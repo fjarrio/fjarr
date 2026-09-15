@@ -49,7 +49,7 @@ Connect to Git → `fjarrio/fjarr`):
 | Setting | Value |
 |---|---|
 | Project name | `fjarr` |
-| Build command | `pnpm install --frozen-lockfile && pnpm --filter fjarr-website build` |
+| Build command | `pnpm --filter fjarr-website build` (Cloudflare auto-runs `pnpm install --frozen-lockfile` first) |
 | Deploy command | `npx wrangler deploy` |
 | Path (advanced) | leave empty (repo root — the pnpm workspace must resolve) |
 | API token | "Create new token" (the auto-generated one is fine) |
