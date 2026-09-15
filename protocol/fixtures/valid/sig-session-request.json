@@ -1,0 +1,22 @@
+{
+  "v": 1,
+  "type": "session-request",
+  "event_id": "0192f3a1-session-",
+  "ts": 1789503000000,
+  "session_id": "s-01",
+  "capabilities": [
+    {
+      "name": "fjarr.camera"
+    },
+    {
+      "name": "fjarr.desktop",
+      "params": {
+        "view_only": false
+      }
+    }
+  ],
+  "operator": {
+    "id": "anna@acme.com",
+    "label": "Anna"
+  }
+}

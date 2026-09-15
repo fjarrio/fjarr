@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "type": "peer-gone",
+  "event_id": "0192f3a1-peer-gon",
+  "ts": 1789503000000,
+  "session_id": "s-01",
+  "reason": "socket-closed"
+}

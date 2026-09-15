@@ -1,0 +1,510 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fjarr.io/protocol/signaling.schema.json",
+  "title": "Fjarr signaling messages",
+  "description": "JSON text frames on the WSS connection to fjarr-server. Normative prose: docs/08-protocol.md#signaling. Unknown fields MUST be ignored (forward compatibility), therefore no additionalProperties:false anywhere.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/hello"
+    },
+    {
+      "$ref": "#/$defs/hello-ack"
+    },
+    {
+      "$ref": "#/$defs/session-request"
+    },
+    {
+      "$ref": "#/$defs/session-accept"
+    },
+    {
+      "$ref": "#/$defs/session-reject"
+    },
+    {
+      "$ref": "#/$defs/offer"
+    },
+    {
+      "$ref": "#/$defs/answer"
+    },
+    {
+      "$ref": "#/$defs/ice"
+    },
+    {
+      "$ref": "#/$defs/session-close"
+    },
+    {
+      "$ref": "#/$defs/peer-gone"
+    },
+    {
+      "$ref": "#/$defs/backend-stream"
+    },
+    {
+      "$ref": "#/$defs/error"
+    }
+  ],
+  "$defs": {
+    "common": {
+      "type": "object",
+      "required": [
+        "v",
+        "type",
+        "event_id",
+        "ts"
+      ],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "type": {
+          "type": "string"
+        },
+        "event_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ts": {
+          "type": "integer",
+          "description": "unix millis"
+        }
+      }
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "track-manifest-entry": {
+      "type": "object",
+      "required": [
+        "track_id",
+        "cap",
+        "kind",
+        "label",
+        "codec",
+        "pt"
+      ],
+      "properties": {
+        "track_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cap": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "video"
+        },
+        "label": {
+          "type": "string"
+        },
+        "codec": {
+          "type": "string"
+        },
+        "pt": {
+          "type": "integer",
+          "minimum": 96,
+          "maximum": 127
+        },
+        "monitor": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "index",
+                "w",
+                "h",
+                "scale"
+              ],
+              "properties": {
+                "index": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "w": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "h": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "scale": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "hello": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        }
+      ],
+      "properties": {
+        "type": {
+          "const": "hello"
+        },
+        "role": {
+          "enum": [
+            "agent",
+            "operator"
+          ]
+        },
+        "auth": {
+          "type": "object",
+          "description": "device credential (agent) or session grant (operator)"
+        },
+        "agent_info": {
+          "type": "object"
+        },
+        "client_info": {
+          "type": "object"
+        },
+        "proto_versions": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "role",
+        "auth",
+        "proto_versions"
+      ],
+      "type": "object"
+    },
+    "hello-ack": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        }
+      ],
+      "properties": {
+        "type": {
+          "const": "hello-ack"
+        },
+        "proto_version": {
+          "type": "integer"
+        },
+        "session_id": {
+          "$ref": "#/$defs/session_id"
+        },
+        "turn": {
+          "type": "object",
+          "required": [
+            "urls",
+            "username",
+            "credential",
+            "ttl"
+          ],
+          "properties": {
+            "urls": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            },
+            "username": {
+              "type": "string"
+            },
+            "credential": {
+              "type": "string"
+            },
+            "ttl": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      },
+      "required": [
+        "proto_version"
+      ],
+      "type": "object"
+    },
+    "session-request": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        }
+      ],
+      "properties": {
+        "type": {
+          "const": "session-request"
+        },
+        "session_id": {
+          "$ref": "#/$defs/session_id"
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "params": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "operator": {
+          "type": "object",
+          "required": [
+            "id",
+            "label"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required": [
+        "session_id",
+        "capabilities",
+        "operator"
+      ],
+      "type": "object"
+    },
+    "session-accept": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        }
+      ],
+      "properties": {
+        "type": {
+          "const": "session-accept"
+        },
+        "session_id": {
+          "$ref": "#/$defs/session_id"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "session-reject": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        }
+      ],
+      "properties": {
+        "type": {
+          "const": "session-reject"
+        },
+        "session_id": {
+          "$ref": "#/$defs/session_id"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "offer": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        }
+      ],
+      "properties": {
+        "type": {
+          "const": "offer"
+        },
+        "session_id": {
+          "$ref": "#/$defs/session_id"
+        },
+        "sdp": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/track-manifest-entry"
+          }
+        }
+      },
+      "required": [
+        "session_id",
+        "sdp",
+        "tracks"
+      ],
+      "type": "object"
+    },
+    "answer": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        }
+      ],
+      "properties": {
+        "type": {
+          "const": "answer"
+        },
+        "session_id": {
+          "$ref": "#/$defs/session_id"
+        },
+        "sdp": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "session_id",
+        "sdp"
+      ],
+      "type": "object"
+    },
+    "ice": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        }
+      ],
+      "properties": {
+        "type": {
+          "const": "ice"
+        },
+        "session_id": {
+          "$ref": "#/$defs/session_id"
+        },
+        "candidate": {
+          "type": "string"
+        },
+        "sdp_mline_index": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "session_id",
+        "candidate",
+        "sdp_mline_index"
+      ],
+      "type": "object"
+    },
+    "session-close": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        }
+      ],
+      "properties": {
+        "type": {
+          "const": "session-close"
+        },
+        "session_id": {
+          "$ref": "#/$defs/session_id"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "peer-gone": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        }
+      ],
+      "properties": {
+        "type": {
+          "const": "peer-gone"
+        },
+        "session_id": {
+          "$ref": "#/$defs/session_id"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "backend-stream": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        }
+      ],
+      "properties": {
+        "type": {
+          "const": "backend-stream"
+        },
+        "capability": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "https://fjarr.io/protocol/envelope.schema.json"
+        }
+      },
+      "required": [
+        "capability",
+        "payload"
+      ],
+      "type": "object"
+    },
+    "error": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        }
+      ],
+      "properties": {
+        "type": {
+          "const": "error"
+        },
+        "code": {
+          "type": "string",
+          "$comment": "Stable append-only strings (docs/08#errors); deliberately not an enum so old peers tolerate new codes"
+        },
+        "message": {
+          "type": "string"
+        },
+        "caused_by": {
+          "type": "string",
+          "description": "event_id of the offending message"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    }
+  }
+}

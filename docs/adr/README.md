@@ -38,3 +38,4 @@ options weighed, the choice, and its consequences — so future maintainers
 | [0014](0014-astro-starlight-website.md) | Astro + Starlight for the website | accepted |
 | [0015](0015-backend-integration-strategy.md) | Backend integration: unified contract, sidecar + managed twin | accepted |
 | [0016](0016-swupdate-ota.md) | SWUpdate as the OTA foundation | proposed (M8) |
+| [0017](0017-libsoup-websocket.md) | libsoup-3 for agent networking | accepted |

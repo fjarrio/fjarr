@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "cap": "fjarr.desktop",
+  "type": "pointer",
+  "event_id": "0192f3a1-ptr",
+  "kind": "event",
+  "payload": {
+    "track_id": "desk-0",
+    "x": 0.7341,
+    "y": 0.4288,
+    "seq": 58342
+  }
+}

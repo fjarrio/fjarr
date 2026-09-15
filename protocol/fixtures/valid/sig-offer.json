@@ -1,0 +1,33 @@
+{
+  "v": 1,
+  "type": "offer",
+  "event_id": "0192f3a1-offer000",
+  "ts": 1789503000000,
+  "session_id": "s-01",
+  "sdp": "v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\n\u2026",
+  "tracks": [
+    {
+      "track_id": "cam-front",
+      "cap": "fjarr.camera",
+      "kind": "video",
+      "label": "Front",
+      "codec": "H264",
+      "pt": 96,
+      "monitor": null
+    },
+    {
+      "track_id": "desk-0",
+      "cap": "fjarr.desktop",
+      "kind": "video",
+      "label": "Monitor 1",
+      "codec": "H264",
+      "pt": 97,
+      "monitor": {
+        "index": 0,
+        "w": 1920,
+        "h": 1080,
+        "scale": 1.0
+      }
+    }
+  ]
+}

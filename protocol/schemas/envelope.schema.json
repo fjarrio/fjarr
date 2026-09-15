@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fjarr.io/protocol/envelope.schema.json",
+  "title": "Fjarr DataChannel envelope",
+  "description": "All control/backend messages share this shape. Normative prose: docs/08-protocol.md#envelope. Unknown fields MUST be ignored (forward compatibility), therefore additionalProperties stays permissive by design.",
+  "type": "object",
+  "required": ["v", "cap", "type", "event_id", "kind", "payload"],
+  "properties": {
+    "v": { "const": 1 },
+    "cap": {
+      "type": "string",
+      "description": "Owning capability, reverse-DNS",
+      "pattern": "^[a-z0-9]+(\\.[a-z0-9-]+)+$"
+    },
+    "type": { "type": "string", "minLength": 1 },
+    "event_id": { "type": "string", "minLength": 1 },
+    "kind": { "enum": ["request", "accept", "feedback", "result", "event"] },
+    "payload": { "type": "object" }
+  },
+  "$comment": "kind=accept/feedback/result echo the request's event_id. result.payload carries ok:bool and, on failure, error:{code,message}."
+}

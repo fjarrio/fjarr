@@ -53,7 +53,7 @@ JSON text frames on the WSS connection. Common fields on **every** message:
 | `session-close` | any | `session_id`, `reason` | orderly teardown |
 | `peer-gone` | server→other side | `session_id`, `reason` | server-side last-will: socket death is announced, never inferred *(camera-streamer last-will lesson)* |
 | `backend-stream` | agent↔server | `capability`, `payload` (envelope) | backend-consumer envelope transport |
-| `error` | server→client | `code`, `message`, `event_id` of the offender | see [error codes](#errors) |
+| `error` | server→client | `code`, `message`, `caused_by` (the offending message's `event_id`) | see [error codes](#errors) |
 
 Reconnection: both sides reconnect with backoff (base 0.5 s ×2, cap 30 s,
 ±20 % jitter, reset only after 30 s stable *(fleet-daemon backoff, copied

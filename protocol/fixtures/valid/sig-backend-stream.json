@@ -1,0 +1,17 @@
+{
+  "v": 1,
+  "type": "backend-stream",
+  "event_id": "0192f3a1-backend-",
+  "ts": 1789503000000,
+  "capability": "fjarr.telemetry",
+  "payload": {
+    "v": 1,
+    "cap": "fjarr.telemetry",
+    "type": "report",
+    "event_id": "0192f3a1-batt",
+    "kind": "event",
+    "payload": {
+      "battery_pct": 81
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "cap": "fjarr.camera",
+  "type": "select-tracks",
+  "event_id": "0192f3a1-sel",
+  "kind": "result",
+  "payload": {
+    "ok": true
+  }
+}

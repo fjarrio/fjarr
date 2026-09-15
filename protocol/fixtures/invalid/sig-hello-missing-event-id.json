@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "type": "hello",
+  "ts": 1,
+  "role": "agent",
+  "auth": {},
+  "proto_versions": [
+    1
+  ]
+}

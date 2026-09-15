@@ -78,6 +78,11 @@ website-dev: ## Landing + docs site preview (http://localhost:4321)
 website-build: ## Production build of fjarr.io
 	pnpm --filter fjarr-website build
 
+# --------------------------------------------------------------- protocol --
+.PHONY: protocol-check
+protocol-check: ## Validate golden fixtures against the protocol schemas
+	node protocol/check.mjs
+
 # ------------------------------------------------------------------- docs --
 .PHONY: docs-lint
 docs-lint: ## Markdown lint over docs and root files

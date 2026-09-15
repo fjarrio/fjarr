@@ -23,6 +23,7 @@ groups with comments.
 | libevdev | 1.13.1 | uinput helper | MIT-ish (X11) | yes (in `fjarr-inputd`) |
 | libdbus / sd-bus | noble | portal negotiation | AFL-2.1/GPL dual → use LGPL path; verify at M2 | yes |
 | nlohmann-json | 3.11 | envelopes, config | MIT | yes |
+| libsoup-3 (+ glib-networking) | 3.4 | WS/HTTP signaling client (ADR-0017) | LGPL-2.1 (dynamic) | yes |
 | **Forbidden**: `gstreamer1.0-plugins-ugly` (x264enc) | — | — | GPL | **never** (doctor-enforced) |
 
 ## Signaling (`fjarr-signaling` / `fjarr-server`) — ships as sidecar/Cloud
@@ -53,6 +54,7 @@ groups with comments.
 | Astro + Starlight | ^7 / ^0.42 | website + docs rendering |
 | pnpm (via corepack) | 10.x | JS workspace |
 | markdownlint-cli2, lychee | latest | docs gates |
+| ajv | ^8 | protocol schema conformance gate (`make protocol-check`) |
 | CMake/Ninja/ccache, clang-18 suite | noble | C++ build/lint |
 | GoogleTest (M1) | — | C++ tests (BSD-3) |
 | coturn (container) | 4.6 | dev/self-host TURN (BSD-3) |

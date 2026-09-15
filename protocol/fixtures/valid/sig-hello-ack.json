@@ -1,0 +1,16 @@
+{
+  "v": 1,
+  "type": "hello-ack",
+  "event_id": "0192f3a1-hello-ac",
+  "ts": 1789503000000,
+  "proto_version": 1,
+  "session_id": "s-01",
+  "turn": {
+    "urls": [
+      "turn:turn.fjarr.io:3478"
+    ],
+    "username": "1789503600:s-01",
+    "credential": "kJGTju\u2026",
+    "ttl": 600
+  }
+}

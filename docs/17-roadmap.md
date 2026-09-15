@@ -30,7 +30,9 @@ signaling with grants/webhooks/TURN minting, `@fjarr/core` state machine +
 `@fjarr/react` basics; camera capability as the reference implementation;
 **ADR-0007 spike** (webrtcbin+FrameHub vs webrtcsink, measured); baseline
 adaptive bitrate; extension API paper-validated against all seven
-capabilities + the [arm-teach stress test](06-capabilities.md#stress-test).
+capabilities + the [arm-teach stress test](06-capabilities.md#stress-test)
+— **done**: [M1 API-fit review](reviews/m1-api-fit-review.md) (4 findings
+folded into docs/05 + docs/09).
 **Gate:** three-demo stack end-to-end — demo-robot streams 2 tracks to 3
 browsers through the sidecar, TS demo-backend minting grants and receiving
 webhooks; reconnect + ICE restart demonstrated under fault injection;

@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "type": "error",
+  "event_id": "0192f3a1-error000",
+  "ts": 1789503000000,
+  "code": "grant-expired",
+  "message": "session grant expired at 1789503300",
+  "caused_by": "0192f3a1-hello0000"
+}

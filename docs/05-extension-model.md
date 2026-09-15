@@ -33,9 +33,17 @@ signatures live in [docs/09](09-interfaces.md); semantically, a capability:
    `com.acme.arm-teach`) + semver. The name prefixes every protocol surface
    it owns.
 2. **Declares needs** at registration:
-   - media tracks it can produce (label, kind, encoder requirements) — the
-     core allocates producer/FrameHub slots and announces them in the track
-     manifest;
+   - media tracks it can produce (label, kind, encoder requirements). The
+     manifest declares track **capacity** (identity + kind); the concrete
+     per-session track set is provided by the capability at
+     `session_attached` (monitors and cameras are runtime facts) and frozen
+     into that session's offer manifest with stable `track_id`s
+     ([M1 API-fit review, F1](reviews/m1-api-fit-review.md));
+   - **dependencies**: names of other capabilities it requires (e.g.
+     `fjarr.ota` → `fjarr.files`). The core validates presence at
+     registration; the typed inter-capability handle is deferred to M4
+     ([F4](reviews/m1-api-fit-review.md)) — declaring the field now avoids
+     a later ABI break;
    - DataChannel classes it needs (reliability per [docs/08](08-protocol.md));
    - config schema (JSON Schema — validated by the core, surfaced to
      integrators);

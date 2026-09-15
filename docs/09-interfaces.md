@@ -39,11 +39,23 @@ namespace fjarr {
 struct CapabilityManifest {
   std::string name;              // reverse-DNS, e.g. "fjarr.camera"
   SemVer version;
-  std::vector<TrackDecl> tracks;         // media it can produce
+  std::vector<TrackDecl> tracks;         // track CAPACITY (docs/05; actual
+                                         // per-session set at attach — F1)
   std::vector<ChannelDecl> channels;     // DC classes it needs (docs/08)
   nlohmann::json config_schema;          // JSON Schema for its config
   std::vector<Privilege> privileges;     // explicit grants required
   ConsumerKinds consumers;               // peer, backend, or both
+  std::vector<std::string> dependencies; // required capabilities (F4)
+};
+
+// Sending surface with mandatory backpressure (docs/08#backpressure — F3):
+class ChannelSender {
+public:
+  virtual ~ChannelSender() = default;
+  virtual void send(const Envelope& msg) = 0;                  // ≤ 16 KiB
+  virtual void send_binary(std::span<const std::byte> frame) = 0; // bulk only
+  virtual std::size_t buffered_amount() const = 0;
+  virtual void on_drain(std::function<void()> below_low_watermark) = 0;
 };
 
 class Capability {
@@ -56,8 +68,21 @@ public:
   virtual void session_detached(SessionId id, DetachReason reason) = 0;
   // Envelopes addressed to this capability's namespace (docs/08#envelope).
   virtual void on_message(SessionContext& ctx, const Envelope& msg) = 0;
+  // Backend consumer hooks (F2) — session-independent conversation with
+  // fjarr-server/Cloud over the agent's signaling connection. Default
+  // no-ops so peer-only capabilities are unaffected.
+  virtual void backend_attached(BackendContext&) {}
+  virtual void backend_detached() {}
+  virtual void on_backend_message(BackendContext&, const Envelope&) {}
   virtual void shutdown() = 0;
 };
+
+// SessionContext (per session): session_id(), operator identity,
+// ChannelSender& channel(ChannelClass), per-session track activation,
+// WorkerPool& worker(). BackendContext (per agent): ChannelSender& with
+// store-and-forward semantics for durable event types (docs/11 whitelist
+// pattern). Both are populated by the M1 core; capabilities never touch
+// sockets or SDP.
 
 } // namespace fjarr
 ```

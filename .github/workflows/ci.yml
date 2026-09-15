@@ -27,6 +27,8 @@ jobs:
         with:
           args: --offline --include-fragments "docs/**/*.md" "*.md"
           fail: true
+      - name: protocol conformance (golden fixtures)
+        run: node protocol/check.mjs
       - name: build website
         run: pnpm --filter fjarr-website build
 

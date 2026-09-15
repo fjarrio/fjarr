@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "cap": "fjarr.files",
+  "type": "file-offer",
+  "event_id": "0192f3a1-xfer",
+  "kind": "result",
+  "payload": {
+    "ok": false,
+    "error": {
+      "code": "payload-invalid",
+      "message": "sha256 mismatch"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "v": 1,
+  "type": "hello",
+  "event_id": "0192f3a1-hello000",
+  "ts": 1789503000000,
+  "role": "agent",
+  "auth": {
+    "scheme": "device-signature",
+    "robot_id": "robot-024",
+    "nonce_sig": "\u2026"
+  },
+  "agent_info": {
+    "fjarr": "0.0.1",
+    "os": "ubuntu-24.04"
+  },
+  "proto_versions": [
+    1
+  ]
+}

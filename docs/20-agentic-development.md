@@ -88,6 +88,12 @@ written).
 ## Boundaries
 
 Agents follow the same rules as humans — docs/13 applies unchanged. In
-addition: agents must not push directly to `main` once M1 starts (branch +
-PR + review), must not weaken a gate to get to green, and must surface
+addition: agents must not weaken a gate to get to green, and must surface
 spec/code disagreements rather than silently "fixing" either side.
+
+**Solo phase (current, by maintainer decision 2026-09-15):** work lands
+directly on `main`; `/verify` gates every push, and review still happens —
+retrospectively: run `/code-review` over the recent commit range after each
+slice lands and apply findings as follow-up commits. CI + auto-deploy make
+`main` the single source of truth. Branch + PR + review becomes mandatory
+when a second regular contributor or external PRs arrive — revisit then.

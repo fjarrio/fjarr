@@ -40,6 +40,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libevdev-dev libudev-dev \
     # --- agent misc (docs/09) ---------------------------------------------
     nlohmann-json3-dev \
+    # --- agent signaling client (ADR-0017) --------------------------------
+    libsoup-3.0-dev glib-networking \
     # --- pipeline DOT graph debugging (camera-streamer lesson) ---------------------
     graphviz \
     && rm -rf /var/lib/apt/lists/*
