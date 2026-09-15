@@ -40,6 +40,28 @@ These encode the workflow so process compliance doesn't depend on prompt
 quality. Add new skills when a procedure gets repeated ≥ 3 times or gotten
 wrong twice.
 
+### Vendored third-party skills
+
+A skill is instructions an agent will follow — treat adopting one like
+adding a dependency. **Policy: review the full SKILL.md, then copy it into
+`.claude/skills/` with a `PROVENANCE.md` (source, fetch date, license,
+adaptations) — never a live marketplace dependency.** Currently vendored:
+
+| Skill | Source | Why |
+|---|---|---|
+| `frontend-design` | [anthropics/skills](https://github.com/anthropics/skills) (Apache-2.0, verbatim) | Distinctive, non-templated visual design — landing page, docs polish, `@fjarr/react` component aesthetics |
+| `brainstorming` | [obra/superpowers](https://github.com/obra/superpowers) (MIT, adapted) | Approval-gated design dialogue before any implementation; rewired to hand off to `/spec` + `/adr` instead of superpowers' own plan flow |
+| `systematic-debugging` | [obra/superpowers](https://github.com/obra/superpowers) (MIT, adapted) | Root-cause-before-fixes discipline — exactly the temperament GStreamer/WebRTC debugging punishes you for lacking |
+
+Considered and deliberately not adopted (for now): full superpowers as a
+plugin (its end-to-end methodology overlaps/conflicts with docs/13's
+spec-first flow — we cherry-picked the two orthogonal gems); generic
+clean-code/SOLID reminder skills (the built-in `/simplify` +
+`/code-review` plus our CLAUDE.md hard rules cover this with less context
+cost); C4-diagram and API-documentation skills (revisit when docs/02
+outgrows hand-drawn Mermaid, and at M5 when the OpenAPI contract is
+written).
+
 ## Recommended built-in workflow (Claude Code)
 
 - `/code-review` on feature branches before merge; **`/code-review ultra`**
