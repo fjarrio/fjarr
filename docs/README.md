@@ -33,6 +33,7 @@ with rationale).
 | 17 | [Roadmap](17-roadmap.md) | Milestones M0–M8 with entry/exit gates | review |
 | 18 | [Open questions](18-open-questions.md) | Live list of undecided items | living |
 | 19 | [Website & publishing](19-website-and-publishing.md) | How docs + landing page ship | review |
+| 20 | [Agentic development](20-agentic-development.md) | AI agents as first-class contributors | review |
 
 ## Architecture decision records
 

@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker build:*)",
+      "Bash(docker ps:*)",
+      "Bash(docker logs:*)",
+      "Bash(cargo:*)",
+      "Bash(pnpm:*)",
+      "Bash(npx markdownlint-cli2:*)",
+      "Bash(lychee:*)",
+      "Bash(cmake:*)",
+      "Bash(ctest:*)",
+      "Bash(gst-inspect-1.0:*)",
+      "Bash(gst-launch-1.0:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)"
+    ],
+    "deny": [
+      "Read(./.env)"
+    ]
+  }
+}

@@ -50,6 +50,7 @@ export default defineConfig({
             "01-glossary",
             "18-open-questions",
             "19-website-and-publishing",
+            "20-agentic-development",
           ],
         },
         {
