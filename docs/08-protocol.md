@@ -46,7 +46,7 @@ JSON text frames on the WSS connection. Common fields on **every** message:
 | `hello` | client→server | `role: "agent"\|"operator"`, `auth` (device credential or session grant), `agent_info`/`client_info`, `proto_versions` | authenticate + advertise |
 | `hello-ack` | server→client | `session_id?`, `proto_version`, `turn` (urls + ephemeral credential + ttl) | accept; operator gets TURN creds here |
 | `session-request` | server→agent | `session_id`, `capabilities: [{name, params}]`, `operator` (display identity) | grant-verified request to open a session |
-| `session-accept` / `session-reject` | agent→server | `session_id`, reject: `reason` | agent's answer (policy hooks may refuse) |
+| `session-accept` / `session-reject` | agent→server→operator | `session_id`, reject: `reason` | agent's answer, relayed to the operator (policy hooks may refuse) |
 | `offer` | agent→server→operator | `session_id`, `sdp`, `tracks` ([manifest](#track-manifest)) | **agent always offers** |
 | `answer` | operator→server→agent | `session_id`, `sdp` | |
 | `ice` | both, trickled | `session_id`, `candidate`, `sdp_mline_index` | trickle ICE is REQUIRED |
@@ -166,7 +166,7 @@ violation, not a style issue.
 ## Errors {#errors}
 
 `error.code` is a stable string: `auth-failed`, `grant-expired`,
-`capability-unknown`, `capability-denied`, `session-unknown`, `rate-limited`,
+`capability-unknown`, `capability-denied`, `session-unknown`, `robot-offline`, `rate-limited`,
 `payload-invalid`, `internal`. Codes are append-only.
 
 ## Versioning {#versioning}

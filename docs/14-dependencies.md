@@ -35,7 +35,13 @@ groups with comments.
 | axum (+ `ws`) | 0.8 | HTTP + WebSocket | MIT | yes |
 | tracing / tracing-subscriber | 0.1/0.3 | structured logs | MIT | yes |
 | serde / serde_json | 1.x | envelopes | MIT/Apache-2.0 | yes |
-| (M1+) jsonwebtoken, hmac/sha1, uuid | — | grants, TURN creds, ids | MIT/Apache-2.0 | yes |
+| futures-util | 0.3 | WS stream/sink combinators | MIT/Apache-2.0 | yes |
+| jsonwebtoken | 9 | session-grant verification (HS256 at M1) | MIT | yes |
+| hmac + sha1 + sha2 | 0.12/0.10 | TURN ephemeral creds (SHA1, coturn format), webhook signatures (SHA256) | MIT/Apache-2.0 | yes |
+| base64 | 0.22 | TURN credential encoding | MIT/Apache-2.0 | yes |
+| uuid (v7) | 1.x | event/session ids | MIT/Apache-2.0 | yes |
+| reqwest (rustls) | 0.12 | webhook delivery | MIT/Apache-2.0 | yes |
+| tokio-tungstenite | 0.24 | e2e test WS client | MIT | dev-only |
 
 ## Web (`@fjarr/core`, `@fjarr/react`) — ships to customer bundles
 

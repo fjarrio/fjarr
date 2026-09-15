@@ -1,88 +1,109 @@
-//! Embeddable Fjarr signaling service.
+//! Embeddable Fjarr signaling service — the substrate of `fjarr-server`
+//! and Fjarr Cloud (ADR-0015).
 //!
-//! M0 STATUS: skeleton — a mountable [`axum::Router`] serving `/healthz` and
-//! a `/ws` echo, plus the hook traits the M1 implementation fills in.
-//! The behavior it will implement is normative in `docs/08-protocol.md`;
-//! the embedding surface in `docs/09-interfaces.md`.
-//! spec: docs/09-interfaces.md#the-rust-crate-beneath-fjarr-signaling
+//! Wire behavior: docs/08-protocol.md (normative). Embedding surface:
+//! docs/09-interfaces.md#the-rust-crate-beneath-fjarr-signaling.
+//!
+//! ```ignore
+//! let app = axum::Router::new().merge(fjarr_signaling::router(config));
+//! ```
 
-use axum::{
-    extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    routing::{any, get},
-    Router,
-};
+pub mod hooks;
+pub mod protocol;
+pub mod turn;
 
-/// Verifies session grants minted by the customer's backend.
-/// spec: docs/09-interfaces.md#a-session-grants-customer-backend--operator-client
-pub trait GrantVerifier: Send + Sync + 'static {}
+mod state;
+mod webhook;
+mod ws;
 
-/// The customer-side robot registry (enrollment, lookup, revocation).
-/// spec: docs/10-security.md#device-identity
-pub trait RobotRegistry: Send + Sync + 'static {}
+use std::sync::Arc;
 
-/// Receives lifecycle/usage events (webhooks, buses, metering).
-/// spec: docs/09-interfaces.md#b-webhooks-fjarr-server--customer-backend
-pub trait EventSink: Send + Sync + 'static {}
+use axum::routing::{any, get};
+use axum::Router;
 
-/// Configuration for a mounted signaling service. Hook fields land in M1;
-/// M0 keeps the shape minimal so embedders see the seam.
-#[derive(Default)]
-pub struct Config {}
+pub use hooks::{AuthError, Event, VerifiedGrant};
+use hooks::{EventSink, GrantVerifier, RobotRegistry};
+pub use turn::TurnConfig;
+pub use webhook::WebhookSink;
 
-/// Build the mountable router — the two lines a Rust-shop backend writes:
-///
-/// ```ignore
-/// let app = axum::Router::new().merge(fjarr_signaling::router(config));
-/// ```
-pub fn router(_config: Config) -> Router {
+/// Configuration for a mounted signaling service. Hooks default to
+/// fail-closed dev placeholders — configure or replace them.
+pub struct Config {
+    pub grant_verifier: Arc<dyn GrantVerifier>,
+    pub robot_registry: Arc<dyn RobotRegistry>,
+    pub event_sink: Arc<dyn EventSink>,
+    pub turn: Option<TurnConfig>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            grant_verifier: Arc::new(hooks::RejectAll("no grant verifier configured")),
+            robot_registry: Arc::new(hooks::RejectAll("no robot registry configured")),
+            event_sink: Arc::new(hooks::LogSink),
+            turn: None,
+        }
+    }
+}
+
+impl Config {
+    /// Dev/sidecar configuration from environment variables:
+    /// - `FJARR_GRANT_HS256_SECRET` — verify operator grants (HS256; per-
+    ///   tenant asymmetric keys arrive at M5)
+    /// - `FJARR_DEV_DEVICE_TOKEN` — DEV-ONLY shared robot token (per-device
+    ///   enrollment replaces this at M5; unset ⇒ agents rejected)
+    /// - `FJARR_TURN_URLS` (comma-separated), `FJARR_TURN_SECRET`,
+    ///   `FJARR_TURN_TTL` (seconds, default 600)
+    /// - `FJARR_WEBHOOK_URL`, `FJARR_WEBHOOK_SECRET`
+    pub fn from_env() -> Self {
+        let mut config = Self::default();
+        if let Ok(secret) = std::env::var("FJARR_GRANT_HS256_SECRET") {
+            config.grant_verifier = Arc::new(hooks::Hs256GrantVerifier::new(secret.as_bytes()));
+        }
+        if let Ok(token) = std::env::var("FJARR_DEV_DEVICE_TOKEN") {
+            tracing::warn!("FJARR_DEV_DEVICE_TOKEN set — dev-grade robot auth (docs/10)");
+            config.robot_registry = Arc::new(hooks::DevSharedTokenRegistry::new(token));
+        }
+        if let (Ok(urls), Ok(secret)) = (
+            std::env::var("FJARR_TURN_URLS"),
+            std::env::var("FJARR_TURN_SECRET"),
+        ) {
+            config.turn = Some(TurnConfig {
+                urls: urls.split(',').map(|u| u.trim().to_string()).collect(),
+                secret,
+                ttl_secs: std::env::var("FJARR_TURN_TTL")
+                    .ok()
+                    .and_then(|t| t.parse().ok())
+                    .unwrap_or(600),
+            });
+        }
+        if let (Ok(url), Ok(secret)) = (
+            std::env::var("FJARR_WEBHOOK_URL"),
+            std::env::var("FJARR_WEBHOOK_SECRET"),
+        ) {
+            config.event_sink = Arc::new(WebhookSink::new(url, secret));
+        }
+        config
+    }
+}
+
+pub(crate) struct ServiceState {
+    pub config: Config,
+    pub shared: state::Shared,
+}
+
+/// Build the mountable router — the two lines a Rust-shop backend writes.
+pub fn router(config: Config) -> Router {
+    let service = Arc::new(ServiceState {
+        config,
+        shared: state::Shared::default(),
+    });
     Router::new()
         .route("/healthz", get(healthz))
-        .route("/ws", any(ws_upgrade))
+        .route("/ws", any(ws::upgrade))
+        .with_state(service)
 }
 
 async fn healthz() -> &'static str {
     "ok"
-}
-
-async fn ws_upgrade(ws: WebSocketUpgrade) -> axum::response::Response {
-    ws.on_upgrade(ws_echo)
-}
-
-/// M0 echo placeholder. M1 replaces this with the signaling state machine
-/// (hello/session-request/offer/answer/ice/peer-gone).
-/// spec: docs/08-protocol.md#signaling
-async fn ws_echo(mut socket: WebSocket) {
-    tracing::debug!("ws connected (M0 echo mode)");
-    while let Some(Ok(msg)) = socket.recv().await {
-        if let Message::Text(text) = msg {
-            if socket.send(Message::Text(text)).await.is_err() {
-                break;
-            }
-        }
-    }
-    tracing::debug!("ws closed");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn healthz_serves_ok_end_to_end() {
-        let app = router(Config::default());
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-
-        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
-        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-        stream
-            .write_all(b"GET /healthz HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n")
-            .await
-            .unwrap();
-        let mut buf = String::new();
-        stream.read_to_string(&mut buf).await.unwrap();
-        assert!(buf.starts_with("HTTP/1.1 200"), "got: {buf}");
-        assert!(buf.ends_with("ok"), "got: {buf}");
-    }
 }
