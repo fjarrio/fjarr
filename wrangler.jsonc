@@ -1,0 +1,12 @@
+// Cloudflare Workers (static assets) deployment of the fjarr.io website.
+// Used by the "Deploy command" (npx wrangler deploy) in Cloudflare's
+// Git-connected Workers Builds — see docs/19-website-and-publishing.md.
+{
+  "name": "fjarr",
+  "compatibility_date": "2026-09-15",
+  "assets": {
+    "directory": "./website/dist",
+    // Starlight emits 404.html; serve it for unknown routes.
+    "not_found_handling": "404-page"
+  }
+}

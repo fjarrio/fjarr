@@ -37,24 +37,29 @@ make website-build   # production build (CI gate from M0.5)
 
 ## Deployment
 
-**Cloudflare Pages via Git integration** — no deploy workflow, no secrets in
-CI; Cloudflare builds on every push to `main`. Domains fjarr.io + fjarr.dev
-are registered on Cloudflare (2026-09-15); repo: `github.com/fjarrio/fjarr`.
+**Cloudflare Workers Builds via Git integration** — no deploy workflow, no
+secrets in CI; Cloudflare builds and deploys on every push to `main`.
+Domains fjarr.io + fjarr.dev are registered on Cloudflare (2026-09-15);
+repo: `github.com/fjarrio/fjarr`. The repo carries a root `wrangler.jsonc`
+declaring the site as a static-assets Worker (`website/dist`).
 
-One-time setup in the Cloudflare dashboard (Workers & Pages → Create →
-Pages → Connect to Git → `fjarrio/fjarr`):
+One-time setup (Cloudflare dashboard → Workers & Pages → Create →
+Connect to Git → `fjarrio/fjarr`):
 
 | Setting | Value |
 |---|---|
-| Production branch | `main` |
-| Root directory | `/` (repo root — the pnpm workspace must resolve) |
-| Build command | `pnpm --filter fjarr-website build` |
-| Build output directory | `website/dist` |
-| Environment variable | `NODE_VERSION=22` |
+| Project name | `fjarr` |
+| Build command | `pnpm install --frozen-lockfile && pnpm --filter fjarr-website build` |
+| Deploy command | `npx wrangler deploy` |
+| Path (advanced) | leave empty (repo root — the pnpm workspace must resolve) |
+| API token | "Create new token" (the auto-generated one is fine) |
+| Environment variable | `NODE_VERSION` = `22` |
+| Non-production branch builds | on (preview deployments for PRs) |
 
-pnpm version is picked up from the root `package.json` `packageManager`
-field. Then under the project's *Custom domains*: add **fjarr.io** (primary)
-and **fjarr.dev** (or a redirect rule fjarr.dev → fjarr.io). CI
+pnpm's exact version comes from the root `package.json` `packageManager`
+field. After the first deploy, attach domains under the Worker's
+**Settings → Domains & Routes**: add **fjarr.io** (primary) and
+**fjarr.dev** (or a redirect rule fjarr.dev → fjarr.io). CI
 (`.github/workflows/ci.yml`) independently gates lint/links/build on PRs so
 broken docs never reach `main`.
 
