@@ -4,6 +4,10 @@
 {
   "name": "fjarr",
   "compatibility_date": "2026-09-15",
+  // Explicit (they are the defaults): keep the workers.dev URL and
+  // per-branch preview URLs alongside the fjarr.io / fjarr.dev domains.
+  "workers_dev": true,
+  "preview_urls": true,
   "assets": {
     "directory": "./website/dist",
     // Starlight emits 404.html; serve it for unknown routes.
