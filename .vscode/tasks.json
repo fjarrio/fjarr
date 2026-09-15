@@ -1,0 +1,96 @@
+{
+  "version": "2.0.0",
+  "options": { "cwd": "${workspaceFolder}" },
+  "tasks": [
+    {
+      "label": "doctor",
+      "type": "shell",
+      "command": "make doctor",
+      "problemMatcher": []
+    },
+    {
+      "label": "agent: configure",
+      "type": "shell",
+      "command": "make agent-configure",
+      "problemMatcher": []
+    },
+    {
+      "label": "agent: build",
+      "type": "shell",
+      "command": "make agent-build",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "agent: test",
+      "type": "shell",
+      "command": "make agent-test",
+      "group": "test",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "signaling: run",
+      "type": "shell",
+      "command": "make signaling-run",
+      "isBackground": true,
+      "problemMatcher": { "base": "$rustc", "background": { "activeOnStart": true, "beginsPattern": ".", "endsPattern": "listening" } }
+    },
+    {
+      "label": "signaling: test",
+      "type": "shell",
+      "command": "make signaling-test",
+      "group": "test",
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "signaling: clippy",
+      "type": "shell",
+      "command": "make signaling-clippy",
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "web: dev (demo dashboard)",
+      "type": "shell",
+      "command": "make web-dev",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "web: build",
+      "type": "shell",
+      "command": "make web-build",
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "website: dev",
+      "type": "shell",
+      "command": "make website-dev",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "docs: lint",
+      "type": "shell",
+      "command": "make docs-lint && make docs-links",
+      "problemMatcher": []
+    },
+    {
+      "label": "sim: up",
+      "type": "shell",
+      "command": "make sim-up",
+      "problemMatcher": []
+    },
+    {
+      "label": "demo: up (full stack)",
+      "type": "shell",
+      "command": "make demo-up",
+      "problemMatcher": []
+    },
+    {
+      "label": "fmt + lint",
+      "type": "shell",
+      "command": "make fmt && make lint",
+      "problemMatcher": []
+    }
+  ]
+}

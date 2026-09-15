@@ -1,0 +1,15 @@
+{
+  "recommendations": [
+    "llvm-vs-code-extensions.vscode-clangd",
+    "ms-vscode.cmake-tools",
+    "rust-lang.rust-analyzer",
+    "vadimcn.vscode-lldb",
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "astro-build.astro-vscode",
+    "davidanson.vscode-markdownlint",
+    "bierner.markdown-mermaid",
+    "ms-azuretools.vscode-docker",
+    "tintinweb.graphviz-interactive-preview"
+  ]
+}

@@ -1,0 +1,14 @@
+[package]
+name = "fjarr-signaling"
+description = "Embeddable Fjarr signaling service — the substrate of fjarr-server and Fjarr Cloud (ADR-0015)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+axum.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true

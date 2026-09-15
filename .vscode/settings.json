@@ -1,0 +1,39 @@
+{
+  // C++ — clangd, not the MS IntelliSense engine
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "clangd.arguments": [
+    "--compile-commands-dir=${workspaceFolder}/build/release",
+    "--header-insertion=never",
+    "--clang-tidy"
+  ],
+  "cmake.useCMakePresets": "always",
+  "cmake.configureOnOpen": false,
+  "[cpp]": {
+    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd",
+    "editor.formatOnSave": true
+  },
+
+  // Rust
+  "rust-analyzer.linkedProjects": ["signaling/Cargo.toml"],
+  "rust-analyzer.check.command": "clippy",
+  "[rust]": { "editor.formatOnSave": true },
+
+  // Web
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "[typescript][typescriptreact][javascript][json][jsonc]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  },
+  "[astro]": { "editor.defaultFormatter": "astro-build.astro-vscode" },
+
+  // Docs
+  "[markdown]": { "editor.wordWrap": "on" },
+  "markdownlint.config": { "extends": ".markdownlint.jsonc" },
+
+  "files.associations": { "*.mdx": "markdown" },
+  "files.exclude": {
+    "**/node_modules": true,
+    "build": true,
+    "signaling/target": true
+  }
+}

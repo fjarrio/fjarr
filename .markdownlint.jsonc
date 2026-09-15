@@ -1,0 +1,9 @@
+{
+  // Fjarr docs lint policy — content over ceremony.
+  "default": true,
+  "MD013": false, // line length — prose wraps naturally
+  "MD033": false, // inline HTML — needed for tables/diagrams occasionally
+  "MD024": { "siblings_only": true }, // repeated headings across sections are fine
+  "MD041": false, // first line may be frontmatter
+  "MD060": false // compact |---| tables are our house style
+}

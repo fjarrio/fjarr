@@ -1,0 +1,24 @@
+# --- local environment ---
+.env
+# prior-project reference material (mined into docs/11-prior-art.md)
+inspiration/
+
+# --- build outputs ---
+build/
+target/
+node_modules/
+dist/
+.astro/
+*.o
+*.so
+
+# --- tool caches / state ---
+.cache/
+.ccache/
+compile_commands.json
+.pnpm-store/
+*.log
+
+# --- editors ---
+.idea/
+*.swp

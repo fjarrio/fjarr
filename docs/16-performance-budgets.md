@@ -1,0 +1,73 @@
+---
+title: Performance Budgets
+description: Latency, bitrate, and resource targets — and the degradation policy when they can't be met.
+---
+
+Budgets are **requirements with numbers**. The [latency
+harness](15-testing-strategy.md#latency-harness) measures them continuously;
+a regression is a failing test. Numbers marked ~ are initial engineering
+targets to be confirmed against M1 measurements (then this doc goes
+`stable`).
+
+## Latency (p50 / p95, 1080p30 primary track)
+
+| Path | Glass-to-glass | Input-to-photon |
+|---|---|---|
+| LAN direct | ~120 / 200 ms | ~150 / 250 ms |
+| Internet P2P (STUN) | ~200 / 350 ms | ~250 / 400 ms |
+| TURN relay | ~250 / 450 ms | ~300 / 500 ms |
+
+Terminal echo round-trip: < 150 ms LAN. Pointer motion send rate ≤ 60 Hz
+coalesced; stale motion dropped, never queued.
+
+## Bitrate tiers (per video track)
+
+| Tier | Resolution/fps | Target bitrate |
+|---|---|---|
+| Active (operator focused) | up to 1920×1080@30 | 2.5–5 Mbps adaptive |
+| Inactive thumbnail | 960×540@5 | ≤ 300 kbps |
+| Disabled | — | ~0 (valve dropped; no renegotiation) |
+
+**Adaptive bitrate is a hard requirement** (the camera-streamer gap): the encoder
+target follows congestion feedback (GCC/TWCC — mechanism per
+[ADR-0007](adr/0007-webrtcbin-vs-webrtcsink.md)) between a floor of 250 kbps
+and the tier target, reacting within ~2 s to loss and recovering within ~10 s.
+Fixed-CBR-only operation is a spec violation.
+
+## Robot resource budget (Intel NUC class, one active session + one thumbnail)
+
+| Resource | Budget |
+|---|---|
+| CPU (agent total) | < 25 % of one core with VA-API encode; capture-copy path < 60 % |
+| GPU | encode within iGPU capacity for 2 concurrent 1080p30 encodes |
+| RAM | agent RSS < 300 MB steady state |
+| Store-and-forward disk | bounded ≤ 200 MB (oldest-first eviction + drop counter) |
+
+Multi-viewer scales via FrameHub: +1 viewer ≈ +RTP fan-out cost only (no new
+encode) — verify ≤ 5 % CPU per additional viewer.
+
+## Fleet/relay planning
+
+Browser viewers are **relay-realistic**: capacity-plan TURN at ~1 stream =
+0.5–5 Mbps depending on activity. Ten concurrent operator views ≈ tens of
+Mbps through the relay — metered per session ([docs/10](10-security.md#turn)),
+priced through ([docs/03](03-product-strategy.md#usage-meters)).
+
+## Bulk vs interactive isolation
+
+During a saturating file transfer: interactive video g2g p95 may degrade by
+at most +50 ms and input-to-photon by +30 ms vs baseline. If a shared SCTP
+association can't hold that, bulk moves to a separate PeerConnection
+(measured decision, M4).
+
+## Degradation policy (in order)
+
+1. Reduce inactive-tier tracks (fps, then resolution).
+2. Reduce active-tier bitrate toward the floor.
+3. Reduce active fps (30→15) before resolution.
+4. Drop inactive tracks entirely (UI shows "paused — bandwidth").
+5. Never: silently stall media, queue stale input, or let heartbeats starve
+   (control DC has priority).
+
+Startup: first frame visible < 2 s after `session-accept` on P2P, < 3 s on
+relay (keyframe-on-connect required).

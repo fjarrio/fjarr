@@ -1,0 +1,17 @@
+{
+  "name": "@fjarr/core",
+  "version": "0.0.1",
+  "description": "Framework-agnostic Fjarr session, transport, and protocol types (zero runtime dependencies)",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

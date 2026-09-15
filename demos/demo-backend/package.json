@@ -1,0 +1,17 @@
+{
+  "name": "fjarr-demo-backend",
+  "private": true,
+  "version": "0.0.1",
+  "description": "DEMO: a robot company's backend integrating Fjarr through the ADR-0015 contract only — zero framework deps",
+  "type": "module",
+  "scripts": {
+    "dev": "node --experimental-strip-types --watch src/server.ts",
+    "start": "node --experimental-strip-types src/server.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.0"
+  }
+}

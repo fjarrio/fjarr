@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = ["crates/fjarr-signaling", "crates/fjarr-server"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "AGPL-3.0-only"
+repository = "https://github.com/fjarrio/fjarr"
+
+[workspace.dependencies]
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

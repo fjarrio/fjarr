@@ -1,0 +1,92 @@
+# Fjarr CI — the gates from docs/13-development-workflow.md.
+# Website deployment is handled by Cloudflare Pages' Git integration
+# (docs/19-website-and-publishing.md#deployment), not by CI.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  docs:
+    name: Docs gates + website build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: markdownlint
+        run: npx --yes markdownlint-cli2 "docs/**/*.md" "*.md"
+      - name: link check (offline, incl. anchors)
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --offline --include-fragments "docs/**/*.md" "*.md"
+          fail: true
+      - name: build website
+        run: pnpm --filter fjarr-website build
+
+  web:
+    name: Web packages + demos
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter '@fjarr/core' --filter '@fjarr/react' build
+      - run: pnpm --filter fjarr-demo-dashboard build
+      - run: pnpm --filter fjarr-demo-backend typecheck
+
+  rust:
+    name: Signaling (test + clippy + fmt)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: signaling
+    steps:
+      - uses: actions/checkout@v4
+      # rustup reads signaling/rust-toolchain.toml automatically
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: signaling
+      - run: cargo fmt --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  cpp:
+    name: Agent + demo-robot build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: install build deps (mirror of .devcontainer/Dockerfile groups)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build ccache pkg-config \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            libgstreamer-plugins-bad1.0-dev nlohmann-json3-dev
+      - uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: cpp-${{ runner.os }}
+      - run: cmake --preset release
+      - run: cmake --build --preset release
+      - run: ctest --preset release
+      # ADR-0011 license policy is enforced structurally too:
+      - name: assert no GPL plugin package in the dependency docs
+        run: "! grep -i 'plugins-ugly' CMakeLists.txt agent/CMakeLists.txt"
+
+  server-image:
+    name: fjarr-server production image
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: build standalone from signaling/ only
+        run: docker build -f docker/signaling/Dockerfile signaling/

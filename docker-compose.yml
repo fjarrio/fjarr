@@ -1,0 +1,132 @@
+# Fjarr development stack. See docs/12-development-environment.md.
+#
+# Profiles:
+#   (default)  dev + robot-sim
+#   demo       the three-demo showcase: fjarr-server sidecar + TS demo-backend
+#              + demo-robot + demo-dashboard (customer deployment topology)
+#   turn       coturn relay in use-auth-secret mode
+#
+# Overrides (conscious privilege grants, opt in explicitly):
+#   docker-compose.host-x11.yml   capture your real host desktop
+#   docker-compose.uinput.yml     /dev/uinput injection experiments
+name: fjarr
+
+services:
+  dev:
+    build:
+      context: .devcontainer
+      args:
+        USER_UID: ${USER_UID:-1000}
+        USER_GID: ${USER_GID:-1000}
+        RENDER_GID: ${RENDER_GID:-110}
+        VIDEO_GID: ${VIDEO_GID:-44}
+    image: fjarr-dev
+    volumes:
+      - .:/workspace:cached
+      - x11sock:/tmp/.X11-unix
+      - cargo-registry:/home/dev/.cargo/registry
+      - pnpm-store:/home/dev/.local/share/pnpm
+      - ccache:/home/dev/.cache/ccache
+    environment:
+      DISPLAY: ":99" # the robot-sim display
+      CCACHE_DIR: /home/dev/.cache/ccache
+    devices:
+      - /dev/dri:/dev/dri # Intel VA-API; comment out on machines without a GPU
+    working_dir: /workspace
+    command: sleep infinity
+
+  robot-sim:
+    build: docker/robot-sim
+    image: fjarr-robot-sim
+    environment:
+      SIM_RESOLUTION: ${SIM_RESOLUTION:-1920x1080x24}
+    volumes:
+      - x11sock:/tmp/.X11-unix
+    ports:
+      - "6080:6080" # noVNC: watch the fake robot desktop in a browser
+
+  # ---------------------------------------------------------------- demo --
+  # The customer deployment topology: their backend (TS) + our sidecar.
+  fjarr-server:
+    profiles: [demo, stack]
+    build:
+      context: signaling
+      dockerfile: ../docker/signaling/Dockerfile
+    image: fjarr-server
+    ports:
+      - "8080:8080"
+
+  demo-backend:
+    profiles: [demo]
+    image: node:22-slim
+    volumes:
+      - ./demos/demo-backend:/app:cached
+    working_dir: /app
+    environment:
+      FJARR_SERVER_URL: http://fjarr-server:8080
+      PORT: "9090"
+    command: node --experimental-strip-types src/server.ts
+    ports:
+      - "9090:9090"
+    depends_on:
+      - fjarr-server
+
+  demo-robot:
+    profiles: [demo]
+    image: fjarr-dev
+    volumes:
+      - .:/workspace:cached
+      - x11sock:/tmp/.X11-unix
+    environment:
+      DISPLAY: ":99"
+      FJARR_SERVER_URL: http://fjarr-server:8080
+    working_dir: /workspace
+    devices:
+      - /dev/dri:/dev/dri
+    command: >
+      bash -c "exec ./build/release/demos/demo-robot/demo-robot 2>/dev/null
+      || { echo 'demo-robot not built yet — run: make agent-build'; sleep infinity; }"
+    depends_on:
+      - robot-sim
+      - fjarr-server
+
+  demo-dashboard:
+    profiles: [demo]
+    image: fjarr-dev
+    volumes:
+      - .:/workspace:cached
+      - pnpm-store:/home/dev/.local/share/pnpm
+    working_dir: /workspace
+    command: >
+      bash -c "corepack enable && pnpm install
+      && pnpm --filter fjarr-demo-dashboard dev --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    depends_on:
+      - demo-backend
+
+  # ---------------------------------------------------------------- turn --
+  coturn:
+    profiles: [turn]
+    image: coturn/coturn:4.6-alpine
+    # use-auth-secret from day one: ephemeral HMAC credentials only, never
+    # static passwords (teleop-car lesson — docs/10-security.md).
+    command: >
+      --listening-port=3478
+      --realm=${TURN_REALM:-fjarr.local}
+      --use-auth-secret
+      --static-auth-secret=${TURN_SECRET:-dev-only-change-me}
+      --min-port=49160 --max-port=49200
+      --fingerprint
+      --no-cli
+      --verbose
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "49160-49200:49160-49200/udp"
+
+volumes:
+  x11sock:
+  cargo-registry:
+  pnpm-store:
+  ccache:

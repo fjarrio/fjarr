@@ -1,0 +1,35 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "agent: debug fjarr-agent",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/debug/agent/daemon/fjarr-agent",
+      "cwd": "${workspaceFolder}",
+      "environment": [
+        { "name": "GST_DEBUG", "value": "3,webrtc*:5,va*:4" },
+        { "name": "DISPLAY", "value": ":99" }
+      ],
+      "MIMode": "gdb",
+      "preLaunchTask": "agent: build"
+    },
+    {
+      "name": "signaling: debug fjarr-server",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": ["build", "-p", "fjarr-server"],
+        "filter": { "name": "fjarr-server", "kind": "bin" }
+      },
+      "cwd": "${workspaceFolder}/signaling"
+    },
+    {
+      "name": "web: Chrome against demo dashboard",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/demos/demo-dashboard"
+    }
+  ]
+}

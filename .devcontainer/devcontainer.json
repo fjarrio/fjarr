@@ -1,0 +1,26 @@
+{
+  "name": "Fjarr",
+  "dockerComposeFile": ["../docker-compose.yml"],
+  "service": "dev",
+  "runServices": ["dev", "robot-sim"],
+  "workspaceFolder": "/workspace",
+  "remoteUser": "dev",
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "llvm-vs-code-extensions.vscode-clangd",
+        "ms-vscode.cmake-tools",
+        "rust-lang.rust-analyzer",
+        "vadimcn.vscode-lldb",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "astro-build.astro-vscode",
+        "davidanson.vscode-markdownlint",
+        "bierner.markdown-mermaid",
+        "ms-azuretools.vscode-docker",
+        "tintinweb.graphviz-interactive-preview"
+      ]
+    }
+  }
+}

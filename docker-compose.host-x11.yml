@@ -1,0 +1,13 @@
+# OPT-IN override: capture your REAL host desktop from the dev container.
+#   docker compose -f docker-compose.yml -f docker-compose.host-x11.yml up -d dev
+# Requires an X11 host session and usually `xhost +local:` (see docs/12).
+# This grants the container access to everything on your screen — a conscious
+# privilege grant, which is why it is not in the base file.
+services:
+  dev:
+    environment:
+      DISPLAY: ${DISPLAY:-:0}
+      XAUTHORITY: /home/dev/.Xauthority
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ${XAUTHORITY:-~/.Xauthority}:/home/dev/.Xauthority:ro

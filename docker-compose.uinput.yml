@@ -1,0 +1,9 @@
+# OPT-IN override: /dev/uinput virtual input device experiments (docs/07).
+#   sudo modprobe uinput   # on the host, first
+#   docker compose -f docker-compose.yml -f docker-compose.uinput.yml up -d dev
+# Grants the container the ability to synthesize input events on the HOST
+# kernel — a conscious privilege grant, never in the base file.
+services:
+  dev:
+    devices:
+      - /dev/uinput:/dev/uinput

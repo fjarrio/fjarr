@@ -1,0 +1,103 @@
+---
+// fjarr.io landing page — sells the idea, links to the docs.
+// Content model + feature-status honesty rule: docs/19-website-and-publishing.md
+const capabilities = [
+  { icon: "📷", name: "Camera video", desc: "Multi-camera live streams, one encode fanned out to every viewer, adaptive bitrate.", status: "in development" },
+  { icon: "🖥️", name: "Remote desktop", desc: "The robot's Ubuntu desktop in your dashboard — unattended access after reboot included.", status: "planned" },
+  { icon: "📈", name: "Sensor streaming", desc: "Typed telemetry with change-triggered updates and offline store-and-forward.", status: "planned" },
+  { icon: "📦", name: "File transfer", desc: "Resumable, backpressured transfers — a 4 GB log dump over LTE that survives reconnects.", status: "planned" },
+  { icon: "⌨️", name: "Remote terminal", desc: "An audited PTY in the browser, over the same session.", status: "planned" },
+  { icon: "🩺", name: "Fleet observability", desc: "Versions, host metrics, error rates across the fleet.", status: "planned" },
+  { icon: "🔄", name: "Atomic OTA", desc: "SWUpdate-based A/B updates with rollback and streamed binary diffs.", status: "planned" },
+];
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fjarr — remote connectivity for robot fleets</title>
+    <meta name="description" content="Embeddable peer-to-peer connectivity for robots: camera video, remote desktop, files, terminal, and fleet tooling over WebRTC. Open core, your stack." />
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: system-ui, sans-serif; background: #0d1117; color: #e6edf3; line-height: 1.6; }
+      .wrap { max-width: 1000px; margin: 0 auto; padding: 0 24px; }
+      header.hero { padding: 96px 0 64px; text-align: center; }
+      .hero h1 { font-size: clamp(2.2rem, 6vw, 3.6rem); margin: 0 0 8px; }
+      .hero .fjarr { color: #58a6ff; }
+      .hero p.tag { font-size: 1.25rem; color: #9da7b3; max-width: 46rem; margin: 12px auto 8px; }
+      .hero p.sub { color: #7d8590; max-width: 44rem; margin: 0 auto 32px; }
+      .cta { display: inline-block; padding: 12px 28px; border-radius: 8px; font-weight: 600; text-decoration: none; margin: 0 8px 8px 0; }
+      .cta.primary { background: #2f81f7; color: #fff; }
+      .cta.ghost { border: 1px solid #30363d; color: #e6edf3; }
+      .banner { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 14px 20px; color: #9da7b3; text-align: center; }
+      section { padding: 48px 0; }
+      h2 { font-size: 1.7rem; margin: 0 0 16px; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+      .card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 18px; }
+      .card h3 { margin: 0 0 6px; font-size: 1.05rem; }
+      .badge { float: right; font-size: 0.7rem; padding: 2px 8px; border-radius: 999px; border: 1px solid #30363d; color: #9da7b3; white-space: nowrap; }
+      .badge.dev { border-color: #2f81f7; color: #58a6ff; }
+      .tiers td { padding: 10px 14px; border-bottom: 1px solid #21262d; }
+      table.tiers { width: 100%; border-collapse: collapse; background: #161b22; border: 1px solid #30363d; border-radius: 10px; overflow: hidden; }
+      code { background: #21262d; padding: 1px 6px; border-radius: 4px; font-size: 0.9em; }
+      footer { padding: 40px 0 64px; color: #7d8590; text-align: center; }
+      a { color: #58a6ff; }
+    </style>
+  </head>
+  <body>
+    <header class="hero wrap">
+      <h1>Stop rebuilding robot connectivity.<br /><span class="fjarr">Fjarr</span> is the stack you keep writing.</h1>
+      <p class="tag">
+        Live camera video, remote desktop, file transfer, telemetry, and a remote
+        terminal to every robot in your fleet — over WebRTC, embedded in
+        <em>your</em> robot, <em>your</em> backend, and <em>your</em> dashboard.
+      </p>
+      <p class="sub">Open-core (AGPL-3.0) libraries you self-host, plus a managed cloud when you'd rather not. <i>Fjärr</i> is Swedish for "remote".</p>
+      <a class="cta primary" href="/readme/">Read the docs</a>
+      <a class="cta ghost" href="/00-vision/">Why Fjarr exists</a>
+      <p style="margin-top: 40px;"></p>
+      <div class="banner">
+        🚧 Fjarr is being built <b>documentation-first</b> and in the open. The specs
+        below are real and current; the code is following them milestone by
+        milestone — see the <a href="/17-roadmap/">roadmap</a>.
+      </div>
+    </header>
+
+    <section class="wrap">
+      <h2>Three libraries, your stack</h2>
+      <div class="grid">
+        <div class="card"><h3>🤖 On the robot</h3><p>Embed <code>libfjarr</code> (C++/GStreamer) into your robot software — or run the <code>fjarr-agent</code> daemon beside it. Hardware H.264 encode, one encoder for any number of viewers.</p></div>
+        <div class="card"><h3>🗄️ Next to your backend</h3><p>Deploy the <code>fjarr-server</code> sidecar (78 MB container) next to your existing stack — any language. Your backend mints session grants and receives webhooks. It never touches the media path.</p></div>
+        <div class="card"><h3>📊 In your dashboard</h3><p><code>@fjarr/core</code> + <code>@fjarr/react</code> drop robot sessions into the React dashboard you already have. Headless-first components, your design system wins.</p></div>
+      </div>
+    </section>
+
+    <section class="wrap">
+      <h2>Capabilities <small style="font-weight:400;color:#7d8590;">— everything is a plugin, including yours</small></h2>
+      <div class="grid">
+        {capabilities.map((c) => (
+          <div class="card">
+            <span class={`badge ${c.status === "in development" ? "dev" : ""}`}>{c.status}</span>
+            <h3>{c.icon} {c.name}</h3>
+            <p style="margin:0;color:#9da7b3;">{c.desc}</p>
+          </div>
+        ))}
+      </div>
+      <p style="color:#7d8590;">Statuses track the public <a href="/17-roadmap/">roadmap</a> — we don't market what doesn't run.</p>
+    </section>
+
+    <section class="wrap">
+      <h2>Open core, honest split</h2>
+      <table class="tiers">
+        <tr><td><b>Free &amp; open (AGPL-3.0)</b></td><td>All three libraries, the signaling sidecar, the protocol, the docs, the demos. Genuinely usable alone, self-hosted forever.</td></tr>
+        <tr><td><b>Fjarr Cloud</b></td><td>Managed signaling + TURN, fleet observability, staged OTA campaigns, SSO — metered by robots, session-minutes, and relay bandwidth. Same contract as self-hosting: switch either way, no rework.</td></tr>
+      </table>
+      <p style="color:#7d8590;">The whole business plan is a public document: <a href="/03-product-strategy/">product strategy</a>.</p>
+    </section>
+
+    <footer class="wrap">
+      Fjarr · <a href="/readme/">documentation</a> · built documentation-first in Sweden 🇸🇪
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,5 @@
+packages:
+  - web/packages/*
+  - demos/demo-backend
+  - demos/demo-dashboard
+  - website
