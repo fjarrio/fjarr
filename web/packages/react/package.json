@@ -1,25 +1,38 @@
 {
   "name": "@fjarr/react",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "React bindings and headless-first components for Fjarr sessions",
   "license": "AGPL-3.0-only",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "files": ["dist"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@fjarr/core": "workspace:*"
   },
   "peerDependencies": {
-    "react": ">=19"
+    "react": ">=19",
+    "react-dom": ">=19"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.0",
     "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "happy-dom": "^20.0.0",
     "react": "^19.0.0",
-    "typescript": "^5.9.0"
+    "react-dom": "^19.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^5.0.0"
   }
 }

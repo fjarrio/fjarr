@@ -1,122 +1,65 @@
 /**
- * @fjarr/core — framework-agnostic session, transport, and protocol types.
+ * @fjarr/core — framework-agnostic sessions, transport, protocol types,
+ * subscriptions, publishing, demand-driven tracks, stats. Zero runtime
+ * dependencies (docs/14).
  *
- * M0 STATUS: the public shape (docs/09) with a real state machine skeleton;
- * connect() throws NotImplemented until the M1 core lands. Zero runtime
- * dependencies is a design goal (docs/14).
- *
- * spec: docs/09-interfaces.md#3-dashboard-tier--fjarrcore--fjarrreact
+ * spec: docs/21-web-client-architecture.md · docs/09-interfaces.md#3-dashboard-tier--fjarrcore--fjarrreact
  */
-
-// ---------------------------------------------------------------- protocol
-
-/** spec: docs/08-protocol.md#envelope */
-export interface Envelope<P = unknown> {
-  v: 1;
-  cap: string;
-  type: string;
-  event_id: string;
-  kind: "request" | "accept" | "feedback" | "result" | "event";
-  payload: P;
-}
-
-/** spec: docs/08-protocol.md#track-manifest */
-export interface TrackManifestEntry {
-  track_id: string;
-  cap: string;
-  kind: "video" | "audio";
-  label: string;
-  codec: string;
-  pt: number;
-  /** SDP media id of the carrying transceiver — maps RTCTrackEvent.transceiver.mid → track_id. */
-  mid?: string;
-  monitor: {
-    /** Stable identity (connector name, e.g. "HDMI-1") — never key on index. */
-    id: string;
-    index: number;
-    primary?: boolean;
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-    scale: number;
-    name?: string;
-  } | null;
-}
-
-/** spec: docs/09-interfaces.md#a-session-grants-customer-backend--operator-client */
-export interface SessionGrantRequest {
-  robotId: string;
-  capabilities: Array<{ name: string; params?: Record<string, unknown> }>;
-}
-
-// ------------------------------------------------------------------ session
-
-/**
- * Reactive session state — STATE, never refs (the teleop-car lesson,
- * docs/11-prior-art.md#teleop-car). Subscribers re-render on every transition.
- */
-export type SessionState =
-  | "idle"
-  | "connecting"
-  | "connected"
-  | "reconnecting"
-  | "failed"
-  | "closed";
-
-export interface FjarrSessionConfig {
-  /** wss:// endpoint of fjarr-server / Fjarr Cloud. */
-  serverUrl: string;
-  /** The host app owns auth: it fetches grants from ITS backend. */
-  grant: () => Promise<string>;
-}
-
-export class NotImplementedError extends Error {
-  constructor(what: string) {
-    super(`${what} is not implemented yet — see docs/17-roadmap.md (M1)`);
-    this.name = "NotImplementedError";
-  }
-}
-
-export interface FjarrSession {
-  readonly state: SessionState;
-  readonly tracks: ReadonlyArray<TrackManifestEntry>;
-  subscribe(listener: (state: SessionState) => void): () => void;
-  connect(): Promise<void>;
-  close(): void;
-}
-
-/**
- * Create a session handle. M0: a real observable state machine whose
- * connect() throws NotImplementedError — the API surface the demo dashboard
- * builds against today, the transport lands in M1.
- */
-export function createFjarrSession(config: FjarrSessionConfig): FjarrSession {
-  let state: SessionState = "idle";
-  const listeners = new Set<(s: SessionState) => void>();
-  const setState = (next: SessionState) => {
-    state = next;
-    for (const l of listeners) l(next);
-  };
-  void config;
-  return {
-    get state() {
-      return state;
-    },
-    tracks: [],
-    subscribe(listener) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    async connect() {
-      setState("connecting");
-      setState("failed");
-      throw new NotImplementedError("FjarrSession.connect");
-    },
-    close() {
-      setState("closed");
-    },
-  };
-}
-
-export const FJARR_CORE_VERSION = "0.0.1";
+export * from "./protocol.js";
+export { FjarrError, NotImplementedError, isFjarrError, type ClientErrorCode } from "./errors.js";
+export { createStore, Emitter, type ReadonlyStore, type Store } from "./store.js";
+export { Backoff, backoffDelay, DEFAULT_BACKOFF, type BackoffPolicy } from "./backoff.js";
+export { webSocketFactory, type SignalingSocket, type SocketFactory } from "./transport.js";
+export type {
+  DataChannelLike,
+  MediaStreamLike,
+  MediaStreamTrackLike,
+  PeerConnectionConfig,
+  PeerConnectionFactory,
+  PeerConnectionLike,
+  PeerConnectionState,
+  RtpReceiverLike,
+  RtpSenderLike,
+  StatsReportLike,
+  TrackEventLike,
+  TransceiverLike,
+  MediaStreamFactory,
+} from "./peer.js";
+export { rtcPeerConnectionFactory, domMediaStreamFactory } from "./peer.js";
+export { EnvelopeRouter, TelemetryStore, DEFAULT_REQUEST_TIMEOUT_MS, type EnvelopeHandler, type RequestOptions } from "./router.js";
+export {
+  ChannelSet,
+  PublisherSlot,
+  parseChannelLabel,
+  HIGH_WATER,
+  LOW_WATER,
+  MAX_ENVELOPE_BYTES,
+  PRE_OPEN_QUEUE_LIMIT,
+  type BulkSender,
+  type ByteChannel,
+  type ChannelClass,
+  type Publisher,
+  type PublisherOptions,
+} from "./channels.js";
+export { TrackRegistry, type AcquireOptions, type FoldedDemand, type LatencyMode, type TrackEntry, type TrackHandle, type TrackSnapshot, type TrackStatus } from "./tracks.js";
+export { Heartbeat, TimeSync, TIME_SYNC_WINDOW, type HeartbeatOptions, type TimeSyncEstimate } from "./timesync.js";
+export {
+  HealthTracker,
+  HEALTH_THRESHOLDS,
+  rateSample,
+  StatsParser,
+  StatsSampler,
+  type AudioTrackStats,
+  type DataChannelStats,
+  type HealthLevel,
+  type OutboundStats,
+  type SessionHealth,
+  type SessionStats,
+  type TrackStats,
+  type TransportStats,
+  type VideoTrackStats,
+} from "./stats.js";
+export { FocusRegistry, type FocusOptions, type FocusRegistration, type WindowLike } from "./focus.js";
+export { createSession, type AudioUplink, type Session, type SessionDeps, type SessionEvent, type SessionInfo, type SessionOptions, type SessionState, type TrackApi } from "./session.js";
+export { createFjarrClient, type FjarrClient, type FjarrClientConfig, type PersistenceAdapter, type SessionManager } from "./client.js";
+export { FJARR_CORE_VERSION } from "./version.js";

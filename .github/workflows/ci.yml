@@ -44,6 +44,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter '@fjarr/core' --filter '@fjarr/react' build
+      - run: pnpm --filter '@fjarr/core' --filter '@fjarr/react' typecheck
+      - run: pnpm --filter '@fjarr/core' --filter '@fjarr/react' test
       - run: pnpm --filter fjarr-demo-dashboard build
       - run: pnpm --filter fjarr-demo-backend typecheck
 

@@ -52,6 +52,9 @@ groups with comments.
 | React (peer dep) | ≥ 19 | `@fjarr/react` only | MIT | peer |
 | (M2+) xterm.js | — | terminal view | MIT | yes |
 | `@fjarr/core` runtime deps | **none** (design goal) | keep the core dependency-free | — | — |
+| vitest | ^5 | unit tests (core, react) | MIT | dev-only |
+| happy-dom | ^20 | DOM for `@fjarr/react` hook tests | MIT | dev-only |
+| @testing-library/react | ^16 | hook/component tests | MIT | dev-only |
 
 ## Demos, website, tooling — never shipped
 

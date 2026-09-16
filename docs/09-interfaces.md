@@ -197,17 +197,21 @@ are the API summary.
 ### Core (framework-agnostic)
 
 ```ts
-const session = createFjarrSession({
+const client = createFjarrClient({
   serverUrl: "wss://fjarr.acme.com/ws",
-  grant: () => fetchGrantFromMyBackend(robotId),   // host app owns auth
+  grant: (robotId) => fetchGrantFromMyBackend(robotId),   // host app owns auth
 });
+const session = client.sessions.open("robot-024");        // idempotent, N per page
 // Reactive state machine — STATE, never refs (teleop-car lesson):
 // "idle" | "connecting" | "connected" | "reconnecting" | "failed" | "closed"
-session.state; session.subscribe(s => …);
-session.tracks;                    // from the manifest, labeled
-session.capability("fjarr.camera").send({type: "select-tracks", …});
-session.stats;                     // per-track bandwidth, RTT
-session.close();
+session.getState(); session.subscribe(() => …);
+session.tracks.list();                                     // from the manifest, labeled
+const cam = session.tracks.acquire("cam-front", { tier: "active", visible: true });
+session.on("fjarr.telemetry", "joint-state", (env) => …);  // stream mode
+await session.request("fjarr.camera", "select-tracks", …); // accept/feedback*/result
+session.publisher("com.acme.teleop", "cmd_vel", { maxHz: 50 }).publish(…);
+session.stats.getSnapshot();                               // per-track, transport
+session.close("operator-closed");
 ```
 
 Reconnect + ICE restart are built in (policy configurable); trickle ICE
@@ -216,17 +220,18 @@ always. Transport is injected — the host app decides how grants are fetched.
 ### React bindings
 
 ```tsx
-<FjarrProvider config={…}>
-  <RobotSession robotId="robot-024" capabilities={["fjarr.camera"]}>
-    <CameraView trackId="cam-front" />
-    <DesktopView monitor={0} />
-    <TerminalView />
+<FjarrProvider client={client}>
+  <SessionScope session={client.sessions.open("robot-024")}>
+    <VideoTile trackId="cam-front" tier="active" />
+    <DesktopView monitorId="HDMI-1" />          {/* M3 */}
+    <TerminalView />                            {/* M2 */}
     <SessionStatus />   {/* re-renders on state change — guaranteed */}
-  </RobotSession>
+  </SessionScope>
 </FjarrProvider>
 ```
 
-All components are headless-first (logic hooks: `useFjarrSession`,
-`useTrack`, `useCapability`) with styled defaults; third-party capabilities
-register views via `registerCapabilityView(name, component)`
+All components are headless-first (logic hooks: `useSession`,
+`useSessionState`, `useTelemetry`, `useVideoTrack`, `usePublisher`) with
+styled defaults; third-party capabilities register views via
+`registerCapabilityView(name, component)`
 ([docs/05](05-extension-model.md#web-side-capability-components)).

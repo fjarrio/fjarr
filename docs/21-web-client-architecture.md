@@ -4,7 +4,9 @@ description: Design of @fjarr/core and @fjarr/react — sessions that follow the
 ---
 
 > **Status: review** — the slice-2 design, written before implementation
-> (docs/13). Inspired by the fleet dashboard's session provider
+> (docs/13); implemented in `web/packages/core` + `web/packages/react`
+> (slice 2, 2026-09-16), unit-tested against the `@fjarr/core/testing`
+> mock agent. Inspired by the fleet dashboard's session provider
 > ([prior art](11-prior-art.md#fleet-dashboard)): its good ideas are kept
 > and pushed further; its structural problems are explicitly designed out.
 
@@ -106,17 +108,18 @@ reconnecting → (connected | failed) → closed`. Transitions:
 | idle | `open()` | connecting | fetch grant → WSS hello → await `hello-ack` (session_id, TURN creds) → `session-request` brokered by server → offer |
 | connecting | offer | connecting | set remote, answer, trickle ICE both ways |
 | connecting | DTLS up + control DC open | connected | start heartbeat; flush demand → `select-tracks` |
-| connected | ICE `disconnected` | reconnecting | `restartIce()`; keep tracks/consumers attached |
-| connected | ICE `failed` / heartbeat 3× missed | reconnecting | new signaling round via same grant (if unexpired) |
+| connected | ICE `disconnected` (past a 3 s grace) or `failed` | reconnecting | send `ice-restart` over signaling; the agent re-offers; keep tracks/consumers attached |
+| connected | heartbeat 3× missed / signaling socket lost / no re-offer within 10 s | reconnecting | new signaling round via same grant (if unexpired) |
 | reconnecting | recovered | connected | re-flush demand (agent keyframes on enable) |
 | reconnecting | attempts exhausted | failed | consumers see `failed`; `retry()` available |
 | any | `peer-gone` / `session-close` from server | closed (reason) | release tracks, keep subscriptions registered for a possible `open()` again |
 | any | `error(grant-expired)` | reconnecting | refetch grant via provider, then retry — never surfaces as a generic failure |
 
-Reconnect backoff is docs/08's (0.5 s ×2, cap 30 s, ±20 % jitter, reset
-after 30 s stable). All of this is core logic, unit-tested against a fake
-transport (docs/15) — the dashboard's ad-hoc `toggle → cleanup → start` is
-the anti-pattern.
+The rungs are the [docs/08 reconnection ladder](08-protocol.md#reconnection);
+backoff is docs/08's (0.5 s ×2, cap 30 s, ±20 % jitter, reset after 30 s
+stable). All of this is core logic, unit-tested against a fake transport
+and a fake peer connection (docs/15) — the dashboard's ad-hoc `toggle →
+cleanup → start` is the anti-pattern.
 
 ## Subscriptions: three delivery modes
 
@@ -164,9 +167,9 @@ declaration**, never by the caller guessing:
 | One-off event/command | `session.send(cap, type, payload)` | control (reliable, ordered) | fire-and-forget envelope, `kind: "event"` |
 | Command with outcome | `session.request(cap, type, payload)` | control | accept/feedback*/result correlation |
 | Continuous lossy stream (joystick, pointer, joint targets) | `session.publisher(cap, type, { key?, maxHz })` → `.publish(payload)` | realtime (unordered, no retransmit) | **newest-wins per key**, rate-capped (default 60 Hz); a burst never queues, the latest value always goes out |
-| Byte stream (terminal input, clipboard payload) | `session.channel(cap)` → `.write(bytes)` | control or bulk per declaration | ordered; `bufferedAmount`/`onDrain` exposed |
-| Large binary (file upload) | `session.bulk(cap)` → `.sendFrames(iter)` | bulk (dedicated DC) | docs/08 backpressure: pumps while below HIGH_WATER, resumes on `bufferedamountlow` |
-| Lossy binary frames (point clouds, depth, custom sensors — either direction) | `session.stream(cap)` → `.send(frame)` / `.onFrame(cb)` | **stream** (unordered, no retransmit, binary; [ADR-0018](adr/0018-stream-channel-class.md)) | frame-level newest-wins with sequence numbers; chunked to the SCTP message limit; consumers get whole frames or nothing |
+| Byte stream (terminal input, clipboard payload) | `session.channel(cap)` → `.write(bytes)` | the capability's **bulk** channel (`fjarr:bulk:<cap>`, reliable-ordered — [docs/08](08-protocol.md#datachannel-topology)); bytes written before the channel opens are queued (bounded) | ordered; `bufferedAmount`/`onDrain` exposed; incoming bytes via `.onData(cb)` |
+| Large binary (file upload) | `session.bulk(cap)` → `.sendFrames(iter)` | bulk (same DC) | docs/08 backpressure: pumps while below HIGH_WATER, resumes on `bufferedamountlow` |
+| Lossy binary frames (point clouds, depth, custom sensors — either direction) | `session.stream(cap)` → `.send(frame)` / `.onFrame(cb)` | **stream** (unordered, no retransmit, binary; [ADR-0018](adr/0018-stream-channel-class.md)) | frame-level newest-wins with sequence numbers; chunked to the SCTP message limit; consumers get whole frames or nothing. **Lands in M4** with the first stream-class capability ([roadmap](17-roadmap.md#m4--files-telemetry-logs-sensors)); slice 2 ships the surface without the chunker |
 
 React bindings: `usePublisher(session, cap, type, opts)` returns a stable
 `publish` function; `useCommand(session, cap, type)` wraps `request()` with
@@ -246,8 +249,11 @@ handle.release();
 ```
 
 Per track: `enabled = any consumer visible`, `tier = max over visible
-consumers`. Changes are debounced (~250 ms) and coalesced into a single
-`fjarr.camera/select-tracks` request ([docs/06](06-capabilities.md#fjarrcamera--camera-video-m1-reference-implementation)).
+consumers`, `preference = sharpness if any visible consumer asks for it`.
+Changes are debounced (~250 ms) and coalesced into one `select-tracks`
+request **per track-owning capability** (`fjarr.camera` for camera tracks,
+`fjarr.desktop` for monitors — [docs/06](06-capabilities.md#fjarrcamera--camera-video-m1-reference-implementation));
+a demand change touching both produces two requests, never one per consumer.
 Reconnection re-sends the full demand snapshot. **Default is nothing
 enabled** — the dashboard's "all tracks on until told otherwise" wastes
 bandwidth on every connect.
@@ -328,9 +334,11 @@ redesigned here as a core service rather than a component's `setInterval`.
 - **Health score with reasons, not a color.** `useSessionHealth(session)`
   yields `{ level: "good" | "degraded" | "poor", reasons: ["loss 6% > 5%",
   "rtt 340 ms > 300 ms"] }` with thresholds taken from the
-  [performance budgets](16-performance-budgets.md) and hysteresis so a
-  single bad second doesn't flap the badge. `<ConnectionQuality>` renders
-  it; hosts can render their own from the same hook.
+  [performance budgets](16-performance-budgets.md#connection-health-thresholds)
+  and hysteresis (a level changes only after three consecutive samples
+  agree) so a single bad second doesn't flap the badge.
+  `<ConnectionQuality>` renders it; hosts can render their own from the
+  same hook.
 
 ## Components (`@fjarr/react`)
 
@@ -397,7 +405,11 @@ breaking later. Slice 2 provides them up front:
 - **Multi-session** tests: three sessions on one client with independent
   state machines; a fault injected on one leaves the other two untouched.
 - **Browser e2e** (Playwright, headless Chromium) against robot-sim via the
-  demo stack: video renders, track toggles within budget.
+  demo stack: video renders, track toggles within budget (lands with slice 5,
+  once demo-robot streams).
+- All of the above except the browser e2e run in `make web-test` with no
+  browser: `@fjarr/core/testing` provides the scripted socket, peer
+  connection and `MockAgent` (docs/15) that host dashboards can reuse.
 
 ## Decisions folded into this design
 

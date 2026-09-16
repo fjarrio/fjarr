@@ -66,8 +66,12 @@ web-build: ## Build @fjarr/core, @fjarr/react, demo dashboard
 	pnpm -r --filter './web/**' --filter fjarr-demo-dashboard build
 
 .PHONY: web-lint
-web-lint: ## Typecheck the JS/TS workspace
+web-lint: ## Typecheck the JS/TS workspace (sources + tests)
 	pnpm -r --filter './web/**' --filter fjarr-demo-dashboard typecheck
+
+.PHONY: web-test
+web-test: ## Unit tests for @fjarr/core and @fjarr/react (vitest)
+	pnpm -r --filter './web/**' test
 
 # ---------------------------------------------------------------- website --
 .PHONY: website-dev

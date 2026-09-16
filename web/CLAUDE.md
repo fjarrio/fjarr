@@ -12,4 +12,8 @@
 - Components are headless-first: logic in hooks, styling overridable.
 - The demo dashboard (`demos/demo-dashboard`) may import only the published
   package surface — treat it as a customer.
-- Gates: `make web-build` + `make web-lint` (tsc strict).
+- Tests run against the fault-injecting mock agent in `@fjarr/core/testing`
+  (docs/15) — no browser, no network; add a fault method there before
+  hand-rolling a fake in a test.
+- Gates: `make web-build` + `make web-lint` (tsc strict, sources + tests) +
+  `make web-test` (vitest).

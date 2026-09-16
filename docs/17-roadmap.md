@@ -48,7 +48,7 @@ adaptive bitrate. Extension API paper-validated — **done**:
 [M1 API-fit review](reviews/m1-api-fit-review.md).
 
 **Slices** (each lands on `main`, reviewed retrospectively — docs/20):
-0 protocol + review ✔ · 1 Rust signaling ✔ · 2 web core + React ·
+0 protocol + review ✔ · 1 Rust signaling ✔ · 2 web core + React ✔ ·
 3 agent core (C++) · 4 `fjarr.camera` · 5 demo wiring · 6 ADR-0007 spike +
 adaptive bitrate · 7 fault injection + latency harness.
 

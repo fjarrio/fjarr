@@ -24,7 +24,10 @@ fails the build ([docs/08](08-protocol.md#versioning)).
 ## Fault injection {#fault-injection}
 
 A **fault-injecting mock backend/peer is a first-class artifact** (the fleet-daemon
-mock's best idea), scripted in integration tests. Minimum fault menu:
+mock's best idea), scripted in integration tests. The web side ships it as
+`@fjarr/core/testing` (`MockAgent`: fake signaling socket + fake peer
+connection, every fault below as a method) so host dashboards test their
+own integration without a browser or a robot. Minimum fault menu:
 
 | Fault | Expected behavior |
 |---|---|
