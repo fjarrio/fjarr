@@ -20,6 +20,17 @@ Peer consumer. Ports the proven camera-streamer v3 model ([prior art](11-prior-a
   adaptive bitrate from day one (the camera-streamer gap).
 - Per-second `bandwidth-stats` on the control DC, per track.
 
+Control messages (envelopes on `fjarr:control`, docs/08#envelope):
+
+| `type` | kind | payload | semantics |
+|---|---|---|---|
+| `select-tracks` | request → result | `{"tracks": [{"track_id": "cam-front", "enabled": true, "tier": "active" \| "thumbnail"}]}` | full desired state for the tracks listed (unlisted = unchanged); agent flips valves, applies docs/16 tier params, requests a keyframe on enable; `result.ok` |
+| `bandwidth-stats` | event | `{"interval_ms": 1000, "tracks": [{"track_id", "enabled", "tier", "bitrate_bps", "frames", "dropped"}]}` | per second while any track is enabled |
+
+The client folds all consumers' demand into one `select-tracks`
+([docs/21](21-web-client-architecture.md#demand-model)); nothing is enabled
+until something on screen asks.
+
 **Accepted when:** 3 browsers watch 2 tracks of the demo-robot concurrently;
 toggling a track takes effect < 500 ms without renegotiation; kill/restore of
 the network recovers the stream without page reload; budgets hold on the NUC.

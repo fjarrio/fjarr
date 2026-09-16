@@ -13,7 +13,8 @@
       "label": "Front",
       "codec": "H264",
       "pt": 96,
-      "monitor": null
+      "monitor": null,
+      "mid": "0"
     },
     {
       "track_id": "desk-0",
@@ -27,7 +28,8 @@
         "w": 1920,
         "h": 1080,
         "scale": 1.0
-      }
+      },
+      "mid": "1"
     }
   ]
 }

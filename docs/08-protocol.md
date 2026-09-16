@@ -110,15 +110,19 @@ Sent inside `offer.tracks`, before any media flows:
 ```json
 [
   {"track_id": "cam-front", "cap": "fjarr.camera", "kind": "video",
-   "label": "Front", "codec": "H264", "pt": 96, "monitor": null},
+   "label": "Front", "codec": "H264", "pt": 96, "mid": "0", "monitor": null},
   {"track_id": "desk-0", "cap": "fjarr.desktop", "kind": "video",
-   "label": "Monitor 1", "codec": "H264", "pt": 97,
+   "label": "Monitor 1", "codec": "H264", "pt": 97, "mid": "1",
    "monitor": {"index": 0, "w": 1920, "h": 1080, "scale": 1.0}}
 ]
 ```
 
-`track_id` is stable across renegotiations. Dashboards MUST label from the
-manifest, not from SDP order. *(camera-streamer manifest lesson)*
+`track_id` is stable across renegotiations. `mid` is the SDP media
+identifier of the transceiver carrying the track (the agent knows it at
+offer time); receivers map incoming `RTCTrackEvent.transceiver.mid` →
+`track_id` directly — no SDP parsing, no payload-type guessing
+([docs/21](21-web-client-architecture.md#track-registry)). Dashboards MUST
+label from the manifest, not from SDP order. *(camera-streamer manifest lesson)*
 
 ## Input events (fjarr.desktop)
 

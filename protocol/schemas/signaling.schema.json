@@ -136,6 +136,10 @@
               }
             }
           ]
+        },
+        "mid": {
+          "type": "string",
+          "description": "SDP media id of the carrying transceiver; receivers map RTCTrackEvent.transceiver.mid \u2192 track_id"
         }
       }
     },

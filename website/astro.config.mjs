@@ -36,6 +36,7 @@ export default defineConfig({
             "09-interfaces",
             "10-security",
             "16-performance-budgets",
+            "21-web-client-architecture",
           ],
         },
         {

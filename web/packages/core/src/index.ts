@@ -28,6 +28,8 @@ export interface TrackManifestEntry {
   label: string;
   codec: string;
   pt: number;
+  /** SDP media id of the carrying transceiver — maps RTCTrackEvent.transceiver.mid → track_id. */
+  mid?: string;
   monitor: { index: number; w: number; h: number; scale: number } | null;
 }
 

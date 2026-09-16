@@ -183,6 +183,11 @@ implementations = the standalone sidecar behavior.
 
 ## 3. Dashboard tier — `@fjarr/core` + `@fjarr/react`
 
+The full design — sessions that follow the user, N sessions per page, the
+three subscription modes, the publish side, and demand-driven track
+delivery — is [docs/21](21-web-client-architecture.md); the sketches below
+are the API summary.
+
 ### Core (framework-agnostic)
 
 ```ts

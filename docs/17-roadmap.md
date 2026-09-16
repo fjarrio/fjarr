@@ -26,8 +26,8 @@ CI (lint, build, docs gates) and website deploy. Registrations done
 ## M1 — Core + extension API, proven by `fjarr.camera`
 
 Agent core (session lifecycle, FrameHub, DC router, reconnect ladder), Rust
-signaling with grants/webhooks/TURN minting, `@fjarr/core` state machine +
-`@fjarr/react` basics; camera capability as the reference implementation;
+signaling with grants/webhooks/TURN minting, `@fjarr/core` + `@fjarr/react`
+per the [web client architecture](21-web-client-architecture.md); camera capability as the reference implementation;
 **ADR-0007 spike** (webrtcbin+FrameHub vs webrtcsink, measured); baseline
 adaptive bitrate; extension API paper-validated against all seven
 capabilities + the [arm-teach stress test](06-capabilities.md#stress-test)

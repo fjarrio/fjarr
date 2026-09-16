@@ -104,3 +104,39 @@ control-plane teacher.
   published artifact, codegen in CI ([docs/08](08-protocol.md#versioning)).
 - Uniform error swallowing in the reconnect loop (`UNAUTHENTICATED` retried
   like `UNAVAILABLE`) → error taxonomy distinguishes retryable from fatal.
+
+## fleet-dashboard {#fleet-dashboard}
+
+React 19 fleet dashboard consuming camera-streamer; the operator-side
+counterpart, analyzed for the slice-2 web design ([docs/21](21-web-client-architecture.md)).
+
+### Adopt
+
+| Pattern | Where it lands |
+|---|---|
+| **Session in an app-root context above the router** (they migrated away from a per-page `OldRunProvider`) — navigation never drops the connection; header controls it from anywhere; a floating overlay follows the user | docs/21 sessions: `FjarrClient` + `SessionManager` at the root, sessions owned by the client, never by components |
+| `subscribe(type, cb) → unsubscribe` pub-sub; other providers/components subscribe to slices | docs/21 three delivery modes; envelopes keyed by `(cap, type)` |
+| **Two data tiers**: slow state through React state, high-rate telemetry through refs read on rAF (`implementOdometryRef` → `ImplementAnimator`) | docs/21 `useTelemetry` (state) vs `useLatest` (ref) — first-class, not ad hoc |
+| Tracks stored independent of `<video>` elements; late-mounting elements `reattach()`; components add themselves to the "used" set → `receiver-select-streams` | docs/21 demand model: reference-counted `acquire/release`, visibility-aware, coalesced `select-tracks` |
+| Track identity resolved via `transceiver.mid` (after parsing SDP to recover it) | fixed at the source: `mid` in the manifest (docs/08) |
+| Isolated heartbeat controller with session-id guard; graceful disconnect with ack + timeout; `beforeunload` warning while connected; "reconnect last robot" | docs/08 heartbeat; docs/21 host-app conveniences (opt-in) |
+
+### Fix (now spec requirements)
+
+- 1,825-line provider with a ~20-field context value → every consumer
+  re-renders on every status tick. → stable client in context, all
+  reactivity via store selectors (`useSyncExternalStore`).
+- Robot domain (`systemHealth`, `battery`, localized toasts, route ids) baked
+  into the connectivity layer. → library has no robot vocabulary; domain
+  providers are built on `useTelemetry` in the host app.
+- All tracks enabled by default until something mounts; video refs must be
+  "ready" at connect time. → default nothing enabled; tracks fully decoupled
+  from elements.
+- One session (`connectedCamera-streamerId`) as a global. → N sessions per client,
+  explicit handles everywhere.
+- Reconnect by toggling disconnect/connect; no `restartIce`; MQTT signaling
+  filtered client-side; static TURN creds from build env. → docs/21 state
+  machine, docs/08 signaling with per-session TURN creds.
+- No publish abstraction (raw `send(type, msg)` on one reliable channel). →
+  docs/21 publishing table: channel class from the capability, newest-wins
+  realtime publishers, deadman re-publish.

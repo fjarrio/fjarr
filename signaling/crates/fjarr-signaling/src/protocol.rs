@@ -97,6 +97,9 @@ pub struct TrackManifestEntry {
     pub label: String,
     pub codec: String,
     pub pt: u8,
+    /// SDP media id of the carrying transceiver (docs/08#track-manifest).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mid: Option<String>,
     pub monitor: Option<MonitorInfo>,
 }
 
