@@ -148,10 +148,58 @@ deliberately failing its post-hook — that device rolls back automatically and
 the campaign reports it; power-cut mid-write leaves the device bootable on
 the old slot.
 
+## `fjarr.audio` — two-way audio (planned) {#fjarraudio--two-way-audio-planned}
+
+Peer consumer. Opus over native WebRTC audio tracks — no new dependencies
+on either side (GStreamer `opusenc`/`opusdec`, browser `getUserMedia`).
+
+- **Downlink**: one or more `kind: "audio"` tracks in the manifest (robot
+  microphones — hear motors, alarms, people). Demand-driven like video:
+  default off, per-consumer mute, browser autoplay policy surfaced (docs/21).
+- **Uplink** (talk to a person at the robot): granted per session with
+  `params.talk = true`; the agent pre-allocates a `recvonly` transceiver in
+  its offer so the browser attaches its mic via `replaceTrack()` without
+  renegotiation. Played through a configured output device on the robot with
+  a **hard volume cap** in agent config.
+- **Push-to-talk by default**; open mic is explicit. Uplink start/stop are
+  audited session events (docs/10) — a live microphone is as sensitive as a
+  terminal.
+- Not in scope: alert sounds/beeps in the dashboard (host UI concern),
+  desktop-audio capture for `fjarr.desktop` (later, same track model).
+
+**Accepted when:** an operator hears the robot-sim's synthetic audio source
+within budget (docs/16); PTT delivers speech to the sim's sink with
+echo cancellation on; releasing PTT stops the uplink within 200 ms; audit
+events recorded. Milestone: after M3 ([roadmap](17-roadmap.md)).
+
+## `fjarr.logs` — live log tailing (planned)
+
+Peer + backend consumers. `journalctl`/application log streams over a
+reliable-ordered channel with server-side filtering (unit, level, regex),
+backpressured so a chatty robot can't flood the operator; the same source
+feeds observability (M7) in the backend mode. Cheap, and the single most
+requested support feature after "show me the screen". Milestone: with M7.
+
+## Conventions on existing capabilities (planned additions)
+
+- `fjarr.camera/snapshot` — request → result carrying one full-resolution
+  still (JPEG/PNG) via the bulk channel, for tickets and reports without
+  screen-grabbing a compressed video frame.
+- `fjarr.telemetry/alert` — a conventional event shape
+  `{severity, code, message, data?}` so hosts route robot-originated
+  notifications to their own toast/notification system uniformly (the
+  fleet-dashboard's `/rtc/toastMessage`, generalized).
+- `fjarr.files/list` — directory listing within the configured allow-lists,
+  a prerequisite for any file-browser UI.
+- `fjarr.core` — reserved namespace for session-level messages that belong
+  to no capability: `ping`/`pong` (docs/08 heartbeat) and `time-sync`
+  (operator↔agent clock offset + RTT, needed for stamping teleop commands
+  and for the docs/15 latency harness).
+
 ## Later / explicitly deferred
 
-Audio (two-way), session recording/replay, mobile operator apps —
-[open questions](18-open-questions.md).
+Session recording/replay, mobile operator apps, haptic/rumble feedback to
+gamepads, desktop audio — [open questions](18-open-questions.md).
 
 ## Stress test: `com.example.arm-teach` (never to be built) {#stress-test}
 

@@ -140,3 +140,28 @@ counterpart, analyzed for the slice-2 web design ([docs/21](21-web-client-archit
 - No publish abstraction (raw `send(type, msg)` on one reliable channel). →
   docs/21 publishing table: channel class from the capability, newest-wins
   realtime publishers, deadman re-publish.
+
+## receiver-playground {#receiver-playground}
+
+A small React playground receiver for camera-streamer (`inspiration/camera-streamer/
+playground/receiver-playground`). Two ideas worth more than its size:
+
+### Adopt
+
+| Pattern | Where it lands |
+|---|---|
+| `subscribeToStream(id, handler)`: N `<VideoStream>` components receive the *same* `MediaStream` — one RTP track, decoded once, rendered many times, no extra bandwidth; late subscribers get the existing stream immediately | docs/21 track registry: fan-out is a guarantee, demand aggregates per track |
+| `StreamSelector` stats panel: 1 s `getStats()` polling, `inbound-rtp` bytes/packets/loss/jitter/PLI/FIR/NACK/frames, candidate-pair RTT, bitrate from byte deltas, a four-level quality label with loss/jitter/RTT thresholds | docs/21 stats & health: sampler in core, per-track by `mid`, selected-pair RTT + relay detection, decode/freeze/HW-decoder metrics, windowed rates, health score with reasons + hysteresis, thresholds from docs/16 |
+| Buffer ICE candidates until the remote description is set | docs/21 state machine (also in camera-streamer) |
+
+### Fix
+
+- Stats averaged/summed across all tracks (per-track view lost); RTT
+  averaged over every succeeded candidate pair rather than the selected
+  one; lifetime counters shown where rates are needed.
+- The stats interval lives in a React effect that depends on the previous
+  sample — it tears down and recreates the timer on every tick.
+- All streams enabled by default (`fill(true)`), a synthetic "main" stream
+  aggregating every track, and stream identity guessed from
+  `event.streams[0].id` or `mid` — replaced by manifest `mid` (docs/08) and
+  demand-driven enablement.

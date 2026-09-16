@@ -28,6 +28,11 @@ coalesced; stale motion dropped, never queued.
 | Inactive thumbnail | 960×540@5 | ≤ 300 kbps |
 | Disabled | — | ~0 (valve dropped; no renegotiation) |
 
+Audio (Opus): 32–64 kbps per track downlink, 24–48 kbps uplink; mouth-to-ear
+< 250 ms P2P. Stream-class sensor frames (ADR-0018): capability-declared
+ceiling (e.g. a decimated point cloud ≤ 2 Mbps at 5–10 Hz); frames older
+than one interval are dropped, never queued.
+
 **Adaptive bitrate is a hard requirement** (the camera-streamer gap): the encoder
 target follows congestion feedback (GCC/TWCC — mechanism per
 [ADR-0007](adr/0007-webrtcbin-vs-webrtcsink.md)) between a floor of 250 kbps

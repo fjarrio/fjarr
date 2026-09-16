@@ -166,6 +166,7 @@ declaration**, never by the caller guessing:
 | Continuous lossy stream (joystick, pointer, joint targets) | `session.publisher(cap, type, { key?, maxHz })` → `.publish(payload)` | realtime (unordered, no retransmit) | **newest-wins per key**, rate-capped (default 60 Hz); a burst never queues, the latest value always goes out |
 | Byte stream (terminal input, clipboard payload) | `session.channel(cap)` → `.write(bytes)` | control or bulk per declaration | ordered; `bufferedAmount`/`onDrain` exposed |
 | Large binary (file upload) | `session.bulk(cap)` → `.sendFrames(iter)` | bulk (dedicated DC) | docs/08 backpressure: pumps while below HIGH_WATER, resumes on `bufferedamountlow` |
+| Lossy binary frames (point clouds, depth, custom sensors — either direction) | `session.stream(cap)` → `.send(frame)` / `.onFrame(cb)` | **stream** (unordered, no retransmit, binary; [ADR-0018](adr/0018-stream-channel-class.md)) | frame-level newest-wins with sequence numbers; chunked to the SCTP message limit; consumers get whole frames or nothing |
 
 React bindings: `usePublisher(session, cap, type, opts)` returns a stable
 `publish` function; `useCommand(session, cap, type)` wraps `request()` with
@@ -212,6 +213,16 @@ so no SDP parsing or payload-type guessing is ever needed.
 `MediaStreamTrack`s live in the registry, **independent of any element**:
 a `<video>` that mounts later simply attaches to the existing track.
 
+**Fan-out is free.** Any number of consumers (a grid tile, a floating
+overlay, a picture-in-picture, a canvas overlay) attach to the *same*
+track: the browser receives and decodes each RTP stream exactly once
+regardless of how many elements render it, so a second tile costs zero
+network bandwidth and zero decode — only compositing (the
+receiver-playground's `subscribeToStream` idea, [prior art](11-prior-art.md#receiver-playground),
+made a guarantee of the registry). Demand is therefore *aggregated* per
+track, never duplicated: ten consumers of `cam-front` produce one enabled
+track at the highest tier any of them asks for.
+
 ### Demand model
 
 Every consumer declares what it needs; the registry folds demand into one
@@ -243,6 +254,27 @@ picture-in-picture) pass `keepWarm: true`. Re-enabling gets a keyframe
 from the agent (docs/06), so the first frame after scroll-back is
 immediate.
 
+### Audio tracks
+
+Audio is a track like video (`kind: "audio"` in the manifest, docs/08),
+served by the `fjarr.audio` capability ([docs/06](06-capabilities.md#fjarraudio--two-way-audio-planned)):
+
+- **Downlink** (hear the robot's surroundings, machine sounds): acquired
+  through the same demand model — `useAudioTrack(session, trackId)` /
+  `<AudioSink>`; default off; per-consumer mute. Browsers refuse to play
+  unmuted audio without a user gesture, so `<AudioSink>` exposes
+  `status: "blocked-autoplay"` and an `unlock()` to call from a click; the
+  library never fakes a gesture.
+- **Uplink** (talk to a person at the robot): the operator's microphone is a
+  *published* media track. Because the agent always offers (docs/08), the
+  agent pre-allocates a `recvonly` audio transceiver in the initial offer
+  whenever the grant includes `fjarr.audio` with `talk: true`; the browser
+  attaches its mic with `RTCRtpSender.replaceTrack()` — **no renegotiation**.
+  `usePushToTalk(session)` is the default UX (open mic is an explicit
+  opt-in), echo cancellation/noise suppression flags pass through to
+  `getUserMedia`, and every uplink start/stop is a session event for audit
+  (docs/10 — a live microphone is as sensitive as a terminal).
+
 ### Hooks and elements
 
 ```ts
@@ -257,6 +289,41 @@ overlays, and `data-fjarr-status` for styling. Stats (`bandwidth-stats`
 envelopes, per docs/08) are a telemetry store: `useTrackStats(session,
 trackId)`.
 
+## Stats and connection health
+
+`RTCPeerConnection.getStats()` is the ground truth for what the network is
+doing; the dashboard tooling around it was the best part of the
+receiver-playground ([prior art](11-prior-art.md#receiver-playground)) and is
+redesigned here as a core service rather than a component's `setInterval`.
+
+- **Sampler in core, one per session** (default 1 s, configurable), publishing
+  into the telemetry store so consumers use mode-1 selectors
+  (`useTrackStats(session, trackId)`, `useSessionStats(session)`) — no timers
+  in React, no re-created intervals.
+- **Per-track, not averaged.** `inbound-rtp` reports are keyed by their
+  `mid` → `track_id` via the manifest. Per video track: bitrate (windowed,
+  from byte deltas), packets lost (cumulative *and* windowed loss rate),
+  jitter, jitter-buffer delay, frames decoded/dropped/per-second, resolution,
+  freeze count and duration, key frames, PLI/FIR/NACK counts, average decode
+  time, `decoderImplementation` + `powerEfficientDecoder` (is hardware
+  decode engaged?). Per audio track: level, concealed samples/events.
+- **Transport**: RTT from the **selected** candidate pair only (not an
+  average over all pairs), `availableIncomingBitrate`, and the pair's
+  local/remote candidate types — so the UI can say *"relayed via TURN"*
+  versus *"direct"*, which explains most latency complaints on the spot.
+- **Outbound** (published audio, future uplinks): bytes sent,
+  `qualityLimitationReason`, retransmissions. **Data channels**: per-channel
+  messages/bytes in and out, `bufferedAmount`.
+- **Agent correlation**: the agent's `bandwidth-stats` envelope (docs/06)
+  gives *sent* bytes per track; sent − received over the same window is the
+  relay/path loss picture the latency harness (docs/15) plots.
+- **Health score with reasons, not a color.** `useSessionHealth(session)`
+  yields `{ level: "good" | "degraded" | "poor", reasons: ["loss 6% > 5%",
+  "rtt 340 ms > 300 ms"] }` with thresholds taken from the
+  [performance budgets](16-performance-budgets.md) and hysteresis so a
+  single bad second doesn't flap the badge. `<ConnectionQuality>` renders
+  it; hosts can render their own from the same hook.
+
 ## Components (`@fjarr/react`)
 
 All headless-first: logic in hooks, minimal default styling, every visual
@@ -269,6 +336,8 @@ overridable; the host's design system wins (docs/05).
 | `<VideoTile>` | one track, demand-managed | RunPage grid cells |
 | `<VideoGrid>` | N tiles from the manifest; layout order/labels from a host-provided ordering (no hard-coded camera names) | `buildGridVideoTrackRows` |
 | `<FloatingVideo>` | draggable/resizable/anchored overlay that persists across routes; `keepWarm` when collapsed | `FrontCameraOverlay` (generalized, robot-agnostic) |
+| `<AudioSink>` / `usePushToTalk` | downlink audio with autoplay-unlock status; PTT uplink | — |
+| `<ConnectionQuality>` | health level + reasons from the stats sampler | `StreamSelector` stats panel (generalized) |
 | `<DesktopView>` / `<TerminalView>` | capability views (M3/M2), registered via `registerCapabilityView` | — |
 
 Third-party capabilities register views with the same registry
@@ -298,6 +367,9 @@ Third-party capabilities register views with the same registry
 - **Publisher** unit tests: newest-wins coalescing under burst, rate cap,
   deadman re-publish while held and silence after release, bulk pump
   honoring `bufferedAmount` watermarks.
+- **Stats sampler** unit tests against recorded `getStats()` snapshots:
+  per-track keying by `mid`, windowed deltas, selected-pair RTT, relay
+  detection, health reasons + hysteresis.
 - **Multi-session** tests: three sessions on one client with independent
   state machines; a fault injected on one leaves the other two untouched.
 - **Browser e2e** (Playwright, headless Chromium) against robot-sim via the

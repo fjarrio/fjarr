@@ -70,6 +70,7 @@ Channels are created by the agent at session setup, named
 | `fjarr:control` | control | yes | reliable | envelopes: capability control, telemetry, clipboard metadata, heartbeat |
 | `fjarr:realtime` | realtime | **no** | **0** | pointer motion, joint states — newest-wins data only |
 | `fjarr:bulk:<cap>` | bulk | yes | reliable | file frames, clipboard payloads; one per bulk-using capability |
+| `fjarr:stream:<cap>` | stream | **no** | **0** | lossy binary frames (point clouds, depth maps, custom sensor data) in either direction; frame-level newest-wins ([ADR-0018](adr/0018-stream-channel-class.md)) |
 
 Rules:
 
@@ -77,6 +78,12 @@ Rules:
   reliability required). Pointer *motion* → **realtime**.
 - Bulk channels implement [backpressure](#backpressure); control/realtime
   messages MUST stay ≤ 16 KiB.
+- Stream frames carry a 12-byte header (`u32 frame_seq`, `u16 chunk_index`,
+  `u16 chunk_count`, `u32 payload_len`) so receivers reassemble whole frames
+  and drop incomplete or stale ones; a frame larger than
+  `sctp.maxMessageSize` is chunked, never queued behind a newer frame.
+- Session-level messages that belong to no capability use the reserved
+  `cap` `fjarr.core`: `ping`/`pong` (heartbeat), `time-sync`.
 - Heartbeat: `ping`/`pong` envelope on control every 5 s, 3 missed → session
   considered dead → teardown + `session-close(reason="heartbeat")`.
 
@@ -117,6 +124,7 @@ Sent inside `offer.tracks`, before any media flows:
 ]
 ```
 
+`kind` is `"video"` or `"audio"` (audio tracks: docs/06 `fjarr.audio`).
 `track_id` is stable across renegotiations. `mid` is the SDP media
 identifier of the transceiver carrying the track (the agent knows it at
 offer time); receivers map incoming `RTCTrackEvent.transceiver.mid` →

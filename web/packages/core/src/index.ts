@@ -24,7 +24,7 @@ export interface Envelope<P = unknown> {
 export interface TrackManifestEntry {
   track_id: string;
   cap: string;
-  kind: "video";
+  kind: "video" | "audio";
   label: string;
   codec: string;
   pt: number;
