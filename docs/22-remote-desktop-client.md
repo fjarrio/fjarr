@@ -282,8 +282,9 @@ lease and the toolbar shows locked/unlocked.
 
 1. Realtime and control publishers with the coalescing/deadman semantics of
    docs/21 (pointer at ≤ 60 Hz with `seq`; keys/buttons reliable).
-2. Track acquire options: `preference` and `latencyMode` passed through to
-   `select-tracks` and to the receiver's `jitterBufferTarget`.
+2. Track acquire options: `preference` (→ `select-tracks`, an encoder-side
+   knob) and `latencyMode` (→ the receiver's `jitterBufferTarget`, a
+   browser-side knob; never on the wire).
 3. Envelope subscription for agent → client `cursor` events on the realtime
    class and `clipboard-offer` on control.
 4. Manifest `monitor` geometry exposed via the track registry.

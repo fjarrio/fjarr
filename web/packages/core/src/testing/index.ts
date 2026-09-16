@@ -333,6 +333,14 @@ export class MockAgent {
   grantExpiredOnce = false;
   private sessionCounter = 0;
   private readonly options: MockAgentOptions;
+  /** Ignore `ice-restart` (a broken relay path) so the client's rung-3 fallback is exercised. */
+  ignoreIceRestart = false;
+  /** Reject the next brokered session with this reason. */
+  rejectNextSession: string | null = null;
+  /** Accept sockets but never answer hello (docs/15 "server goes silent" at signaling level). */
+  neverAck = false;
+  /** Data channels open before or after `connectionState: connected` (browsers differ). */
+  channelsBeforeConnected = true;
 
   constructor(options: MockAgentOptions = {}) {
     this.options = { auto: true, online: true, turn: DEFAULT_TURN, ...options };
@@ -391,9 +399,18 @@ export class MockAgent {
           queueMicrotask(() => socket.receive(this.sig({ type: "error", code: "robot-offline", message: "robot is not connected", caused_by: parsed.event_id })));
           return;
         }
+        if (this.neverAck) return;
         const sessionId = `s-${++this.sessionCounter}`;
+        // A new session is a new manifest_version sequence (docs/08#renegotiation).
+        this.manifestVersion = 1;
         queueMicrotask(() => {
           socket.receive(this.sig({ type: "hello-ack", proto_version: PROTO_VERSION, session_id: sessionId, ...(this.options.turn ? { turn: this.options.turn } : {}) }));
+          if (this.rejectNextSession !== null) {
+            const reason = this.rejectNextSession;
+            this.rejectNextSession = null;
+            socket.receive(this.sig({ type: "session-reject", session_id: sessionId, reason }));
+            return;
+          }
           socket.receive(this.sig({ type: "session-accept", session_id: sessionId }));
           socket.receive(this.offer(sessionId, "v=0\r\noffer"));
         });
@@ -403,6 +420,7 @@ export class MockAgent {
         queueMicrotask(() => this.completeConnection());
         break;
       case "ice-restart":
+        if (this.ignoreIceRestart) break;
         queueMicrotask(() => socket.receive(this.offer(parsed.session_id, "v=0\r\noffer ice-restart")));
         break;
       default:
@@ -413,15 +431,18 @@ export class MockAgent {
   private completeConnection(): void {
     const pc = this.pcs[this.pcs.length - 1];
     if (!pc || pc.closed) return;
-    if (!pc.channel("fjarr:control")) {
+    const openChannels = () => {
+      if (pc.channel("fjarr:control")) return;
       const control = pc.openDataChannel("fjarr:control");
       control.onSend = (d) => this.onEnvelope(control, d);
       const realtime = pc.openDataChannel("fjarr:realtime");
       realtime.onSend = (d) => this.onEnvelope(realtime, d);
       for (const cap of this.options.bulkCaps ?? []) pc.openDataChannel(`fjarr:bulk:${cap}`);
       if (this.options.uplinkMid) pc.addUplinkTransceiver(this.options.uplinkMid);
-    }
+    };
+    if (this.channelsBeforeConnected) openChannels();
     if (pc.connectionState !== "connected") pc.setConnectionState("connected");
+    if (!this.channelsBeforeConnected) openChannels();
   }
 
   private onEnvelope(dc: FakeDataChannel, data: string | ArrayBuffer | ArrayBufferView): void {
@@ -443,7 +464,9 @@ export class MockAgent {
     }
     if (result) {
       const reply = makeEnvelope(parsed.cap, parsed.type === "ping" ? "pong" : parsed.type, "result", result, parsed.event_id);
-      queueMicrotask(() => dc.receive(JSON.stringify(reply)));
+      // Agents answer on control whatever channel carried the request (docs/08: realtime carries events only).
+      const control = this.pcs[this.pcs.length - 1]?.channel("fjarr:control") ?? dc;
+      queueMicrotask(() => control.receive(JSON.stringify(reply)));
     }
   }
 

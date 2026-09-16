@@ -33,7 +33,11 @@ export interface FjarrClientConfig {
 }
 
 export interface SessionManager {
-  /** Idempotent: returns the existing session for `robotId`, (re)opening it if not active. */
+  /**
+   * Idempotent: returns the existing session for `robotId`, (re)opening it
+   * if not active. `options` apply when the session is created; a later call
+   * with different options does not reconfigure a live session.
+   */
   open(robotId: string, options?: SessionOptions): Session;
   get(robotId: string): Session | undefined;
   /** Close and forget (subscriptions are dropped); `session.close()` keeps the handle. */
@@ -81,7 +85,8 @@ export function createFjarrClient(config: FjarrClientConfig): FjarrClient {
         publish();
       }
       s.open();
-      if (config.persistence) void Promise.resolve(config.persistence.set(LAST_ROBOT_KEY, robotId)).catch(() => undefined);
+      const persistence = config.persistence;
+      if (persistence) void Promise.resolve().then(() => persistence.set(LAST_ROBOT_KEY, robotId)).catch(() => undefined);
       return s;
     },
     get: (robotId) => sessions.get(robotId),

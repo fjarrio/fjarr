@@ -60,6 +60,8 @@ const client = createFjarrClient({
     set: (k, v) => localStorage.setItem(k, v),
   },
 });
+// Dev only: don't leak sessions across Vite hot reloads of this module.
+import.meta.hot?.dispose(() => client.destroy());
 
 export function App() {
   return (

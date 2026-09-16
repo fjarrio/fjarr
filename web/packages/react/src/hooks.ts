@@ -3,7 +3,7 @@
  * context value churn, no timers in React.
  * spec: docs/21-web-client-architecture.md#subscriptions-three-delivery-modes · #publishing-sending-toward-the-robot
  */
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type {
   Envelope,
   EnvelopeHandler,
@@ -26,7 +26,7 @@ import type {
   TrackSnapshot,
   TrackStats,
 } from "@fjarr/core";
-import { useFjarrClient, useSession } from "./context.js";
+import { ClientContext, useFjarrClient, useSession } from "./context.js";
 
 /** Bind any core store. */
 export function useStore<T>(store: ReadonlyStore<T>): T {
@@ -65,7 +65,7 @@ export function useTelemetry<T>(session: Session | undefined, selector: (t: Tele
   // The snapshot is the *selected* value, cached per store version, so React
   // re-renders only when `equals` says the selection changed — never on an
   // unrelated telemetry update (the fleet dashboard's 20-field context churn).
-  const cache = useRef<{ version: number; selector: typeof selector; value: T } | null>(null);
+  const cache = useRef<{ telemetry: typeof telemetry; version: number; selector: typeof selector; value: T } | null>(null);
   const selectorRef = useRef(selector);
   selectorRef.current = selector;
   const equalsRef = useRef(equals);
@@ -74,10 +74,12 @@ export function useTelemetry<T>(session: Session | undefined, selector: (t: Tele
     const version = telemetry.versionStore.getSnapshot();
     const c = cache.current;
     const sel = selectorRef.current;
-    if (c && c.version === version && c.selector === sel) return c.value;
+    if (c && c.telemetry === telemetry && c.version === version && c.selector === sel) return c.value;
     const next = sel(reader);
-    const value = c && equalsRef.current(c.value, next) ? c.value : next;
-    cache.current = { version, selector: sel, value };
+    // Same store: preserve identity when equal. A different session's store
+    // (session prop switched) never reuses the previous robot's value.
+    const value = c && c.telemetry === telemetry && equalsRef.current(c.value, next) ? c.value : next;
+    cache.current = { telemetry, version, selector: sel, value };
     return value;
   }, [telemetry, reader]);
   return useSyncExternalStore(telemetry.versionStore.subscribe, getSnapshot, getSnapshot);
@@ -174,13 +176,17 @@ export function useTimeSync(session?: Session): TimeSyncEstimate | null {
   return useStore(useSession(session).timeSync);
 }
 
-/** Keyboard ownership for an input surface (docs/22 focus model). */
+/**
+ * Keyboard ownership for an input surface (docs/22 focus model). `window`
+ * defaults to the page's own window so OS blur releases held keys; a view
+ * portaled into a presentation popup passes that popup's window (docs/22 #8).
+ */
 export function useInputFocus(id: string, options: FocusOptions = {}): { registration: FocusRegistration | null; focused: boolean } {
   const client = useFjarrClient();
   const [registration, setRegistration] = useState<FocusRegistration | null>(null);
   const onLost = useRef(options.onLost);
   onLost.current = options.onLost;
-  const win = options.window;
+  const win = options.window ?? (typeof window !== "undefined" ? window : undefined);
   useEffect(() => {
     const r = client.focus.register(id, { window: win, onLost: () => onLost.current?.() });
     setRegistration(r);
@@ -192,8 +198,9 @@ export function useInputFocus(id: string, options: FocusOptions = {}): { registr
 
 /** Opt-in "are you sure?" while any session is connected (docs/21 host conveniences). */
 export function useBeforeUnloadWhileConnected(client?: FjarrClient): void {
-  const ctx = useFjarrClient();
+  const ctx = useContext(ClientContext);
   const c = client ?? ctx;
+  if (!c) throw new Error("useBeforeUnloadWhileConnected: pass `client` or render inside <FjarrProvider>");
   useEffect(() => {
     if (typeof window === "undefined") return;
     const handler = (ev: BeforeUnloadEvent) => {

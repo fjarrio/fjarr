@@ -84,7 +84,8 @@ core change.
 Each capability ships its dashboard counterpart as an entry in
 `@fjarr/react`'s registry keyed by the same reverse-DNS name:
 
-- a React component (or several) receiving `{ session, capability }` context;
+- a React component (or several) receiving `{ session, capability }` props
+  (`CapabilityViewProps` in `@fjarr/react`);
 - a headless hook layer in `@fjarr/core` for teams building their own UI;
 - type definitions for its envelope messages (generated from the protocol
   schemas — [docs/08](08-protocol.md#versioning)).

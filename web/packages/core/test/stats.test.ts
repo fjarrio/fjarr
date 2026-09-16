@@ -48,7 +48,7 @@ describe("health with reasons + hysteresis (docs/16#connection-health-thresholds
     at: 0,
     intervalMs: 1000,
     transport: { rttMs: rtt, availableIncomingBitrate: null, localCandidateType: null, remoteCandidateType: null, relayed: false },
-    tracks: { "cam-front": { kind: "video", trackId: "cam-front", mid: "0", bitrateBps: 0, bytesReceived: 0, packetsReceived: 100, packetsLost: 0, lossRate: loss, jitterMs: 0, jitterBufferDelayMs: 0, framesDecoded: 0, framesDropped: 0, framesPerSecond: 30, width: 0, height: 0, freezeCount: 0, freezeDurationMs: 0, freezesInWindow: 0, keyFramesDecoded: 0, pliCount: 0, firCount: 0, nackCount: 0, avgDecodeTimeMs: 0, decoderImplementation: null, powerEfficientDecoder: null, framesInWindow: frames } },
+    tracks: { "cam-front": { kind: "video", trackId: "cam-front", mid: "0", bitrateBps: 0, bytesReceived: 0, packetsReceived: 100, packetsLost: 0, lossRate: loss, packetsReceivedInWindow: Math.round(100 * (1 - loss)), packetsLostInWindow: Math.round(100 * loss), jitterMs: 0, jitterBufferDelayMs: 0, framesDecoded: 0, framesDropped: 0, framesPerSecond: 30, width: 0, height: 0, freezeCount: 0, freezeDurationMs: 0, freezesInWindow: 0, freezeMsInWindow: 0, keyFramesDecoded: 0, pliCount: 0, firCount: 0, nackCount: 0, avgDecodeTimeMs: 0, decoderImplementation: null, powerEfficientDecoder: null, framesInWindow: frames } },
     outbound: [],
     dataChannels: [],
   });
@@ -75,5 +75,47 @@ describe("health with reasons + hysteresis (docs/16#connection-health-thresholds
     expect(h.push(good).level).toBe("poor");
     expect(h.push(good).level).toBe("poor");
     expect(h.push(good).level).toBe("good");
+  });
+});
+
+describe("review: windowed freeze/decode metrics, first sample, legacy keying, pooled loss", () => {
+  it("freeze and decode-time are windowed, not cumulative; the first sample of a track is neutral", () => {
+    const p = new StatsParser(resolver);
+    const rep = (n: number, freezeS: number, decodeS: number) =>
+      report([{ id: "IN0", type: "inbound-rtp", kind: "video", mid: "0", bytesReceived: 1000 * n, packetsReceived: 10 * n, packetsLost: 0, framesDecoded: 30 * n, freezeCount: n, totalFreezesDuration: freezeS, totalDecodeTime: decodeS }]);
+    const firstSample = p.parse(rep(1, 0.6, 0.3), 1000);
+    const first = firstSample.tracks["cam-front"]!;
+    expect(first.kind === "video" && first.framesInWindow).toBeNull();
+    expect(rateSample({ ...firstSample, intervalMs: 1000 }, new Set(["cam-front"])).level).toBe("good"); // no delta yet: not "no frames"
+    const second = p.parse(rep(2, 0.64, 0.6), 2000).tracks["cam-front"]!;
+    if (second.kind !== "video") throw new Error("video expected");
+    expect(second.freezeMsInWindow).toBeCloseTo(40, 5); // 600 ms of history does not count
+    expect(second.avgDecodeTimeMs).toBeCloseTo(10, 5);
+    const health = rateSample(p.parse(rep(3, 1.3, 0.9), 3000), new Set(["cam-front"]));
+    expect(health).toEqual({ level: "degraded", reasons: ["cam-front: freeze 660 ms"] });
+  });
+
+  it("resolves a track through the legacy `track` report when neither mid nor trackIdentifier is on inbound-rtp", () => {
+    const p = new StatsParser(resolver);
+    const s = p.parse(report([{ id: "IN9", type: "inbound-rtp", kind: "audio", trackId: "T9", bytesReceived: 1 }, { id: "T9", type: "track", trackIdentifier: "mic-media" }]), 0);
+    expect(s.tracks["mic"]?.kind).toBe("audio");
+  });
+
+  it("pools loss across tracks by packets, not by averaging per-track rates", () => {
+    const base = { at: 0, intervalMs: 1000, transport: { rttMs: 20, availableIncomingBitrate: null, localCandidateType: null, remoteCandidateType: null, relayed: false }, outbound: [], dataChannels: [] };
+    const audio = { kind: "audio" as const, trackId: "mic", mid: "1", bitrateBps: 0, bytesReceived: 0, packetsReceived: 5, packetsLost: 1, lossRate: 0.2, packetsReceivedInWindow: 4, packetsLostInWindow: 1, jitterMs: 0, audioLevel: 0, concealedSamples: 0, concealmentEvents: 0 };
+    const video = { kind: "video" as const, trackId: "cam-front", mid: "0", bitrateBps: 0, bytesReceived: 0, packetsReceived: 1000, packetsLost: 0, lossRate: 0, packetsReceivedInWindow: 1000, packetsLostInWindow: 0, jitterMs: 0, jitterBufferDelayMs: 0, framesDecoded: 30, framesDropped: 0, framesPerSecond: 30, width: 0, height: 0, freezeCount: 0, freezeDurationMs: 0, freezesInWindow: 0, freezeMsInWindow: 0, keyFramesDecoded: 0, pliCount: 0, firCount: 0, nackCount: 0, avgDecodeTimeMs: 0, decoderImplementation: null, powerEfficientDecoder: null, framesInWindow: 30 };
+    expect(rateSample({ ...base, tracks: { mic: audio, "cam-front": video } }, new Set(["cam-front"])).level).toBe("good"); // 1 / 1005 pooled
+  });
+
+  it("hysteresis keeps reasons fresh at the same level and requires agreement, not monotonic worsening", () => {
+    const h = new HealthTracker();
+    expect(h.push({ level: "good", reasons: [] }).reasons).toEqual([]);
+    expect(h.push({ level: "degraded", reasons: ["rtt"] }).level).toBe("good");
+    expect(h.push({ level: "degraded", reasons: ["rtt"] }).level).toBe("good");
+    expect(h.push({ level: "poor", reasons: ["loss"] }).level).toBe("good"); // degraded, degraded, poor: no agreement
+    expect(h.push({ level: "poor", reasons: ["loss"] }).level).toBe("good");
+    expect(h.push({ level: "poor", reasons: ["loss 20%"] })).toEqual({ level: "poor", reasons: ["loss 20%"] });
+    expect(h.push({ level: "poor", reasons: ["loss 25%"] }).reasons).toEqual(["loss 25%"]); // same level: reasons update at once
   });
 });

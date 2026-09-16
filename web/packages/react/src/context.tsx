@@ -6,7 +6,7 @@
 import { createContext, useContext, type ReactNode } from "react";
 import type { FjarrClient, Session } from "@fjarr/core";
 
-const ClientContext = createContext<FjarrClient | null>(null);
+export const ClientContext = createContext<FjarrClient | null>(null);
 const SessionContext = createContext<Session | null>(null);
 
 export interface FjarrProviderProps {

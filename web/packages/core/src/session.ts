@@ -40,7 +40,7 @@ export interface SessionInfo {
   /** Why the session is closed/failed/reconnecting (human-readable, stable prefixes). */
   readonly reason: string | null;
   readonly error: FjarrError | null;
-  /** Consecutive reconnect rounds since the last stable connection. */
+  /** Consecutive reconnect rounds; reset by a connection that stayed up ≥ 30 s (docs/08 backoff rule). */
   readonly round: number;
 }
 
@@ -169,6 +169,9 @@ export class SessionImpl implements Session {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** One ICE restart per disconnection (docs/08 rung 2), then rung 3. */
+  private restartAttempted = false;
+  private connectedAt: number | null = null;
   private uplinkActive = false;
 
   constructor(private readonly deps: SessionDeps) {
@@ -196,9 +199,11 @@ export class SessionImpl implements Session {
       {
         intervalMs: deps.options.statsIntervalMs,
         now: deps.now,
+        // Tracks the health score expects frames from: demanded AND bound
+        // (RTCTrackEvent received). Unbound tracks are still starting up.
         enabledTracks: () => {
           const s = new Set<string>();
-          for (const [id, e] of this.registry.store.getSnapshot().entries) if (e.demand.enabled) s.add(id);
+          for (const [id, e] of this.registry.store.getSnapshot().entries) if (e.demand.enabled && e.track) s.add(id);
           return s;
         },
       },
@@ -207,7 +212,8 @@ export class SessionImpl implements Session {
     this.audioUplink = this.buildAudioUplink();
     this.channels.onControlOpen.on(() => this.maybeConnected());
     this.channels.onControlClose.on(() => {
-      if (this.getState() === "connected") this.newRound("control-channel-closed");
+      const st = this.getState();
+      if (st === "connected" || st === "reconnecting") this.newRound("control-channel-closed");
     });
     this.channels.onEnvelope.on((env) => {
       if (env.cap === "fjarr.desktop" && env.type === "monitors" && env.kind === "event") {
@@ -256,13 +262,23 @@ export class SessionImpl implements Session {
     const state = this.getState();
     if (state !== "idle" && !TERMINAL.has(state)) return; // idempotent
     this.round = 0;
+    this.connectedAt = null;
     this.backoff.reset();
     this.setInfo({ state: "connecting", reason: null, error: null, round: 0, sessionId: null });
-    void this.startRound();
+    this.launchRound();
+    this.touchIdle(); // the idle policy counts from open(), even with no consumer yet
   }
 
+  /** From `failed`: open again. From `reconnecting`: skip the backoff and try now. */
   retry(): void {
-    if (this.getState() === "failed") this.open();
+    const state = this.getState();
+    if (state === "failed") {
+      this.open();
+    } else if (state === "reconnecting" && this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+      this.launchRound();
+    }
   }
 
   close(reason = "operator-closed"): void {
@@ -277,10 +293,21 @@ export class SessionImpl implements Session {
   private fail(error: FjarrError, reason: string): void {
     this.teardownAll();
     this.setInfo({ state: "failed", reason, error, sessionId: null });
+    this.deps.emit({ type: "error", robotId: this.robotId, error, context: "fatal" });
+  }
+
+  private launchRound(): void {
+    this.startRound().catch((e: unknown) => this.reportError(e, "round"));
   }
 
   private async startRound(): Promise<void> {
     const gen = ++this.generation;
+    // The connect timeout bounds the whole round, grant fetch included: a
+    // hanging host backend must not leave the session in `connecting` forever.
+    this.connectTimer = setTimeout(() => {
+      this.connectTimer = null;
+      if (gen === this.generation) this.newRound("connect-timeout");
+    }, this.deps.options.connectTimeoutMs ?? 15_000);
     let token = this.grantToken;
     if (!token) {
       try {
@@ -293,12 +320,15 @@ export class SessionImpl implements Session {
       if (gen !== this.generation) return;
       this.grantToken = token;
     }
-    const socket = this.deps.socketFactory(this.deps.serverUrl);
+    let socket: SignalingSocket;
+    try {
+      socket = this.deps.socketFactory(this.deps.serverUrl);
+    } catch (e) {
+      // A bad serverUrl (scheme, mixed content) throws synchronously: fatal, not a spinner.
+      this.fail(new FjarrError("transport-failed", e instanceof Error ? e.message : String(e)), "transport-failed");
+      return;
+    }
     this.socket = socket;
-    this.connectTimer = setTimeout(() => {
-      this.connectTimer = null;
-      if (gen === this.generation) this.newRound("connect-timeout");
-    }, this.deps.options.connectTimeoutMs ?? 15_000);
     socket.onopen = () => {
       if (gen !== this.generation) return;
       socket.send(
@@ -318,6 +348,7 @@ export class SessionImpl implements Session {
       if (gen !== this.generation) return;
       const msg = parseSignaling(text);
       if (msg) this.onSignal(msg, gen);
+      else this.onUnparseable(text);
     };
     socket.onclose = (reason) => {
       if (gen !== this.generation) return;
@@ -325,6 +356,18 @@ export class SessionImpl implements Session {
       if (TERMINAL.has(this.getState())) return;
       this.newRound(`signaling-lost:${reason}`);
     };
+  }
+
+  /** docs/08#versioning: a higher major is not ours to act on; surface it once. */
+  private onUnparseable(text: string): void {
+    try {
+      const v = (JSON.parse(text) as { v?: unknown }).v;
+      if (typeof v === "number" && v > PROTO_VERSION) {
+        this.deps.emit({ type: "warning", robotId: this.robotId, message: `ignored a protocol v${v} message (this client speaks v${PROTO_VERSION})` });
+      }
+    } catch {
+      /* not JSON: ignore */
+    }
   }
 
   private onSignal(msg: SignalingMessage, gen: number): void {
@@ -340,10 +383,14 @@ export class SessionImpl implements Session {
         this.fail(new FjarrError("session-rejected", msg.reason), `rejected:${msg.reason}`);
         break;
       case "offer":
-        this.offerChain = this.offerChain.then(() => this.handleOffer(msg, gen)).catch((e: unknown) => this.reportError(e, "offer"));
+        this.offerChain = this.offerChain.then(() => this.handleOffer(msg, gen)).catch((e: unknown) => {
+          if (gen === this.generation) this.reportError(e, "offer");
+        });
         break;
       case "ice": {
         const c = { candidate: msg.candidate, sdpMLineIndex: msg.sdp_mline_index };
+        // Queued until a remote description is applied — including while an
+        // ICE restart is pending (candidates for the new ufrag must wait for the re-offer).
         if (this.pc && this.remoteDescribed) void this.pc.addIceCandidate(c).catch((e: unknown) => this.reportError(e, "ice"));
         else this.iceQueue.push(c);
         break;
@@ -366,16 +413,20 @@ export class SessionImpl implements Session {
     switch (code) {
       case "grant-expired":
         this.grantToken = null; // refetch through the provider — never a generic failure
-        this.newRound("grant-expired");
+        this.newRound("grant-expired", { free: true });
         break;
       case "rate-limited":
         this.newRound("rate-limited");
+        break;
+      case "session-unknown":
+        // Our session is gone server-side (usually a message crossing peer-gone on the wire): an orderly close.
+        this.teardownAll();
+        this.setInfo({ state: "closed", reason: "session-unknown", sessionId: null });
         break;
       case "auth-failed":
       case "robot-offline":
       case "capability-denied":
       case "capability-unknown":
-      case "session-unknown":
       case "payload-invalid":
       case "internal":
         this.fail(error, code);
@@ -387,7 +438,8 @@ export class SessionImpl implements Session {
 
   private async handleOffer(msg: Extract<SignalingMessage, { type: "offer" }>, gen: number): Promise<void> {
     if (gen !== this.generation) return;
-    if (this.registry.applyManifest(msg.tracks, msg.manifest_version) === "stale") return;
+    const tracks = msg.tracks.map((t) => (t.monitor === undefined ? { ...t, monitor: null } : t));
+    if (this.registry.applyManifest(tracks, msg.manifest_version) === "stale") return;
     if (!this.pc) this.pc = this.createPeer();
     const pc = this.pc;
     await pc.setRemoteDescription({ type: "offer", sdp: msg.sdp });
@@ -400,21 +452,29 @@ export class SessionImpl implements Session {
     await pc.setLocalDescription(answer);
     if (gen !== this.generation || this.pc !== pc) return;
     this.socket?.send(JSON.stringify({ v: PROTO_VERSION, type: "answer", event_id: newEventId(this.deps.now()), ts: this.deps.now(), session_id: this.sessionId, sdp: answer.sdp ?? "" }));
-    if (this.restartTimer) {
-      clearTimeout(this.restartTimer); // the agent re-offered; ICE decides from here
-      this.restartTimer = null;
-    }
+    // A pending ICE-restart timer keeps running until ICE actually reaches
+    // `connected` (maybeConnected clears it) — the re-offer alone proves nothing.
     this.maybeConnected();
   }
 
   private createPeer(): PeerConnectionLike {
     const iceServers = [...(this.deps.options.extraIceServers ?? [])];
     if (this.turnCreds) iceServers.push({ urls: this.turnCreds.urls, username: this.turnCreds.username, credential: this.turnCreds.credential });
+    if (iceServers.length === 0) {
+      this.deps.emit({ type: "warning", robotId: this.robotId, message: "no ICE servers (hello-ack carried no TURN and extraIceServers is empty): only LAN peers will connect" });
+    }
     const pc = this.deps.peerConnectionFactory({ iceServers, iceTransportPolicy: this.deps.options.iceTransportPolicy ?? "all" });
     const gen = this.generation;
+    let endOfCandidatesSent = false;
     pc.onicecandidate = (ev) => {
       if (gen !== this.generation || !this.socket) return;
       const c = ev.candidate;
+      if (!c || c.candidate === "") {
+        if (endOfCandidatesSent) return; // Chrome fires "" per m-section and a final null
+        endOfCandidatesSent = true;
+      } else {
+        endOfCandidatesSent = false; // a new gathering (ICE restart) started
+      }
       this.socket.send(
         JSON.stringify({
           v: PROTO_VERSION,
@@ -442,7 +502,9 @@ export class SessionImpl implements Session {
           this.maybeConnected();
           break;
         case "disconnected":
-          if (!this.graceTimer) {
+          if (this.getState() === "reconnecting" && this.restartAttempted) {
+            this.newRound("ice-restart-failed"); // rung 2 is one attempt, then rung 3
+          } else if (!this.graceTimer && this.getState() === "connected") {
             this.graceTimer = setTimeout(() => {
               this.graceTimer = null;
               this.requestIceRestart("ice-disconnected");
@@ -450,7 +512,9 @@ export class SessionImpl implements Session {
           }
           break;
         case "failed":
-          this.requestIceRestart("ice-failed");
+          if (this.restartAttempted) this.newRound("ice-restart-failed"); // rung 2 is one attempt, then rung 3
+          else if (this.getState() === "connecting") this.newRound("ice-failed"); // first connect: nothing to restart
+          else this.requestIceRestart("ice-failed");
           break;
         default:
           break;
@@ -466,23 +530,26 @@ export class SessionImpl implements Session {
     if (this.restartTimer) clearTimeout(this.restartTimer);
     if (this.connectTimer) clearTimeout(this.connectTimer);
     this.restartTimer = this.connectTimer = null;
-    this.round = 0;
-    this.backoff.markConnected(this.deps.now());
-    this.setInfo({ state: "connected", reason: null, error: null, round: 0 });
+    this.restartAttempted = false;
+    this.connectedAt = this.deps.now();
+    this.backoff.markConnected(this.connectedAt);
+    this.setInfo({ state: "connected", reason: null, error: null });
     this.heartbeat.start();
     this.sampler.start(this.pc);
     this.registry.reflushAll();
   }
 
-  /** Rung 2 of docs/08#reconnection: ask the agent for an ICE restart. */
+  /** Rung 2 of docs/08#reconnection: ask the agent for an ICE restart — once per disconnection. */
   private requestIceRestart(why: string): void {
     const state = this.getState();
     if (state !== "connected" && state !== "reconnecting") return;
-    if (this.restartTimer) return;
+    if (this.restartTimer || this.restartAttempted) return;
     this.heartbeat.stop();
     this.sampler.stop();
     this.setInfo({ state: "reconnecting", reason: why });
     if (this.socket && this.sessionId) {
+      this.restartAttempted = true;
+      this.remoteDescribed = false; // candidates for the restarted ICE wait for the re-offer
       this.socket.send(JSON.stringify({ v: PROTO_VERSION, type: "ice-restart", event_id: newEventId(this.deps.now()), ts: this.deps.now(), session_id: this.sessionId }));
       this.restartTimer = setTimeout(() => {
         this.restartTimer = null;
@@ -493,23 +560,34 @@ export class SessionImpl implements Session {
     }
   }
 
-  /** Rung 3: a fresh signaling round with the same (or a refetched) grant. */
-  private newRound(why: string): void {
+  /**
+   * Rung 3: a fresh signaling round with the same (or a refetched) grant.
+   * `free` rounds (grant refresh) neither count toward `maxRounds` nor wait.
+   */
+  private newRound(why: string, opts: { free?: boolean } = {}): void {
     if (TERMINAL.has(this.getState())) return;
+    const now = this.deps.now();
+    const stableResetMs = DEFAULT_BACKOFF.stableResetMs;
+    if (this.connectedAt !== null && now - this.connectedAt >= stableResetMs) this.round = 0; // a stable link earns a fresh budget
+    this.connectedAt = null;
     this.teardownMedia();
     this.detachSocket();
-    this.round++;
+    if (!opts.free) this.round++;
     const max = this.deps.options.maxRounds ?? 5;
     if (this.round > max) {
-      this.fail(new FjarrError("closed", `reconnect attempts exhausted (${why})`), `exhausted:${why}`);
+      this.fail(new FjarrError("reconnect-exhausted", `reconnect attempts exhausted (${why})`), `exhausted:${why}`);
       return;
     }
     this.setInfo({ state: "reconnecting", reason: why, sessionId: null, round: this.round });
-    this.backoff.markDisconnected(this.deps.now());
+    if (opts.free) {
+      this.launchRound();
+      return;
+    }
+    this.backoff.markDisconnected(now);
     const delay = this.backoff.next();
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      void this.startRound();
+      this.launchRound();
     }, delay);
   }
 
@@ -524,10 +602,12 @@ export class SessionImpl implements Session {
   private teardownMedia(): void {
     this.heartbeat.stop();
     this.sampler.stop();
+    this.time.reset(); // a new peer may be a rebooted robot with a new clock
     if (this.graceTimer) clearTimeout(this.graceTimer);
     if (this.restartTimer) clearTimeout(this.restartTimer);
     if (this.connectTimer) clearTimeout(this.connectTimer);
     this.graceTimer = this.restartTimer = this.connectTimer = null;
+    this.restartAttempted = false;
     this.router.failPending("not-connected", "session reconnecting");
     this.channels.reset();
     this.registry.detachMedia();
@@ -557,8 +637,8 @@ export class SessionImpl implements Session {
     this.router.failPending("closed", "session closed");
     this.registry.clearManifest();
     this.sampler.reset();
-    this.time.reset();
     this.turnCreds = null;
+    this.connectedAt = null;
   }
 
   // -------------------------------------------------- subscribe/publish

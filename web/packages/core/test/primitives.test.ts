@@ -203,3 +203,70 @@ describe("focus registry (docs/22 core requirement #6/#8)", () => {
     expect(reg.owner.getSnapshot()).toBeNull();
   });
 });
+
+describe("review: ids, emitter, focus across windows", () => {
+  it("encodes the timestamp in the first 48 bits (decodes back exactly)", () => {
+    const now = 1_789_503_000_123;
+    const id = newEventId(now);
+    expect(parseInt(id.slice(0, 8) + id.slice(9, 13), 16)).toBe(now);
+  });
+
+  it("a throwing stream handler does not starve the other subscribers", async () => {
+    const { EnvelopeRouter: Router } = await import("../src/index.js");
+    const router = new Router(() => true);
+    const seen: string[] = [];
+    router.on("fjarr.x", "a", () => {
+      throw new Error("buggy host handler");
+    });
+    router.on("fjarr.x", "a", () => seen.push("second"));
+    router.onAny(() => seen.push("any"));
+    const deferred: Array<() => void> = [];
+    const spy = vi.spyOn(globalThis, "queueMicrotask").mockImplementation((cb) => {
+      deferred.push(cb as () => void);
+    });
+    try {
+      expect(() => router.handleIncoming(makeEnvelope("fjarr.x", "a", "event", {}))).not.toThrow();
+      expect(seen).toEqual(["second", "any"]);
+      expect(deferred).toHaveLength(1);
+      expect(() => deferred[0]!()).toThrow("buggy host handler"); // the error still surfaces, asynchronously
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("OS focus on a presentation window restores its most recently focused view; re-register keeps ownership", () => {
+    const reg = new FocusRegistry();
+    const lost: string[] = [];
+    const mkWindow = () => {
+      const listeners = new Map<string, () => void>();
+      return {
+        win: { addEventListener: (t: string, l: () => void) => listeners.set(t, l), removeEventListener: (t: string) => listeners.delete(t) },
+        fire: (t: string) => listeners.get(t)?.(),
+      };
+    };
+    const A = mkWindow();
+    const B = mkWindow();
+    const a = reg.register("a", { window: A.win, onLost: () => lost.push("a") });
+    reg.register("b1", { window: B.win, onLost: () => lost.push("b1") });
+    const b2 = reg.register("b2", { window: B.win, onLost: () => lost.push("b2") });
+    b2.focus();
+    a.focus(); // Alt-Tab to A
+    A.fire("blur");
+    expect(reg.owner.getSnapshot()).toBeNull();
+    B.fire("focus"); // Alt-Tab to B: its last focused view (b2) owns the keyboard again, no click needed
+    expect(reg.owner.getSnapshot()).toBe("b2");
+    expect(lost).toEqual(["b2", "a"]);
+
+    // Re-registering the same id (StrictMode / window prop change) keeps ownership silently.
+    const b2again = reg.register("b2", { window: B.win, onLost: () => lost.push("b2-again") });
+    expect(reg.owner.getSnapshot()).toBe("b2");
+    expect(lost).toEqual(["b2", "a"]);
+
+    // A focus() on an unregistered view is ignored; unregistering the owner releases its keys.
+    b2again.unregister();
+    expect(reg.owner.getSnapshot()).toBeNull();
+    expect(lost.at(-1)).toBe("b2-again");
+    b2again.focus();
+    expect(reg.owner.getSnapshot()).toBeNull();
+  });
+});

@@ -3,7 +3,7 @@
  * everything overridable; the host's design system wins (docs/05).
  * spec: docs/21-web-client-architecture.md#components-fjarrreact
  */
-import { useEffect, useRef, useState, type ComponentType, type CSSProperties, type ReactNode, type VideoHTMLAttributes } from "react";
+import { useCallback, useRef, useState, useSyncExternalStore, type ComponentType, type CSSProperties, type ReactNode, type VideoHTMLAttributes } from "react";
 import type { Session, SessionOptions, SessionState, TrackEntry, TrackPreference, TrackTier } from "@fjarr/core";
 import { useFjarrClient, useSession } from "./context.js";
 import { useSessionHealth, useSessionInfo, useSessionState, useStore, useTracks } from "./hooks.js";
@@ -11,8 +11,11 @@ import { useAudioTrack, useVideoTrack, type UseVideoTrackOptions } from "./media
 
 // ---------------------------------------------------------- registry
 
+/** What a registered capability view receives (docs/05#web-side-capability-components). */
 export interface CapabilityViewProps {
   session: Session;
+  /** The reverse-DNS capability name the view was registered under. */
+  capability: string;
 }
 
 const viewRegistry = new Map<string, ComponentType<CapabilityViewProps>>();
@@ -86,10 +89,11 @@ export function ConnectButton({ robotId, options, labels, className, style }: Co
   );
 }
 
+const noSubscribe = () => () => {};
 function useStateOf(session: Session | undefined): SessionState {
-  const [, force] = useState(0);
-  useEffect(() => session?.subscribe(() => force((n) => n + 1)), [session]);
-  return session?.getState() ?? "idle";
+  const subscribe = useCallback((l: () => void) => (session ? session.subscribe(l) : noSubscribe()), [session]);
+  const get = useCallback(() => session?.getState() ?? "idle", [session]);
+  return useSyncExternalStore(subscribe, get, get);
 }
 
 // ------------------------------------------------------------- video
@@ -192,6 +196,8 @@ export function FloatingVideo({ session, trackId, initial = { x: 16, y: 16, widt
           if (drag.current) setPos({ x: e.clientX - drag.current.dx, y: e.clientY - drag.current.dy });
         }}
         onPointerUp={() => (drag.current = null)}
+        onPointerCancel={() => (drag.current = null)}
+        onLostPointerCapture={() => (drag.current = null)}
       >
         <span>{trackId}</span>
         <button type="button" onClick={() => setCollapsed((c) => !c)} style={{ background: "none", border: "none", color: "inherit", cursor: "pointer" }}>

@@ -148,3 +148,120 @@ describe("@fjarr/react", () => {
     expect(session.consumerCount).toBe(0);
   });
 });
+
+describe("@fjarr/react review regressions", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("push-to-talk: a stop() (or unmount) while the permission prompt is up never leaves the mic live", async () => {
+    const { agent, client } = setup();
+    const session = client.sessions.open("robot-1");
+    await tick();
+    // Give the mock agent an uplink transceiver so replaceTrack would succeed.
+    agent.pc.addUplinkTransceiver("7");
+    const stopped: string[] = [];
+    const track = { kind: "audio", id: "mic-1", stop: () => stopped.push("mic-1") };
+    let resolveGum: ((s: unknown) => void) | null = null;
+    vi.stubGlobal("navigator", { mediaDevices: { getUserMedia: () => new Promise((r) => (resolveGum = r)) } });
+    const { usePushToTalk } = await import("../src/index.js");
+    let binding: ReturnType<typeof usePushToTalk> | null = null;
+    function Ptt() {
+      binding = usePushToTalk(session);
+      return null;
+    }
+    render(
+      <FjarrProvider client={client}>
+        <Ptt />
+      </FjarrProvider>,
+    );
+    let startPromise: Promise<void> = Promise.resolve();
+    act(() => {
+      startPromise = binding!.start(); // pointerdown
+    });
+    act(() => binding!.stop()); // pointerup before the user clicks "Allow"
+    await act(async () => {
+      resolveGum!({ getAudioTracks: () => [track], getTracks: () => [track] }); // user allows
+      await startPromise;
+    });
+    expect(stopped).toEqual(["mic-1"]);
+    expect(binding!.talking).toBe(false);
+    expect(session.audioUplink.active).toBe(false);
+    const uplink = agent.pc.transceivers.find((t) => t.mid === "7")!;
+    expect(uplink.sender.track).toBeNull();
+  });
+
+  it("<VideoTile>: the ref callback is stable, so stream arrival re-creates no observer and demand never flaps", async () => {
+    const { agent, client } = setup();
+    const session = client.sessions.open("robot-1");
+    await tick();
+    const observers: Array<{ cb: (entries: Array<{ isIntersecting: boolean }>) => void; disconnected: boolean }> = [];
+    class FakeIO {
+      disconnected = false;
+      constructor(readonly cb: (entries: Array<{ isIntersecting: boolean }>) => void) {
+        observers.push(this);
+      }
+      observe() {
+        queueMicrotask(() => this.cb([{ isIntersecting: true }]));
+      }
+      disconnect() {
+        this.disconnected = true;
+      }
+    }
+    vi.stubGlobal("IntersectionObserver", FakeIO);
+    render(
+      <FjarrProvider client={client}>
+        <VideoTile session={session} trackId="cam-front" />
+      </FjarrProvider>,
+    );
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    const selects = () => agent.received.filter((e) => e.type === "select-tracks").map((e) => (e.payload as { tracks: Array<{ enabled: boolean }> }).tracks[0]!.enabled);
+    expect(selects()).toEqual([true]);
+    expect(observers).toHaveLength(1);
+    act(() => {
+      agent.emitTrack("cam-front"); // stream identity changes
+    });
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    expect(observers).toHaveLength(1); // same element, same observer
+    expect(selects()).toEqual([true]); // no disable/enable flap on the wire
+    // Scrolling out and back within the grace produces nothing on the wire either.
+    act(() => observers[0]!.cb([{ isIntersecting: false }]));
+    await act(() => vi.advanceTimersByTimeAsync(200));
+    act(() => observers[0]!.cb([{ isIntersecting: true }]));
+    await act(() => vi.advanceTimersByTimeAsync(600));
+    expect(selects()).toEqual([true]);
+    act(() => observers[0]!.cb([{ isIntersecting: false }]));
+    await act(() => vi.advanceTimersByTimeAsync(600));
+    expect(selects()).toEqual([true, false]);
+  });
+
+  it("useTelemetry never serves the previous robot's value after a session switch with a stable selector", async () => {
+    const { agent, client } = setup();
+    const a = client.sessions.open("robot-a");
+    await tick();
+    const b = client.sessions.open("robot-b");
+    await tick();
+    const selectBattery = (t: { get: <P>(cap: string, type: string) => P | undefined }) => t.get<{ pct: number }>("fjarr.telemetry", "battery")?.pct;
+    function Battery({ session }: { session: typeof a }) {
+      const pct = useTelemetry(session, selectBattery);
+      return <span data-testid="pct">{pct ?? "—"}</span>;
+    }
+    const view = render(
+      <FjarrProvider client={client}>
+        <Battery session={a} />
+      </FjarrProvider>,
+    );
+    act(() => agent.pcs[0]!.channel("fjarr:control")!.receive(JSON.stringify({ v: 1, cap: "fjarr.telemetry", type: "battery", event_id: "1", kind: "event", payload: { pct: 80 } })));
+    act(() => agent.pcs[1]!.channel("fjarr:control")!.receive(JSON.stringify({ v: 1, cap: "fjarr.telemetry", type: "mode", event_id: "2", kind: "event", payload: { mode: "auto" } }))); // b's version counter now equals a's
+    expect(screen.getByTestId("pct").textContent).toBe("80");
+    view.rerender(
+      <FjarrProvider client={client}>
+        <Battery session={b} />
+      </FjarrProvider>,
+    );
+    expect(screen.getByTestId("pct").textContent).toBe("—");
+  });
+});

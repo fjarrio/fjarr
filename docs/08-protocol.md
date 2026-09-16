@@ -100,8 +100,11 @@ Rules:
   `sctp.maxMessageSize` is chunked, never queued behind a newer frame.
 - Session-level messages that belong to no capability use the reserved
   `cap` `fjarr.core` ([below](#fjarr-core)).
-- Heartbeat: `ping`/`pong` envelope on control every 5 s, 3 missed → session
-  considered dead → teardown + `session-close(reason="heartbeat")`.
+- Heartbeat: `ping`/`pong` envelope on control every 5 s, 3 missed → the
+  peer is considered dead: the operator tears the media path down and climbs
+  the [reconnection ladder](#reconnection) (its signaling socket death, or a
+  `session-close(reason="heartbeat")` if the socket is still up, tells the
+  server); the agent ends the session with `session-close(reason="heartbeat")`.
 - A capability that needs an **ordered byte stream** (terminal input,
   clipboard payloads) declares a bulk channel; raw bytes ride it as binary
   messages. Control and realtime carry envelopes only.
@@ -184,8 +187,12 @@ established session:
 - `tracks` is the **complete** new manifest; unchanged tracks keep their
   `track_id` and `mid`; removed tracks are absent and their transceivers are
   stopped; new tracks get new transceivers.
-- `manifest_version` (monotonic `u32`, new offer field) orders manifests;
-  receivers ignore an offer older than one already applied.
+- `manifest_version` (monotonic `u32`, new offer field) orders manifests
+  **within a session**: a new `session_id` starts a new sequence, and
+  receivers reset their applied version with it. Receivers ignore an offer
+  *older* than one already applied and re-apply an *equal* one (an
+  ICE-restart re-offer carries the unchanged manifest and the unchanged
+  version; the SDP is what changed).
 - The agent serializes renegotiations: at most one un-answered offer per
   session; further changes are coalesced into the next offer.
 - **Media on unchanged tracks MUST continue uninterrupted** throughout the

@@ -62,6 +62,8 @@ export interface TrackRegistryDeps {
 }
 
 const NO_DEMAND: FoldedDemand = { enabled: false, tier: "thumbnail", interactive: false };
+/** select-tracks retries per track before waiting for the next demand change. */
+export const MAX_FLUSH_ATTEMPTS = 4;
 
 interface Live {
   track: MediaStreamTrackLike;
@@ -77,7 +79,9 @@ export class TrackRegistry {
   private readonly streams = new Map<string, MediaStreamLike>();
   private readonly consumers = new Map<string, Map<number, Required<Pick<AcquireOptions, "tier" | "visible">> & AcquireOptions>>();
   private readonly lastSent = new Map<string, string>();
+  private readonly flushAttempts = new Map<string, number>();
   private readonly dirty = new Set<string>();
+  private lastMonitorsKey = "";
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private nextHandle = 1;
   private version = 0;
@@ -204,11 +208,18 @@ export class TrackRegistry {
     this.streams.delete(id);
   }
 
-  /** Peer connection gone: media detaches, manifest and demand stay. */
+  /**
+   * Peer connection gone: media detaches, manifest and demand stay. The
+   * manifest_version sequence is per session (docs/08#renegotiation), so a
+   * new signaling round starts a new sequence — a restarted agent offering
+   * version 1 again must not be mistaken for a stale offer.
+   */
   detachMedia(): void {
     for (const id of Array.from(this.live.keys())) this.dropLive(id);
     this.pendingByMid.clear();
     this.lastSent.clear();
+    this.manifestVersion = null;
+    this.flushAttempts.clear();
     this.publish();
   }
 
@@ -242,7 +253,9 @@ export class TrackRegistry {
 
   acquire(trackId: string, options: AcquireOptions = {}): TrackHandle {
     const handleId = this.nextHandle++;
-    const opts = { tier: options.tier ?? "active", visible: options.visible ?? true, ...options };
+    // Defaults win over explicit `undefined` (a hook passing `{ tier }` from
+    // an optional prop must still get "active"/visible).
+    const opts = { ...options, tier: options.tier ?? "active", visible: options.visible ?? true };
     let set = this.consumers.get(trackId);
     if (!set) {
       set = new Map();
@@ -257,7 +270,7 @@ export class TrackRegistry {
         if (released) return;
         const cur = this.consumers.get(trackId)?.get(handleId);
         if (!cur) return;
-        Object.assign(cur, patch);
+        for (const [k, v] of Object.entries(patch)) if (v !== undefined) (cur as unknown as Record<string, unknown>)[k] = v;
         this.demandChanged(trackId);
       },
       release: () => {
@@ -359,10 +372,34 @@ export class TrackRegistry {
     for (const [cap, tracks] of byCap) {
       requests.push(
         this.deps.request(cap, "select-tracks", { tracks } satisfies SelectTracksPayload).then(
-          () => undefined,
+          () => {
+            for (const t of tracks) this.flushAttempts.delete(t.track_id);
+          },
           (error: unknown) => {
-            for (const t of tracks) this.lastSent.delete(t.track_id);
+            // Demand is never dropped on failure: re-mark and retry with a
+            // growing delay, up to MAX_FLUSH_ATTEMPTS, then leave it for the
+            // next demand change / reconnect (which re-flushes everything).
             this.deps.onError(error, `${cap}/select-tracks`);
+            let retry = false;
+            for (const t of tracks) {
+              this.lastSent.delete(t.track_id);
+              const n = (this.flushAttempts.get(t.track_id) ?? 0) + 1;
+              this.flushAttempts.set(t.track_id, n);
+              if (n < MAX_FLUSH_ATTEMPTS) {
+                this.dirty.add(t.track_id);
+                retry = true;
+              }
+            }
+            if (retry && !this.flushTimer) {
+              const attempt = Math.max(...tracks.map((t) => this.flushAttempts.get(t.track_id) ?? 1));
+              this.flushTimer = setTimeout(
+                () => {
+                  this.flushTimer = null;
+                  void this.flush();
+                },
+                (this.deps.debounceMs ?? 250) * 2 ** attempt,
+              );
+            }
           },
         ),
       );
@@ -401,7 +438,14 @@ export class TrackRegistry {
     }
     this.version++;
     this.storeImpl.set({ version: this.version, manifestVersion: this.manifestVersion, entries });
-    this.monitorsImpl.set(this.monitorsFromEvent ?? monitorsOf(this.manifest));
+    // Monitors keep their identity unless geometry actually changed, so
+    // layout consumers don't re-render on every track status tick.
+    const monitors = this.monitorsFromEvent ?? monitorsOf(this.manifest);
+    const key = JSON.stringify(monitors);
+    if (key !== this.lastMonitorsKey) {
+      this.lastMonitorsKey = key;
+      this.monitorsImpl.set(monitors);
+    }
   }
 
   dispose(): void {

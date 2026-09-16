@@ -43,6 +43,12 @@ Decisions live in [docs/adr/](adr/README.md) — one file per decision, immutabl
 once accepted (superseded, never edited). Start with the
 [ADR process](adr/README.md) and the [template](adr/0000-template.md).
 
+## Reviews
+
+Gate artifacts and retrospective code reviews live in `docs/reviews/`:
+the [M1 extension-API fit review](reviews/m1-api-fit-review.md) and the
+[slice-2 web core + React review](reviews/slice-2-review.md).
+
 ## Reading paths
 
 - **"I'm a robot company evaluating Fjarr"** → 00 → 02 → 06 → 09 → 04

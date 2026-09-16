@@ -18,7 +18,10 @@ export interface VideoTrackStats {
   packetsLost: number;
   /** Windowed: lost / (lost + received) over the last sample interval. */
   lossRate: number;
+  packetsReceivedInWindow: number;
+  packetsLostInWindow: number;
   jitterMs: number;
+  /** Windowed average jitter-buffer delay per emitted frame over the last interval. */
   jitterBufferDelayMs: number;
   framesDecoded: number;
   framesDropped: number;
@@ -27,17 +30,20 @@ export interface VideoTrackStats {
   height: number;
   freezeCount: number;
   freezeDurationMs: number;
-  /** Windowed: freezes that started during the last interval. */
-  freezesInWindow: number;
+  /** Windowed: freezes that started during the last interval; null on the track's first sample. */
+  freezesInWindow: number | null;
+  /** Windowed: freeze time accrued during the last interval; null on the first sample. */
+  freezeMsInWindow: number | null;
   keyFramesDecoded: number;
   pliCount: number;
   firCount: number;
   nackCount: number;
+  /** Windowed average decode time per frame over the last interval. */
   avgDecodeTimeMs: number;
   decoderImplementation: string | null;
   powerEfficientDecoder: boolean | null;
-  /** Frames decoded during the last interval. */
-  framesInWindow: number;
+  /** Frames decoded during the last interval; null on the track's first sample (no delta yet). */
+  framesInWindow: number | null;
 }
 
 export interface AudioTrackStats {
@@ -49,6 +55,8 @@ export interface AudioTrackStats {
   packetsReceived: number;
   packetsLost: number;
   lossRate: number;
+  packetsReceivedInWindow: number;
+  packetsLostInWindow: number;
   jitterMs: number;
   audioLevel: number;
   concealedSamples: number;
@@ -119,11 +127,29 @@ interface PrevInbound {
   lost: number;
   framesDecoded: number;
   freezeCount: number;
+  freezeMs: number;
+  jitterBufferDelay: number;
+  jitterBufferEmitted: number;
+  totalDecodeTime: number;
 }
 
 export interface TrackResolver {
   byMid(mid: string): string | undefined;
   byTrackIdentifier(id: string): string | undefined;
+}
+
+/** inbound-rtp → track_id: `mid` (Chrome ≥ 105), else `trackIdentifier`, else the legacy `track` report. */
+function resolveTrackId(r: Report, byId: Map<string, Report>, resolve: TrackResolver): string | null {
+  const mid = str(r, "mid");
+  if (mid) {
+    const id = resolve.byMid(mid);
+    if (id) return id;
+  }
+  const ti = str(r, "trackIdentifier") ?? (() => {
+    const legacy = str(r, "trackId");
+    return legacy ? str(byId.get(legacy) ?? {}, "trackIdentifier") : null;
+  })();
+  return (ti && resolve.byTrackIdentifier(ti)) ?? null;
 }
 
 /** Pure: one getStats() report → SessionStats, using the previous sample for deltas. */
@@ -168,9 +194,7 @@ export class StatsParser {
           break;
         case "inbound-rtp": {
           const id = str(r, "id")!;
-          const mid = str(r, "mid");
-          const trackIdentifier = str(r, "trackIdentifier");
-          const trackId = (mid && this.resolve.byMid(mid)) ?? (trackIdentifier && this.resolve.byTrackIdentifier(trackIdentifier)) ?? null;
+          const trackId = resolveTrackId(r, byId, this.resolve);
           if (!trackId) break;
           const prev = this.prevInbound.get(id);
           const bytes = num(r, "bytesReceived");
@@ -178,38 +202,47 @@ export class StatsParser {
           const lost = num(r, "packetsLost");
           const framesDecoded = num(r, "framesDecoded");
           const freezeCount = num(r, "freezeCount");
-          nextInbound.set(id, { bytes, received, lost, framesDecoded, freezeCount });
-          const dBytes = prev ? Math.max(0, bytes - prev.bytes) : 0;
-          const dRecv = prev ? Math.max(0, received - prev.received) : 0;
-          const dLost = prev ? Math.max(0, lost - prev.lost) : 0;
+          const freezeMs = num(r, "totalFreezesDuration") * 1000;
+          const jitterBufferDelay = num(r, "jitterBufferDelay");
+          const jitterBufferEmitted = num(r, "jitterBufferEmittedCount");
+          const totalDecodeTime = num(r, "totalDecodeTime");
+          nextInbound.set(id, { bytes, received, lost, framesDecoded, freezeCount, freezeMs, jitterBufferDelay, jitterBufferEmitted, totalDecodeTime });
+          const delta = (cur: number, before: number | undefined) => (before === undefined ? 0 : Math.max(0, cur - before));
+          const dBytes = delta(bytes, prev?.bytes);
+          const dRecv = delta(received, prev?.received);
+          const dLost = delta(lost, prev?.lost);
           const lossRate = dRecv + dLost > 0 ? dLost / (dRecv + dLost) : 0;
           const bitrateBps = secs > 0 ? (dBytes * 8) / secs : 0;
-          const common = { trackId, mid, bitrateBps, bytesReceived: bytes, packetsReceived: received, packetsLost: lost, lossRate, jitterMs: num(r, "jitter") * 1000 };
+          const common = { trackId, mid: str(r, "mid"), bitrateBps, bytesReceived: bytes, packetsReceived: received, packetsLost: lost, lossRate, packetsReceivedInWindow: dRecv, packetsLostInWindow: dLost, jitterMs: num(r, "jitter") * 1000 };
           if (str(r, "kind") === "audio") {
             tracks[trackId] = { kind: "audio", ...common, audioLevel: num(r, "audioLevel"), concealedSamples: num(r, "concealedSamples"), concealmentEvents: num(r, "concealmentEvents") };
           } else {
-            const emitted = num(r, "jitterBufferEmittedCount");
-            const decodeCount = framesDecoded;
+            // Windowed ratios (a current spike must not be diluted by an hour of history).
+            const dEmitted = delta(jitterBufferEmitted, prev?.jitterBufferEmitted);
+            const dJbDelay = delta(jitterBufferDelay, prev?.jitterBufferDelay);
+            const dFrames = delta(framesDecoded, prev?.framesDecoded);
+            const dDecode = delta(totalDecodeTime, prev?.totalDecodeTime);
             tracks[trackId] = {
               kind: "video",
               ...common,
-              jitterBufferDelayMs: emitted > 0 ? (num(r, "jitterBufferDelay") / emitted) * 1000 : 0,
+              jitterBufferDelayMs: dEmitted > 0 ? (dJbDelay / dEmitted) * 1000 : 0,
               framesDecoded,
               framesDropped: num(r, "framesDropped"),
               framesPerSecond: num(r, "framesPerSecond"),
               width: num(r, "frameWidth"),
               height: num(r, "frameHeight"),
               freezeCount,
-              freezeDurationMs: num(r, "totalFreezesDuration") * 1000,
-              freezesInWindow: prev ? Math.max(0, freezeCount - prev.freezeCount) : 0,
+              freezeDurationMs: freezeMs,
+              freezesInWindow: prev ? Math.max(0, freezeCount - prev.freezeCount) : null,
+              freezeMsInWindow: prev ? Math.max(0, freezeMs - prev.freezeMs) : null,
               keyFramesDecoded: num(r, "keyFramesDecoded"),
               pliCount: num(r, "pliCount"),
               firCount: num(r, "firCount"),
               nackCount: num(r, "nackCount"),
-              avgDecodeTimeMs: decodeCount > 0 ? (num(r, "totalDecodeTime") / decodeCount) * 1000 : 0,
+              avgDecodeTimeMs: dFrames > 0 ? (dDecode / dFrames) * 1000 : 0,
               decoderImplementation: str(r, "decoderImplementation"),
               powerEfficientDecoder: typeof r.powerEfficientDecoder === "boolean" ? (r.powerEfficientDecoder as boolean) : null,
-              framesInWindow: prev ? Math.max(0, framesDecoded - prev.framesDecoded) : 0,
+              framesInWindow: prev ? dFrames : null,
             };
           }
           break;
@@ -279,9 +312,14 @@ export function rateSample(stats: SessionStats, enabledTracks: ReadonlySet<strin
     worsen("degraded");
     reasons.push(`rtt ${Math.round(rtt)} ms > ${t.rttDegradedMs} ms`);
   }
-  // Windowed loss across tracks: per-track rates weighted equally.
-  const rates = Object.values(stats.tracks).map((s) => s.lossRate);
-  const loss = rates.length ? rates.reduce((a, b) => a + b, 0) / rates.length : 0;
+  // Windowed loss pooled across received tracks (docs/16): Σ lost / Σ (lost + received).
+  let lostSum = 0;
+  let totalSum = 0;
+  for (const s of Object.values(stats.tracks)) {
+    lostSum += s.packetsLostInWindow;
+    totalSum += s.packetsLostInWindow + s.packetsReceivedInWindow;
+  }
+  const loss = totalSum > 0 ? lostSum / totalSum : 0;
   if (loss > t.lossPoor) {
     worsen("poor");
     reasons.push(`loss ${(loss * 100).toFixed(0)}% > ${t.lossPoor * 100}%`);
@@ -291,12 +329,23 @@ export function rateSample(stats: SessionStats, enabledTracks: ReadonlySet<strin
   }
   for (const [id, s] of Object.entries(stats.tracks)) {
     if (s.kind !== "video") continue;
+    if (s.framesInWindow === null) continue; // first sample for this track: no delta yet
     if (enabledTracks.has(id) && stats.intervalMs > 0 && s.framesInWindow === 0) {
       worsen("poor");
       reasons.push(`${id}: no frames decoded`);
-    } else if (s.freezesInWindow > 0 && s.freezeDurationMs >= t.freezeDegradedMs) {
+    } else if ((s.freezeMsInWindow ?? 0) >= t.freezeDegradedMs) {
       worsen("degraded");
-      reasons.push(`${id}: freeze`);
+      reasons.push(`${id}: freeze ${Math.round(s.freezeMsInWindow ?? 0)} ms`);
+    }
+  }
+  // An enabled, bound track with no inbound-rtp report at all is dead media,
+  // whatever the browser's stats keying (docs/16 "no frames decoded").
+  if (stats.intervalMs > 0) {
+    for (const id of enabledTracks) {
+      if (!(id in stats.tracks)) {
+        worsen("poor");
+        reasons.push(`${id}: no media stats`);
+      }
     }
   }
   return { level, reasons };
@@ -377,10 +426,12 @@ export class StatsSampler {
     this.timer = setInterval(() => void this.sample(), this.options.intervalMs ?? 1000);
   }
 
+  /** Stops sampling; the last sample is dropped so a reconnecting session never shows a dead peer's numbers. */
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.pc = null;
+    this.statsStore.set(null);
   }
 
   /** Also callable directly (tests, harness). */

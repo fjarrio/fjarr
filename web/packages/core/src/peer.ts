@@ -90,6 +90,22 @@ export const rtcPeerConnectionFactory: PeerConnectionFactory = (config) =>
     iceTransportPolicy: config.iceTransportPolicy,
   }) as unknown as PeerConnectionLike;
 
+// Compile-time witnesses: the DOM objects must satisfy the seams structurally,
+// so drift in the `*Like` interfaces fails `tsc` instead of surfacing at runtime.
+// (Casts are still needed at the factories because the DOM handler types are
+// invariant in their event parameter.)
+type Assignable<From, To> = From extends To ? true : never;
+// Overloaded DOM methods (send, createAnswer…) can't be compared to a single
+// signature, so the witnesses cover the plain members.
+const _witnessTrack: Assignable<Pick<MediaStreamTrack, "id" | "kind" | "muted" | "readyState" | "stop">, Pick<MediaStreamTrackLike, "id" | "kind" | "muted" | "readyState" | "stop">> = true;
+const _witnessChannel: Assignable<Pick<RTCDataChannel, "label" | "readyState" | "bufferedAmount" | "bufferedAmountLowThreshold" | "close">, Pick<DataChannelLike, "label" | "readyState" | "bufferedAmount" | "bufferedAmountLowThreshold" | "close">> = true;
+const _witnessTransceiver: Assignable<Pick<RTCRtpTransceiver, "mid" | "direction">, Pick<TransceiverLike, "mid" | "direction">> = true;
+const _witnessPeer: Assignable<Pick<RTCPeerConnection, "connectionState" | "iceConnectionState" | "getTransceivers" | "close">, Pick<PeerConnectionLike, "connectionState" | "iceConnectionState" | "getTransceivers" | "close">> = true;
+void _witnessTrack;
+void _witnessChannel;
+void _witnessTransceiver;
+void _witnessPeer;
+
 export type MediaStreamFactory = (tracks: MediaStreamTrackLike[]) => MediaStreamLike;
 
 export const domMediaStreamFactory: MediaStreamFactory = (tracks) =>

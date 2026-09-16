@@ -17,27 +17,38 @@ export interface UseVideoTrackOptions extends AcquireOptions {
 }
 
 export interface VideoTrackBinding {
-  /** Ref callback for the `<video>` element (may live in another same-origin document). */
+  /** Stable ref callback for the `<video>` element (may live in another same-origin document). */
   attach: (el: HTMLVideoElement | null) => void;
   status: TrackStatus;
   entry: TrackEntry | undefined;
   stream: MediaStream | null;
 }
 
-const hasIO = () => typeof IntersectionObserver !== "undefined";
+/** The element's own window (a presentation popup) or the global one. */
+const windowOf = (node: Element): (Window & typeof globalThis) | null => (node.ownerDocument.defaultView as (Window & typeof globalThis) | null) ?? null;
 
 export function useVideoTrack(session: Session | undefined, trackId: string, options: UseVideoTrackOptions = {}): VideoTrackBinding {
   const s = useSession(session);
   const entry = useTrackEntry(s, trackId);
   const handle = useRef<TrackHandle | null>(null);
   const el = useRef<HTMLVideoElement | null>(null);
-  const cleanupEl = useRef<() => void>(() => {});
+  const detach = useRef<() => void>(() => {});
   const graceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Last observed visibility, so a handle acquired after the observer fired starts right. */
+  const lastVisible = useRef(false);
   const { tier, preference, latencyMode, keepWarm = false, visibilityGraceMs = 500 } = options;
+  const keepWarmRef = useRef(keepWarm);
+  keepWarmRef.current = keepWarm;
+  const graceRef = useRef(visibilityGraceMs);
+  graceRef.current = visibilityGraceMs;
+
+  const stream = entry?.track ? ((s.tracks.stream(trackId) as unknown as MediaStream | null) ?? null) : null;
+  const streamRef = useRef(stream);
+  streamRef.current = stream;
 
   // Demand lives as long as the hook: acquired on mount, released on unmount.
   useEffect(() => {
-    const h = s.tracks.acquire(trackId, { tier, preference, latencyMode, visible: keepWarm || !hasIO() });
+    const h = s.tracks.acquire(trackId, { tier, preference, latencyMode, visible: keepWarm || lastVisible.current });
     handle.current = h;
     return () => {
       h.release();
@@ -45,50 +56,47 @@ export function useVideoTrack(session: Session | undefined, trackId: string, opt
     };
   }, [s, trackId, tier, preference, latencyMode, keepWarm]);
 
-  const setVisible = useCallback(
-    (visible: boolean) => {
-      if (graceTimer.current) clearTimeout(graceTimer.current);
-      graceTimer.current = null;
-      if (visible || keepWarm) {
-        handle.current?.update({ visible: true });
-        return;
-      }
-      graceTimer.current = setTimeout(() => {
-        graceTimer.current = null;
-        handle.current?.update({ visible: false });
-      }, visibilityGraceMs);
-    },
-    [keepWarm, visibilityGraceMs],
-  );
-
-  const stream = entry?.track ? ((s.tracks.stream(trackId) as unknown as MediaStream | null) ?? null) : null;
-
-  // Attach the stream whenever the element or the live track changes.
-  useEffect(() => {
-    const v = el.current;
-    if (!v) return;
-    if (v.srcObject !== stream) {
-      v.srcObject = stream;
-      if (stream) void v.play().catch(() => undefined);
+  const setVisible = useCallback((visible: boolean) => {
+    lastVisible.current = visible;
+    if (graceTimer.current) clearTimeout(graceTimer.current);
+    graceTimer.current = null;
+    if (visible || keepWarmRef.current) {
+      handle.current?.update({ visible: true });
+      return;
     }
+    graceTimer.current = setTimeout(() => {
+      graceTimer.current = null;
+      handle.current?.update({ visible: false });
+    }, graceRef.current);
+  }, []);
+
+  const bind = (v: HTMLVideoElement, next: MediaStream | null) => {
+    if (v.srcObject === next) return;
+    v.srcObject = next;
+    if (next) void v.play().catch(() => undefined);
+  };
+
+  // Attach the stream whenever the live track changes (element stays put).
+  useEffect(() => {
+    if (el.current) bind(el.current, stream);
   }, [stream]);
 
+  // Stable across renders: React calls it once per element, not once per stream.
   const attach = useCallback(
     (node: HTMLVideoElement | null) => {
-      cleanupEl.current();
-      cleanupEl.current = () => {};
+      detach.current();
+      detach.current = () => {};
       el.current = node;
       if (!node) return;
-      if (node.srcObject !== stream) {
-        node.srcObject = stream;
-        if (stream) void node.play().catch(() => undefined);
-      }
+      bind(node, streamRef.current);
       const doc = node.ownerDocument;
+      const win = windowOf(node);
+      const IO = win?.IntersectionObserver ?? (typeof IntersectionObserver !== "undefined" ? IntersectionObserver : undefined);
+      const intersecting = { current: IO === undefined }; // no observer available: assume visible
       const onVisibility = () => setVisible(doc.visibilityState !== "hidden" && intersecting.current);
-      const intersecting = { current: !hasIO() };
       let io: IntersectionObserver | null = null;
-      if (hasIO()) {
-        io = new IntersectionObserver(
+      if (IO) {
+        io = new IO(
           (entries) => {
             intersecting.current = entries.some((e) => e.isIntersecting);
             onVisibility();
@@ -99,18 +107,23 @@ export function useVideoTrack(session: Session | undefined, trackId: string, opt
       }
       doc.addEventListener("visibilitychange", onVisibility);
       onVisibility();
-      cleanupEl.current = () => {
+      detach.current = () => {
         io?.disconnect();
         doc.removeEventListener("visibilitychange", onVisibility);
-        if (graceTimer.current) clearTimeout(graceTimer.current);
-        graceTimer.current = null;
-        handle.current?.update({ visible: keepWarm });
+        setVisible(false); // through the grace: a re-attach within it never flaps demand
       };
     },
-    [stream, setVisible, keepWarm],
+    [setVisible],
   );
 
-  useEffect(() => () => cleanupEl.current(), []);
+  useEffect(
+    () => () => {
+      detach.current();
+      if (graceTimer.current) clearTimeout(graceTimer.current);
+      graceTimer.current = null;
+    },
+    [],
+  );
 
   return { attach, status: entry?.status ?? "unavailable", entry, stream };
 }
@@ -133,12 +146,22 @@ export function useAudioTrack(session: Session | undefined, trackId: string, opt
   const el = useRef<HTMLAudioElement | null>(null);
   const [blocked, setBlocked] = useState(false);
   const [muted, setMuted] = useState(options.muted ?? false);
+  const mutedRef = useRef(muted);
+  mutedRef.current = muted;
 
   useEffect(() => {
-    const h = s.tracks.acquire(trackId, { tier: "active", visible: !muted });
+    const h = s.tracks.acquire(trackId, { tier: "active", visible: !mutedRef.current });
     handle.current = h;
-    return () => h.release();
-  }, [s, trackId, muted]);
+    return () => {
+      h.release();
+      if (handle.current === h) handle.current = null;
+    };
+  }, [s, trackId]);
+
+  // Mute toggles demand in place (no re-acquire).
+  useEffect(() => {
+    handle.current?.update({ visible: !muted });
+  }, [muted]);
 
   const stream = entry?.track ? ((s.tracks.stream(trackId) as unknown as MediaStream | null) ?? null) : null;
 
@@ -148,13 +171,16 @@ export function useAudioTrack(session: Session | undefined, trackId: string, opt
     try {
       await a.play();
       setBlocked(false);
-    } catch {
-      setBlocked(true);
+    } catch (e) {
+      // Only a missing user gesture is "blocked"; AbortError (source swapped
+      // during reconnect) and the like are not.
+      if (e instanceof Error && e.name === "NotAllowedError") setBlocked(true);
     }
   }, [stream]);
 
   useEffect(() => {
     const a = el.current;
+    if (!stream) setBlocked(false);
     if (!a) return;
     if (a.srcObject !== stream) a.srcObject = stream;
     a.muted = muted;
@@ -189,17 +215,27 @@ export interface PushToTalkBinding {
   unavailable: boolean;
 }
 
-/** Push-to-talk uplink on the agent's pre-allocated transceiver (docs/21 audio uplink). */
+/**
+ * Push-to-talk uplink on the agent's pre-allocated transceiver (docs/21 audio
+ * uplink). A live microphone is as sensitive as a terminal (docs/10): a
+ * `stop()` or unmount that happens while `start()` is still waiting for the
+ * permission prompt wins — the mic is never left open.
+ */
 export function usePushToTalk(session: Session | undefined, options: PushToTalkOptions = {}): PushToTalkBinding {
   const s = useSession(session);
   const [talking, setTalking] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const mic = useRef<MediaStream | null>(null);
+  const pending = useRef<Promise<void> | null>(null);
+  /** Bumped by every stop(); a start() whose generation is stale unwinds itself. */
+  const generation = useRef(0);
   const constraints = options.constraints;
 
   const stop = useCallback(() => {
-    void s.audioUplink.replaceTrack(null);
+    generation.current++;
+    pending.current = null;
+    void s.audioUplink.replaceTrack(null).catch(() => undefined);
     for (const t of mic.current?.getTracks() ?? []) t.stop();
     mic.current = null;
     setTalking(false);
@@ -207,22 +243,37 @@ export function usePushToTalk(session: Session | undefined, options: PushToTalkO
 
   const start = useCallback(async () => {
     if (mic.current) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, ...constraints } });
-      const track = stream.getAudioTracks()[0];
-      if (!track) throw new Error("no audio track");
-      const ok = await s.audioUplink.replaceTrack(track as unknown as MediaStreamTrackLike);
-      if (!ok) {
-        for (const t of stream.getTracks()) t.stop();
-        setUnavailable(true);
-        return;
+    if (pending.current) return pending.current; // one getUserMedia at a time
+    const gen = generation.current;
+    const run = (async () => {
+      let stream: MediaStream | null = null;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, ...constraints } });
+        if (gen !== generation.current) throw new Error("released"); // stopped while the prompt was up
+        const track = stream.getAudioTracks()[0];
+        if (!track) throw new Error("no audio track");
+        const ok = await s.audioUplink.replaceTrack(track as unknown as MediaStreamTrackLike);
+        if (gen !== generation.current) {
+          await s.audioUplink.replaceTrack(null).catch(() => undefined);
+          throw new Error("released");
+        }
+        if (!ok) {
+          setUnavailable(true);
+          throw new Error("released");
+        }
+        mic.current = stream;
+        stream = null; // now owned by mic.current
+        setTalking(true);
+        setError(null);
+      } catch (e) {
+        if (!(e instanceof Error && e.message === "released")) setError(e instanceof Error ? e : new Error(String(e)));
+      } finally {
+        for (const t of stream?.getTracks() ?? []) t.stop();
+        pending.current = null;
       }
-      mic.current = stream;
-      setTalking(true);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e : new Error(String(e)));
-    }
+    })();
+    pending.current = run;
+    return run;
   }, [s, constraints]);
 
   useEffect(() => () => stop(), [stop]);

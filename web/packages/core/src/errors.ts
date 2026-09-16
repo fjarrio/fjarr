@@ -21,6 +21,8 @@ export type ClientErrorCode =
   | "channel-missing"
   | "queue-overflow"
   | "session-rejected"
+  | "transport-failed"
+  | "reconnect-exhausted"
   | "not-implemented";
 
 export class NotImplementedError extends FjarrError {

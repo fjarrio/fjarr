@@ -114,13 +114,12 @@ describe("session state machine (docs/21)", () => {
     expect(s.getState()).toBe("reconnecting");
     await vi.advanceTimersByTimeAsync(600); // backoff 500 ms (jitter 0.5 → exact)
     await tick();
-    expect(s.getState()).toBe("reconnecting");
-    expect(s.info.getSnapshot().reason).toBe("grant-expired");
-    await vi.advanceTimersByTimeAsync(1100);
-    await tick();
+    // grant-expired → refetch → immediate free round (no backoff, no round charged)
     expect(s.getState()).toBe("connected");
     expect(h.grants()).toBe(2);
+    expect(h.events.some((e) => e.type === "state" && e.reason === "grant-expired")).toBe(true);
     expect(h.states("robot-1")).not.toContain("failed");
+    expect(s.info.getSnapshot().round).toBe(1); // only the socket loss counted
   });
 
   it("silent server: 3 missed heartbeats → new signaling round → connected again", async () => {

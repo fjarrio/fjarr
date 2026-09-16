@@ -42,7 +42,11 @@ export const webSocketFactory: SocketFactory = (url) => {
   ws.onmessage = (ev) => {
     if (typeof ev.data === "string") socket.onmessage?.(ev.data);
   };
-  ws.onerror = () => finish("socket-error");
+  // Browsers fire `close` (with the code) right after `error`; let it carry
+  // the reason, and fall back to a generic one only if it never arrives.
+  ws.onerror = () => {
+    setTimeout(() => finish("socket-error"), 250);
+  };
   ws.onclose = (ev) => finish(ev.reason || `socket-closed:${ev.code}`);
   return socket;
 };

@@ -44,7 +44,8 @@ export interface TrackManifestEntry {
   pt: number;
   /** SDP media id of the carrying transceiver — maps RTCTrackEvent.transceiver.mid → track_id. */
   mid?: string;
-  monitor: MonitorInfo | null;
+  /** Optional on the wire (schema); the session normalizes a missing value to `null` before the registry sees it. */
+  monitor?: MonitorInfo | null;
 }
 
 export interface TurnCredentials {
@@ -298,6 +299,8 @@ export function isSignalingMessage(x: unknown): x is SignalingMessage {
       return (
         (x.role === "agent" || x.role === "operator") &&
         isRecord(x.auth) &&
+        (x.agent_info === undefined || isRecord(x.agent_info)) &&
+        (x.client_info === undefined || isRecord(x.client_info)) &&
         Array.isArray(x.proto_versions) &&
         x.proto_versions.length > 0 &&
         x.proto_versions.every(isInt)
@@ -313,7 +316,7 @@ export function isSignalingMessage(x: unknown): x is SignalingMessage {
         sid() &&
         Array.isArray(x.capabilities) &&
         x.capabilities.length > 0 &&
-        x.capabilities.every((c) => isRecord(c) && isStr(c.name)) &&
+        x.capabilities.every((c) => isRecord(c) && isStr(c.name) && (c.params === undefined || isRecord(c.params))) &&
         isRecord(x.operator) &&
         isStr(x.operator.id) &&
         isStr(x.operator.label)

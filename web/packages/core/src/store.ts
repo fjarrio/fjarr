@@ -43,8 +43,17 @@ export class Emitter<T> {
       this.handlers.delete(handler);
     };
   }
+  /** One throwing handler never starves the others; its error is rethrown asynchronously. */
   emit(value: T): void {
-    for (const h of Array.from(this.handlers)) h(value);
+    for (const h of Array.from(this.handlers)) {
+      try {
+        h(value);
+      } catch (error) {
+        queueMicrotask(() => {
+          throw error;
+        });
+      }
+    }
   }
   get size(): number {
     return this.handlers.size;

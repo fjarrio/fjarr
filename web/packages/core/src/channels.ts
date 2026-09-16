@@ -19,6 +19,8 @@ export const MAX_ENVELOPE_BYTES = 16 * 1024;
 
 export type ChannelClass = "control" | "realtime" | "bulk" | "stream";
 
+const encoder = new TextEncoder();
+
 export function parseChannelLabel(label: string): { cls: ChannelClass; cap?: string } | null {
   const parts = label.split(":");
   if (parts[0] !== "fjarr" || parts.length < 2) return null;
@@ -41,6 +43,8 @@ export class ChannelSet {
   readonly onBulkOpen = new Emitter<string>();
   readonly onBulkData = new Emitter<{ cap: string; data: ArrayBuffer }>();
   readonly onBulkDrain = new Emitter<string>();
+  /** A bulk channel closed (peer gone or reset): waiters must give up. */
+  readonly onBulkClose = new Emitter<string>();
   readonly onStreamData = new Emitter<{ cap: string; data: ArrayBuffer }>();
 
   attach(dc: DataChannelLike): void {
@@ -72,6 +76,7 @@ export class ChannelSet {
         dc.onopen = () => this.onBulkOpen.emit(cap);
         dc.onclose = () => {
           if (this.bulk.get(cap) === dc) this.bulk.delete(cap);
+          this.onBulkClose.emit(cap);
         };
         dc.onbufferedamountlow = () => this.onBulkDrain.emit(cap);
         dc.onmessage = (ev) => {
@@ -116,15 +121,19 @@ export class ChannelSet {
   private sendText(dc: DataChannelLike | null, env: Envelope): boolean {
     if (!dc || dc.readyState !== "open") return false;
     const text = JSON.stringify(env);
-    if (text.length > MAX_ENVELOPE_BYTES) {
+    if (text.length > MAX_ENVELOPE_BYTES / 4 && encoder.encode(text).byteLength > MAX_ENVELOPE_BYTES) {
       throw new FjarrError("payload-invalid", `${env.cap}/${env.type}: envelope exceeds 16 KiB (docs/08)`);
     }
     dc.send(text);
     return true;
   }
 
-  /** Tear down every channel (peer connection gone). Handles rebind later. */
+  /**
+   * Tear down every channel (peer connection gone). Silent for control —
+   * the caller already knows the peer is gone; bulk waiters are released.
+   */
   reset(): void {
+    const bulkCaps = Array.from(this.bulk.keys());
     for (const dc of [this.control, this.realtime, ...this.bulk.values(), ...this.stream.values()]) {
       if (!dc) continue;
       dc.onopen = dc.onclose = dc.onmessage = dc.onbufferedamountlow = null;
@@ -134,11 +143,10 @@ export class ChannelSet {
         /* already closed */
       }
     }
-    const wasOpen = this.controlOpen;
     this.control = this.realtime = null;
     this.bulk.clear();
     this.stream.clear();
-    if (wasOpen) this.onControlClose.emit();
+    for (const cap of bulkCaps) this.onBulkClose.emit(cap);
   }
 }
 
@@ -170,7 +178,7 @@ export class PublisherSlot<P = unknown> {
   private last: P | undefined;
   private lastSentAt = -Infinity;
   private rateTimer: ReturnType<typeof setTimeout> | null = null;
-  private deadmanTimer: ReturnType<typeof setInterval> | null = null;
+  private deadmanTimer: ReturnType<typeof setTimeout> | null = null;
   private holders = 0;
   readonly minIntervalMs: number;
 
@@ -188,12 +196,6 @@ export class PublisherSlot<P = unknown> {
 
   acquire(): Publisher<P> {
     this.holders++;
-    if (this.options.deadman && !this.deadmanTimer) {
-      const { intervalMs } = this.options.deadman;
-      this.deadmanTimer = setInterval(() => {
-        if (this.last !== undefined && this.now() - this.lastSentAt >= intervalMs) this.emit(this.last);
-      }, intervalMs);
-    }
     let released = false;
     return {
       publish: (payload) => {
@@ -236,11 +238,22 @@ export class PublisherSlot<P = unknown> {
   private emit(payload: P): void {
     this.lastSentAt = this.now();
     this.transmit(payload); // realtime: a closed channel simply drops (lossy by design)
+    this.armDeadman();
+  }
+
+  /** Re-armed from every send, so the wire gap while held never exceeds intervalMs. */
+  private armDeadman(): void {
+    if (!this.options.deadman || this.holders === 0) return;
+    if (this.deadmanTimer) clearTimeout(this.deadmanTimer);
+    this.deadmanTimer = setTimeout(() => {
+      this.deadmanTimer = null;
+      if (this.holders > 0 && this.last !== undefined) this.emit(this.last);
+    }, this.options.deadman.intervalMs);
   }
 
   private stop(): void {
     if (this.rateTimer) clearTimeout(this.rateTimer);
-    if (this.deadmanTimer) clearInterval(this.deadmanTimer);
+    if (this.deadmanTimer) clearTimeout(this.deadmanTimer);
     this.rateTimer = null;
     this.deadmanTimer = null;
     this.hasPending = false;
@@ -331,23 +344,30 @@ export function createByteChannel(set: ChannelSet, cap: string, onRelease: () =>
 }
 
 export function createBulkSender(set: ChannelSet, cap: string): BulkSender {
+  /** Wait for `event` on `cap`, or reject on abort / channel close. Listeners never leak. */
+  const waitFor = (event: Emitter<string>, signal: AbortSignal | undefined, what: string) =>
+    new Promise<void>((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new FjarrError("closed", "aborted"));
+        return;
+      }
+      const done = (fn: () => void) => {
+        offEvent();
+        offClose();
+        signal?.removeEventListener("abort", onAbort);
+        fn();
+      };
+      const onAbort = () => done(() => reject(new FjarrError("closed", "aborted")));
+      const offEvent = event.on((c) => c === cap && done(resolve));
+      const offClose = set.onBulkClose.on((c) => c === cap && done(() => reject(new FjarrError("closed", `${cap}: bulk channel closed while waiting for ${what}`))));
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
   return {
     cap,
     async sendFrames(frames, signal) {
       let dc = set.bulk.get(cap);
       if (!dc || dc.readyState !== "open") {
-        await new Promise<void>((resolve, reject) => {
-          const off = set.onBulkOpen.on((c) => {
-            if (c === cap) {
-              off();
-              resolve();
-            }
-          });
-          signal?.addEventListener("abort", () => {
-            off();
-            reject(new FjarrError("closed", "aborted"));
-          });
-        });
+        await waitFor(set.onBulkOpen, signal, "open");
         dc = set.bulk.get(cap);
       }
       if (!dc) throw new FjarrError("channel-missing", `${cap}: no bulk channel declared by the agent`);
@@ -356,20 +376,10 @@ export function createBulkSender(set: ChannelSet, cap: string): BulkSender {
       for await (const frame of frames as AsyncIterable<Uint8Array>) {
         if (signal?.aborted) throw new FjarrError("closed", "aborted");
         while (dc.bufferedAmount >= HIGH_WATER) {
-          await new Promise<void>((resolve, reject) => {
-            const off = set.onBulkDrain.on((c) => {
-              if (c === cap) {
-                off();
-                resolve();
-              }
-            });
-            signal?.addEventListener("abort", () => {
-              off();
-              reject(new FjarrError("closed", "aborted"));
-            });
-          });
+          await waitFor(set.onBulkDrain, signal, "drain");
           if (dc.readyState !== "open") throw new FjarrError("closed", `${cap}: bulk channel closed mid-transfer`);
         }
+        if (dc.readyState !== "open") throw new FjarrError("closed", `${cap}: bulk channel closed mid-transfer`);
         dc.send(frame);
         count++;
         bytes += frame.byteLength;

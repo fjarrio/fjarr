@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "type": "error",
+  "event_id": "0192f3a1-err-bad",
+  "ts": 1789503000000,
+  "message": "something happened"
+}

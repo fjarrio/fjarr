@@ -1,0 +1,21 @@
+{
+  "v": 1,
+  "type": "offer",
+  "event_id": "0192f3a1-offer-bad",
+  "ts": 1789503000000,
+  "session_id": "s-01",
+  "sdp": "v=0\r\n…",
+  "tracks": [
+    {
+      "track_id": "desk-HDMI-1",
+      "cap": "fjarr.desktop",
+      "kind": "video",
+      "label": "HDMI-1",
+      "codec": "H264",
+      "pt": 97,
+      "mid": "1",
+      "monitor": { "index": 0, "x": 0, "y": 0, "w": 0, "h": 1080, "scale": 1.0 }
+    }
+  ],
+  "manifest_version": -1
+}

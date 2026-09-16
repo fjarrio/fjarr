@@ -22,7 +22,11 @@ export interface FocusRegistration {
 }
 
 export interface FocusOptions {
-  /** The window this view lives in (a presentation popup); OS focus loss of that window blurs the view. */
+  /**
+   * The window this view lives in (a presentation popup). OS focus of that
+   * window claims the keyboard for the view (its most recently focused view,
+   * when several share the window); OS blur / pagehide releases it.
+   */
   window?: WindowLike;
   /** Called when the view loses the keyboard for any reason — send `release-all` here. */
   onLost?: () => void;
@@ -31,11 +35,14 @@ export interface FocusOptions {
 interface Entry {
   options: FocusOptions;
   onBlur: (() => void) | null;
+  onFocus: (() => void) | null;
 }
 
 export class FocusRegistry {
   private readonly views = new Map<string, Entry>();
   private readonly ownerStore = createStore<string | null>(null);
+  /** Most recently focused view per window, so OS focus can restore it. */
+  private readonly lastFocusedInWindow = new Map<WindowLike, string>();
 
   /** Reactive: the id of the view that owns the keyboard, or null. */
   get owner(): ReadonlyStore<string | null> {
@@ -43,20 +50,33 @@ export class FocusRegistry {
   }
 
   register(id: string, options: FocusOptions = {}): FocusRegistration {
-    this.unregister(id);
-    const entry: Entry = { options, onBlur: null };
+    // Re-registering the same id (StrictMode, a window prop change) keeps
+    // ownership: no spurious `onLost` / release-all.
+    this.detach(id);
+    const entry: Entry = { options, onBlur: null, onFocus: null };
     if (options.window) {
+      const win = options.window;
       entry.onBlur = () => {
         if (this.ownerStore.getSnapshot() === id) this.setOwner(null);
       };
-      options.window.addEventListener("blur", entry.onBlur);
-      options.window.addEventListener("pagehide", entry.onBlur);
+      entry.onFocus = () => {
+        const owner = this.ownerStore.getSnapshot();
+        if (owner !== null && this.views.get(owner)?.options.window === win) return; // already owned inside this window
+        const preferred = this.lastFocusedInWindow.get(win);
+        const target = preferred !== undefined && this.views.has(preferred) && this.views.get(preferred)?.options.window === win ? preferred : id;
+        this.setOwner(target);
+      };
+      win.addEventListener("blur", entry.onBlur);
+      win.addEventListener("pagehide", entry.onBlur);
+      win.addEventListener("focus", entry.onFocus);
     }
     this.views.set(id, entry);
     const self = this;
     return {
       id,
-      focus: () => this.setOwner(id),
+      focus: () => {
+        if (this.views.has(id)) this.setOwner(id);
+      },
       blur: () => {
         if (this.ownerStore.getSnapshot() === id) this.setOwner(null);
       },
@@ -71,18 +91,37 @@ export class FocusRegistry {
     const prev = this.ownerStore.getSnapshot();
     if (prev === next) return;
     this.ownerStore.set(next);
+    if (next !== null) {
+      const win = this.views.get(next)?.options.window;
+      if (win) this.lastFocusedInWindow.set(win, next);
+    }
     if (prev !== null) this.views.get(prev)?.options.onLost?.();
   }
 
-  private unregister(id: string): void {
+  /** Remove listeners and the entry without touching ownership. */
+  private detach(id: string): Entry | undefined {
     const entry = this.views.get(id);
-    if (!entry) return;
-    if (entry.onBlur && entry.options.window) {
-      entry.options.window.removeEventListener("blur", entry.onBlur);
-      entry.options.window.removeEventListener("pagehide", entry.onBlur);
+    if (!entry) return undefined;
+    if (entry.options.window) {
+      if (entry.onBlur) {
+        entry.options.window.removeEventListener("blur", entry.onBlur);
+        entry.options.window.removeEventListener("pagehide", entry.onBlur);
+      }
+      if (entry.onFocus) entry.options.window.removeEventListener("focus", entry.onFocus);
     }
     this.views.delete(id);
-    if (this.ownerStore.getSnapshot() === id) this.setOwner(null);
+    return entry;
+  }
+
+  private unregister(id: string): void {
+    const entry = this.detach(id);
+    if (!entry) return;
+    for (const [win, last] of this.lastFocusedInWindow) if (last === id) this.lastFocusedInWindow.delete(win);
+    if (this.ownerStore.getSnapshot() === id) {
+      // The view is gone: clear ownership, and let it release its held keys.
+      this.ownerStore.set(null);
+      entry.options.onLost?.();
+    }
   }
 
   /** Blur everything (e.g. page hidden). */

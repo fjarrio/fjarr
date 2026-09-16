@@ -6,7 +6,8 @@ description: Design of @fjarr/core and @fjarr/react — sessions that follow the
 > **Status: review** — the slice-2 design, written before implementation
 > (docs/13); implemented in `web/packages/core` + `web/packages/react`
 > (slice 2, 2026-09-16), unit-tested against the `@fjarr/core/testing`
-> mock agent. Inspired by the fleet dashboard's session provider
+> mock agent and reviewed retrospectively
+> ([slice-2 review](reviews/slice-2-review.md)). Inspired by the fleet dashboard's session provider
 > ([prior art](11-prior-art.md#fleet-dashboard)): its good ideas are kept
 > and pushed further; its structural problems are explicitly designed out.
 
@@ -111,9 +112,16 @@ reconnecting → (connected | failed) → closed`. Transitions:
 | connected | ICE `disconnected` (past a 3 s grace) or `failed` | reconnecting | send `ice-restart` over signaling; the agent re-offers; keep tracks/consumers attached |
 | connected | heartbeat 3× missed / signaling socket lost / no re-offer within 10 s | reconnecting | new signaling round via same grant (if unexpired) |
 | reconnecting | recovered | connected | re-flush demand (agent keyframes on enable) |
-| reconnecting | attempts exhausted | failed | consumers see `failed`; `retry()` available |
+| reconnecting | attempts exhausted | failed | consumers see `failed` and an `error` event (`reconnect-exhausted`); `retry()` available |
+| reconnecting | `retry()` | connecting round now | skips the remaining backoff (a host "reconnect now" button) |
 | any | `peer-gone` / `session-close` from server | closed (reason) | release tracks, keep subscriptions registered for a possible `open()` again |
-| any | `error(grant-expired)` | reconnecting | refetch grant via provider, then retry — never surfaces as a generic failure |
+| any | `error(grant-expired)` | reconnecting | refetch grant via provider, then retry immediately — a free round: no backoff, not counted toward the attempt budget, never a generic failure |
+| any | `error(session-unknown)` | closed (reason) | the server no longer knows our session (a message crossed `peer-gone` on the wire): an orderly close, not a failure |
+
+The attempt budget (default 5 rounds) is renewed by a connection that stayed
+up for 30 s, the same rule the docs/08 backoff uses; a connect timeout
+(default 15 s, grant fetch included) bounds every round so a hanging backend
+or a socket that never opens still climbs the ladder.
 
 The rungs are the [docs/08 reconnection ladder](08-protocol.md#reconnection);
 backoff is docs/08's (0.5 s ×2, cap 30 s, ±20 % jitter, reset after 30 s
