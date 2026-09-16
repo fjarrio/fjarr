@@ -45,6 +45,7 @@ Notes:
 | Failure modes | capture source dies, portal revoked, X restart — recovery behavior |
 | Code size/complexity | LoC of the backend implementation |
 | Future-proofing | upstream direction (Ubuntu is Wayland-default; Xorg maintenance reality) |
+| Desktop audio capture path | PipeWire capture (Wayland) vs PulseAudio monitor source (X11): availability, latency, whether it works unattended |
 
 ## Spike protocol (M2)
 

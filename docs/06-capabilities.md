@@ -52,6 +52,10 @@ detail is incorporated here).
   defining industrial requirement; backend chosen accordingly
   ([ADR-0006](adr/0006-desktop-backend-selection.md)).
 - Privilege separation for injection ([ADR-0009](adr/0009-privilege-separation.md)).
+- **Desktop audio** (planned, after `fjarr.audio`): the robot's system audio
+  output as a `kind: "audio"` track — PipeWire capture on Wayland, PulseAudio
+  monitor source on X11 (a per-backend criterion in [docs/07](07-desktop-backends.md)).
+  Same demand model and autoplay handling as `fjarr.audio`.
 
 **Accepted when:** operator controls the robot-sim desktop end-to-end
 (input-to-photon within [budgets](16-performance-budgets.md)); reboot of the
@@ -180,6 +184,35 @@ backpressured so a chatty robot can't flood the operator; the same source
 feeds observability (M7) in the backend mode. Cheap, and the single most
 requested support feature after "show me the screen". Milestone: with M7.
 
+## Sensor data transport: video track or stream class? {#sensor-transport}
+
+Dense sensor data (depth, thermal, disparity, lidar point clouds) can travel
+either **packed into a video track** or as **stream-class binary frames**
+([ADR-0018](adr/0018-stream-channel-class.md)). Neither is universally
+better; the choice is made **per sensor, per capability** with this matrix,
+confirmed by measurement in the first sensor capability's spike
+([open question #16](18-open-questions.md)).
+
+| Concern | Video track | Stream class |
+|---|---|---|
+| Bandwidth | Temporal + spatial compression: 1080p30 dense depth in a few Mbps | Raw size unless we compress ourselves (640×480×16-bit ≈ 147 Mbps at 30 fps — must decimate/voxelize or add Draco/zstd) |
+| Fidelity | Lossy: 8-bit 4:2:0 codecs; 16-bit metric data needs a packing profile (split planes, or 10/12-bit HEVC/AV1 where the browser decodes them in hardware); edge ringing → "flying pixels" | Bit-exact: 16-bit depth, float32 XYZ, intensities, per-point attributes |
+| Data shape | Dense 2-D grids only | Anything: sparse/variable point counts, structs, protobuf/CBOR |
+| Metadata & sync | Out-of-band (frame seq via time-sync + telemetry) — a real sync problem | Inline: timestamps, intrinsics, frame id in the header |
+| Rate control | Free: GCC/TWCC adaptive bitrate, FEC/NACK, jitter buffer, demand tiers | Ours: drop frames on `bufferedAmount` growth; no FEC; whole frame or nothing |
+| CPU / HW | HW encode (VA-API) and HW decode in the browser | Agent: cheap unless compressing; browser: WASM decode if compressed |
+| Consumer access | `<video>` → WebGL texture is cheap; **numeric readback is expensive** (canvas `getImageData` / WebCodecs `VideoFrame` copy) | `ArrayBuffer` straight into a three.js/WebGL buffer; trivial numeric access |
+| Latency | Encoder pipeline adds ~1–2 frames | Serialization only |
+| Fits when | dense, high-rate (≥ 15 fps), visualization-grade, resolution matters | sparse or exact, ≤ ~10 Hz after decimation, ≤ docs/16 stream budget, metadata-rich |
+
+Rules of thumb: a depth camera meant for *seeing* obstacles → video
+(with a documented packing profile); a lidar cloud meant for a 3-D map
+or for *numbers* → stream class after decimation; and **hybrid** is
+legitimate — a depth video for the overview plus a decimated cloud on the
+stream class for the 3-D view, both stamped with `time-sync`. The
+measurements that decide each case: end-to-end latency, bandwidth, agent
++ browser CPU, and fidelity error (RMS depth error after the round trip).
+
 ## Conventions on existing capabilities (planned additions)
 
 - `fjarr.camera/snapshot` — request → result carrying one full-resolution
@@ -195,11 +228,22 @@ requested support feature after "show me the screen". Milestone: with M7.
   to no capability: `ping`/`pong` (docs/08 heartbeat) and `time-sync`
   (operator↔agent clock offset + RTT, needed for stamping teleop commands
   and for the docs/15 latency harness).
+- **Multi-operator presence** (planned, M5): the server emits
+  `session-peers` (docs/08) to every party on a robot — who is connected,
+  with their ownership role from the docs/10 leases (`owner` of input,
+  `viewer`) — so UIs can show "Anna is driving, Björn is watching" and
+  request/hand over control explicitly. Web: `useSessionPeers(session)`.
+- **Haptic feedback** (planned): any capability may emit
+  `haptic {intensity, duration_ms, pattern?}` events on the realtime class
+  (collision proximity, end-stop, terrain); the web library maps them to
+  the Gamepad API's `vibrationActuator` via `useGamepadHaptics(session, cap)`
+  and ignores them where unsupported. Lossy by design — a missed rumble is
+  fine, a late one is worse.
 
 ## Later / explicitly deferred
 
-Session recording/replay, mobile operator apps, haptic/rumble feedback to
-gamepads, desktop audio — [open questions](18-open-questions.md).
+Session recording/replay, mobile operator apps —
+[open questions](18-open-questions.md).
 
 ## Stress test: `com.example.arm-teach` (never to be built) {#stress-test}
 

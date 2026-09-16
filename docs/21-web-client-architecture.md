@@ -337,6 +337,8 @@ overridable; the host's design system wins (docs/05).
 | `<VideoGrid>` | N tiles from the manifest; layout order/labels from a host-provided ordering (no hard-coded camera names) | `buildGridVideoTrackRows` |
 | `<FloatingVideo>` | draggable/resizable/anchored overlay that persists across routes; `keepWarm` when collapsed | `FrontCameraOverlay` (generalized, robot-agnostic) |
 | `<AudioSink>` / `usePushToTalk` | downlink audio with autoplay-unlock status; PTT uplink | — |
+| `useSessionPeers` / `<SessionPeers>` | who else is on this robot and who owns input (docs/08 `session-peers`, M5) | — |
+| `useGamepadHaptics` | maps capability `haptic` events to the Gamepad vibration actuator | — |
 | `<ConnectionQuality>` | health level + reasons from the stats sampler | `StreamSelector` stats panel (generalized) |
 | `<DesktopView>` / `<TerminalView>` | capability views (M3/M2), registered via `registerCapabilityView` | — |
 
