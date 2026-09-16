@@ -7,7 +7,7 @@ title: "ADR 0013: WebSocket signaling"
 
 ## Context
 
-Browsers speak WSS natively; enterprise networks pass 443. camera-streamer proved
+Browsers speak WSS natively; enterprise networks pass 443. The camera streamer proved
 MQTT signaling works for agents but adds a broker nobody else in the stack
 needs, and its transport sat behind a tiny publish/callback seam — the
 pattern worth keeping.

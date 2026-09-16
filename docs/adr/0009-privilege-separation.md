@@ -9,7 +9,7 @@ title: "ADR 0009: Privilege separation"
 
 Input injection may require privileges (always for uinput; possibly for
 login-screen scenarios). Running the network-facing agent as root is
-unacceptable; fleet-daemon's arbitrary-shell-over-FIFO shows where convenience
+unacceptable; the fleet daemon's arbitrary-shell-over-FIFO shows where convenience
 escalation ends up.
 
 ## Options considered

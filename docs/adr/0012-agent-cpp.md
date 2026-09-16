@@ -13,7 +13,7 @@ C++/ROS 2).
 
 ## Options considered
 
-**C++20** (native GStreamer/GLib fit; camera-streamer's production-proven idioms —
+**C++20** (native GStreamer/GLib fit; the camera streamer's production-proven idioms —
 RAII wrappers, generation-counted contexts, single-loop marshaling — port
 directly; first-class ROS 2 embedding) · Rust (memory safety, but
 gstreamer-rs + the C callback boundary reintroduces unsafe seams, no

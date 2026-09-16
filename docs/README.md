@@ -24,7 +24,7 @@ with rationale).
 | 08 | [Protocol](08-protocol.md) | Normative wire spec: signaling + DataChannels | review |
 | 09 | [Interfaces](09-interfaces.md) | The three embedding APIs + backend contract | review |
 | 10 | [Security](10-security.md) | Threat model, identity, tokens, TURN, privileges | review |
-| 11 | [Prior art](11-prior-art.md) | Lessons mined from camera-streamer, teleop-car, fleet-daemon | review |
+| 11 | [Prior art](11-prior-art.md) | Lessons mined from five prior in-house projects (anonymized) | review |
 | 12 | [Development environment](12-development-environment.md) | Devcontainer, compose, doctor, troubleshooting | review |
 | 13 | [Development workflow](13-development-workflow.md) | Doc-driven process, ADRs, definition of done | review |
 | 14 | [Dependencies](14-dependencies.md) | Every dependency: version, license, ships-or-dev | review |

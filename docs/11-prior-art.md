@@ -1,15 +1,17 @@
 ---
 title: Prior Art
-description: Lessons mined from camera-streamer, teleop-car, and fleet-daemon — adopt the proven, fix the flawed.
+description: Lessons mined from the camera streamer, teleop-car, and fleet daemon — adopt the proven, fix the flawed.
 ---
 
-Three earlier projects were analyzed in depth before Fjarr's specs were
-written (sources in the gitignored `inspiration/` folder; full camera-streamer tree at
-`the local source tree`). Per project: **Adopt** (proven, reuse) and
-**Fix** (documented in specs as requirements, not repeated). They are
-inspiration, not obligation.
+Five earlier in-house projects were analyzed in depth before Fjarr's specs
+were written. **They are referred to by descriptive codenames only** — the
+projects, their owners and their source trees are deliberately not
+identified, and the code itself is not published (it lives in the
+gitignored `inspiration/` folder on maintainers' machines). Per project:
+**Adopt** (proven, reuse) and **Fix** (documented in specs as requirements,
+not repeated). They are inspiration, not obligation.
 
-## camera-streamer {#camera-streamer}
+## The camera streamer {#camera-streamer}
 
 C++/GStreamer/`webrtcbin` ROS 2 camera streamer (NVIDIA Jetson, stereo cameras);
 "worked reliably" in the field. ~5.9k LOC.
@@ -40,7 +42,7 @@ C++/GStreamer/`webrtcbin` ROS 2 camera streamer (NVIDIA Jetson, stereo cameras);
 - Single hardcoded TURN URL with embedded credentials → [docs/10](10-security.md#turn).
 - No audio; ROS topic→JSON bridging hand-written per topic → adapter seam.
 
-## teleop-car {#teleop-car}
+## The teleop car {#teleop-car}
 
 Browser + Python/aiortc RC car over MQTT signaling; coturn + haproxy infra.
 Memorable UX, but most durable value is in the anti-patterns.
@@ -64,7 +66,7 @@ capabilities later).
 | Robot's 1 s deadman timer silently regressed (dead code) | safety behaviors are spec'd + tested, never incidental ([docs/15](15-testing-strategy.md#safety-behaviors)) |
 | Infra memory: haproxy basic-auth + Cloudflare TLS, coturn on host networking | TURN capacity/ports documented honestly ([docs/04](04-supported-platforms.md#network-requirements)) |
 
-## fleet-daemon {#fleet-daemon}
+## The fleet daemon {#fleet-daemon}
 
 Python/gRPC robot↔backend daemon in production across a large customer fleet. The
 control-plane teacher.
@@ -105,9 +107,9 @@ control-plane teacher.
 - Uniform error swallowing in the reconnect loop (`UNAUTHENTICATED` retried
   like `UNAVAILABLE`) → error taxonomy distinguishes retryable from fatal.
 
-## fleet-dashboard {#fleet-dashboard}
+## The fleet dashboard {#fleet-dashboard}
 
-React 19 fleet dashboard consuming camera-streamer; the operator-side
+React 19 fleet dashboard consuming the camera streamer; the operator-side
 counterpart, analyzed for the slice-2 web design ([docs/21](21-web-client-architecture.md)).
 
 ### Adopt
@@ -141,10 +143,9 @@ counterpart, analyzed for the slice-2 web design ([docs/21](21-web-client-archit
   docs/21 publishing table: channel class from the capability, newest-wins
   realtime publishers, deadman re-publish.
 
-## receiver-playground {#receiver-playground}
+## The receiver playground {#receiver-playground}
 
-A small React playground receiver for camera-streamer (`inspiration/camera-streamer/
-playground/receiver-playground`). Two ideas worth more than its size:
+A small React playground receiver for the camera streamer (`inspiration/receiver-playground`). Two ideas worth more than its size:
 
 ### Adopt
 
@@ -152,7 +153,7 @@ playground/receiver-playground`). Two ideas worth more than its size:
 |---|---|
 | `subscribeToStream(id, handler)`: N `<VideoStream>` components receive the *same* `MediaStream` — one RTP track, decoded once, rendered many times, no extra bandwidth; late subscribers get the existing stream immediately | docs/21 track registry: fan-out is a guarantee, demand aggregates per track |
 | `StreamSelector` stats panel: 1 s `getStats()` polling, `inbound-rtp` bytes/packets/loss/jitter/PLI/FIR/NACK/frames, candidate-pair RTT, bitrate from byte deltas, a four-level quality label with loss/jitter/RTT thresholds | docs/21 stats & health: sampler in core, per-track by `mid`, selected-pair RTT + relay detection, decode/freeze/HW-decoder metrics, windowed rates, health score with reasons + hysteresis, thresholds from docs/16 |
-| Buffer ICE candidates until the remote description is set | docs/21 state machine (also in camera-streamer) |
+| Buffer ICE candidates until the remote description is set | docs/21 state machine (also in the camera streamer) |
 
 ### Fix
 

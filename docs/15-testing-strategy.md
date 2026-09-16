@@ -52,7 +52,7 @@ From M1, a measurement rig — not vibes:
 
 ## Safety behaviors {#safety-behaviors}
 
-Learned the hard way (teleop-car's silently-regressed deadman): every safety
+Learned the hard way (the teleop car's silently-regressed deadman): every safety
 behavior is **spec'd, implemented, and covered by a test that fails when it
 regresses**:
 

@@ -7,8 +7,8 @@ title: "ADR 0008: DataChannel topology"
 
 ## Context
 
-teleop-car put 150 msg/s of control on one default (reliable-ordered) channel —
-head-of-line blocking by construction; camera-streamer used a single channel per peer
+The teleop car put 150 msg/s of control on one default (reliable-ordered) channel —
+head-of-line blocking by construction; the camera streamer used a single channel per peer
 too. Mixing bulk, control, and realtime traffic in one queue is the classic
 failure.
 

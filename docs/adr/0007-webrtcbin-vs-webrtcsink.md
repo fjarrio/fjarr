@@ -7,11 +7,11 @@ title: "ADR 0007: webrtcbin vs webrtcsink"
 
 ## Context
 
-camera-streamer proved a hand-rolled `webrtcbin` + FrameHub fan-out in production —
+The camera streamer proved a hand-rolled `webrtcbin` + FrameHub fan-out in production —
 but with zero congestion control, and adaptive bitrate is a hard Fjarr
 requirement (docs/16). `webrtcsink` (gst-plugins-rs) natively ships GCC
 congestion control, encoder management, and multi-consumer fan-out — i.e.
-much of what camera-streamer hand-built — at the cost of less control over the exact
+much of what the camera streamer hand-built — at the cost of less control over the exact
 session/track model docs/08 specifies, and it is not packaged in Ubuntu
 24.04 (we'd build/vendor it).
 

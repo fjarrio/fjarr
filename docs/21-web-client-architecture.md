@@ -4,7 +4,7 @@ description: Design of @fjarr/core and @fjarr/react — sessions that follow the
 ---
 
 > **Status: review** — the slice-2 design, written before implementation
-> (docs/13). Inspired by the fleet-dashboard's session provider
+> (docs/13). Inspired by the fleet dashboard's session provider
 > ([prior art](11-prior-art.md#fleet-dashboard)): its good ideas are kept
 > and pushed further; its structural problems are explicitly designed out.
 
@@ -65,7 +65,7 @@ stable `FjarrClient`; everything reactive is a store selector.
 `<FjarrProvider client={client}>` mounts once, at the app root **above the
 router**. Sessions are owned by the client's `SessionManager`, keyed by
 `robot_id`; React components hold handles, never own sessions. Unmounting a
-page therefore never tears a session down (the fleet-dashboard's core
+page therefore never tears a session down (the fleet dashboard's core
 insight, made structural rather than incidental).
 
 ```tsx
@@ -218,7 +218,7 @@ overlay, a picture-in-picture, a canvas overlay) attach to the *same*
 track: the browser receives and decodes each RTP stream exactly once
 regardless of how many elements render it, so a second tile costs zero
 network bandwidth and zero decode — only compositing (the
-receiver-playground's `subscribeToStream` idea, [prior art](11-prior-art.md#receiver-playground),
+receiver playground's `subscribeToStream` idea, [prior art](11-prior-art.md#receiver-playground),
 made a guarantee of the registry). Demand is therefore *aggregated* per
 track, never duplicated: ten consumers of `cam-front` produce one enabled
 track at the highest tier any of them asks for.
@@ -293,7 +293,7 @@ trackId)`.
 
 `RTCPeerConnection.getStats()` is the ground truth for what the network is
 doing; the dashboard tooling around it was the best part of the
-receiver-playground ([prior art](11-prior-art.md#receiver-playground)) and is
+receiver playground ([prior art](11-prior-art.md#receiver-playground)) and is
 redesigned here as a core service rather than a component's `setInterval`.
 
 - **Sampler in core, one per session** (default 1 s, configurable), publishing

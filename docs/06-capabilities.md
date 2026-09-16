@@ -132,7 +132,7 @@ its liveness state within 30 s.
 ## `fjarr.ota` — fleet OTA updates (M8)
 
 Backend consumer. Built on **SWUpdate**
-([ADR-0016](adr/0016-swupdate-ota.md)); fleet-daemon's `deploy.py` is the
+([ADR-0016](adr/0016-swupdate-ota.md)); the fleet daemon's `deploy.py` is the
 documented anti-pattern this replaces (no A/B, no rollback, abort-unsafe).
 
 - **A/B partitioning, atomic apply, automatic rollback** on boot-failure
@@ -221,7 +221,7 @@ and browser CPU, and fidelity error (RMS depth error after the round trip).
 - `fjarr.telemetry/alert` — a conventional event shape
   `{severity, code, message, data?}` so hosts route robot-originated
   notifications to their own toast/notification system uniformly (the
-  fleet-dashboard's `/rtc/toastMessage`, generalized).
+  fleet dashboard's `/rtc/toastMessage`, generalized).
 - `fjarr.files/list` — directory listing within the configured allow-lists,
   a prerequisite for any file-browser UI.
 - `fjarr.core` — reserved namespace for session-level messages that belong

@@ -9,7 +9,7 @@ title: "ADR 0016: SWUpdate OTA"
 
 Fleet OTA (docs/06 `fjarr.ota`) requires A/B partitioning, atomic apply,
 automatic rollback, delta updates, and pre/post hooks — opinionated and
-working out of the box. The in-house prior art (fleet-daemon `deploy.py`: git +
+working out of the box. The in-house prior art (the fleet daemon's `deploy.py`: git +
 docker + two firmware flashes, no A/B, no rollback, abort-unsafe) is the
 documented anti-pattern. This is a solved problem in embedded Linux; we
 should adopt, not invent.
@@ -42,4 +42,4 @@ question #6).
 We inherit a battle-tested updater and its constraints (image-based robots —
 the opinionated part); the reference partition/image recipe becomes a
 deliverable; hook scripts get the safety treatment (timeout-bounded,
-refusable, logged) that fleet-daemon lacked.
+refusable, logged) that the fleet daemon lacked.
