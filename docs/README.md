@@ -35,6 +35,7 @@ with rationale).
 | 19 | [Website & publishing](19-website-and-publishing.md) | How docs + landing page ship | review |
 | 20 | [Agentic development](20-agentic-development.md) | AI agents as first-class contributors | review |
 | 21 | [Web client architecture](21-web-client-architecture.md) | @fjarr/core + @fjarr/react: sessions, subscriptions, publishing, demand-driven media | review |
+| 22 | [Remote desktop client](22-remote-desktop-client.md) | Browser-side fjarr.desktop: input pipeline, focus, cursor, latency, clipboard | review |
 
 ## Architecture decision records
 

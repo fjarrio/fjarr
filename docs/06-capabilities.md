@@ -24,7 +24,7 @@ Control messages (envelopes on `fjarr:control`, docs/08#envelope):
 
 | `type` | kind | payload | semantics |
 |---|---|---|---|
-| `select-tracks` | request → result | `{"tracks": [{"track_id": "cam-front", "enabled": true, "tier": "active" \| "thumbnail"}]}` | full desired state for the tracks listed (unlisted = unchanged); agent flips valves, applies docs/16 tier params, requests a keyframe on enable; `result.ok` |
+| `select-tracks` | request → result | `{"tracks": [{"track_id": "cam-front", "enabled": true, "tier": "active" \| "thumbnail", "preference"?: "motion" \| "sharpness"}]}` | full desired state for the tracks listed (unlisted = unchanged); agent flips valves, applies docs/16 tier params, requests a keyframe on enable; `preference` maps to the encoder's degradation preference (desktop text wants `sharpness`); `result.ok` |
 | `bandwidth-stats` | event | `{"interval_ms": 1000, "tracks": [{"track_id", "enabled", "tier", "bitrate_bps", "frames", "dropped"}]}` | per second while any track is enabled |
 
 The client folds all consumers' demand into one `select-tracks`
@@ -52,6 +52,10 @@ detail is incorporated here).
   defining industrial requirement; backend chosen accordingly
   ([ADR-0006](adr/0006-desktop-backend-selection.md)).
 - Privilege separation for injection ([ADR-0009](adr/0009-privilege-separation.md)).
+- Browser-side design — input pipeline, focus, browser-reserved shortcuts,
+  cursor strategy, latency knobs, clipboard UX — is
+  [docs/22](22-remote-desktop-client.md); the same `select-tracks` message
+  as the camera capability carries `preference: "sharpness"` for text.
 - **Desktop audio** (planned, after `fjarr.audio`): the robot's system audio
   output as a `kind: "audio"` track — PipeWire capture on Wayland, PulseAudio
   monitor source on X11 (a per-backend criterion in [docs/07](07-desktop-backends.md)).

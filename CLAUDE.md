@@ -76,6 +76,7 @@ CI mirrors all of this in `.github/workflows/ci.yml`.
 | Wire behavior | docs/08-protocol.md (normative) |
 | Embedding APIs / idioms | docs/09-interfaces.md |
 | Web library design (sessions, subscriptions, publishing, tracks) | docs/21-web-client-architecture.md |
+| Remote desktop in the browser (input, focus, cursor, clipboard) | docs/22-remote-desktop-client.md |
 | Capability plugin rules | docs/05-extension-model.md + `/new-capability` |
 | Security constraints | docs/10-security.md |
 | Why decisions were made | docs/adr/README.md |

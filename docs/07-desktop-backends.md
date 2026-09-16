@@ -46,6 +46,7 @@ Notes:
 | Code size/complexity | LoC of the backend implementation |
 | Future-proofing | upstream direction (Ubuntu is Wayland-default; Xorg maintenance reality) |
 | Desktop audio capture path | PipeWire capture (Wayland) vs PulseAudio monitor source (X11): availability, latency, whether it works unattended |
+| Cursor metadata | can the backend capture *without* the cursor and report cursor shape changes (XFixes cursor image events / PipeWire cursor metadata)? Required for local-cursor mode ([docs/22](22-remote-desktop-client.md#cursor-strategy)) |
 
 ## Spike protocol (M2)
 

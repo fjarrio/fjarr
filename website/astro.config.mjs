@@ -37,6 +37,7 @@ export default defineConfig({
             "10-security",
             "16-performance-budgets",
             "21-web-client-architecture",
+            "22-remote-desktop-client",
           ],
         },
         {

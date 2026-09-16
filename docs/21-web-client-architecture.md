@@ -340,10 +340,24 @@ overridable; the host's design system wins (docs/05).
 | `useSessionPeers` / `<SessionPeers>` | who else is on this robot and who owns input (docs/08 `session-peers`, M5) | — |
 | `useGamepadHaptics` | maps capability `haptic` events to the Gamepad vibration actuator | — |
 | `<ConnectionQuality>` | health level + reasons from the stats sampler | `StreamSelector` stats panel (generalized) |
-| `<DesktopView>` / `<TerminalView>` | capability views (M3/M2), registered via `registerCapabilityView` | — |
+| `<DesktopView>` | the remote-desktop surface — design in [docs/22](22-remote-desktop-client.md), which also lists the core requirements slice 2 must satisfy for it | — |
+| `<TerminalView>` | capability view (M2), registered via `registerCapabilityView` | — |
 
 Third-party capabilities register views with the same registry
 ([docs/05](05-extension-model.md#web-side-capability-components)).
+
+## Capability-specific requirements on the core
+
+Some capabilities need small hooks in the core that are cheap now and
+breaking later. Slice 2 provides them up front:
+
+- **Remote desktop** ([docs/22 core requirements](22-remote-desktop-client.md#core-requirements-for-slice-2-so-m3-needs-no-core-change)):
+  track acquire options `preference` + `latencyMode` (→ `select-tracks`,
+  `jitterBufferTarget`), a page-level keyboard **focus registry**, cursor
+  events on the realtime class, `useTimeSync`.
+- **Terminal**: an ordered byte channel with `onDrain` (publishing table).
+- **Audio**: autoplay-unlock status and `replaceTrack` uplink on a
+  pre-allocated transceiver (media section).
 
 ## Host-app conveniences (opt-in, never automatic)
 

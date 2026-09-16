@@ -144,11 +144,19 @@ Pointer motion (realtime channel, coalesced client-side to ≤ 60 Hz):
 
 `x`/`y` are normalized [0,1] within that monitor's track — DPI/scaling
 agnostic by construction. `seq` is monotonic; receivers drop stale.
-Buttons/wheel/keys (control channel): `{"type":"button","payload":
-{"button":"left","down":true}}`, `{"type":"key","payload":{"code":"KeyA",
-"down":true}}` — `code` is `KeyboardEvent.code` (layout-independent physical
-key), mapped to Linux keycodes agent-side. On `session-close` for any reason
-the agent MUST release all held keys/buttons.
+Control-channel input messages (all `cap: "fjarr.desktop"`):
+
+| `type` | payload | notes |
+|---|---|---|
+| `button` | `{"button": "left" \| "middle" \| "right" \| "back" \| "forward", "down": bool}` | |
+| `wheel` | `{"dx": px, "dy": px}` | already normalized to pixels by the client |
+| `key` | `{"code": "KeyA", "down": bool}` | `code` = `KeyboardEvent.code` (physical key), mapped to Linux keycodes agent-side; clients MUST NOT forward browser auto-repeat — the held key repeats natively |
+| `key-combo` | `{"codes": ["ControlLeft", "AltLeft", "Delete"]}` | atomic press-and-release for combos the browser cannot capture |
+| `text` | `{"text": "åäö"}` | composed/IME/pasted text the physical-key path cannot express; agent injects as Unicode typing |
+| `release-all` | `{}` | client-initiated on focus loss; the agent MUST also release everything on `session-close` |
+| `cursor` *(agent → client, realtime class)* | `{"shape_id", "hotspot": {x, y}, "png"?: base64}` | cursor shape changes for local-cursor rendering ([docs/22](22-remote-desktop-client.md#cursor-strategy)); `png` only when a new `shape_id` appears |
+
+Full client-side semantics: [docs/22](22-remote-desktop-client.md#input-pipeline).
 
 ## File frames (fjarr.files) {#file-frames}
 
