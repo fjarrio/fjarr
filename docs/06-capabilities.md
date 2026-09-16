@@ -178,7 +178,7 @@ on either side (GStreamer `opusenc`/`opusdec`, browser `getUserMedia`).
 **Accepted when:** an operator hears the robot-sim's synthetic audio source
 within budget (docs/16); PTT delivers speech to the sim's sink with
 echo cancellation on; releasing PTT stops the uplink within 200 ms; audit
-events recorded. Milestone: after M3 ([roadmap](17-roadmap.md)).
+events recorded. Milestone: **M3** ([roadmap](17-roadmap.md#m3--see-control-and-hear-the-robot)).
 
 ## `fjarr.logs` — live log tailing (planned)
 
@@ -186,7 +186,8 @@ Peer + backend consumers. `journalctl`/application log streams over a
 reliable-ordered channel with server-side filtering (unit, level, regex),
 backpressured so a chatty robot can't flood the operator; the same source
 feeds observability (M7) in the backend mode. Cheap, and the single most
-requested support feature after "show me the screen". Milestone: with M7.
+requested support feature after "show me the screen". Milestone: peer mode
+**M4**, backend mode **M7** ([roadmap](17-roadmap.md)).
 
 ## Sensor data transport: video track or stream class? {#sensor-transport}
 
