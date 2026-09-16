@@ -213,6 +213,14 @@ so no SDP parsing or payload-type guessing is ever needed.
 `MediaStreamTrack`s live in the registry, **independent of any element**:
 a `<video>` that mounts later simply attaches to the existing track.
 
+**Renegotiation-safe.** A new offer mid-session ([docs/08](08-protocol.md#renegotiation))
+is *diffed* against the registry by `track_id`: new tracks are added
+(pending until their `RTCTrackEvent`), removed tracks are released and their
+consumers see `status: "unavailable"` while keeping their handles, and
+untouched tracks are left strictly alone — no element re-attach, no
+flicker. Demand is re-flushed only for tracks whose entry changed. Offers
+with a `manifest_version` older than the applied one are ignored.
+
 **Fan-out is free.** Any number of consumers (a grid tile, a floating
 overlay, a picture-in-picture, a canvas overlay) attach to the *same*
 track: the browser receives and decodes each RTP stream exactly once

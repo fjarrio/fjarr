@@ -105,10 +105,20 @@ pub struct TrackManifestEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitorInfo {
+    /// Stable identity (connector name) — never key on `index`.
+    pub id: String,
     pub index: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary: Option<bool>,
+    #[serde(default)]
+    pub x: i32,
+    #[serde(default)]
+    pub y: i32,
     pub w: u32,
     pub h: u32,
     pub scale: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// Message bodies, discriminated by `type`. Unknown fields inside known
@@ -148,6 +158,9 @@ pub enum Body {
         session_id: String,
         sdp: String,
         tracks: Vec<TrackManifestEntry>,
+        /// Monotonic per session; orders renegotiation offers (docs/08#renegotiation).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        manifest_version: Option<u32>,
     },
     Answer {
         session_id: String,

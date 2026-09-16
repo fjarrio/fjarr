@@ -47,6 +47,7 @@ Notes:
 | Future-proofing | upstream direction (Ubuntu is Wayland-default; Xorg maintenance reality) |
 | Desktop audio capture path | PipeWire capture (Wayland) vs PulseAudio monitor source (X11): availability, latency, whether it works unattended |
 | Cursor metadata | can the backend capture *without* the cursor and report cursor shape changes (XFixes cursor image events / PipeWire cursor metadata)? Required for local-cursor mode ([docs/22](22-remote-desktop-client.md#cursor-strategy)) |
+| **Monitor hot-plug** | change notification (X11: RandR `RRScreenChangeNotify`/output events; Wayland: does the portal session expose new outputs, or must `SelectSources` re-run — and can that happen unattended with a restore token?), stable connector ids, adding/removing one capture without disturbing the others, zero-monitor and re-plug behavior ([docs/06](06-capabilities.md#fjarrdesktop--remote-desktop-m3-backend-spikes-m2)) |
 
 ## Spike protocol (M2)
 
@@ -63,6 +64,16 @@ Decision rule: **unattended access is a hard gate** — a combo that cannot
 reach a rebooted, nobody-logged-in robot is out for the appliance case
 regardless of other scores. Among survivors, lowest operational complexity
 wins; latency differences under 20 ms p50 are noise.
+
+## Simulating hot-plug
+
+robot-sim's Xvfb runs with the RandR extension; RandR 1.5 *virtual
+monitors* (`xrandr --setmonitor VIRT-2 1280/300x720/200+1920+0 none`,
+`xrandr --delmonitor VIRT-2`) add and remove monitor objects at runtime
+without real hardware, which is what X11 backends see on a hot-plug. The
+M2 spikes verify this works on Xvfb and it becomes the docs/15 hot-plug
+test fixture; the Wayland equivalent (a headless compositor with
+configurable outputs) is a spike question in its own right.
 
 ## Working hypotheses (to be falsified, not trusted)
 

@@ -1,7 +1,7 @@
 {
   "v": 1,
   "type": "offer",
-  "event_id": "0192f3a1-offer000",
+  "event_id": "0192f3a1-offer0002",
   "ts": 1789503000000,
   "session_id": "s-01",
   "sdp": "v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\n\u2026",
@@ -17,25 +17,24 @@
       "mid": "0"
     },
     {
-      "track_id": "desk-HDMI-1",
+      "track_id": "desk-DP-2",
       "cap": "fjarr.desktop",
       "kind": "video",
-      "label": "HDMI-1 (Dell U2720Q)",
+      "label": "DP-2",
       "codec": "H264",
-      "pt": 97,
+      "pt": 98,
+      "mid": "2",
       "monitor": {
-        "id": "HDMI-1",
+        "id": "DP-2",
         "index": 0,
         "primary": true,
         "x": 0,
         "y": 0,
-        "w": 1920,
-        "h": 1080,
-        "scale": 1.0,
-        "name": "Dell U2720Q"
-      },
-      "mid": "1"
+        "w": 2560,
+        "h": 1440,
+        "scale": 1.0
+      }
     }
   ],
-  "manifest_version": 1
+  "manifest_version": 2
 }

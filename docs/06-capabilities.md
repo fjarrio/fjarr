@@ -42,7 +42,18 @@ discussion is archived in the gitignored `inspiration/` folder; the full
 detail is incorporated here).
 
 - One video track per monitor (multi-monitor = multiple tracks, dashboard
-  picks; never one huge stitched frame).
+  picks; never one huge stitched frame). Track identity derives from the
+  monitor's **stable connector id** (docs/08), never from an index.
+- **Hot-plug is a first-class requirement, on both sides.** Monitors may be
+  connected, disconnected, re-plugged, or change mode at any time during a
+  session: the agent's backend reports changes (`on_monitors_changed`), the
+  capability updates its track set and the core renegotiates
+  ([docs/08](08-protocol.md#renegotiation)) while **every other monitor's
+  video keeps flowing**; a `monitors` event precedes the renegotiation so
+  the UI reacts instantly. Same-monitor mode/DPI changes update the track in
+  place (new geometry, keyframe). Zero monitors (headless robot, everything
+  unplugged) is a valid state the session survives; a re-plugged monitor
+  returns under its old identity. Web side: [docs/22](22-remote-desktop-client.md#monitors-and-geometry).
 - Pointer: absolute normalized coordinates per monitor, lossy channel;
   buttons/wheel reliable. Keyboard: physical `KeyboardEvent.code` →
   Linux keycodes, reliable channel; layout handling per backend
@@ -64,7 +75,12 @@ detail is incorporated here).
 **Accepted when:** operator controls the robot-sim desktop end-to-end
 (input-to-photon within [budgets](16-performance-budgets.md)); reboot of the
 sim brings the desktop back with no local interaction; a stuck-modifier can
-never persist after disconnect (input state reset on session end).
+never persist after disconnect (input state reset on session end);
+**hot-plug**: with two monitors streaming, adding a third shows it in the UI
+within 2 s with zero dropped frames on the other two, unplugging one leaves
+a placeholder and the rest untouched, re-plugging restores it under the same
+`track_id`, a mode change keeps input coordinates correct, and unplugging
+everything then plugging one back recovers without a reconnect.
 
 ## `fjarr.telemetry` — sensor/telemetry streaming (M4)
 

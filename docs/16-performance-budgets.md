@@ -75,4 +75,7 @@ association can't hold that, bulk moves to a separate PeerConnection
    (control DC has priority).
 
 Startup: first frame visible < 2 s after `session-accept` on P2P, < 3 s on
-relay (keyframe-on-connect required).
+relay (keyframe-on-connect required). **Hot-plug** (docs/08 renegotiation):
+a newly connected monitor's first frame < 2 s after the `monitors` event;
+**zero** dropped frames and no re-attach on unchanged tracks during the
+renegotiation.

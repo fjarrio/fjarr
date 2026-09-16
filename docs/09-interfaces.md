@@ -79,7 +79,9 @@ public:
 
 // SessionContext (per session): session_id(), operator identity,
 // ChannelSender& channel(ChannelClass), per-session track activation,
-// WorkerPool& worker(). BackendContext (per agent): ChannelSender& with
+// update_tracks(new set) — mid-session track add/remove; the core coalesces
+// into one serialized renegotiation offer and keeps other tracks flowing
+// (docs/08#renegotiation) — and WorkerPool& worker(). BackendContext (per agent): ChannelSender& with
 // store-and-forward semantics for durable event types (docs/11 whitelist
 // pattern). Both are populated by the M1 core; capabilities never touch
 // sockets or SDP.
@@ -95,9 +97,13 @@ namespace fjarr {
 class DesktopBackend {
 public:
   virtual ~DesktopBackend() = default;
-  virtual std::vector<Monitor> monitors() = 0;          // id, geometry, scale
+  virtual std::vector<Monitor> monitors() = 0;          // stable connector ids, geometry
+  // Hot-plug: fires on connect/disconnect/mode change with the full new set;
+  // the capability diffs it and calls SessionContext::update_tracks
+  // (docs/08#renegotiation). Backends without native events poll.
+  virtual void on_monitors_changed(std::function<void(std::vector<Monitor>)>) = 0;
   virtual CaptureSource start_capture(MonitorId) = 0;   // yields a GstElement/bin
-  virtual void stop_capture(MonitorId) = 0;
+  virtual void stop_capture(MonitorId) = 0;             // never disturbs other captures
   // Input: absolute normalized coordinates within one monitor's region —
   // the Wayland mapping_id model; X11 implements INTO this shape.
   virtual void pointer_motion(MonitorId, double nx, double ny) = 0;

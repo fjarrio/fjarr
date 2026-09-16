@@ -36,10 +36,14 @@ minimal elements; the toolbar is a slot the host fills.
 ## Monitors and geometry
 
 The manifest carries one video track per monitor with
-`monitor: {index, w, h, scale}` (docs/08). `useMonitors(session)` exposes
-them; the view renders one monitor, a host layout can render several
-(side by side / tabs). Coordinates sent to the agent are **normalized to
-the monitor** ([docs/08](08-protocol.md#input-events-fjarrdesktop)), so
+`monitor: {id, index, primary, x, y, w, h, scale, name}` (docs/08). **`id`
+is the stable identity** (connector name) and `track_id` is `desk-<id>`;
+`index` is display order only and changes when other monitors come and go
+— nothing in the client keys on it. `useMonitors(session)` is reactive: it
+reflects the `monitors` event immediately and the manifest after
+renegotiation. The view renders one monitor, a host layout can render
+several. Coordinates sent to the agent are **normalized to the monitor**
+([docs/08](08-protocol.md#input-events-fjarrdesktop)), so
 the client must map from screen pixels to the video's **content box** —
 with `object-fit: contain` the element has letterbox bars that are not
 part of the monitor:
@@ -52,6 +56,40 @@ const nx = (e.clientX - box.left) / box.width;   // clamp to [0,1]; outside → 
 Display modes: `fit` (contain), `fill`, and `native` (1:1 pixels with
 scrolling, for pixel-exact work); HiDPI is handled by the agent's `scale`
 being informational only — normalized coordinates make it irrelevant.
+
+### Hot-plug
+
+Monitors connect, disconnect, re-plug and change mode during sessions;
+the client must make this boring:
+
+- `<DesktopView monitorId="HDMI-1">` binds to the **stable id**. If that
+  monitor disappears the view stays mounted and shows a "monitor
+  disconnected" placeholder (its track handle is kept, demand released);
+  when the monitor returns — same `track_id` — the view rebinds
+  automatically, with no host-app involvement.
+- `<DesktopView>` with no `monitorId` follows a policy: `primary` (default,
+  tracks the `primary` flag as it moves), or `first`.
+- `<DesktopLayout session>` renders every current monitor arranged by its
+  `x/y` geometry — the same picture as the OS display settings — and
+  reflows on every change; the host can override with tabs or a grid.
+- The `monitors` event (docs/08) arrives *before* the renegotiation
+  finishes, so placeholders and arrangement update instantly; frames follow
+  within the docs/16 hot-plug budget. Tracks for untouched monitors are
+  never re-attached (docs/21 renegotiation-safe registry) — no flicker on
+  the monitors you were working on.
+- Mode/DPI change on the same monitor: the `<video>` simply reports new
+  `videoWidth/Height`; the content-box mapping recomputes; nothing
+  re-binds.
+- Zero monitors: the desktop view shows "no display connected"; the
+  session, input focus and clipboard remain; the first monitor to appear
+  is bound per policy.
+- Mirrored outputs appear as separate tracks; `<DesktopLayout>` hides a
+  monitor whose geometry exactly duplicates another's unless `showMirrors`.
+
+Keyboard focus is per session, not per monitor — keys go to the robot's
+focused window wherever it is; pointer events carry the monitor's
+`track_id`, so a single keyboard owner with several monitor views is the
+normal case.
 
 ## Input pipeline
 
@@ -156,12 +194,21 @@ lease and the toolbar shows locked/unlocked.
 6. A per-page **focus registry** in `@fjarr/react` (which view owns the
    keyboard) — small, but it must exist at the client level, not inside a
    component.
+7. **Renegotiation-safe track registry**: manifest diffing by `track_id`,
+   `manifest_version` ordering, and track handles that survive a track
+   disappearing and rebind when it returns — the substrate for monitor
+   hot-plug ([docs/21](21-web-client-architecture.md#track-registry)).
 
 ## Testing (docs/15)
 
 Unit: letterbox math (fit/fill/native, HiDPI), held-state release on blur,
-repeat filtering, wheel normalization, focus arbitration with three views.
+repeat filtering, wheel normalization, focus arbitration with three views,
+manifest diffing on renegotiation (add/remove/mode-change/re-plug, stale
+`manifest_version` ignored), view rebinding policies.
 Browser (Playwright against robot-sim): type "åäö" and a Ctrl+Alt+Del
 combo into the sim's xterm and read it back; Alt+Tab in fullscreen with
 keyboard lock; clipboard round trip both ways; cursor-shape event
-rendering; input-to-photon within docs/16 budgets.
+rendering; input-to-photon within docs/16 budgets; **hot-plug** via
+`xrandr --setmonitor`/`--delmonitor` on robot-sim ([docs/07](07-desktop-backends.md#simulating-hot-plug)):
+add → visible < 2 s with zero dropped frames on the others, remove →
+placeholder, re-plug → same `track_id`, remove all → recover.

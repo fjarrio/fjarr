@@ -35,6 +35,7 @@ mock's best idea), scripted in integration tests. Minimum fault menu:
 | Agent SIGKILL mid-session | operator sees `peer-gone` ≤ heartbeat budget; supervised restart; robot reachable again < 30 s |
 | Media plane hang (SIGSTOP) | control plane survives; ownership lease expires (fail-open); watchdog restarts media plane |
 | Mid-transfer network kill | file resume from received ranges; hash verifies |
+| Monitor hot-plug during a session (`xrandr --setmonitor`/`--delmonitor` on robot-sim) | renegotiation adds/removes the track; other monitors' frame counters never stall; re-plug restores the same `track_id`; zero monitors then one recovers without reconnect |
 | Grant expired / clock skew | clean `grant-expired`, no retry storm (fatal vs retryable taxonomy) |
 
 ## Latency harness (glass-to-glass) {#latency-harness}

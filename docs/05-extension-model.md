@@ -38,7 +38,11 @@ signatures live in [docs/09](09-interfaces.md); semantically, a capability:
      per-session track set is provided by the capability at
      `session_attached` (monitors and cameras are runtime facts) and frozen
      into that session's offer manifest with stable `track_id`s
-     ([M1 API-fit review, F1](reviews/m1-api-fit-review.md));
+     ([M1 API-fit review, F1](reviews/m1-api-fit-review.md)); the set may
+     change mid-session (`SessionContext::update_tracks`, e.g. monitor
+     hot-plug) — the core coalesces changes into one serialized
+     renegotiation and keeps unchanged tracks flowing
+     ([docs/08](08-protocol.md#renegotiation));
    - **dependencies**: names of other capabilities it requires (e.g.
      `fjarr.ota` → `fjarr.files`). The core validates presence at
      registration; the typed inter-capability handle is deferred to M4

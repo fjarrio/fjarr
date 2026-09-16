@@ -119,11 +119,20 @@ Sent inside `offer.tracks`, before any media flows:
 [
   {"track_id": "cam-front", "cap": "fjarr.camera", "kind": "video",
    "label": "Front", "codec": "H264", "pt": 96, "mid": "0", "monitor": null},
-  {"track_id": "desk-0", "cap": "fjarr.desktop", "kind": "video",
-   "label": "Monitor 1", "codec": "H264", "pt": 97, "mid": "1",
-   "monitor": {"index": 0, "w": 1920, "h": 1080, "scale": 1.0}}
+  {"track_id": "desk-HDMI-1", "cap": "fjarr.desktop", "kind": "video",
+   "label": "HDMI-1 (Dell U2720Q)", "codec": "H264", "pt": 97, "mid": "1",
+   "monitor": {"id": "HDMI-1", "index": 0, "primary": true,
+               "x": 0, "y": 0, "w": 1920, "h": 1080, "scale": 1.0,
+               "name": "Dell U2720Q"}}
 ]
 ```
+
+`monitor.id` is the **stable identity** (the connector name, e.g. `HDMI-1`,
+`eDP-1`; virtual outputs use the backend's stable name) and desktop
+`track_id`s derive from it (`desk-<id>`), so a monitor keeps its identity
+across unplug/replug and across sessions. `index`, `primary` and the `x`/`y`
+placement are informational and change freely; `name` is the EDID model when
+known. Never key anything on `index`.
 
 `kind` is `"video"` or `"audio"` (audio tracks: docs/06 `fjarr.audio`).
 `track_id` is stable across renegotiations. `mid` is the SDP media
@@ -132,6 +141,25 @@ offer time); receivers map incoming `RTCTrackEvent.transceiver.mid` →
 `track_id` directly — no SDP parsing, no payload-type guessing
 ([docs/21](21-web-client-architecture.md#track-registry)). Dashboards MUST
 label from the manifest, not from SDP order. *(camera-streamer manifest lesson)*
+
+### Renegotiation and manifest updates {#renegotiation}
+
+The track set can change mid-session (monitor hot-plug, a capability adding
+a track). The agent — which always offers — sends a **new `offer`** on the
+established session:
+
+- `tracks` is the **complete** new manifest; unchanged tracks keep their
+  `track_id` and `mid`; removed tracks are absent and their transceivers are
+  stopped; new tracks get new transceivers.
+- `manifest_version` (monotonic `u32`, new offer field) orders manifests;
+  receivers ignore an offer older than one already applied.
+- The agent serializes renegotiations: at most one un-answered offer per
+  session; further changes are coalesced into the next offer.
+- **Media on unchanged tracks MUST continue uninterrupted** throughout the
+  renegotiation (docs/16 budget) — a hot-plug on one monitor never blips
+  another.
+- ICE restart travels in the offer's SDP as usual; the same serialization
+  applies.
 
 ## Input events (fjarr.desktop)
 
@@ -155,6 +183,7 @@ Control-channel input messages (all `cap: "fjarr.desktop"`):
 | `text` | `{"text": "åäö"}` | composed/IME/pasted text the physical-key path cannot express; agent injects as Unicode typing |
 | `release-all` | `{}` | client-initiated on focus loss; the agent MUST also release everything on `session-close` |
 | `cursor` *(agent → client, realtime class)* | `{"shape_id", "hotspot": {x, y}, "png"?: base64}` | cursor shape changes for local-cursor rendering ([docs/22](22-remote-desktop-client.md#cursor-strategy)); `png` only when a new `shape_id` appears |
+| `monitors` *(agent → client, event)* | `{"monitors": [monitor…], "reason": "hotplug" \| "mode-change" \| "initial"}` | emitted immediately on any change with the full current set, *before* the renegotiation completes, so UIs can show placeholders/arrangements at once; the offer's manifest remains the source of truth for tracks |
 
 Full client-side semantics: [docs/22](22-remote-desktop-client.md#input-pipeline).
 

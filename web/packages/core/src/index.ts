@@ -30,7 +30,18 @@ export interface TrackManifestEntry {
   pt: number;
   /** SDP media id of the carrying transceiver — maps RTCTrackEvent.transceiver.mid → track_id. */
   mid?: string;
-  monitor: { index: number; w: number; h: number; scale: number } | null;
+  monitor: {
+    /** Stable identity (connector name, e.g. "HDMI-1") — never key on index. */
+    id: string;
+    index: number;
+    primary?: boolean;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    scale: number;
+    name?: string;
+  } | null;
 }
 
 /** spec: docs/09-interfaces.md#a-session-grants-customer-backend--operator-client */
