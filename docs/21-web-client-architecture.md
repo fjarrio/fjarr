@@ -316,6 +316,8 @@ Third-party capabilities register views with the same registry
   the escape hatch.
 - Agent supplies `mid` in the manifest (protocol amendment, docs/08).
 
-Open for review before slice 2 starts: the idle-policy default (currently
-no auto-close), the 250 ms demand debounce, and whether `<VideoGrid>`
-belongs in the library at all or only in the demo.
+Decided with the maintainer (2026-09-16): idle policy defaults to **never
+auto-close** (hosts opt into `closeAfterMs`); `<VideoGrid>` **ships in
+`@fjarr/react`**, headless-first, with host-provided ordering. The 250 ms
+demand debounce is an initial value to be tuned against the latency
+harness.
