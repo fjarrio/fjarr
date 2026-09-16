@@ -39,6 +39,7 @@ groups with comments.
 | jsonwebtoken | 9 | session-grant verification (HS256 at M1) | MIT | yes |
 | hmac + sha1 + sha2 | 0.12/0.10 | TURN ephemeral creds (SHA1, coturn format), webhook signatures (SHA256) | MIT/Apache-2.0 | yes |
 | base64 | 0.22 | TURN credential encoding | MIT/Apache-2.0 | yes |
+| subtle | 2 | constant-time token comparison | BSD-3 | yes |
 | uuid (v7) | 1.x | event/session ids | MIT/Apache-2.0 | yes |
 | reqwest (rustls) | 0.12 | webhook delivery | MIT/Apache-2.0 | yes |
 | tokio-tungstenite | 0.24 | e2e test WS client | MIT | dev-only |

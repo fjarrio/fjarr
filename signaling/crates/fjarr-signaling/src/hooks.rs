@@ -7,7 +7,7 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::protocol::{CapabilityGrant, OperatorInfo};
+use crate::protocol::{error_codes as ec, CapabilityGrant, OperatorInfo};
 
 /// Verified content of a session grant (docs/09#a-session-grants).
 #[derive(Debug, Clone)]
@@ -21,8 +21,19 @@ pub struct VerifiedGrant {
 #[derive(Debug)]
 pub enum AuthError {
     /// Credential invalid/expired — fatal, the client must not retry as-is.
-    Rejected(&'static str),
+    /// `code` is the wire error code (docs/08#errors) so clients can tell
+    /// `grant-expired` (refetch and retry) from `auth-failed` (stop).
+    Rejected {
+        code: &'static str,
+        message: &'static str,
+    },
     Internal(String),
+}
+
+impl AuthError {
+    fn rejected(code: &'static str, message: &'static str) -> Self {
+        AuthError::Rejected { code, message }
+    }
 }
 
 /// Verifies session grants minted by the customer's backend.
@@ -97,13 +108,13 @@ impl GrantVerifier for Hs256GrantVerifier {
         let token = auth
             .get("jwt")
             .and_then(Value::as_str)
-            .ok_or(AuthError::Rejected("auth.jwt missing"))?;
+            .ok_or_else(|| AuthError::rejected(ec::AUTH_FAILED, "auth.jwt missing"))?;
         let data = jsonwebtoken::decode::<GrantClaims>(token, &self.key, &self.validation)
             .map_err(|e| match e.kind() {
                 jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
-                    AuthError::Rejected("grant expired")
+                    AuthError::rejected(ec::GRANT_EXPIRED, "grant expired")
                 }
-                _ => AuthError::Rejected("grant invalid"),
+                _ => AuthError::rejected(ec::AUTH_FAILED, "grant invalid"),
             })?;
         let c = data.claims;
         Ok(VerifiedGrant {
@@ -132,22 +143,19 @@ impl RobotRegistry for DevSharedTokenRegistry {
         let robot_id = auth
             .get("robot_id")
             .and_then(Value::as_str)
-            .ok_or(AuthError::Rejected("auth.robot_id missing"))?;
+            .ok_or_else(|| AuthError::rejected(ec::AUTH_FAILED, "auth.robot_id missing"))?;
         let token = auth
             .get("dev_token")
             .and_then(Value::as_str)
-            .ok_or(AuthError::Rejected("auth.dev_token missing"))?;
-        // Constant-time comparison is overkill for the dev path but free:
-        if token.len() == self.token.len()
-            && token
-                .bytes()
-                .zip(self.token.bytes())
-                .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-                == 0
-        {
+            .ok_or_else(|| AuthError::rejected(ec::AUTH_FAILED, "auth.dev_token missing"))?;
+        // Constant-time comparison via the audited `subtle` crate (already
+        // in the dependency tree) — a hand-rolled loop is the kind of code
+        // that gets "simplified" into `==` and silently loses the property.
+        use subtle::ConstantTimeEq as _;
+        if bool::from(token.as_bytes().ct_eq(self.token.as_bytes())) {
             Ok(robot_id.to_string())
         } else {
-            Err(AuthError::Rejected("dev token mismatch"))
+            Err(AuthError::rejected(ec::AUTH_FAILED, "dev token mismatch"))
         }
     }
 }
@@ -157,13 +165,13 @@ pub struct RejectAll(pub &'static str);
 
 impl GrantVerifier for RejectAll {
     fn verify(&self, _: &Value) -> Result<VerifiedGrant, AuthError> {
-        Err(AuthError::Rejected(self.0))
+        Err(AuthError::rejected(ec::AUTH_FAILED, self.0))
     }
 }
 
 impl RobotRegistry for RejectAll {
     fn authenticate(&self, _: &Value) -> Result<String, AuthError> {
-        Err(AuthError::Rejected(self.0))
+        Err(AuthError::rejected(ec::AUTH_FAILED, self.0))
     }
 }
 

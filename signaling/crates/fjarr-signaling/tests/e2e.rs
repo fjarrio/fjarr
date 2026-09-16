@@ -41,10 +41,7 @@ async fn send(socket: &mut Socket, body: Value) {
     msg["v"] = json!(1);
     msg["event_id"] = json!(uuid::Uuid::now_v7().to_string());
     msg["ts"] = json!(1789503000000i64);
-    socket
-        .send(WsMsg::Text(msg.to_string()))
-        .await
-        .unwrap();
+    socket.send(WsMsg::Text(msg.to_string())).await.unwrap();
 }
 
 async fn recv(socket: &mut Socket) -> Value {
@@ -229,7 +226,8 @@ async fn bad_credentials_fail_closed() {
         }),
     )
     .await;
-    assert_eq!(recv(&mut operator).await["code"], "auth-failed");
+    // grant-expired ≠ auth-failed: client should refetch and retry.
+    assert_eq!(recv(&mut operator).await["code"], "grant-expired");
 }
 
 #[tokio::test]
@@ -254,4 +252,150 @@ async fn agent_socket_death_tells_operator_peer_gone() {
     let gone = recv(&mut operator).await;
     assert_eq!(gone["type"], "peer-gone");
     assert_eq!(gone["reason"], "agent-disconnected");
+}
+
+/// A second robot must not inject into / hijack another robot's session by
+/// naming its session_id (docs/10 ownership guard).
+#[tokio::test]
+async fn agent_cannot_relay_into_another_robots_session() {
+    let addr = start_server().await;
+
+    let mut agent_a = connect(addr).await;
+    agent_hello(&mut agent_a, "robot-a").await;
+    let mut operator = connect(addr).await;
+    send(
+        &mut operator,
+        json!({ "type": "hello", "role": "operator",
+                "auth": { "jwt": grant("robot-a") }, "proto_versions": [1] }),
+    )
+    .await;
+    let session_id = recv(&mut operator).await["session_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(recv(&mut agent_a).await["type"], "session-request");
+
+    // Robot B tries to push an offer into A's session.
+    let mut agent_b = connect(addr).await;
+    agent_hello(&mut agent_b, "robot-b").await;
+    send(
+        &mut agent_b,
+        json!({ "type": "offer", "session_id": session_id, "sdp": "malicious", "tracks": [] }),
+    )
+    .await;
+    let err = recv(&mut agent_b).await;
+    assert_eq!(err["code"], "session-unknown");
+
+    // The operator did not receive B's offer: A's legitimate offer is the
+    // next and only one it sees.
+    send(
+        &mut agent_a,
+        json!({ "type": "offer", "session_id": session_id, "sdp": "legitimate", "tracks": [] }),
+    )
+    .await;
+    let offer = recv(&mut operator).await;
+    assert_eq!(offer["sdp"], "legitimate");
+}
+
+/// An operator may only address the one session it owns (docs/10) — it
+/// cannot close another operator's session by guessing its id.
+#[tokio::test]
+async fn operator_cannot_close_another_session() {
+    let addr = start_server().await;
+    let mut agent = connect(addr).await;
+    agent_hello(&mut agent, "robot-a").await;
+
+    let mut op1 = connect(addr).await;
+    send(
+        &mut op1,
+        json!({ "type": "hello", "role": "operator",
+                "auth": { "jwt": grant("robot-a") }, "proto_versions": [1] }),
+    )
+    .await;
+    let victim = recv(&mut op1).await["session_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(recv(&mut agent).await["type"], "session-request");
+
+    let mut op2 = connect(addr).await;
+    send(
+        &mut op2,
+        json!({ "type": "hello", "role": "operator",
+                "auth": { "jwt": grant("robot-a") }, "proto_versions": [1] }),
+    )
+    .await;
+    assert_eq!(recv(&mut op2).await["type"], "hello-ack");
+    assert_eq!(recv(&mut agent).await["type"], "session-request");
+
+    send(
+        &mut op2,
+        json!({ "type": "session-close", "session_id": victim, "reason": "malice" }),
+    )
+    .await;
+    assert_eq!(recv(&mut op2).await["code"], "session-unknown");
+
+    // op1's session is intact: it can still relay ICE to the agent.
+    send(
+        &mut op1,
+        json!({ "type": "ice", "session_id": victim,
+                "candidate": "candidate:ok", "sdp_mline_index": 0 }),
+    )
+    .await;
+    let relayed = recv(&mut agent).await;
+    assert_eq!(relayed["type"], "ice");
+    assert_eq!(relayed["candidate"], "candidate:ok");
+}
+
+/// A stale agent socket timing out AFTER a reconnect must not tear down the
+/// reconnected socket's live session (generation guard, camera-streamer lesson).
+#[tokio::test]
+async fn stale_agent_socket_does_not_kill_reconnected_session() {
+    let addr = start_server().await;
+
+    let mut stale = connect(addr).await;
+    agent_hello(&mut stale, "robot-a").await;
+    let mut fresh = connect(addr).await;
+    agent_hello(&mut fresh, "robot-a").await;
+
+    let mut operator = connect(addr).await;
+    send(
+        &mut operator,
+        json!({ "type": "hello", "role": "operator",
+                "auth": { "jwt": grant("robot-a") }, "proto_versions": [1] }),
+    )
+    .await;
+    let session_id = recv(&mut operator).await["session_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(recv(&mut fresh).await["type"], "session-request");
+
+    // The stale socket dies — its disconnect must be a no-op.
+    drop(stale);
+
+    // The live session still relays; had it been wrongly swept, the operator
+    // would receive peer-gone instead of ice.
+    send(
+        &mut fresh,
+        json!({ "type": "ice", "session_id": session_id,
+                "candidate": "still-alive", "sdp_mline_index": 0 }),
+    )
+    .await;
+    let relayed = recv(&mut operator).await;
+    assert_eq!(relayed["type"], "ice");
+    assert_eq!(relayed["candidate"], "still-alive");
+}
+
+/// /healthz stays wired (deleted M0 test's coverage, re-established).
+#[tokio::test]
+async fn healthz_serves_ok() {
+    let addr = start_server().await;
+    let body = reqwest::get(format!("http://{addr}/healthz"))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(body, "ok");
 }

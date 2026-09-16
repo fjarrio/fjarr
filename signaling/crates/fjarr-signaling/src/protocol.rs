@@ -34,6 +34,14 @@ pub fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// Unix seconds. Single clock accessor shared by TURN expiry and elsewhere.
+pub fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     #[serde(flatten)]

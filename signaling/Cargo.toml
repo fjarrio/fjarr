@@ -21,6 +21,7 @@ hmac = "0.12"
 sha1 = "0.10"
 sha2 = "0.10"
 base64 = "0.22"
+subtle = "2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"

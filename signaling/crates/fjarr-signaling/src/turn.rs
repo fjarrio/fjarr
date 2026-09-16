@@ -16,11 +16,7 @@ pub struct TurnConfig {
 }
 
 pub fn mint(config: &TurnConfig, session_id: &str) -> TurnCredentials {
-    let expiry = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-        + config.ttl_secs;
+    let expiry = crate::protocol::now_secs() + config.ttl_secs;
     let username = format!("{expiry}:{session_id}");
     let mut mac = Hmac::<sha1::Sha1>::new_from_slice(config.secret.as_bytes())
         .expect("hmac accepts any key length");
