@@ -370,6 +370,7 @@ async fn operator_loop(
         let addressed = match &msg.body {
             Body::Answer { session_id, .. }
             | Body::Ice { session_id, .. }
+            | Body::IceRestart { session_id }
             | Body::SessionClose { session_id, .. } => Some(session_id.clone()),
             _ => None,
         };
@@ -380,7 +381,7 @@ async fn operator_loop(
             }
         }
         match &msg.body {
-            Body::Answer { .. } | Body::Ice { .. } => {
+            Body::Answer { .. } | Body::Ice { .. } | Body::IceRestart { .. } => {
                 if service.shared.relay_to_agent(&session_id, msg) == Relay::Unknown {
                     Shared::send_error(&tx, ec::SESSION_UNKNOWN, "unknown session", Some(event_id));
                 }

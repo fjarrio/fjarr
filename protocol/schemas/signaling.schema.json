@@ -29,6 +29,9 @@
       "$ref": "#/$defs/ice"
     },
     {
+      "$ref": "#/$defs/ice-restart"
+    },
+    {
       "$ref": "#/$defs/session-close"
     },
     {
@@ -441,6 +444,26 @@
         "sdp_mline_index"
       ],
       "type": "object"
+    },
+    "ice-restart": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        }
+      ],
+      "properties": {
+        "type": {
+          "const": "ice-restart"
+        },
+        "session_id": {
+          "$ref": "#/$defs/session_id"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object",
+      "description": "operator asks the always-offering agent to re-offer with an ICE restart (docs/08#reconnection)"
     },
     "session-close": {
       "allOf": [

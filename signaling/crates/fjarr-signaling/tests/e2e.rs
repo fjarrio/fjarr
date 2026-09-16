@@ -162,6 +162,16 @@ async fn full_session_brokering_and_relay() {
     .await;
     assert_eq!(recv(&mut agent).await["type"], "ice");
 
+    // Operator asks for an ICE restart (docs/08#reconnection) → relayed.
+    send(
+        &mut operator,
+        json!({ "type": "ice-restart", "session_id": session_id }),
+    )
+    .await;
+    let restart = recv(&mut agent).await;
+    assert_eq!(restart["type"], "ice-restart");
+    assert_eq!(restart["session_id"], json!(session_id));
+
     // Operator socket death → agent hears peer-gone, never infers.
     drop(operator);
     let gone = recv(&mut agent).await;

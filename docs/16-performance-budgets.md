@@ -58,6 +58,22 @@ Browser viewers are **relay-realistic**: capacity-plan TURN at ~1 stream =
 Mbps through the relay — metered per session ([docs/10](10-security.md#turn)),
 priced through ([docs/03](03-product-strategy.md#usage-meters)).
 
+## Connection health thresholds {#connection-health-thresholds}
+
+The web client's health score ([docs/21](21-web-client-architecture.md#stats-and-connection-health))
+derives from the selected candidate pair's RTT and the windowed packet
+loss across received tracks:
+
+| Level | Condition (any) |
+|---|---|
+| good | RTT ≤ 300 ms and loss ≤ 5 % and no freeze in the window |
+| degraded | RTT > 300 ms, or loss > 5 %, or a freeze ≥ 500 ms in the window |
+| poor | RTT > 600 ms, or loss > 15 %, or no frames decoded for a full window while a track is enabled |
+
+A level changes only after three consecutive 1 s samples agree
+(hysteresis). The numbers are initial targets in the same sense as the
+latency table above.
+
 ## Bulk vs interactive isolation
 
 During a saturating file transfer: interactive video g2g p95 may degrade by

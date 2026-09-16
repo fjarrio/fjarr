@@ -49,17 +49,32 @@ JSON text frames on the WSS connection. Common fields on **every** message:
 | `session-accept` / `session-reject` | agent→server→operator | `session_id`, reject: `reason` | agent's answer, relayed to the operator (policy hooks may refuse) |
 | `offer` | agent→server→operator | `session_id`, `sdp`, `tracks` ([manifest](#track-manifest)) | **agent always offers** |
 | `answer` | operator→server→agent | `session_id`, `sdp` | |
-| `ice` | both, trickled | `session_id`, `candidate`, `sdp_mline_index` | trickle ICE is REQUIRED |
+| `ice` | both, trickled | `session_id`, `candidate`, `sdp_mline_index` | trickle ICE is REQUIRED; `candidate: ""` = end of candidates |
+| `ice-restart` | operator→server→agent | `session_id` | the operator asks the always-offering agent to re-offer with an ICE restart on the existing session ([reconnection](#reconnection)); the agent answers with a new `offer` |
 | `session-close` | any | `session_id`, `reason` | orderly teardown |
 | `peer-gone` | server→other side | `session_id`, `reason` | server-side last-will: socket death is announced, never inferred *(camera-streamer last-will lesson)* |
 | `backend-stream` | agent↔server | `capability`, `payload` (envelope) | backend-consumer envelope transport |
 | `session-peers` *(planned, M5)* | server→all parties | `session_id`, `peers: [{operator, role: "owner" \| "viewer"}]` | multi-operator presence from the docs/10 ownership leases; emitted on every change |
 | `error` | server→client | `code`, `message`, `caused_by` (the offending message's `event_id`) | see [error codes](#errors) |
 
-Reconnection: both sides reconnect with backoff (base 0.5 s ×2, cap 30 s,
-±20 % jitter, reset only after 30 s stable *(fleet-daemon backoff, copied
-verbatim)*). An operator reconnect attempts ICE restart on the existing
-session before requesting a new one.
+### Reconnection {#reconnection}
+
+Both sides reconnect with backoff (base 0.5 s ×2, cap 30 s, ±20 % jitter,
+reset only after 30 s stable *(fleet-daemon backoff, copied verbatim)*).
+The operator's ladder, cheapest rung first:
+
+1. ICE `disconnected`: wait a short grace (3 s) — ICE usually recovers on
+   its own.
+2. Still disconnected, or ICE `failed`: send `ice-restart` over signaling
+   (the WSS is independent of the media path); the agent re-offers with
+   `iceRestart` and the same manifest; tracks and consumers stay attached.
+3. No new offer within 10 s, or the signaling socket itself is gone: a
+   **new signaling round** with the same grant (a fresh `hello`, new
+   session) — re-fetching the grant first if the server said
+   `grant-expired`. Consumers keep their subscriptions and demand; the
+   client re-flushes demand on the new session.
+4. Attempts exhausted (host-configurable, default 5 rounds): `failed`, with
+   an explicit retry available.
 
 ## DataChannel topology {#datachannel-topology}
 
@@ -84,9 +99,27 @@ Rules:
   and drop incomplete or stale ones; a frame larger than
   `sctp.maxMessageSize` is chunked, never queued behind a newer frame.
 - Session-level messages that belong to no capability use the reserved
-  `cap` `fjarr.core`: `ping`/`pong` (heartbeat), `time-sync`.
+  `cap` `fjarr.core` ([below](#fjarr-core)).
 - Heartbeat: `ping`/`pong` envelope on control every 5 s, 3 missed → session
   considered dead → teardown + `session-close(reason="heartbeat")`.
+- A capability that needs an **ordered byte stream** (terminal input,
+  clipboard payloads) declares a bulk channel; raw bytes ride it as binary
+  messages. Control and realtime carry envelopes only.
+
+### Session-level messages (`fjarr.core`) {#fjarr-core}
+
+| `type` | kind | payload | notes |
+|---|---|---|---|
+| `ping` | request (operator → agent) | `{"t0": ms}` | every 5 s while connected; `t0` = sender's clock at send |
+| `pong` | result (echoes the `ping`'s `event_id`) | `{"ok": true, "t0", "t1", "t2"}` | `t1` = agent receive time, `t2` = agent send time, agent clock |
+| `time-sync` | request / result | same as `ping`/`pong` | an explicit on-demand probe (latency harness); heartbeats already keep the estimate fresh |
+| `ice-restart` | — | — | not an envelope: it is a [signaling message](#signaling), because it must work while the media path is down |
+
+Clock offset and RTT follow NTP: with `t3` = the operator's receive time,
+`offset = ((t1 − t0) + (t2 − t3)) / 2`, `rtt = (t3 − t0) − (t2 − t1)`.
+Implementations keep the sample with the smallest RTT over a sliding
+window (the fleet-daemon lesson: a single skewed sample must not jump the
+clock); consumers stamp outgoing commands as `local + offset`.
 
 ## The envelope {#envelope}
 

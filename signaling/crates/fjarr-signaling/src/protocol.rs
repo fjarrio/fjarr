@@ -171,6 +171,10 @@ pub enum Body {
         candidate: String,
         sdp_mline_index: u32,
     },
+    /// Operator → agent: re-offer with an ICE restart (docs/08#reconnection).
+    IceRestart {
+        session_id: String,
+    },
     SessionClose {
         session_id: String,
         reason: String,

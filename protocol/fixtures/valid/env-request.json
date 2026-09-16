@@ -5,8 +5,12 @@
   "event_id": "0192f3a1-sel",
   "kind": "request",
   "payload": {
-    "enabled": [
-      "cam-front"
+    "tracks": [
+      {
+        "track_id": "cam-front",
+        "enabled": true,
+        "tier": "active"
+      }
     ]
   }
 }
