@@ -227,3 +227,29 @@ describe("review: deadman phase, bulk hang, UTF-8 cap", () => {
     expect(() => set.sendControl(env)).toThrow(/16 KiB/); // …bytes don't
   });
 });
+
+describe("review pass 2: oversized publish keeps the deadman alive", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("a rejected (oversized) publish neither poisons `last` nor stops the deadman", () => {
+    const out: string[] = [];
+    const slot = new PublisherSlot<string>(
+      (v) => {
+        if (v.length > 10) throw new Error("envelope exceeds 16 KiB");
+        out.push(v);
+        return true;
+      },
+      { maxHz: 100, deadman: { intervalMs: 100 } },
+      () => Date.now(),
+    );
+    const p = slot.acquire();
+    p.publish("ok");
+    vi.advanceTimersByTime(20);
+    expect(() => p.publish("way-too-long-payload")).toThrow(/16 KiB/);
+    vi.advanceTimersByTime(1000);
+    expect(out.length).toBeGreaterThanOrEqual(10);
+    expect(new Set(out)).toEqual(new Set(["ok"])); // the last *sent* value keeps going out
+    p.release();
+  });
+});

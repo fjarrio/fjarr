@@ -400,6 +400,7 @@ export class StatsSampler {
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly parser: StatsParser;
   private readonly health = new HealthTracker();
+  private readonly seen = new Set<string>();
   private readonly statsStore = createStore<SessionStats | null>(null);
   private readonly healthStore = createStore<SessionHealth>({ level: "good", reasons: [] });
   private pc: PeerConnectionLike | null = null;
@@ -426,12 +427,15 @@ export class StatsSampler {
     this.timer = setInterval(() => void this.sample(), this.options.intervalMs ?? 1000);
   }
 
-  /** Stops sampling; the last sample is dropped so a reconnecting session never shows a dead peer's numbers. */
+  /** Stops sampling; the last sample and level are dropped so a reconnecting session never shows a dead peer's numbers. */
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.pc = null;
+    this.seen.clear();
+    this.health.reset();
     this.statsStore.set(null);
+    this.healthStore.set({ level: "good", reasons: [] });
   }
 
   /** Also callable directly (tests, harness). */
@@ -447,7 +451,13 @@ export class StatsSampler {
     if (this.pc !== pc) return null;
     const stats = this.parser.parse(report, (this.options.now ?? Date.now)());
     this.statsStore.set(stats);
-    this.healthStore.set(this.health.push(rateSample(stats, this.options.enabledTracks())));
+    // "No media stats" only applies to tracks that have reported before:
+    // a browser that materialises inbound-rtp on the first packet must not
+    // rate a starting track as dead.
+    for (const id of Object.keys(stats.tracks)) this.seen.add(id);
+    const expected = new Set<string>();
+    for (const id of this.options.enabledTracks()) if (this.seen.has(id)) expected.add(id);
+    this.healthStore.set(this.health.push(rateSample(stats, expected)));
     return stats;
   }
 

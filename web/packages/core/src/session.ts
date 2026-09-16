@@ -172,6 +172,8 @@ export class SessionImpl implements Session {
   /** One ICE restart per disconnection (docs/08 rung 2), then rung 3. */
   private restartAttempted = false;
   private connectedAt: number | null = null;
+  /** One free (uncounted, unbacked-off) grant refresh per attempt; a second consecutive grant-expired is a real round. */
+  private freeRoundUsed = false;
   private uplinkActive = false;
 
   constructor(private readonly deps: SessionDeps) {
@@ -301,6 +303,7 @@ export class SessionImpl implements Session {
   }
 
   private async startRound(): Promise<void> {
+    if (TERMINAL.has(this.getState())) return; // a listener closed us during the transition
     const gen = ++this.generation;
     // The connect timeout bounds the whole round, grant fetch included: a
     // hanging host backend must not leave the session in `connecting` forever.
@@ -375,6 +378,7 @@ export class SessionImpl implements Session {
       case "hello-ack":
         this.sessionId = msg.session_id ?? null;
         this.turnCreds = msg.turn ?? null;
+        this.freeRoundUsed = false;
         this.setInfo({ sessionId: this.sessionId });
         break;
       case "session-accept":
@@ -391,8 +395,11 @@ export class SessionImpl implements Session {
         const c = { candidate: msg.candidate, sdpMLineIndex: msg.sdp_mline_index };
         // Queued until a remote description is applied — including while an
         // ICE restart is pending (candidates for the new ufrag must wait for the re-offer).
-        if (this.pc && this.remoteDescribed) void this.pc.addIceCandidate(c).catch((e: unknown) => this.reportError(e, "ice"));
-        else this.iceQueue.push(c);
+        if (this.pc && this.remoteDescribed) {
+          void this.pc.addIceCandidate(c).catch((e: unknown) => {
+            if (gen === this.generation) this.reportError(e, "ice");
+          });
+        } else this.iceQueue.push(c);
         break;
       }
       case "session-close":
@@ -411,10 +418,13 @@ export class SessionImpl implements Session {
   private onServerError(code: string, message: string, causedBy?: string): void {
     const error = new FjarrError(code, message, causedBy);
     switch (code) {
-      case "grant-expired":
+      case "grant-expired": {
         this.grantToken = null; // refetch through the provider — never a generic failure
-        this.newRound("grant-expired", { free: true });
+        const free = !this.freeRoundUsed; // a host that keeps minting expired grants gets backoff, not a hot loop
+        this.freeRoundUsed = true;
+        this.newRound("grant-expired", { free });
         break;
+      }
       case "rate-limited":
         this.newRound("rate-limited");
         break;
@@ -447,7 +457,12 @@ export class SessionImpl implements Session {
     this.remoteDescribed = true;
     const queued = this.iceQueue;
     this.iceQueue = [];
-    for (const c of queued) await pc.addIceCandidate(c).catch((e: unknown) => this.reportError(e, "ice"));
+    for (const c of queued) {
+      await pc.addIceCandidate(c).catch((e: unknown) => {
+        if (gen === this.generation && this.pc === pc) this.reportError(e, "ice");
+      });
+      if (gen !== this.generation || this.pc !== pc) return;
+    }
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     if (gen !== this.generation || this.pc !== pc) return;
@@ -502,7 +517,7 @@ export class SessionImpl implements Session {
           this.maybeConnected();
           break;
         case "disconnected":
-          if (this.getState() === "reconnecting" && this.restartAttempted) {
+          if (this.getState() === "reconnecting" && this.restartAttempted && this.remoteDescribed) {
             this.newRound("ice-restart-failed"); // rung 2 is one attempt, then rung 3
           } else if (!this.graceTimer && this.getState() === "connected") {
             this.graceTimer = setTimeout(() => {
@@ -512,9 +527,14 @@ export class SessionImpl implements Session {
           }
           break;
         case "failed":
-          if (this.restartAttempted) this.newRound("ice-restart-failed"); // rung 2 is one attempt, then rung 3
-          else if (this.getState() === "connecting") this.newRound("ice-failed"); // first connect: nothing to restart
-          else this.requestIceRestart("ice-failed");
+          if (this.restartAttempted) {
+            // The old ufrag failing before the re-offer is applied is not the restart failing.
+            if (this.remoteDescribed) this.newRound("ice-restart-failed"); // rung 2 is one attempt, then rung 3
+          } else if (this.getState() === "connecting" || !this.channels.controlOpen) {
+            this.newRound("ice-failed"); // never connected on this peer (first connect or a rung-3 round): nothing to restart
+          } else {
+            this.requestIceRestart("ice-failed");
+          }
           break;
         default:
           break;
@@ -533,9 +553,11 @@ export class SessionImpl implements Session {
     this.restartAttempted = false;
     this.connectedAt = this.deps.now();
     this.backoff.markConnected(this.connectedAt);
+    const pc = this.pc;
     this.setInfo({ state: "connected", reason: null, error: null });
+    if (this.pc !== pc || this.getState() !== "connected") return; // a state listener closed us
     this.heartbeat.start();
-    this.sampler.start(this.pc);
+    this.sampler.start(pc);
     this.registry.reflushAll();
   }
 
@@ -550,6 +572,7 @@ export class SessionImpl implements Session {
     if (this.socket && this.sessionId) {
       this.restartAttempted = true;
       this.remoteDescribed = false; // candidates for the restarted ICE wait for the re-offer
+      this.iceQueue = []; // anything still queued belongs to the old ufrag
       this.socket.send(JSON.stringify({ v: PROTO_VERSION, type: "ice-restart", event_id: newEventId(this.deps.now()), ts: this.deps.now(), session_id: this.sessionId }));
       this.restartTimer = setTimeout(() => {
         this.restartTimer = null;
@@ -578,17 +601,22 @@ export class SessionImpl implements Session {
       this.fail(new FjarrError("reconnect-exhausted", `reconnect attempts exhausted (${why})`), `exhausted:${why}`);
       return;
     }
-    this.setInfo({ state: "reconnecting", reason: why, sessionId: null, round: this.round });
+    // Arm the next step *before* telling listeners: a host that calls
+    // close() from its state handler must find the timer and clear it.
     if (opts.free) {
-      this.launchRound();
-      return;
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        this.launchRound();
+      }, 0);
+    } else {
+      this.backoff.markDisconnected(now);
+      const delay = this.backoff.next();
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        this.launchRound();
+      }, delay);
     }
-    this.backoff.markDisconnected(now);
-    const delay = this.backoff.next();
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.launchRound();
-    }, delay);
+    this.setInfo({ state: "reconnecting", reason: why, sessionId: null, round: this.round });
   }
 
   private detachSocket(): void {

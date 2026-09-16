@@ -187,11 +187,22 @@ export function useInputFocus(id: string, options: FocusOptions = {}): { registr
   const onLost = useRef(options.onLost);
   onLost.current = options.onLost;
   const win = options.window ?? (typeof window !== "undefined" ? window : undefined);
+  const latest = useRef<FocusRegistration | null>(null);
+  // Re-register (never unregister) on option changes so ownership survives a
+  // window or id change; unregister only on unmount.
   useEffect(() => {
+    if (latest.current && latest.current.id !== id) latest.current.unregister();
     const r = client.focus.register(id, { window: win, onLost: () => onLost.current?.() });
+    latest.current = r;
     setRegistration(r);
-    return () => r.unregister();
   }, [client, id, win]);
+  useEffect(
+    () => () => {
+      latest.current?.unregister();
+      latest.current = null;
+    },
+    [],
+  );
   const owner = useStore(client.focus.owner);
   return { registration, focused: owner === id };
 }

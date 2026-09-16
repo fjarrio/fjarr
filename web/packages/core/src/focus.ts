@@ -50,8 +50,9 @@ export class FocusRegistry {
   }
 
   register(id: string, options: FocusOptions = {}): FocusRegistration {
-    // Re-registering the same id (StrictMode, a window prop change) keeps
-    // ownership: no spurious `onLost` / release-all.
+    // Re-registering the same id (a window prop change in `useInputFocus`)
+    // keeps ownership: no spurious `onLost` / release-all. Unregistering
+    // does release — an unmounted view must not keep the keyboard.
     this.detach(id);
     const entry: Entry = { options, onBlur: null, onFocus: null };
     if (options.window) {

@@ -45,6 +45,8 @@ export class ChannelSet {
   readonly onBulkDrain = new Emitter<string>();
   /** A bulk channel closed (peer gone or reset): waiters must give up. */
   readonly onBulkClose = new Emitter<string>();
+  /** The whole set was torn down (peer gone): every waiter, attached or not, gives up. */
+  readonly onReset = new Emitter<void>();
   readonly onStreamData = new Emitter<{ cap: string; data: ArrayBuffer }>();
 
   attach(dc: DataChannelLike): void {
@@ -147,6 +149,7 @@ export class ChannelSet {
     this.bulk.clear();
     this.stream.clear();
     for (const cap of bulkCaps) this.onBulkClose.emit(cap);
+    this.onReset.emit();
   }
 }
 
@@ -215,14 +218,13 @@ export class PublisherSlot<P = unknown> {
   }
 
   private publish(payload: P): void {
-    this.last = payload;
     if (this.rateTimer) {
       this.pendingValue = payload;
       this.hasPending = true;
       return;
     }
-    this.emit(payload);
     this.rateTimer = setTimeout(() => this.tick(), this.minIntervalMs);
+    this.emit(payload); // may throw (oversized): the rate timer and deadman are already safe
   }
 
   private tick(): void {
@@ -231,14 +233,19 @@ export class PublisherSlot<P = unknown> {
     const v = this.pendingValue as P;
     this.hasPending = false;
     this.pendingValue = undefined;
-    this.emit(v);
     this.rateTimer = setTimeout(() => this.tick(), this.minIntervalMs);
+    this.emit(v);
   }
 
+  /** Sends `payload`; `last` only ever holds a value that went out, so the deadman never re-throws. */
   private emit(payload: P): void {
     this.lastSentAt = this.now();
-    this.transmit(payload); // realtime: a closed channel simply drops (lossy by design)
-    this.armDeadman();
+    try {
+      this.transmit(payload); // realtime: a closed channel simply drops (lossy by design)
+      this.last = payload;
+    } finally {
+      this.armDeadman();
+    }
   }
 
   /** Re-armed from every send, so the wire gap while held never exceeds intervalMs. */
@@ -325,12 +332,18 @@ export function createByteChannel(set: ChannelSet, cap: string, onRelease: () =>
     },
     ready() {
       if (dc()?.readyState === "open") return Promise.resolve();
-      return new Promise<void>((resolve) => {
+      return new Promise<void>((resolve, reject) => {
         const off = set.onBulkOpen.on((c) => {
           if (c === cap) {
             off();
+            offReset();
             resolve();
           }
+        });
+        const offReset = set.onReset.on(() => {
+          off();
+          offReset();
+          reject(new FjarrError("closed", `${cap}: peer gone before the bulk channel opened`));
         });
       });
     },
@@ -354,12 +367,14 @@ export function createBulkSender(set: ChannelSet, cap: string): BulkSender {
       const done = (fn: () => void) => {
         offEvent();
         offClose();
+        offReset();
         signal?.removeEventListener("abort", onAbort);
         fn();
       };
       const onAbort = () => done(() => reject(new FjarrError("closed", "aborted")));
       const offEvent = event.on((c) => c === cap && done(resolve));
       const offClose = set.onBulkClose.on((c) => c === cap && done(() => reject(new FjarrError("closed", `${cap}: bulk channel closed while waiting for ${what}`))));
+      const offReset = set.onReset.on(() => done(() => reject(new FjarrError("closed", `${cap}: peer gone while waiting for ${what}`))));
       signal?.addEventListener("abort", onAbort, { once: true });
     });
   return {

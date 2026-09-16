@@ -138,16 +138,17 @@ describe("review: reconnection ladder (docs/08#reconnection)", () => {
     await tick();
     expect(s.getState()).toBe("connected");
     // Now the restart itself fails: the re-offer arrives but ICE never recovers.
-    h.agent.auto = false; // stop the mock from flipping connected after the answer
+    h.agent.suppressConnected = true;
     h.agent.iceFailed();
-    await tick();
+    await tick(); // ice-restart sent, re-offer applied, answer sent, ICE still down
     expect(s.getState()).toBe("reconnecting");
-    h.agent.pc.setConnectionState("failed"); // second failure while rung 2 is pending
+    expect(h.agent.pc.remoteDescriptions).toBe(3);
+    h.agent.pc.setConnectionState("failed"); // the restarted ICE fails too
     await tick();
     expect(h.agent.signaling.filter((m) => m.type === "ice-restart")).toHaveLength(2); // one per disconnection
     expect(s.info.getSnapshot().reason).toBe("ice-restart-failed");
     expect(h.agent.pcs.at(-1)!.closed).toBe(true); // rung 3: peer torn down, new round pending
-    h.agent.auto = true;
+    h.agent.suppressConnected = false;
     await vi.advanceTimersByTimeAsync(600);
     await tick();
     expect(s.getState()).toBe("connected");
@@ -437,5 +438,153 @@ describe("review: stats health over several samples", () => {
     h.agent.dropSocket();
     expect(s.stats.getSnapshot()).toBeNull();
     expect(s.timeSync.getSnapshot()).toBeNull();
+  });
+});
+
+describe("review pass 2: adversarial findings", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("a host that close()s from its state listener during reconnecting leaves no zombie round", async () => {
+    const h = harness();
+    const s = await connected(h);
+    const off = h.client.on("session-event", (e) => {
+      if (e.type === "state" && e.state === "reconnecting") s.close("auth-gone");
+    });
+    h.agent.dropSocket();
+    expect(s.getState()).toBe("closed");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.agent.sockets).toHaveLength(1); // no round ever launched
+    expect(s.getState()).toBe("closed");
+    expect(s.info.getSnapshot().sessionId).toBeNull();
+    off();
+  });
+
+  it("a host that close()s from the connected transition leaves no heartbeat or sampler running", async () => {
+    const h = harness();
+    const s = h.client.sessions.open("robot-1");
+    const off = h.client.on("session-event", (e) => {
+      if (e.type === "state" && e.state === "connected") s.close("bye");
+    });
+    await tick();
+    expect(s.getState()).toBe("closed");
+    const pings = () => h.agent.received.filter((e) => e.type === "ping").length;
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(pings()).toBe(0);
+    expect(s.stats.getSnapshot()).toBeNull();
+    off();
+  });
+
+  it("an old ufrag failing before the re-offer is applied does not count as the restart failing", async () => {
+    const h = harness();
+    const s = await connected(h);
+    h.agent.auto = false; // no re-offer will come
+    h.agent.iceFailed(); // → ice-restart pending
+    h.agent.pc.setConnectionState("failed"); // the dying old ICE reports again
+    expect(s.getState()).toBe("reconnecting");
+    expect(h.agent.pc.closed).toBe(false); // still rung 2, bounded by the 10 s timer
+    await vi.advanceTimersByTimeAsync(10_100);
+    expect(h.agent.pc.closed).toBe(true);
+    expect(s.info.getSnapshot().reason).toBe("ice-restart-timeout");
+  });
+
+  it("a rung-3 round whose fresh ICE fails climbs immediately instead of asking for a restart", async () => {
+    const h = harness();
+    const s = await connected(h);
+    h.agent.suppressConnected = true;
+    h.agent.dropSocket();
+    await vi.advanceTimersByTimeAsync(600);
+    await tick(); // new round: offer answered, channels never open, ICE never connects
+    expect(s.getState()).toBe("reconnecting");
+    const pc = h.agent.pc;
+    pc.setConnectionState("failed");
+    expect(pc.closed).toBe(true);
+    expect(s.info.getSnapshot().reason).toBe("ice-failed");
+    expect(h.agent.signaling.filter((m) => m.type === "ice-restart")).toHaveLength(0);
+  });
+
+  it("repeated grant-expired is backed off and bounded, never a hot loop", async () => {
+    const h = harness({}, { sessionDefaults: { maxRounds: 3, demandDebounceMs: 10 } });
+    h.agent.expireAllGrants = true;
+    const s = h.client.sessions.open("robot-1");
+    await tick();
+    const hellos = () => h.agent.signaling.filter((m) => m.type === "hello").length;
+    expect(hellos()).toBe(2); // the first refetch is free and immediate…
+    await tick(20);
+    expect(hellos()).toBe(2); // …the second is a counted, backed-off round: no hot loop
+    await vi.advanceTimersByTimeAsync(200_000);
+    expect(s.getState()).toBe("failed");
+    expect(hellos()).toBe(5); // 1 + free + 3 counted rounds
+    expect(s.info.getSnapshot().reason).toBe("exhausted:grant-expired");
+  });
+
+  it("a bulk wait started before any bulk channel exists rejects when the peer goes away", async () => {
+    const h = harness();
+    const s = await connected(h);
+    const done = s.bulk("fjarr.files").sendFrames([new Uint8Array(1)]);
+    const rejection = expect(done).rejects.toMatchObject({ code: "closed" });
+    const ready = expect(s.channel("fjarr.files").ready()).rejects.toMatchObject({ code: "closed" });
+    h.agent.dropSocket();
+    await rejection;
+    await ready;
+  });
+
+  it("after the retry budget is spent, a later demand change gets a fresh budget", async () => {
+    let fail = true;
+    const h = harness({ onRequest: (env) => (env.type === "select-tracks" && fail ? { ok: false, error: { code: "internal", message: "down" } } : undefined) });
+    const s = await connected(h);
+    const handle = s.tracks.acquire("cam-front");
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(h.selects().length).toBe(4);
+    handle.update({ tier: "thumbnail" });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(h.selects().length).toBe(8); // a full new budget, not a single shot
+    fail = false;
+    handle.update({ tier: "active" });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(h.selects().length).toBe(9);
+    handle.release();
+  });
+
+  it("update(null) clears an option back to its default", async () => {
+    const h = harness();
+    const s = await connected(h);
+    const handle = s.tracks.acquire("cam-front", { latencyMode: "interactive", preference: "sharpness" });
+    h.agent.emitTrack("cam-front");
+    const receiver = h.agent.pc.transceivers.find((t) => t.mid === "0")!.receiver;
+    expect(receiver.jitterBufferTarget).toBe(0);
+    handle.update({ latencyMode: null, preference: null });
+    expect(receiver.jitterBufferTarget).toBeNull();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(h.selects().at(-1)).toEqual({ tracks: [{ track_id: "cam-front", enabled: true, tier: "active" }] });
+    handle.release();
+  });
+
+  it("two concurrent sessions on one mock agent get their replies on their own control channel", async () => {
+    const h = harness();
+    const a = await connected(h, "robot-a");
+    const b = await connected(h, "robot-b");
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(a.getState()).toBe("connected");
+    expect(b.getState()).toBe("connected");
+    expect(h.errors()).toEqual([]);
+    expect(h.states("robot-a")).toEqual(["connecting", "connected"]);
+  });
+
+  it("'no media stats' waits for a track to have reported once (startup grace), then catches a vanished report", async () => {
+    const h = harness();
+    const s = await connected(h);
+    const handle = s.tracks.acquire("cam-front");
+    h.agent.emitTrack("cam-front");
+    h.agent.pc.statsReport = [{ id: "P", type: "candidate-pair", state: "succeeded", nominated: true, currentRoundTripTime: 0.02 }];
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(s.health.getSnapshot().level).toBe("good"); // never reported yet: starting up
+    let n = 0;
+    h.agent.pc.getStats = async () => ({ forEach: (cb) => [{ id: "P", type: "candidate-pair", state: "succeeded", nominated: true, currentRoundTripTime: 0.02 }, { id: "IN0", type: "inbound-rtp", kind: "video", mid: "0", framesDecoded: 30 * ++n, packetsReceived: 10 * n }].forEach(cb) });
+    await vi.advanceTimersByTimeAsync(2000);
+    h.agent.pc.getStats = async () => ({ forEach: (cb) => [{ id: "P", type: "candidate-pair", state: "succeeded", nominated: true, currentRoundTripTime: 0.02 }].forEach(cb) });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(s.health.getSnapshot()).toEqual({ level: "poor", reasons: ["cam-front: no media stats"] });
+    handle.release();
   });
 });

@@ -48,7 +48,8 @@ export function useVideoTrack(session: Session | undefined, trackId: string, opt
 
   // Demand lives as long as the hook: acquired on mount, released on unmount.
   useEffect(() => {
-    const h = s.tracks.acquire(trackId, { tier, preference, latencyMode, visible: keepWarm || lastVisible.current });
+    // A pending grace counts as visible: an option change mid-grace must not flap demand.
+    const h = s.tracks.acquire(trackId, { tier, preference, latencyMode, visible: keepWarm || lastVisible.current || graceTimer.current !== null });
     handle.current = h;
     return () => {
       h.release();
@@ -148,6 +149,10 @@ export function useAudioTrack(session: Session | undefined, trackId: string, opt
   const [muted, setMuted] = useState(options.muted ?? false);
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
+  const mutedProp = options.muted;
+  useEffect(() => {
+    if (mutedProp !== undefined) setMuted(mutedProp);
+  }, [mutedProp]);
 
   useEffect(() => {
     const h = s.tracks.acquire(trackId, { tier: "active", visible: !mutedRef.current });
@@ -230,31 +235,43 @@ export function usePushToTalk(session: Session | undefined, options: PushToTalkO
   const pending = useRef<Promise<void> | null>(null);
   /** Bumped by every stop(); a start() whose generation is stale unwinds itself. */
   const generation = useRef(0);
+  /** Every replaceTrack goes through one chain so calls reach the sender in program order. */
+  const senderChain = useRef<Promise<unknown>>(Promise.resolve());
   const constraints = options.constraints;
+
+  const replace = useCallback(
+    (track: MediaStreamTrackLike | null) => {
+      const next = senderChain.current.then(() => s.audioUplink.replaceTrack(track)).catch(() => false);
+      senderChain.current = next;
+      return next;
+    },
+    [s],
+  );
 
   const stop = useCallback(() => {
     generation.current++;
     pending.current = null;
-    void s.audioUplink.replaceTrack(null).catch(() => undefined);
+    void replace(null);
     for (const t of mic.current?.getTracks() ?? []) t.stop();
     mic.current = null;
     setTalking(false);
-  }, [s]);
+  }, [replace]);
 
   const start = useCallback(async () => {
     if (mic.current) return;
     if (pending.current) return pending.current; // one getUserMedia at a time
     const gen = generation.current;
-    const run = (async () => {
+    const self: { run: Promise<void> | null } = { run: null };
+    const run: Promise<void> = (async () => {
       let stream: MediaStream | null = null;
       try {
         stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, ...constraints } });
-        if (gen !== generation.current) throw new Error("released"); // stopped while the prompt was up
+        if (gen !== generation.current || mic.current) throw new Error("released"); // stopped, or a newer start won
         const track = stream.getAudioTracks()[0];
         if (!track) throw new Error("no audio track");
-        const ok = await s.audioUplink.replaceTrack(track as unknown as MediaStreamTrackLike);
-        if (gen !== generation.current) {
-          await s.audioUplink.replaceTrack(null).catch(() => undefined);
+        const ok = await replace(track as unknown as MediaStreamTrackLike);
+        if (gen !== generation.current || mic.current) {
+          void replace(null);
           throw new Error("released");
         }
         if (!ok) {
@@ -269,12 +286,13 @@ export function usePushToTalk(session: Session | undefined, options: PushToTalkO
         if (!(e instanceof Error && e.message === "released")) setError(e instanceof Error ? e : new Error(String(e)));
       } finally {
         for (const t of stream?.getTracks() ?? []) t.stop();
-        pending.current = null;
+        if (pending.current === self.run) pending.current = null; // never clobber a newer run's guard
       }
     })();
+    self.run = run;
     pending.current = run;
     return run;
-  }, [s, constraints]);
+  }, [replace, constraints]);
 
   useEffect(() => () => stop(), [stop]);
 

@@ -69,6 +69,29 @@ autoplay "blocked" only on `NotAllowedError` · mute toggles demand in place ·
   `latencyMode` is browser-side only.
 - docs/05: registered views receive `{ session, capability }`.
 
+### Second pass: adversarial review of the fix commit
+
+Because the first pass found so much, a second, narrower pass reviewed the
+diff of the fix commit (`2a95c2d`) with an adversarial brief: break the
+fixes. It found 16 items; the ones worth naming:
+
+| # | Area | Finding | Resolution |
+|---|---|---|---|
+| 15 | session | a host calling `close()` from its `state` listener during `reconnecting` (or `connected`) left a zombie round: the timer was armed *after* the listener ran, so a socket, peer connection and sampler outlived the closed session | timers armed before the transition is announced; `startRound()` refuses a terminal state; `maybeConnected()` re-checks after announcing |
+| 16 | session | the free `grant-expired` round was an unbounded hot loop for a host minting tokens the server rejects | one free refresh per attempt (reset by `hello-ack`); a second consecutive `grant-expired` is a counted, backed-off round |
+| 17 | channels | a bulk wait started before any bulk channel existed still hung on peer loss (`onBulkClose` only covers attached channels); `ByteChannel.ready()` had no close path | `ChannelSet.onReset` rejects every waiter |
+| 18 | channels | an oversized publish left the rejected payload in `last` and skipped re-arming, so the deadman went silent while held | `last` only ever holds a sent value; the timers are armed before the transmit |
+| 19 | react | `usePushToTalk`: an unwinding stale `start()` cleared a *newer* run's pending guard, so a third `start()` could open a second live microphone; two `replaceTrack` calls could land out of order | per-run guard, `mic.current` re-check after every await, all `replaceTrack` calls serialized through one chain |
+| 20 | testing | the mock answered on the *latest* peer connection's control channel, so two concurrent sessions would spuriously reconnect after 15 s | replies on the peer connection the request came from; a 25 s two-session test |
+| 21 | tracks | after `MAX_FLUSH_ATTEMPTS` every later demand change got a single un-retried shot | a demand change resets the budget |
+| 22 | session | a rung-3 round whose fresh ICE failed asked for a restart on a session that never connected; a `failed` from the old ufrag before the re-offer counted as the restart failing | "never connected on this peer" climbs at once; restart failure is judged only after the re-offer is applied |
+| 23 | stats | "no media stats" rated a starting track `poor` in browsers that materialise the report on the first packet; `stop()` kept the dead peer's health level | the rule applies only to tracks that have reported once; health resets with stats |
+| 24 | react | `useInputFocus` unregistered on every option change, so ownership was lost on the exact window transition docs/22 #8 covers; `<AudioSink muted>` ignored later prop changes; an option change mid-visibility-grace flapped demand | re-register without unregistering, unmount-only unregister; prop effect; a pending grace counts as visible |
+
+Also: `update(null)` clears an acquire option; late trickle candidates for the
+old ufrag are dropped at restart; spurious `error` events after a teardown
+mid-offer are suppressed. Every item has a regression test.
+
 ### Deferred (recorded, not fixed here)
 
 | Finding | Why deferred | Where it goes |
@@ -96,10 +119,14 @@ controllable IntersectionObserver, and the cross-session telemetry cache.
 
 ## Conclusion
 
-Slice 2 stands, with 14 real defects fixed before any agent exists to hit
-them; the most consequential were the two that made a long session
+Slice 2 stands, with 14 real defects fixed in the first pass and 10 more
+in the adversarial second pass, before any agent exists to hit them; the most consequential were the two that made a long session
 unrecoverable (findings 2 and 4) and the microphone left open (10). The
 review also confirmed the design choices that matter: generation guards on
 every async boundary, renegotiation diffing by `track_id`, one owner per
-session for demand, and the mock agent as the test substrate. Slice 3 (agent
-core, C++) starts from the protocol as amended here.
+session for demand, and the mock agent as the test substrate. The second
+pass's yield (10 in ~900 lines of fixes vs. 14 in ~4,000 lines of original
+code) is the argument for stopping here: the remaining risk is the
+mock-versus-browser gap, which only the slice-5 end-to-end run against a
+real agent can close. Slice 3 (agent core, C++) starts from the protocol as
+amended here.

@@ -22,9 +22,12 @@ export interface AcquireOptions {
   latencyMode?: LatencyMode;
 }
 
+/** `null` clears an option back to its default; `undefined` leaves it untouched. */
+export type AcquirePatch = { [K in keyof AcquireOptions]?: AcquireOptions[K] | null };
+
 export interface TrackHandle {
   readonly trackId: string;
-  update(options: Partial<AcquireOptions>): void;
+  update(options: AcquirePatch): void;
   release(): void;
   readonly released: boolean;
 }
@@ -270,7 +273,15 @@ export class TrackRegistry {
         if (released) return;
         const cur = this.consumers.get(trackId)?.get(handleId);
         if (!cur) return;
-        for (const [k, v] of Object.entries(patch)) if (v !== undefined) (cur as unknown as Record<string, unknown>)[k] = v;
+        const target = cur as unknown as Record<string, unknown>;
+        for (const [k, v] of Object.entries(patch)) {
+          if (v === undefined) continue;
+          if (v === null) {
+            if (k === "tier") target[k] = "active";
+            else if (k === "visible") target[k] = true;
+            else delete target[k];
+          } else target[k] = v;
+        }
         this.demandChanged(trackId);
       },
       release: () => {
@@ -311,6 +322,7 @@ export class TrackRegistry {
   }
 
   private demandChanged(trackId: string): void {
+    this.flushAttempts.delete(trackId); // a new demand is a new retry budget
     this.dirty.add(trackId);
     this.applyLatency(trackId);
     this.publish();

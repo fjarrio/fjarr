@@ -265,3 +265,127 @@ describe("@fjarr/react review regressions", () => {
     expect(screen.getByTestId("pct").textContent).toBe("—");
   });
 });
+
+describe("@fjarr/react review pass 2", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("push-to-talk: overlapping start/stop/start never leaves two microphone streams", async () => {
+    const { agent, client } = setup();
+    const session = client.sessions.open("robot-1");
+    await tick();
+    agent.pc.addUplinkTransceiver("7");
+    const stopped: string[] = [];
+    const mkTrack = (id: string) => ({ kind: "audio", id, stop: () => stopped.push(id) });
+    const prompts: Array<(s: unknown) => void> = [];
+    vi.stubGlobal("navigator", { mediaDevices: { getUserMedia: () => new Promise((r) => prompts.push(r)) } });
+    const { usePushToTalk } = await import("../src/index.js");
+    let binding: ReturnType<typeof usePushToTalk> | null = null;
+    function Ptt() {
+      binding = usePushToTalk(session);
+      return null;
+    }
+    render(
+      <FjarrProvider client={client}>
+        <Ptt />
+      </FjarrProvider>,
+    );
+    let p1: Promise<void> = Promise.resolve();
+    let p2: Promise<void> = Promise.resolve();
+    act(() => {
+      p1 = binding!.start();
+    });
+    act(() => binding!.stop());
+    act(() => {
+      p2 = binding!.start();
+    });
+    // The first prompt resolves late (its run must unwind without touching run 2's guard)…
+    await act(async () => {
+      const t1 = mkTrack("mic-1");
+      prompts[0]!({ getAudioTracks: () => [t1], getTracks: () => [t1] });
+      await p1;
+    });
+    // …a third start() while run 2 is still pending must be deduped…
+    let p3: Promise<void> = Promise.resolve();
+    act(() => {
+      p3 = binding!.start();
+    });
+    expect(prompts).toHaveLength(2);
+    await act(async () => {
+      const t2 = mkTrack("mic-2");
+      prompts[1]!({ getAudioTracks: () => [t2], getTracks: () => [t2] });
+      await p2;
+      await p3;
+    });
+    expect(stopped).toEqual(["mic-1"]);
+    expect(binding!.talking).toBe(true);
+    const uplink = agent.pc.transceivers.find((t) => t.mid === "7")!;
+    expect(uplink.sender.track?.id).toBe("mic-2");
+    act(() => binding!.stop());
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(stopped).toEqual(["mic-1", "mic-2"]);
+    expect(uplink.sender.track).toBeNull();
+  });
+
+  it("<VideoTile>: stream arrival never shows a 'disabled' status in between", async () => {
+    const { agent, client } = setup();
+    const session = client.sessions.open("robot-1");
+    await tick();
+    class FakeIO {
+      constructor(readonly cb: (entries: Array<{ isIntersecting: boolean }>) => void) {}
+      observe() {
+        queueMicrotask(() => this.cb([{ isIntersecting: true }]));
+      }
+      disconnect() {}
+    }
+    vi.stubGlobal("IntersectionObserver", FakeIO);
+    render(
+      <FjarrProvider client={client}>
+        <VideoTile session={session} trackId="cam-front" />
+      </FjarrProvider>,
+    );
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    const statuses: string[] = [];
+    const off = session.tracks.store.subscribe(() => statuses.push(session.tracks.store.getSnapshot().entries.get("cam-front")!.status));
+    act(() => {
+      agent.emitTrack("cam-front");
+    });
+    await act(() => vi.advanceTimersByTimeAsync(700));
+    off();
+    expect(statuses).not.toContain("disabled");
+    expect(statuses.at(-1)).toBe("streaming");
+  });
+
+  it("useInputFocus keeps keyboard ownership across a window option change", async () => {
+    const { client } = setup();
+    const { useInputFocus } = await import("../src/index.js");
+    const lost: string[] = [];
+    const popup = { addEventListener() {}, removeEventListener() {} };
+    let reg: ReturnType<typeof useInputFocus> | null = null;
+    function Surface({ win }: { win?: typeof popup }) {
+      reg = useInputFocus("desk", { window: win, onLost: () => lost.push("desk") });
+      return <span>{reg.focused ? "focused" : "blurred"}</span>;
+    }
+    const view = render(
+      <FjarrProvider client={client}>
+        <Surface />
+      </FjarrProvider>,
+    );
+    act(() => reg!.registration!.focus());
+    expect(screen.getByText("focused")).toBeTruthy();
+    view.rerender(
+      <FjarrProvider client={client}>
+        <Surface win={popup} />
+      </FjarrProvider>,
+    );
+    expect(screen.getByText("focused")).toBeTruthy(); // ownership survived the re-register
+    expect(lost).toEqual([]);
+    view.unmount();
+    expect(client.focus.owner.getSnapshot()).toBeNull();
+    expect(lost).toEqual(["desk"]);
+  });
+});

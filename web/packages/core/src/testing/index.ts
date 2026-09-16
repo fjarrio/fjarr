@@ -341,6 +341,8 @@ export class MockAgent {
   neverAck = false;
   /** Data channels open before or after `connectionState: connected` (browsers differ). */
   channelsBeforeConnected = true;
+  /** Re-offer on ice-restart but never report ICE connected afterwards (a restart that fails). */
+  suppressConnected = false;
 
   constructor(options: MockAgentOptions = {}) {
     this.options = { auto: true, online: true, turn: DEFAULT_TURN, ...options };
@@ -390,7 +392,7 @@ export class MockAgent {
     if (!this.auto) return;
     switch (parsed.type) {
       case "hello": {
-        if (this.grantExpiredOnce) {
+        if (this.grantExpiredOnce || this.expireAllGrants) {
           this.grantExpiredOnce = false;
           queueMicrotask(() => socket.receive(this.sig({ type: "error", code: "grant-expired", message: "expired", caused_by: parsed.event_id })));
           return;
@@ -417,6 +419,7 @@ export class MockAgent {
         break;
       }
       case "answer":
+        if (this.suppressConnected) break;
         queueMicrotask(() => this.completeConnection());
         break;
       case "ice-restart":
@@ -464,8 +467,10 @@ export class MockAgent {
     }
     if (result) {
       const reply = makeEnvelope(parsed.cap, parsed.type === "ping" ? "pong" : parsed.type, "result", result, parsed.event_id);
-      // Agents answer on control whatever channel carried the request (docs/08: realtime carries events only).
-      const control = this.pcs[this.pcs.length - 1]?.channel("fjarr:control") ?? dc;
+      // Agents answer on control whatever channel carried the request (docs/08:
+      // realtime carries events only) — on the peer connection the request came from.
+      const owner = this.pcs.find((p) => p.channels.includes(dc));
+      const control = owner?.channel("fjarr:control") ?? dc;
       queueMicrotask(() => control.receive(JSON.stringify(reply)));
     }
   }
@@ -548,4 +553,6 @@ export class MockAgent {
   expireGrantOnce(): void {
     this.grantExpiredOnce = true;
   }
+  /** Every hello is answered with grant-expired (a host minting tokens the server rejects). */
+  expireAllGrants = false;
 }

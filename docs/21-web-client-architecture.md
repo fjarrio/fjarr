@@ -115,7 +115,7 @@ reconnecting → (connected | failed) → closed`. Transitions:
 | reconnecting | attempts exhausted | failed | consumers see `failed` and an `error` event (`reconnect-exhausted`); `retry()` available |
 | reconnecting | `retry()` | connecting round now | skips the remaining backoff (a host "reconnect now" button) |
 | any | `peer-gone` / `session-close` from server | closed (reason) | release tracks, keep subscriptions registered for a possible `open()` again |
-| any | `error(grant-expired)` | reconnecting | refetch grant via provider, then retry immediately — a free round: no backoff, not counted toward the attempt budget, never a generic failure |
+| any | `error(grant-expired)` | reconnecting | refetch grant via provider, then retry immediately — the first refresh per attempt is free (no backoff, not counted); a second consecutive `grant-expired` is an ordinary backed-off round, so a host minting rejected tokens can never hot-loop; never a generic failure |
 | any | `error(session-unknown)` | closed (reason) | the server no longer knows our session (a message crossed `peer-gone` on the wire): an orderly close, not a failure |
 
 The attempt budget (default 5 rounds) is renewed by a connection that stayed
