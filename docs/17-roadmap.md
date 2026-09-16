@@ -78,7 +78,10 @@ pointer + keyboard with the full input pipeline (focus model,
 browser-reserved shortcuts + Keyboard Lock, no-auto-repeat, composed text,
 client-side release-all), local-cursor mode where the backend allows,
 `sharpness` preference and `latencyMode: interactive`, clipboard text;
-`release_all_input` safety; unattended-access test green on a real NUC.
+`release_all_input` safety; unattended-access test green on a real NUC;
+**presentation mode** (multi-monitor fullscreen, one window per monitor)
+with the **portal-vs-route spike** that fixes the default per browser
+(open question #19).
 **Plus `fjarr.audio`** (robot microphone downlink, push-to-talk uplink via
 the pre-allocated transceiver, audited) and **desktop audio** on
 `fjarr.desktop`.

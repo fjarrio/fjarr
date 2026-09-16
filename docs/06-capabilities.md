@@ -54,6 +54,11 @@ detail is incorporated here).
   place (new geometry, keyframe). Zero monitors (headless robot, everything
   unplugged) is a valid state the session survives; a re-plugged monitor
   returns under its old identity. Web side: [docs/22](22-remote-desktop-client.md#monitors-and-geometry).
+- **Presentation mode**: the operator's screens become the robot's screens
+  — one fullscreen browser window per robot monitor with Keyboard Lock,
+  automated on Chromium via the Window Management API, manual (drag, then
+  fullscreen) elsewhere; one session and one ownership lease behind all
+  windows ([docs/22](22-remote-desktop-client.md#presentation-mode)).
 - Pointer: absolute normalized coordinates per monitor, lossy channel;
   buttons/wheel reliable. Keyboard: physical `KeyboardEvent.code` →
   Linux keycodes, reliable channel; layout handling per backend
@@ -80,7 +85,12 @@ never persist after disconnect (input state reset on session end);
 within 2 s with zero dropped frames on the other two, unplugging one leaves
 a placeholder and the rest untouched, re-plugging restores it under the same
 `track_id`, a mode change keeps input coordinates correct, and unplugging
-everything then plugging one back recovers without a reconnect.
+everything then plugging one back recovers without a reconnect;
+**presentation mode**: on a two-screen Chromium desktop one click fills
+both screens with the two mapped robot monitors, Alt+Tab typed on either
+screen reaches the robot, closing the dashboard tab closes both windows,
+and on Firefox the same button opens the windows and the operator finishes
+manually without errors.
 
 ## `fjarr.telemetry` — sensor/telemetry streaming (M4)
 

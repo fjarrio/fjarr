@@ -63,6 +63,11 @@ Concurrent access policy (from the fleet-daemon lesson, generalized):
   (30 s without refresh clears the claim, logged). A dead process must never
   leave a robot unownable — the media plane is the component most likely to
   hang.
+- A claim is keyed on the **operator identity in the grant**, not on the
+  session: several sessions of the same operator (one per browser window in
+  the desktop [presentation mode](22-remote-desktop-client.md#presentation-mode)
+  fallback) share one claim and all may send input; a different operator
+  is read-only until transfer.
 
 ## TURN
 

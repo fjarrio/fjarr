@@ -27,7 +27,8 @@ survives a tab switch. This document pins every one of those.
  ├─ CursorOverlay       local cursor rendering (see Cursor strategy)
  ├─ Toolbar (slot)      monitor switch, fullscreen, special keys, clipboard,
  │                      view-only badge, quality (docs/21 health)
- └─ hooks: useDesktopInput, useDesktopFocus, useMonitors, useClipboardSync
+ └─ hooks: useDesktopInput, useDesktopFocus, useMonitors, useClipboardSync,
+           usePresentation (multi-monitor fullscreen, see below)
 ```
 
 Headless-first like every component (docs/05): the surfaces are hooks +
@@ -90,6 +91,102 @@ Keyboard focus is per session, not per monitor — keys go to the robot's
 focused window wherever it is; pointer events carry the monitor's
 `track_id`, so a single keyboard owner with several monitor views is the
 normal case.
+
+### Presentation mode — multi-monitor fullscreen {#presentation-mode}
+
+The goal: the operator's two screens *become* the robot's two screens,
+fullscreen, with Keyboard Lock on each. The platform constraint that shapes
+the design: **a document can be fullscreen on one screen only** — every
+browser, no exceptions. Spanning N screens therefore means N browser
+windows, one per robot monitor, orchestrated by the dashboard page.
+
+**What the platform provides (Chromium-family only)** — the Window
+Management API:
+
+| Need | API | Permission |
+|---|---|---|
+| "Is spanning even relevant?" | `screen.isExtended` | none — gates the toolbar button |
+| Local screens with position/size/scale/`isPrimary`/label, plus `screenschange` | `window.getScreenDetails()` | `window-management` (prompt from a gesture, remembered per origin) |
+| Place a popup on another screen; open several popups from one click | `window.open(url, name, "left=,top=,width=,height=")` | `window-management` (without it: clamped to the current screen, one popup per gesture) |
+| Open straight into fullscreen on that screen | `popup,fullscreen` window feature (Chrome ≥ 123) | `window-management` |
+| Fullscreen from inside an existing popup | `element.requestFullscreen({ screen })` (needs a gesture *in that window*; fullscreen capability delegation via `postMessage` bridges the opener's click) | `window-management` |
+| Lock Esc/Alt+Tab/Super per window | `navigator.keyboard.lock()` — per window, fullscreen only | none |
+
+Firefox and Safari implement none of the placement APIs; there the
+**degraded path** is the one every browser supports: the dashboard opens
+one normal window per monitor, the operator drags each to a screen and
+clicks the view's own fullscreen button (`enterFullscreen()` above). Same
+components, no extra code path — only the automation is missing. The
+toolbar copy says so ("drag this window to the screen, then fullscreen").
+
+**Design (primary): one session, portaled views.** The dashboard page keeps
+the one session, the one grant and the one docs/10 ownership lease; each
+popup document is just a rendering surface. `usePresentation(session)`:
+
+1. On the operator's click, requests `window-management` if needed, reads
+   `getScreenDetails()`, and computes the **screen mapping** (below).
+2. Opens one same-origin popup per mapped monitor, positioned on its local
+   screen, `popup,fullscreen` where supported. Popups are opened from the
+   *same* gesture — allowed with the permission; a browser that still
+   blocks the second one gets a per-window "click to open" fallback.
+3. Renders a `<DesktopView monitorId=… presentation>` into each popup's
+   `document.body` through a React portal. The React tree, the session, the
+   track handles and the focus registry all stay in the opener; the
+   `<video>` element lives in the popup and receives the opener's
+   `MediaStream` as `srcObject` (same-origin popups share the opener's
+   agent cluster, so the object is usable across the two documents). React
+   attaches its event listeners to portal containers, so the docs/22 input
+   pipeline works unchanged; Keyboard Lock is requested per popup window.
+4. Focus: the focus registry stays per *page* (opener), but a presentation
+   window that has OS focus owns the keyboard — the registry treats each
+   popup window's `focus`/`blur` as the view's focus events, so exactly one
+   keyboard owner still holds across all windows.
+5. Teardown: closing any popup releases that monitor's demand (unmount →
+   `release()`, docs/21) and sends `release-all` for keys held from that
+   window; `pagehide`/`beforeunload` on the opener closes every popup
+   (orphaned fullscreen windows with no session behind them are a bug);
+   the operator's own `screenschange` (a local screen vanished) closes the
+   popup that was on it and re-opens it on the fallback screen after a
+   confirmation.
+
+Every `<DesktopView>` remains usable inline too — presentation mode is a
+layout choice, never a different component.
+
+**Fallback: one session per window.** If the portal approach fails a
+browser (`Cross-Origin-Opener-Policy: same-origin` host apps, `noopener`,
+or a future process-isolation change that breaks cross-document
+`srcObject`), each popup is a plain route (the host app provides it —
+`/desktop/:robot/:monitor` in the demo) that opens its *own* session and
+acquires only its monitor's track. Demand-driven delivery means no
+duplicated video and FrameHub means no extra encode; the cost is N
+signaling/ICE/DTLS setups and N grants. Input from the extra windows is
+legitimate because the docs/10 lease is keyed on the **operator identity in
+the grant**, not the session — the same operator's windows share one
+claim. `usePresentation({ mode: "portal" | "route" })` selects; the demo
+dashboard exercises both, and the **M3 spike** decides the default per
+browser (open question #19).
+
+**Screen mapping.** Local screens rarely match robot monitors 1:1:
+
+- Auto: `primary` ↔ `isPrimary`; then by relative position (left-of/
+  right-of/above/below the primary, using `x/y` on both sides); leftover
+  robot monitors get no window (they stay reachable inline); leftover
+  local screens stay free for the host app.
+- Operator override: a small dialog showing both arrangements (local from
+  `getScreenDetails()`, robot from `useMonitors`) with drag-to-assign;
+  persisted per `(robot, set of monitor ids)` in `localStorage`, so the
+  second visit to the same robot from the same desk is one click.
+- Robot hot-plug during presentation: a new robot monitor gets a window only
+  if a free local screen is mapped to it (otherwise it appears inline); a
+  vanished robot monitor leaves its window showing the placeholder (the
+  same behavior as inline — the window is not closed, so re-plug rebinds).
+
+**Not the browser's job.** A fixed control room (an operator desk with
+three screens permanently dedicated to one robot) is better served by
+Chrome kiosk mode or a Tauri/Electron shell hosting the same dashboard:
+there multi-window fullscreen is unconditional instead of permission- and
+gesture-gated. Fjarr documents that recipe (docs/12 later) rather than
+building a shell.
 
 ## Input pipeline
 
@@ -198,6 +295,13 @@ lease and the toolbar shows locked/unlocked.
    `manifest_version` ordering, and track handles that survive a track
    disappearing and rebind when it returns — the substrate for monitor
    hot-plug ([docs/21](21-web-client-architecture.md#track-registry)).
+8. **Multi-window awareness** for [presentation mode](#presentation-mode):
+   track handles expose the `MediaStream` so a view rendered into another
+   same-origin document can attach it; the focus registry accepts a
+   `window` per view (OS focus of a popup window = focus of that view);
+   nothing in the core touches the global `window`/`document` without
+   going through the view's own — a portaled view must not observe the
+   opener's `visibilitychange` as its own.
 
 ## Testing (docs/15)
 
@@ -212,3 +316,11 @@ rendering; input-to-photon within docs/16 budgets; **hot-plug** via
 `xrandr --setmonitor`/`--delmonitor` on robot-sim ([docs/07](07-desktop-backends.md#simulating-hot-plug)):
 add → visible < 2 s with zero dropped frames on the others, remove →
 placeholder, re-plug → same `track_id`, remove all → recover.
+**Presentation mode** (Chromium with the `window-management` permission
+pre-granted over CDP and a virtual two-screen display in CI): a click opens two
+fullscreen windows on two screens, each showing the mapped robot monitor
+with Keyboard Lock active; typing in either lands in the sim; closing one
+window releases its track and its held keys; closing the opener closes
+both; the mapping override survives a reload; the same test runs in
+`mode: "route"`; Firefox runs the degraded path (windows open, operator
+fullscreen per window) and must not error.

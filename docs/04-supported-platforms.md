@@ -41,9 +41,9 @@ Both X11 and Wayland are evaluated head-to-head before committing
 
 | | Status | Notes |
 |---|---|---|
-| **Chromium-family ≥ 120** (Chrome, Edge) | **Primary** | H.264 + VP8 decode, full WebRTC feature set |
-| Firefox ESR+ | Supported | verify H.264 availability in CI (platform-dependent) |
-| Safari 17+ | Best-effort | test at M3; known WebRTC quirks |
+| **Chromium-family ≥ 120** (Chrome, Edge) | **Primary** | H.264 + VP8 decode, full WebRTC feature set; Window Management API for automated multi-monitor fullscreen ([docs/22](22-remote-desktop-client.md#presentation-mode)), straight-to-fullscreen popups from ≥ 123 |
+| Firefox ESR+ | Supported | verify H.264 availability in CI (platform-dependent); no Window Management API — multi-monitor fullscreen is the manual path |
+| Safari 17+ | Best-effort | test at M3; known WebRTC quirks; no Window Management API |
 | Mobile browsers | Not targeted for M≤6 | dashboard responsive layouts still apply |
 
 ## Network requirements
