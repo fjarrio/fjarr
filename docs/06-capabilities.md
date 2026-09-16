@@ -211,7 +211,7 @@ or for *numbers* → stream class after decimation; and **hybrid** is
 legitimate — a depth video for the overview plus a decimated cloud on the
 stream class for the 3-D view, both stamped with `time-sync`. The
 measurements that decide each case: end-to-end latency, bandwidth, agent
-+ browser CPU, and fidelity error (RMS depth error after the round trip).
+and browser CPU, and fidelity error (RMS depth error after the round trip).
 
 ## Conventions on existing capabilities (planned additions)
 
