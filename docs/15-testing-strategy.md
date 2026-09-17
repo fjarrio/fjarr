@@ -27,7 +27,10 @@ A **fault-injecting mock backend/peer is a first-class artifact** (the fleet-dae
 mock's best idea), scripted in integration tests. The web side ships it as
 `@fjarr/core/testing` (`MockAgent`: fake signaling socket + fake peer
 connection, every fault below as a method) so host dashboards test their
-own integration without a browser or a robot. Minimum fault menu:
+own integration without a browser or a robot; the C++ side ships
+`fjarr-opsim` (docs/23) and the [browser lab](25-browser-lab.md) applies
+the network rows below as named profiles on both the browser and the media
+path. Minimum fault menu:
 
 | Fault | Expected behavior |
 |---|---|
@@ -45,9 +48,12 @@ own integration without a browser or a robot. Minimum fault menu:
 
 From M1, a measurement rig — not vibes:
 
-- **Glass-to-glass**: robot-sim renders a frame counter + timestamp;
-  headless-browser side OCRs/reads it from the decoded frame; Δ = g2g.
-  Report p50/p95 under clean, lossy, and relay conditions.
+- **Glass-to-glass**: the agent draws a **machine-readable frame stamp**
+  (frame counter + sender timestamp as a block pattern — no OCR) on the
+  test pattern / a stamped camera track; the [browser lab](25-browser-lab.md)
+  reads it per decoded frame via `requestVideoFrameCallback`; Δ = g2g.
+  Report p50/p95 under clean, lossy, and relay conditions (the lab's
+  network profiles).
 - **Input-to-photon**: synthetic click → screen change at a known pixel →
   time to that change appearing in the received stream.
 - Results append to a tracked CSV; regressions against
@@ -66,6 +72,25 @@ regresses**:
 - ownership lease expiry (fail-open) under media-plane hang;
 - heartbeat teardown timings.
 
+## Memory safety (C++) {#memory-safety-c}
+
+The agent wraps a C object system, so lifetime bugs get their own ladder
+([docs/23](23-agent-core-architecture.md#memory-and-lifetime-discipline-and-the-tooling-that-enforces-it)):
+
+| Layer | Tool | When | Gate? |
+|---|---|---|---|
+| RAII kit only touches refcounts | grep gate in `/verify`, clang-tidy `-Werror` | every commit | yes |
+| Address/Undefined/Leak | `asan` preset (+ `lsan.supp`) on unit + loop tests | every commit (CI) | yes |
+| Data races in the threading model | `tsan` preset on unit + loop tests | every commit (CI) | yes |
+| Live GStreamer objects per test / scenario | `leaks` tracer checkpoints bracketing every test case and every `fjarr-opsim` scenario | every commit (CI) | yes |
+| Object census + RSS over a soak | `GET /memory` before/after 200 sessions (`fjarr-opsim`) | nightly | yes (docs/16 budget) |
+| Uninitialised reads, invalid frees sanitizers miss | valgrind memcheck on loop tests | nightly | trend → gate at M3 |
+| Allocations on the hot path | heaptrack on a streaming scenario | nightly | docs/16 "0 per frame" budget |
+
+Every tool prints a one-screen verdict and writes JSON, so an AI agent
+running `make agent-test-asan` or `curl :7381/memory` gets an answer it
+can act on, not a wall of output.
+
 ## Unattended-access test (the industrial gate)
 
 Scripted per desktop-backend spike and kept forever after: reboot the
@@ -75,5 +100,8 @@ display **with zero local interaction**. This test decides ADR-0006.
 ## What CI runs (from M0.5)
 
 Lint (clang-tidy, clippy, eslint, markdownlint, lychee) → unit + component →
-integration on the compose stack (software encoders; VA-API asserted only on
-GPU runners when available) → docs build. Nightly: soak + latency trends.
+browser-lab e2e on the compose stack ([docs/25](25-browser-lab.md): real
+Chromium over CDP, software encoders; VA-API asserted only on GPU runners
+when available) → docs build. Nightly: soak, profiling scenarios and
+latency trends, with lab artifacts (traces, profiles, captures) attached
+to the run.

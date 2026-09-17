@@ -51,7 +51,7 @@ JSON text frames on the WSS connection. Common fields on **every** message:
 | `answer` | operator→server→agent | `session_id`, `sdp` | |
 | `ice` | both, trickled | `session_id`, `candidate`, `sdp_mline_index` | trickle ICE is REQUIRED; `candidate: ""` = end of candidates |
 | `ice-restart` | operator→server→agent | `session_id` | the operator asks the always-offering agent to re-offer with an ICE restart on the existing session ([reconnection](#reconnection)); the agent answers with a new `offer` |
-| `session-close` | any | `session_id`, `reason` | orderly teardown |
+| `session-close` | any | `session_id`, `reason`, `retry?` (bool, default false) | orderly teardown; `retry: true` means the closer expects the operator to open a **new session immediately** (agent media-plane restart, the ICE-restart fallback below) — the client treats it as a reconnection rung, never as a terminal close |
 | `peer-gone` | server→other side | `session_id`, `reason` | server-side last-will: socket death is announced, never inferred *(camera-streamer last-will lesson)* |
 | `backend-stream` | agent↔server | `capability`, `payload` (envelope) | backend-consumer envelope transport |
 | `session-peers` *(planned, M5)* | server→all parties | `session_id`, `peers: [{operator, role: "owner" \| "viewer"}]` | multi-operator presence from the docs/10 ownership leases; emitted on every change |
@@ -66,8 +66,14 @@ The operator's ladder, cheapest rung first:
 1. ICE `disconnected`: wait a short grace (3 s) — ICE usually recovers on
    its own.
 2. Still disconnected, or ICE `failed`: send `ice-restart` over signaling
-   (the WSS is independent of the media path); the agent re-offers with
-   `iceRestart` and the same manifest; tracks and consumers stay attached.
+   (the WSS is independent of the media path). An agent whose stack
+   supports ICE restart re-offers with new ICE credentials and the same
+   manifest; tracks and consumers stay attached. An agent that cannot
+   (GStreamer 1.24's `webrtcbin` ignores the restart option — the
+   [spike](../agent/spikes/webrtcbin-probe/README.md)) MUST answer
+   `session-close{reason:"ice-restart", retry:true}` at once, so the
+   operator climbs to rung 3 without waiting out the re-offer timeout
+   ([open question #21](18-open-questions.md)).
 3. No new offer within 10 s, or the signaling socket itself is gone: a
    **new signaling round** with the same grant (a fresh `hello`, new
    session) — re-fetching the grant first if the server said
@@ -185,8 +191,11 @@ a track). The agent — which always offers — sends a **new `offer`** on the
 established session:
 
 - `tracks` is the **complete** new manifest; unchanged tracks keep their
-  `track_id` and `mid`; removed tracks are absent and their transceivers are
-  stopped; new tracks get new transceivers.
+  `track_id` and `mid`; removed tracks are absent from the manifest — the
+  agent MAY keep their transceiver alive but muted (`sendonly`, valve
+  closed) for reuse, so receivers key on the manifest, never on transceiver
+  liveness; new tracks get new transceivers. `mid` values are read from the
+  offer SDP (`a=mid`) by both sides.
 - `manifest_version` (monotonic `u32`, new offer field) orders manifests
   **within a session**: a new `session_id` starts a new sequence, and
   receivers reset their applied version with it. Receivers ignore an offer

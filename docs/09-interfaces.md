@@ -26,7 +26,8 @@ agent.run();   // blocks; or agent.start()/stop() on the host's loop
 ```
 
 `fjarr-agent` (the reference daemon) is ~100 lines doing exactly this from
-config. Required idioms inside the library (from the camera-streamer heritage,
+config (`fjarr.toml` + `FJARR_*` overrides — format in
+[docs/23](23-agent-core-architecture.md#configuration)). Required idioms inside the library (from the camera-streamer heritage,
 [prior art](11-prior-art.md)): RAII wrappers for every GObject, all callbacks
 marshaled to one main loop, generation-counted session contexts, caps-gated
 offers.
@@ -77,14 +78,15 @@ public:
   virtual void shutdown() = 0;
 };
 
-// SessionContext (per session): session_id(), operator identity,
-// ChannelSender& channel(ChannelClass), per-session track activation,
-// update_tracks(new set) — mid-session track add/remove; the core coalesces
-// into one serialized renegotiation offer and keeps other tracks flowing
-// (docs/08#renegotiation) — and WorkerPool& worker(). BackendContext (per agent): ChannelSender& with
-// store-and-forward semantics for durable event types (docs/11 whitelist
-// pattern). Both are populated by the M1 core; capabilities never touch
-// sockets or SDP.
+// SessionContext (per session) and BackendContext (per agent) are concrete
+// classes specified in docs/23 (agent core architecture): tracks
+// (add_track at attach, update_tracks for renegotiation — the core
+// coalesces into one serialized offer and keeps other tracks flowing,
+// docs/08#renegotiation), per-class ChannelSender access, the
+// accept/feedback/result/fail correlation helpers, run_async on the worker
+// pool, arm_deadman, close. Both are core-loop-only; capabilities never
+// touch sockets, SDP or GStreamer negotiation.
+// spec: docs/23-agent-core-architecture.md#the-concrete-sessioncontext-and-backendcontext
 
 } // namespace fjarr
 ```
@@ -121,11 +123,61 @@ Implementations: `X11DesktopBackend` (XTest), `WaylandDesktopBackend`
 (portals/libei), `UinputInjector` (composable injection override) — chosen by
 config after [ADR-0006](adr/0006-desktop-backend-selection.md).
 
+### The video source contract {#the-video-source-contract}
+
+Every track enters the media plane through one contract — a test pattern,
+a webcam, an SDK-backed stereo camera, a network camera, a desktop monitor
+([docs/23](23-agent-core-architecture.md#video-sources-one-contract-three-ways-to-provide-one)).
+Customers add sources by config (a GStreamer description string), by
+registering a type, or through a capability:
+
+```cpp
+namespace fjarr {
+
+struct SourceOutput {
+  std::string name;        // "src" for single-output sources; "left"/"right"/"depth" …
+  TrackKind kind;          // Video | Audio
+  GstCaps* declared_caps;  // what the output will produce (raw, DMABuf/VAMemory, or x-h264…)
+};
+
+struct SourceInfo {
+  std::string identity;    // stable device identity (serial, by-id path, url)
+  std::vector<SourceOutput> outputs;
+};
+
+class VideoSource {
+public:
+  virtual ~VideoSource() = default;
+  virtual SourceInfo describe() const = 0;
+  /// A bin exposing ghost pad "src" (or "src_<name>" per output). Created
+  /// on first demand, disposed after idle; may be called again later.
+  virtual GstBin* create_bin() = 0;
+  virtual bool available() const = 0;
+  virtual void on_availability_changed(std::function<void(bool)> cb) = 0;   // hot-plug
+  virtual void on_unavailable(std::function<void(std::string reason)> cb) {} // permanent failure
+};
+
+// Registered source types: config `source = { type = "acme.stereo", … }`
+// → factory(params validated against schema). Built-ins: gst, test, v4l2, rtsp.
+struct SourceType {
+  std::string name;                   // reverse-DNS for third parties
+  nlohmann::json params_schema;
+  std::function<std::unique_ptr<VideoSource>(const nlohmann::json& params)> create;
+};
+void Agent::register_source_type(SourceType type);   // before run()/start()
+
+} // namespace fjarr
+```
+
+`fjarr-agent --probe-source '<description | type spec>'` validates a source
+standalone (negotiated caps, memory type, measured fps, bus errors) so a
+new camera can be brought up on the robot without a server or a browser.
+
 ### Adapter seams
 
-`TelemetrySource` (push typed values + error events), `EncoderAdapter`
-(pipeline fragment factory per codec/hardware), `SignalingTransport`
-(WebSocket default). ROS 2 lives in a separate `fjarr-ros2` adapter package —
+`VideoSource` (above), `TelemetrySource` (push typed values + error
+events), `EncoderAdapter` (pipeline fragment factory per codec/hardware),
+`SignalingTransport` (WebSocket default). ROS 2 lives in a separate `fjarr-ros2` adapter package —
 the core never links ROS.
 
 ## 2. Backend tier — the integration contract (ADR-0015)

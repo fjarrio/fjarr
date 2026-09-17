@@ -335,6 +335,8 @@ export class MockAgent {
   private readonly options: MockAgentOptions;
   /** Ignore `ice-restart` (a broken relay path) so the client's rung-3 fallback is exercised. */
   ignoreIceRestart = false;
+  /** Behave like an agent on GStreamer 1.24: answer `ice-restart` with `session-close{retry:true}` (docs/08#reconnection). */
+  iceRestartUnsupported = false;
   /** Reject the next brokered session with this reason. */
   rejectNextSession: string | null = null;
   /** Accept sockets but never answer hello (docs/15 "server goes silent" at signaling level). */
@@ -424,6 +426,10 @@ export class MockAgent {
         break;
       case "ice-restart":
         if (this.ignoreIceRestart) break;
+        if (this.iceRestartUnsupported) {
+          queueMicrotask(() => socket.receive(this.sig({ type: "session-close", session_id: parsed.session_id, reason: "ice-restart", retry: true })));
+          break;
+        }
         queueMicrotask(() => socket.receive(this.offer(parsed.session_id, "v=0\r\noffer ice-restart")));
         break;
       default:
@@ -543,8 +549,8 @@ export class MockAgent {
   peerGone(reason = "agent-disconnected"): void {
     this.socket.receive(this.sig({ type: "peer-gone", session_id: this.currentSessionId(), reason }));
   }
-  sessionClose(reason = "agent-shutdown"): void {
-    this.socket.receive(this.sig({ type: "session-close", session_id: this.currentSessionId(), reason }));
+  sessionClose(reason = "agent-shutdown", opts: { retry?: boolean } = {}): void {
+    this.socket.receive(this.sig({ type: "session-close", session_id: this.currentSessionId(), reason, ...(opts.retry ? { retry: true } : {}) }));
   }
   serverError(code: string, message = code): void {
     this.socket.receive(this.sig({ type: "error", code, message }));

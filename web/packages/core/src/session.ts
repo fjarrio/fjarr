@@ -403,6 +403,15 @@ export class SessionImpl implements Session {
         break;
       }
       case "session-close":
+        if (msg.retry === true) {
+          // The agent wants a fresh session now (media restart, ICE-restart
+          // fallback on stacks without restart): a counted round, no wait.
+          this.newRound(`session-close:${msg.reason}`, { immediate: true });
+          break;
+        }
+        this.teardownAll();
+        this.setInfo({ state: "closed", reason: `${msg.type}:${msg.reason}`, sessionId: null });
+        break;
       case "peer-gone":
         this.teardownAll();
         this.setInfo({ state: "closed", reason: `${msg.type}:${msg.reason}`, sessionId: null });
@@ -587,7 +596,7 @@ export class SessionImpl implements Session {
    * Rung 3: a fresh signaling round with the same (or a refetched) grant.
    * `free` rounds (grant refresh) neither count toward `maxRounds` nor wait.
    */
-  private newRound(why: string, opts: { free?: boolean } = {}): void {
+  private newRound(why: string, opts: { free?: boolean; immediate?: boolean } = {}): void {
     if (TERMINAL.has(this.getState())) return;
     const now = this.deps.now();
     const stableResetMs = DEFAULT_BACKOFF.stableResetMs;
@@ -603,7 +612,8 @@ export class SessionImpl implements Session {
     }
     // Arm the next step *before* telling listeners: a host that calls
     // close() from its state handler must find the timer and clear it.
-    if (opts.free) {
+    if (opts.free || opts.immediate) {
+      if (opts.immediate) this.backoff.markDisconnected(now); // counted, but the agent asked: no wait
       this.reconnectTimer = setTimeout(() => {
         this.reconnectTimer = null;
         this.launchRound();

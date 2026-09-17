@@ -15,6 +15,14 @@ much of what the camera streamer hand-built — at the cost of less control over
 session/track model docs/08 specifies, and it is not packaged in Ubuntu
 24.04 (we'd build/vendor it).
 
+**Spike finding (2026-09-17, [agent/spikes/webrtcbin-probe](../../agent/spikes/webrtcbin-probe/README.md)):**
+`webrtcbin` 1.24.2 ignores the `ice-restart` offer option and wedges the
+answerer on `direction=inactive`; `max-bundle` is required for
+DataChannels. The protocol gained a `session-close{retry:true}` fallback
+so rung 2 of the reconnection ladder works without in-place ICE restart.
+Whether `webrtcsink` (newer gst-plugins-rs) restarts ICE is a question for
+the spike this ADR waits on.
+
 ## Options considered
 
 - **webrtcbin + FrameHub (camera-streamer pattern)** + hand-wired TWCC/GCC bitrate

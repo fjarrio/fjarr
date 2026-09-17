@@ -249,7 +249,9 @@ async fn agent_loop(
                     Shared::send_error(&tx, ec::SESSION_UNKNOWN, "unknown session", Some(event_id));
                 }
             }
-            Body::SessionClose { session_id, reason } => {
+            Body::SessionClose {
+                session_id, reason, ..
+            } => {
                 let (sid, why) = (session_id.clone(), reason.clone());
                 if service.shared.relay_to_operator(robot_id, &sid, msg) != Relay::Unknown {
                     if let Some(session) = service.shared.remove_session(&sid) {

@@ -115,6 +115,7 @@ reconnecting → (connected | failed) → closed`. Transitions:
 | reconnecting | attempts exhausted | failed | consumers see `failed` and an `error` event (`reconnect-exhausted`); `retry()` available |
 | reconnecting | `retry()` | connecting round now | skips the remaining backoff (a host "reconnect now" button) |
 | any | `peer-gone` / `session-close` from server | closed (reason) | release tracks, keep subscriptions registered for a possible `open()` again |
+| connected / reconnecting | `session-close{retry:true}` (agent media restart, ICE-restart fallback on GStreamer 1.24) | reconnecting | a counted round, started at once — the agent asked for a fresh session |
 | any | `error(grant-expired)` | reconnecting | refetch grant via provider, then retry immediately — the first refresh per attempt is free (no backoff, not counted); a second consecutive `grant-expired` is an ordinary backed-off round, so a host minting rejected tokens can never hot-loop; never a generic failure |
 | any | `error(session-unknown)` | closed (reason) | the server no longer knows our session (a message crossed `peer-gone` on the wire): an orderly close, not a failure |
 
@@ -366,6 +367,7 @@ overridable; the host's design system wins (docs/05).
 | `<ConnectionQuality>` | health level + reasons from the stats sampler | `StreamSelector` stats panel (generalized) |
 | `<DesktopView>` | the remote-desktop surface — design in [docs/22](22-remote-desktop-client.md), which also lists the core requirements slice 2 must satisfy for it | — |
 | `<TerminalView>` | capability view (M2), registered via `registerCapabilityView` | — |
+| `<PipelineGraph>` / `usePipelines` | live GStreamer pipeline graphs from `fjarr.introspect` ([docs/24](24-pipeline-introspection.md)); d3-graphviz rendering, history scrubbing (slice 5) | — |
 
 Third-party capabilities register views with the same registry
 ([docs/05](05-extension-model.md#web-side-capability-components)).
@@ -412,9 +414,13 @@ breaking later. Slice 2 provides them up front:
   detection, health reasons + hysteresis.
 - **Multi-session** tests: three sessions on one client with independent
   state machines; a fault injected on one leaves the other two untouched.
-- **Browser e2e** (Playwright, headless Chromium) against robot-sim via the
-  demo stack: video renders, track toggles within budget (lands with slice 5,
-  once demo-robot streams).
+- **Browser e2e** in the [browser lab](25-browser-lab.md): first against
+  the in-browser **loopback agent** (a real `RTCPeerConnection` pair in the
+  page — autoplay, `srcObject`, IntersectionObserver, `getStats`,
+  `replaceTrack`, renegotiation and ICE restart on a real WebRTC stack),
+  then against demo-robot via the demo stack once it streams. The core's
+  **wire tap** (`client.on("wire", …)`) makes DataChannel traffic
+  observable there, since CDP cannot see inside SCTP.
 - All of the above except the browser e2e run in `make web-test` with no
   browser: `@fjarr/core/testing` provides the scripted socket, peer
   connection and `MockAgent` (docs/15) that host dashboards can reuse.

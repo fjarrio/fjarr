@@ -166,7 +166,7 @@
         },
         "mid": {
           "type": "string",
-          "description": "SDP media id of the carrying transceiver; receivers map RTCTrackEvent.transceiver.mid \u2192 track_id"
+          "description": "SDP media id of the carrying transceiver; receivers map RTCTrackEvent.transceiver.mid → track_id"
         }
       }
     },
@@ -480,6 +480,10 @@
         },
         "reason": {
           "type": "string"
+        },
+        "retry": {
+          "type": "boolean",
+          "description": "true: the closer expects a new session immediately (media restart, ICE-restart fallback); default false"
         }
       },
       "required": [

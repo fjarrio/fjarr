@@ -1,0 +1,55 @@
+[  0.013] GStreamer GStreamer 1.24.2, webrtcbin bundle-policy=none
+[  0.020] Q6: webrtcbin props: latency=200 ms, bundle-policy=none, ice-transport-policy=all
+[  0.021] RESULT Q6-turn  PASS    turn-server prop readback=turn://user:s3cret@turn.example.org:3478?transport=tcp; add-turn-server(turn://...)=1 (turns://...)=1 (http://...)=0
+[  0.021] GstWebRTCDataChannel props: label(gchararray,rw) ordered(gboolean,rw) max-packet-lifetime(gint,rw) max-retransmits(gint,rw) protocol(gchararray,rw) negotiated(gboolean,rw) id(gint,rw) priority(GstWebRTCPriorityType,rw) ready-state(GstWebRTCDataChannelState,ro) buffered-amount(guint64,ro) buffered-amount-low-threshold(guint64,rw) 
+[  0.021] GstWebRTCDataChannel signals: on-open on-close on-error on-message-data on-message-string on-buffered-amount-low send-data send-string close 
+[  0.021] GstWebRTCRTPTransceiver props: name(gchararray,rw) parent(GstObject,rw) sender(GstWebRTCRTPSender,rw) receiver(GstWebRTCRTPReceiver,rw) current-direction(GstWebRTCRTPTransceiverDirection,ro) direction(GstWebRTCRTPTransceiverDirection,rw) mlineindex(guint,rw) mid(gchararray,ro) kind(GstWebRTCKind,ro) codec-preferences(GstCaps,rw) 
+
+** (webrtcbin-probe:18678): CRITICAL **: 21:00:06.663: gst_webrtc_bin_create_data_channel: assertion 'webrtc->priv->is_closed != TRUE' failed
+[  0.021] A: create-data-channel in NULL state -> (nil) (CRITICAL above = webrtcbin must be >= READY)
+[  0.023] A: on-new-transceiver mline=4294967295 mid=(null) dir=sendrecv
+[  0.023] A: requested sink_0, link=0
+[  0.023] B: on-negotiation-needed #1
+[  0.025] A: create-data-channel after PLAYING -> 0x64829ada5c40
+[  0.026] caps-gate: fixed RTP caps on payloader src: application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)VP8, payload=(int)96, ssrc=(uint)2026771992, timestamp-offset=(uint)1120483890, seqnum-offset=(uint)3411, a-framerate=(string)30
+[  0.026] A: on-negotiation-needed #1
+[  0.046] RESULT Q2-caps  PASS    fixed caps (payload+ssrc) seen on payloader src pad before create-offer: application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)VP8, payload=(int)96, ssrc=(uint)20
+[  0.046] Q2: mid before create-offer = (null) (negotiation-needed so far: 1)
+[  0.046] negotiate: create-offer on A (options=NULL)
+[  0.290] negotiate: offer created: m=0:video mid=video0 sendrecv ufrag=jdTNNIChovROrZHR1s+p+9jBrsxAVAmN port=9 m=1:application mid=application1 <none> ufrag=Pc+EU5ph/1u8enZ7ZI2iNL0T6xtI8pmc port=9
+[  0.292] A: signaling-state -> have-local-offer
+[  0.292] A: ice-gathering-state -> gathering
+[  0.294] B: signaling-state -> have-remote-offer
+[  0.294] B: flushed 6 queued remote candidates
+[  0.294] B: on-new-transceiver mline=0 mid=(null) dir=recvonly
+[  0.294] negotiate: answer created: m=0:video mid=video0 recvonly ufrag=K7h9BHEHV3fCAm1eYiEQ1vLsuqtOjEcC port=9 m=1:application mid=application1 <none> ufrag=+rZh4ntqH978NIEkhq2GCV5K1PTmnd1B port=9
+[  0.296] B: signaling-state -> stable
+[  0.296] B: ice-gathering-state -> gathering
+[  0.296] B: ice-connection-state -> checking
+[  0.296] B: connection-state -> connecting
+[  0.297] A: signaling-state -> stable
+[  0.297] A: flushed 6 queued remote candidates
+[  0.297] negotiate: done, signaling-state A=stable
+[  0.297] RESULT Q1-offer PASS    offer m-sections: m=0:video mid=video0 sendrecv ufrag=jdTNNIChovROrZHR1s+p+9jBrsxAVAmN port=9 m=1:application mid=application1 <none> ufrag=Pc+EU5ph/1u8enZ7ZI2iNL0T6xtI8pmc port=9
+[  0.297] RESULT Q2-mid   PASS    mid: before create-offer=(null) | after create-offer(before SLD)=(null) | after set-local=(null) | after answer applied=video0 (offer m=0 a=mid:video0)
+[  0.297] A: ice-connection-state -> checking
+[  0.297] A: connection-state -> connecting
+[  0.358] A: ice-connection-state -> connected
+[  0.358] A: ice-connection-state -> completed
+[  0.358] B: ice-connection-state -> connected
+[  0.358] B: ice-connection-state -> completed
+[  0.365] caps-gate: fixed RTP caps on payloader src: application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)VP8, payload=(int)96, seqnum-offset=(uint)3411, timestamp-offset=(uint)1120483890, ssrc=(uint)2026771992, a-framerate=(string)30
+[  0.493] A: ice-gathering-state -> complete
+[  0.496] B: ice-gathering-state -> complete
+[  0.564] B: pad-added src_0 (#1) transceiver mid=video0 mlineindex=0 caps=application/x-rtp, media=(string)video, payload=(int)96, clock-rate=(int)90000, encoding-n
+[  5.366] B: connection-state -> failed
+[ 15.388] RESULT Q1-ondc  FAIL    B on-data-channel fired: no; A connection-state=connecting B=failed (connected+open within 15 s: NO)
+
+===== SUMMARY (bundle-policy=none) =====
+ID        VERDICT  NOTE
+Q6-turn   PASS     turn-server prop readback=turn://user:s3cret@turn.example.org:3478?transport=tcp; add-turn-server(turn://...)=1 (turns://...)=1 (http://...)=0
+Q2-caps   PASS     fixed caps (payload+ssrc) seen on payloader src pad before create-offer: application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)VP8, payload=(int)96, ssrc=(uint)20
+Q1-offer  PASS     offer m-sections: m=0:video mid=video0 sendrecv ufrag=jdTNNIChovROrZHR1s+p+9jBrsxAVAmN port=9 m=1:application mid=application1 <none> ufrag=Pc+EU5ph/1u8enZ7ZI2iNL0T6xtI8pmc port=9
+Q2-mid    PASS     mid: before create-offer=(null) | after create-offer(before SLD)=(null) | after set-local=(null) | after answer applied=video0 (offer m=0 a=mid:video0)
+Q1-ondc   FAIL     B on-data-channel fired: no; A connection-state=connecting B=failed (connected+open within 15 s: NO)
+[ 15.389] A: connection-state -> connected

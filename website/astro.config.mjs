@@ -38,6 +38,9 @@ export default defineConfig({
             "16-performance-budgets",
             "21-web-client-architecture",
             "22-remote-desktop-client",
+            "23-agent-core-architecture",
+            "24-pipeline-introspection",
+            "25-browser-lab",
           ],
         },
         {

@@ -47,6 +47,8 @@ Fixed-CBR-only operation is a spec violation.
 | GPU | encode within iGPU capacity for 2 concurrent 1080p30 encodes |
 | RAM | agent RSS < 300 MB steady state |
 | Store-and-forward disk | bounded ≤ 200 MB (oldest-first eviction + drop counter) |
+| Heap allocations per frame on the streaming hot path (FrameHub → appsrc), steady state | 0 beyond GStreamer's own buffer refs (heaptrack) |
+| Object census after a 200-session soak | identical to baseline; RSS growth < 5 MB |
 
 Multi-viewer scales via FrameHub: +1 viewer ≈ +RTP fan-out cost only (no new
 encode) — verify ≤ 5 % CPU per additional viewer.
@@ -57,6 +59,20 @@ Browser viewers are **relay-realistic**: capacity-plan TURN at ~1 stream =
 0.5–5 Mbps depending on activity. Ten concurrent operator views ≈ tens of
 Mbps through the relay — metered per session ([docs/10](10-security.md#turn)),
 priced through ([docs/03](03-product-strategy.md#usage-meters)).
+
+## Web client budgets {#web-client-budgets}
+
+Measured by the [browser lab](25-browser-lab.md) profiling scenarios
+(initial targets, confirmed at slice 5):
+
+| Metric | Budget |
+|---|---|
+| Main-thread busy while streaming 2 active tracks (60 s) | ≤ 15 % |
+| Long tasks (> 50 ms) while streaming | 0 per minute after first frame |
+| INP (dashboard interactions while streaming) | ≤ 200 ms |
+| JS heap growth per connect/disconnect cycle (100-cycle soak, after GC) | ≤ 50 KB/cycle, no monotonic listener/node growth |
+| Time to first frame after `select-tracks` enable (LAN, keyframe requested) | ≤ 300 ms |
+| Frames dropped on unchanged tracks during a renegotiation | 0 (frame-stamp counter) |
 
 ## Connection health thresholds {#connection-health-thresholds}
 

@@ -19,6 +19,28 @@ Peer consumer. Ports the proven camera-streamer v3 model ([prior art](11-prior-a
 - Active/inactive quality tiers per [budgets](16-performance-budgets.md);
   adaptive bitrate from day one (the camera-streamer gap).
 - Per-second `bandwidth-stats` on the control DC, per track.
+- **Any source, by config.** Tracks reference sources through the
+  [video source contract](09-interfaces.md#the-video-source-contract):
+  a GStreamer description string covers every camera with a plugin, a
+  registered type covers SDK-backed or multi-output devices, and the track
+  id is the config key (stable across replug):
+
+  ```toml
+  [capabilities."fjarr.camera".tracks.front]
+  label  = "Front"
+  source = "v4l2src device=/dev/v4l/by-id/usb-Acme_Cam-video-index0 ! image/jpeg,width=1280,height=720,framerate=30/1 ! jpegdec"
+
+  [capabilities."fjarr.camera".tracks.arm]
+  label  = "Arm"
+  source = { type = "acme.stereo", serial = "0123", output = "left" }   # registered in-process
+
+  [capabilities."fjarr.camera".tracks.pattern]
+  label  = "Test"
+  source = { type = "test", pattern = "smpte", width = 1280, height = 720, fps = 30 }
+  ```
+
+  Unplugging a camera removes its track through the same renegotiation
+  as a monitor hot-plug; replugging restores the same `track_id`.
 
 Control messages (envelopes on `fjarr:control`, docs/08#envelope):
 
@@ -214,6 +236,21 @@ backpressured so a chatty robot can't flood the operator; the same source
 feeds observability (M7) in the backend mode. Cheap, and the single most
 requested support feature after "show me the screen". Milestone: peer mode
 **M4**, backend mode **M7** ([roadmap](17-roadmap.md)).
+
+## `fjarr.introspect` — pipeline introspection (slice 3 core, slice 5 UI) {#fjarrintrospect--pipeline-introspection-slice-3-core-slice-5-ui}
+
+Peer consumer, built in. Exposes the agent's live pipeline snapshots
+(DOT, JSON, summary text, with history) over the session so a robot's
+media plane can be inspected from the dashboard without shell access —
+the product feature specified in [docs/24](24-pipeline-introspection.md).
+Grant-gated (`{"name":"fjarr.introspect"}`, developer/support roles);
+large bodies ride `fjarr:bulk:fjarr.introspect`.
+
+**Accepted when:** from the demo dashboard's Diagnostics tab, an operator
+with the introspect grant watches the session pipeline update live while
+toggling tracks and triggering the hot-plug test hook; the same snapshots
+are readable with one `curl` on the robot; an operator without the grant
+gets `capability-denied`.
 
 ## Sensor data transport: video track or stream class? {#sensor-transport}
 

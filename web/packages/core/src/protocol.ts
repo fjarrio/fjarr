@@ -132,6 +132,8 @@ export interface SessionCloseMessage extends SignalingCommon {
   type: "session-close";
   session_id: string;
   reason: string;
+  /** The closer expects a new session at once (media restart, ICE-restart fallback) — docs/08#signaling. */
+  retry?: boolean;
 }
 
 export interface PeerGoneMessage extends SignalingCommon {
@@ -324,8 +326,9 @@ export function isSignalingMessage(x: unknown): x is SignalingMessage {
     case "session-accept":
     case "ice-restart":
       return sid();
-    case "session-reject":
     case "session-close":
+      return sid() && isStr(x.reason) && (x.retry === undefined || typeof x.retry === "boolean");
+    case "session-reject":
     case "peer-gone":
       return sid() && isStr(x.reason);
     case "offer":

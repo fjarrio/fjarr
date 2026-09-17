@@ -20,6 +20,7 @@ files, fleet metadata, update artifacts (M8 — the supply-chain crown jewel).
 | TURN abuse | harvested credentials | ephemeral HMAC creds (`use-auth-secret`), TTL ≤ session; never static ([teleop-car lesson](11-prior-art.md#teleop-car)) |
 | Robot-side privilege escalation | compromise of the agent process | agent runs unprivileged; injection helper is minimal and separate ([ADR-0009](adr/0009-privilege-separation.md)); **no arbitrary-shell escape hatches, ever** (fleet-daemon FIFO anti-lesson) |
 | Terminal/file abuse | over-broad grants | per-capability grant params (`view_only`, `read`/`write`, path allow-lists); audit every session |
+| Internals disclosure | pipeline graphs reveal device paths, encoder settings, session ids | `fjarr.introspect` only with an explicit grant (developer/support roles); the local endpoint binds to loopback unless a token is configured; snapshots never contain credentials ([docs/24](24-pipeline-introspection.md)) |
 | Replay/tamper on webhooks | forged callbacks | HMAC-signed, timestamped, `event_id` idempotency |
 | Stuck control | dead operator/agent | heartbeat teardown + `release_all_input()`; deadman on actuation channels ([docs/15](15-testing-strategy.md)) |
 

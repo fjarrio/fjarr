@@ -32,6 +32,7 @@ Or without VS Code: `docker compose up -d dev robot-sim`, then
 | `demo-robot` | `demo` | the C++ "customer robot" capturing robot-sim |
 | `demo-dashboard` | `demo` | Vite dev server on <http://localhost:5173> |
 | `coturn` | `turn` | TURN relay in `use-auth-secret` mode (ephemeral creds only) |
+| `browser` | `lab` | headless Chromium with CDP on <http://localhost:9222> and fake media devices — the [browser lab](25-browser-lab.md) |
 
 `make demo-up` = `docker compose --profile demo up -d` — the full customer
 topology. The `dev` and `robot-sim` containers share `/tmp/.X11-unix` via the
@@ -106,9 +107,28 @@ Named volumes keep rebuilds fast: `cargo-registry`, `pnpm-store`, `ccache`,
 `x11sock`. `docker compose down -v` wipes them (first build after that is
 slow again).
 
+## Browser lab
+
+`make lab-up` starts the `browser` service beside the demo profile;
+`make e2e` runs the Playwright/CDP suite from `dev`; `pnpm fjarr-lab
+<command>` drives the same browser ad hoc (`open`, `net lossy`, `wire
+--follow`, `profile cpu 10`, `memory --cycles 20`…). Artifacts land in
+`web/e2e/out/`. Details: [docs/25](25-browser-lab.md).
+
+## Pipeline introspection
+
+With the demo profile up, `make introspect` opens the agent's live pipeline
+viewer (`http://localhost:7381/`, [docs/24](24-pipeline-introspection.md));
+`curl localhost:7381/pipelines` lists pipelines and
+`curl localhost:7381/pipelines/<id>.txt` prints a one-screen summary — the
+first thing to look at when media misbehaves, and what `/verify` and the
+e2e tests assert against.
+
 ## Make targets
 
-`doctor` · `agent-configure/build/test` · `signaling-run/test/clippy` ·
+`doctor` · `agent-configure/build/test` · `agent-test-asan/tsan` ·
+`agent-leaks` · `agent-memcheck` · `agent-heaptrack` (docs/15 memory
+safety) · `signaling-run/test/clippy` ·
 `web-dev/build/lint` · `sim-up` · `demo-up/down` · `stack-up` ·
 `website-dev/build` · `docs-lint` · `docs-links` · `fmt` · `lint`.
 `.vscode/tasks.json` wraps the same targets — terminal and IDE never diverge.

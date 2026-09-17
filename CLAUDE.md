@@ -77,6 +77,9 @@ CI mirrors all of this in `.github/workflows/ci.yml`.
 | Embedding APIs / idioms | docs/09-interfaces.md |
 | Web library design (sessions, subscriptions, publishing, tracks) | docs/21-web-client-architecture.md |
 | Remote desktop in the browser (input, focus, cursor, clipboard) | docs/22-remote-desktop-client.md |
+| Agent core internals (threading, sessions, media plane, SessionContext) | docs/23-agent-core-architecture.md |
+| Looking at what the media plane is doing (live pipeline graphs, `curl localhost:7381`) | docs/24-pipeline-introspection.md |
+| Driving a real browser: e2e, wire captures, network profiles, CPU/memory profiles (`fjarr-lab`) | docs/25-browser-lab.md |
 | Capability plugin rules | docs/05-extension-model.md + `/new-capability` |
 | Security constraints | docs/10-security.md |
 | Why decisions were made | docs/adr/README.md |

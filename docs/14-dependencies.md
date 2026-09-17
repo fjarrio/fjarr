@@ -24,6 +24,10 @@ groups with comments.
 | libdbus / sd-bus | noble | portal negotiation | AFL-2.1/GPL dual → use LGPL path; verify at M2 | yes |
 | nlohmann-json | 3.11 | envelopes, config | MIT | yes |
 | libsoup-3 (+ glib-networking) | 3.4 | WS/HTTP signaling client (ADR-0017) | LGPL-2.1 (dynamic) | yes |
+| toml++ (`tomlplusplus`) | 3.4 (header-only) | `fjarr.toml` config (docs/23) | MIT | yes |
+| nlohmann json-schema-validator | 2.3 | capability config validation against `config_schema` | MIT | yes |
+| libsystemd (`sd_notify`) | noble, optional | READY/WATCHDOG supervision (ADR-0019) | LGPL-2.1 (dynamic) | yes (optional) |
+| GoogleTest | 1.14 | C++ unit/loop tests | BSD-3 | dev-only |
 | **Forbidden**: `gstreamer1.0-plugins-ugly` (x264enc) | — | — | GPL | **never** (doctor-enforced) |
 
 ## Signaling (`fjarr-signaling` / `fjarr-server`) — ships as sidecar/Cloud
@@ -55,6 +59,9 @@ groups with comments.
 | vitest | ^5 | unit tests (core, react) | MIT | dev-only |
 | happy-dom | ^20 | DOM for `@fjarr/react` hook tests | MIT | dev-only |
 | @testing-library/react | ^16 | hook/component tests | MIT | dev-only |
+| d3-graphviz + @hpcc-js/wasm | ^5 / ^2 | DOT rendering in `<PipelineGraph>` and the on-robot viewer (docs/24) | BSD-3 / Apache-2.0 | yes (`@fjarr/react` optional entry; viewer bundled with the agent) |
+| @playwright/test (+ pinned Chromium image) | ^1.5x | browser lab harness and e2e (docs/25) | Apache-2.0 | dev-only |
+| web-vitals | ^4 | LCP/CLS/INP in the lab | Apache-2.0 | dev-only |
 
 ## Demos, website, tooling — never shipped
 
@@ -66,7 +73,7 @@ groups with comments.
 | markdownlint-cli2, lychee | latest | docs gates |
 | ajv | ^8 | protocol schema conformance gate (`make protocol-check`) |
 | CMake/Ninja/ccache, clang-18 suite | noble | C++ build/lint |
-| GoogleTest (M1) | — | C++ tests (BSD-3) |
+| valgrind, heaptrack | noble | nightly memcheck and allocation profiling of the agent (docs/15 memory safety; GPL tools, dev-only, never linked) |
 | coturn (container) | 4.6 | dev/self-host TURN (BSD-3) |
 | Xvfb/openbox/x11vnc/noVNC (robot-sim) | noble | fake robot desktop |
 | Docker + Compose v2 | ≥ 24 | the environment itself |

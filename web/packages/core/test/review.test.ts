@@ -588,3 +588,39 @@ describe("review pass 2: adversarial findings", () => {
     handle.release();
   });
 });
+
+describe("session-close with retry (docs/08: agent-requested fresh session)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("an agent on a stack without ICE restart answers ice-restart with a retryable close; the client reconnects at once", async () => {
+    const h = harness();
+    const s = await connected(h);
+    h.agent.iceRestartUnsupported = true;
+    h.agent.iceFailed();
+    await tick();
+    expect(h.agent.signaling.filter((m) => m.type === "ice-restart")).toHaveLength(1);
+    expect(s.getState()).toBe("connected"); // new session brokered immediately, no 10 s wait
+    expect(h.agent.sockets).toHaveLength(2);
+    // reconnecting (ice-failed) → reconnecting (session-close:ice-restart) → connected
+    expect(h.states()).toEqual(["connecting", "connected", "reconnecting", "reconnecting", "connected"]);
+    expect(h.events.some((e) => e.type === "state" && e.reason === "session-close:ice-restart")).toBe(true);
+    expect(s.info.getSnapshot().round).toBe(1); // counted
+  });
+
+  it("a media-plane restart on the agent is a reconnection, not a terminal close", async () => {
+    const h = harness();
+    const s = await connected(h);
+    const handle = s.tracks.acquire("cam-front");
+    await vi.advanceTimersByTimeAsync(50);
+    expect(h.selects().length).toBe(1);
+    h.agent.sessionClose("media-restart", { retry: true });
+    await tick();
+    expect(s.getState()).toBe("connected");
+    expect(handle.released).toBe(false);
+    expect(h.selects().length).toBe(2); // demand re-flushed on the new session
+    h.agent.sessionClose("operator-kicked");
+    expect(s.getState()).toBe("closed");
+    handle.release();
+  });
+});

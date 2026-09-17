@@ -75,6 +75,15 @@ written).
 
 ## Agent-relevant tooling notes
 
+The two tools built *for* agents as much as for people: the
+[browser lab](25-browser-lab.md) (`fjarr-lab` drives a real Chromium over
+CDP: open, eval, screenshot, network profile, signaling and DataChannel
+captures, CPU/memory profiles, web vitals, all with text + JSON output) and
+[pipeline introspection](24-pipeline-introspection.md)
+(`curl localhost:7381/pipelines/<id>.txt`). An agent debugging a media
+problem uses those before reading code, and cites their artifacts in its
+report.
+
 - Everything builds in the dev container; agents should prefix with
   `docker compose exec dev …` (CLAUDE.md documents this) — host tools are
   intentionally not the toolchain.

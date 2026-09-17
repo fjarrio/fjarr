@@ -26,7 +26,11 @@ telemetry, scp for files).
 Analogous positioning: **LiveKit** (media infra, open server + cloud twin),
 **Mender/Balena** (fleet OTA), **Temporal** (open core + managed). Fjarr's
 differentiator is the *bundle for robots*: real-time media, desktop, files,
-and fleet tooling — one protocol, embeddable at every tier.
+and fleet tooling — one protocol, embeddable at every tier — plus a
+developer experience no media stack offers: **live pipeline introspection**
+([docs/24](24-pipeline-introspection.md)) that lets an integrator, a
+support engineer or an AI coding agent see exactly what the media plane is
+doing, on the robot and from the dashboard.
 
 ## Open-core split ([ADR-0011](adr/0011-license-open-core.md), [ADR-0015](adr/0015-backend-integration-strategy.md))
 
@@ -36,6 +40,7 @@ and fleet tooling — one protocol, embeddable at every tier.
 | `fjarr-signaling` crate + `fjarr-server` sidecar (self-host) | **Fleet observability**: aggregation, retention, dashboards, alerting (M7) |
 | `@fjarr/core`, `@fjarr/react` | **OTA campaigns**: staged rollouts, fleet targeting, audit (M8) |
 | Protocol spec, SDKs, docs, demos | SSO/SCIM, audit export, support/SLA |
+| Pipeline introspection on the robot + in the dashboard ([docs/24](24-pipeline-introspection.md)) | fleet-wide pipeline history, search and retention in Cloud (M7) |
 | | **Commercial license** for companies that can't ship AGPL |
 
 Principles: the open core must be *genuinely usable alone* (a company can run

@@ -36,6 +36,9 @@ with rationale).
 | 20 | [Agentic development](20-agentic-development.md) | AI agents as first-class contributors | review |
 | 21 | [Web client architecture](21-web-client-architecture.md) | @fjarr/core + @fjarr/react: sessions, subscriptions, publishing, demand-driven media | review |
 | 22 | [Remote desktop client](22-remote-desktop-client.md) | Browser-side fjarr.desktop: input pipeline, focus, cursor, latency, clipboard | review |
+| 23 | [Agent core architecture](23-agent-core-architecture.md) | libfjarr core: threading, session state machine, media plane, DC router, SessionContext, supervision, testing | draft |
+| 24 | [Pipeline introspection](24-pipeline-introspection.md) | Live, visual and machine-readable GStreamer pipeline graphs — for developers, customers and AI agents | draft |
+| 25 | [Browser lab](25-browser-lab.md) | CDP-driven Chromium in the stack: e2e, traffic introspection, network emulation, profiling — for people and agents | draft |
 
 ## Architecture decision records
 

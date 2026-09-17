@@ -16,7 +16,7 @@ by revision (this document's history), never by renumbering.
 | M0 Docs & environment | **done** 2026-09-15 | doctor 0 failures, 3 tiers + 3 demos build, site builds |
 | M0.5 Public foundations | **done** 2026-09-16 | CI green, fjarr.io + fjarr.dev live, registrations, prior-art anonymization policy |
 | M1 Core + extension API (camera video) | **in progress** | slices 0–1 done (protocol + API-fit review; Rust signaling, reviewed); slices 2–7 pending |
-| M2 – M8 | planned | revised 2026-09-16 after the slice-2 design ([docs/21](21-web-client-architecture.md), [docs/22](22-remote-desktop-client.md)) |
+| M2 – M8 | planned | revised 2026-09-16 after the slice-2 design ([docs/21](21-web-client-architecture.md), [docs/22](22-remote-desktop-client.md)); slice-3 planning 2026-09-17: [docs/23](23-agent-core-architecture.md) agent core, [docs/24](24-pipeline-introspection.md) introspection, [docs/25](25-browser-lab.md) browser lab, [ADR-0019](adr/0019-agent-process-model.md), the [webrtcbin spike](../agent/spikes/webrtcbin-probe/README.md) |
 
 ## M0 — Documentation & environment *(done)*
 
@@ -50,8 +50,17 @@ adaptive bitrate. Extension API paper-validated — **done**:
 **Slices** (each lands on `main`, reviewed retrospectively — docs/20):
 0 protocol + review ✔ · 1 Rust signaling ✔ · 2 web core + React ✔
 ([review](reviews/slice-2-review.md)) ·
-3 agent core (C++) · 4 `fjarr.camera` · 5 demo wiring · 6 ADR-0007 spike +
-adaptive bitrate · 7 fault injection + latency harness.
+3 agent core (C++, per [docs/23](23-agent-core-architecture.md) — ships
+with a built-in `fjarr.test` capability and the `fjarr-opsim` operator
+simulator so the core is proven end-to-end before any real capability,
+plus the pipeline-introspection walker, local endpoint and viewer of
+[docs/24](24-pipeline-introspection.md), and — as its first task, on the
+web side — the [browser lab](25-browser-lab.md) (CDP Chromium in compose,
+Playwright/CDP harness, loopback agent, `fjarr-lab`); gate in
+[docs/23](23-agent-core-architecture.md#slice-3-gate)) ·
+4 `fjarr.camera` · 5 demo wiring (incl. `fjarr.introspect` +
+`<PipelineGraph>`) · 6 ADR-0007 spike + adaptive bitrate ·
+7 fault injection + latency harness.
 
 **Gate:** the three-demo stack end-to-end — demo-robot (embedding libfjarr)
 streams 2 tracks to 3 browsers through the `fjarr-server` sidecar, the TS

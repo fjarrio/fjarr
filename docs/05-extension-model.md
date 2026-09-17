@@ -100,6 +100,7 @@ Adapters customize *how the core talks to its environment*:
 | Seam | Tier | First implementation |
 |---|---|---|
 | `TelemetrySource` / `RobotAdapter` | agent | **ROS 2 adapter** — the core stays ROS-free (fleet-daemon lesson); adapters translate ROS topics into capability data |
+| Video source | agent | one contract for every camera/screen/test source ([docs/09](09-interfaces.md#the-video-source-contract)); customers add sources by config string, by registering a type, or via a capability — no core change |
 | Encoder adapter | agent | VA-API; Jetson `nvv4l2h264enc` later |
 | Desktop backend | agent | per [docs/07](07-desktop-backends.md) — X11/Wayland/uinput behind one interface |
 | Auth hooks | server | JWT verification; company SSO later |

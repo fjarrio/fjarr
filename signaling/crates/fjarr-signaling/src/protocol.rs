@@ -178,6 +178,9 @@ pub enum Body {
     SessionClose {
         session_id: String,
         reason: String,
+        /// The closer expects a new session at once (docs/08#signaling).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retry: Option<bool>,
     },
     PeerGone {
         session_id: String,
