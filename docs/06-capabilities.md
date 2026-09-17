@@ -30,9 +30,13 @@ Peer consumer. Ports the proven camera-streamer v3 model ([prior art](11-prior-a
   label  = "Front"
   source = "v4l2src device=/dev/v4l/by-id/usb-Acme_Cam-video-index0 ! image/jpeg,width=1280,height=720,framerate=30/1 ! jpegdec"
 
+  [capabilities."fjarr.camera".tracks.stereo-left]
+  label  = "Stereo left"
+  source = "zedsrc camera-resolution=2 camera-fps=30 stream-type=0"    # a vendor plugin (Stereolabs ZED), tier 1
+
   [capabilities."fjarr.camera".tracks.arm]
   label  = "Arm"
-  source = { type = "acme.stereo", serial = "0123", output = "left" }   # registered in-process
+  source = { type = "acme.stereo", serial = "0123", output = "left" }   # registered in-process, tier 2
 
   [capabilities."fjarr.camera".tracks.pattern]
   label  = "Test"
