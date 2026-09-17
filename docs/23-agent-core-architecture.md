@@ -124,6 +124,7 @@ Agent (public, pImpl)
      ├─ CoreLoop                     GMainContext/GMainLoop, post_to_owner sink, worker pool
      ├─ SignalingClient              libsoup-3 WebSocket, hello/backoff, message dispatch
      ├─ CapabilityRegistry           name → Capability, manifests, config validation, dependencies
+     ├─ ModuleLoader                 dlopen of in-tree optional modules (desktop backends, ADR-0021)
      ├─ MediaPlane
      │   ├─ FrameHub                 track_id/tier → ring of encoded GstSamples, subscribers
      │   ├─ SourceRegistry            type name → VideoSource factory (built-in + customer-registered)
@@ -295,7 +296,11 @@ packages (`fjarr-gst-<vendor>`) reached through tier 1; the core links no
 SDK, a customer installs only the packages for the hardware they own, and a
 configured track whose element is missing is `unavailable` with the reason
 (or a startup error if the track is `required = true`) while everything
-else runs. Tier 2 is for the embedding application's own code.
+else runs. Tier 2 is for the embedding application's own code. The same rule covers
+the desktop: capture is GStreamer (`ximagesrc`, `pipewiresrc`), while
+input, monitors, cursor and clipboard live in in-tree backend modules
+loaded at runtime from separate packages, so the core carries no X11,
+Wayland or PipeWire dependency ([ADR-0021](adr/0021-desktop-backends-as-runtime-modules.md)).
 
 Tier 1 and tier 2 sources are both consumed by the built-in `fjarr.camera`
 capability, whose config is a list of tracks referencing sources

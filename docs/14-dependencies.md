@@ -17,11 +17,11 @@ groups with comments.
 | `gstreamer1.0-nice` (libnice) | 0.1.21 | ICE for webrtcbin | LGPL-2.1/MPL | yes |
 | `gstreamer1.0-pipewire` | 1.0.5 | Wayland capture (`pipewiresrc`) | MIT | yes |
 | libva + intel-media-driver (iHD) | 2.20 / 24.1 | VA-API H.264 encode | MIT | yes (driver from distro) |
-| libx11 / libxtst / libxfixes / libxrandr / libxi | noble | X11 backend | MIT/X11 | yes |
-| libei | 1.2.1 | Wayland input injection | MIT | yes |
-| libpipewire | 1.0.5 | portal capture | MIT | yes |
+| libx11 / libxtst / libxfixes / libxrandr / libxi | noble | X11 backend | MIT/X11 | yes — in `fjarr-desktop-x11` only ([ADR-0021](adr/0021-desktop-backends-as-runtime-modules.md)) |
+| libei | 1.2.1 | Wayland input injection | MIT | yes — in `fjarr-desktop-wayland` only |
+| libpipewire (+ `gstreamer1.0-pipewire`) | 1.0.5 | portal capture | MIT | yes — in `fjarr-desktop-wayland` only |
 | libevdev | 1.13.1 | uinput helper | MIT-ish (X11) | yes (in `fjarr-inputd`) |
-| libdbus / sd-bus | noble | portal negotiation | AFL-2.1/GPL dual → use LGPL path; verify at M2 | yes |
+| libdbus / sd-bus | noble | portal negotiation | AFL-2.1/GPL dual → use LGPL path; verify at M2 | yes — in `fjarr-desktop-wayland` only |
 | nlohmann-json | 3.11 | envelopes, config | MIT | yes |
 | libsoup-3 (+ glib-networking) | 3.4 | WS/HTTP signaling client (ADR-0017) | LGPL-2.1 (dynamic) | yes |
 | toml++ (`tomlplusplus`) | 3.4 (header-only) | `fjarr.toml` config (docs/23) | MIT | yes |

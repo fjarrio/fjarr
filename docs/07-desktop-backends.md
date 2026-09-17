@@ -31,6 +31,13 @@ Notes:
   around an interactive user. Unattended access after reboot is the make-or-
   break question for C/D.
 
+Whichever combinations win ship as **runtime modules in separate
+packages** (`fjarr-desktop-x11`, `fjarr-desktop-wayland`, plus the
+privileged `fjarr-inputd`), never linked into the core
+([ADR-0021](adr/0021-desktop-backends-as-runtime-modules.md)); the
+`fjarr.desktop` capability reports `unavailable` with the package to
+install when none matches the running display server.
+
 ## Evaluation criteria (measured, per combo)
 
 | Criterion | How measured |

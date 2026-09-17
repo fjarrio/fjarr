@@ -2,7 +2,9 @@
 title: "ADR 0020: Vendor camera support ships as separately packaged GStreamer plugins"
 ---
 
-- **Status**: accepted
+- **Status**: accepted — the sentence on desktop backends is superseded by
+  [ADR-0021](0021-desktop-backends-as-runtime-modules.md) (they are runtime
+  modules in separate packages, not linked into the core)
 - **Date**: 2026-09-17
 
 ## Context

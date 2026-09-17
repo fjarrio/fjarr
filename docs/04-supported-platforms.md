@@ -37,6 +37,14 @@ Both X11 and Wayland are evaluated head-to-head before committing
 | Unattended after reboot | straightforward | portal permission model is the hard part |
 | Ubuntu 24.04 default | available | default session |
 
+## Robot — optional platform packages
+
+Desktop support is installed per display server: `fjarr-desktop-x11`
+and `fjarr-desktop-wayland` are runtime modules loaded by the core when
+configured ([ADR-0021](adr/0021-desktop-backends-as-runtime-modules.md));
+a headless robot installs neither and carries no X11 or PipeWire
+dependency.
+
 ## Robot — vendor camera packages
 
 The agent core is architecture-independent; vendor camera support is a
