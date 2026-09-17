@@ -55,6 +55,12 @@ services:
     image: fjarr-server
     ports:
       - "8080:8080"
+    environment:
+      # docs/09 contract surface; values from .env (never committed).
+      FJARR_GRANT_HS256_SECRET: ${FJARR_GRANT_HS256_SECRET:-dev-only-grant-secret}
+      FJARR_DEV_DEVICE_TOKEN: ${FJARR_DEV_DEVICE_TOKEN:-dev-only-device-token}
+      FJARR_TURN_URLS: ${FJARR_TURN_URLS:-}
+      FJARR_TURN_SECRET: ${TURN_SECRET:-}
 
   demo-backend:
     profiles: [demo]
@@ -79,8 +85,12 @@ services:
       - x11sock:/tmp/.X11-unix
     environment:
       DISPLAY: ":99"
-      FJARR_SERVER_URL: http://fjarr-server:8080
+      FJARR_SERVER_URL: ws://fjarr-server:8080/ws
+      FJARR_ROBOT_ID: demo-robot-01
+      FJARR_DEV_DEVICE_TOKEN: ${FJARR_DEV_DEVICE_TOKEN:-dev-only-device-token}
     working_dir: /workspace
+    cap_add:
+      - NET_ADMIN   # tc netem for the browser lab's media-path profiles (docs/25)
     devices:
       - /dev/dri:/dev/dri
     command: >

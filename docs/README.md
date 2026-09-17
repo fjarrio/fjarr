@@ -36,9 +36,9 @@ with rationale).
 | 20 | [Agentic development](20-agentic-development.md) | AI agents as first-class contributors | review |
 | 21 | [Web client architecture](21-web-client-architecture.md) | @fjarr/core + @fjarr/react: sessions, subscriptions, publishing, demand-driven media | review |
 | 22 | [Remote desktop client](22-remote-desktop-client.md) | Browser-side fjarr.desktop: input pipeline, focus, cursor, latency, clipboard | review |
-| 23 | [Agent core architecture](23-agent-core-architecture.md) | libfjarr core: threading, session state machine, media plane, DC router, SessionContext, supervision, testing | draft |
-| 24 | [Pipeline introspection](24-pipeline-introspection.md) | Live, visual and machine-readable GStreamer pipeline graphs — for developers, customers and AI agents | draft |
-| 25 | [Browser lab](25-browser-lab.md) | CDP-driven Chromium in the stack: e2e, traffic introspection, network emulation, profiling — for people and agents | draft |
+| 23 | [Agent core architecture](23-agent-core-architecture.md) | libfjarr core: threading, session state machine, media plane, DC router, SessionContext, supervision, testing | review |
+| 24 | [Pipeline introspection](24-pipeline-introspection.md) | Live, visual and machine-readable GStreamer pipeline graphs — for developers, customers and AI agents | review |
+| 25 | [Browser lab](25-browser-lab.md) | CDP-driven Chromium in the stack: e2e, traffic introspection, network emulation, profiling — for people and agents | review |
 | 26 | [Robot install & drivers](26-robot-install-and-drivers.md) | One-line install; the driver catalog, `setup`, `drivers` and `--check`; only the drivers a use case needs | draft |
 
 ## Architecture decision records
@@ -50,8 +50,9 @@ once accepted (superseded, never edited). Start with the
 ## Reviews
 
 Gate artifacts and retrospective code reviews live in `docs/reviews/`:
-the [M1 extension-API fit review](reviews/m1-api-fit-review.md) and the
-[slice-2 web core + React review](reviews/slice-2-review.md).
+the [M1 extension-API fit review](reviews/m1-api-fit-review.md), the
+[slice-2 web core + React review](reviews/slice-2-review.md) and the
+[slice-3 planning review](reviews/slice-3-planning-review.md).
 
 ## Reading paths
 

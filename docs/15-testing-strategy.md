@@ -39,7 +39,8 @@ path. Minimum fault menu:
 | Packet loss 5–20 % on media path (netem) | video degrades, never stalls > budget; input stays responsive |
 | Relay-only forced (`iceTransportPolicy: relay`) | everything works through coturn; budgets per docs/16 relay column |
 | Agent SIGKILL mid-session | operator sees `peer-gone` ≤ heartbeat budget; supervised restart; robot reachable again < 30 s |
-| Media plane hang (SIGSTOP) | control plane survives; ownership lease expires (fail-open); watchdog restarts media plane |
+| Pipeline error (encoder reset, capture death — injected via the `fjarr.test` hooks or `GST_DEBUG` fault points) | producer restart with backoff, then a media-plane rebuild: sessions close with `media-restart` (`retry:true`), the signaling socket stays up, the robot stays online ([ADR-0019](adr/0019-agent-process-model.md)) |
+| Whole-process hang (SIGSTOP) | the systemd watchdog kills and restarts the process (no in-process defense against a stopped process); operators see `peer-gone`; ownership lease expires (fail-open); robot back < 30 s |
 | Mid-transfer network kill | file resume from received ranges; hash verifies |
 | Monitor hot-plug during a session (`xrandr --setmonitor`/`--delmonitor` on robot-sim) | renegotiation adds/removes the track; other monitors' frame counters never stall; re-plug restores the same `track_id`; zero monitors then one recovers without reconnect |
 | Grant expired / clock skew | clean `grant-expired`, no retry storm (fatal vs retryable taxonomy) |
@@ -97,9 +98,11 @@ Scripted per desktop-backend spike and kept forever after: reboot the
 robot-sim (later: a real NUC), wait, assert a session can start and see the
 display **with zero local interaction**. This test decides ADR-0006.
 
-## What CI runs (from M0.5)
+## What CI runs
 
-Lint (clang-tidy, clippy, eslint, markdownlint, lychee) → unit + component →
+Today (M0.5–slice 2): lint, Rust and web unit tests, builds, docs gates.
+From slice 3a/3b: lint (clang-tidy, clippy, eslint, markdownlint, lychee)
+→ unit + component (C++ under ASan; TSan as a trend until 3c) →
 browser-lab e2e on the compose stack ([docs/25](25-browser-lab.md): real
 Chromium over CDP, software encoders; VA-API asserted only on GPU runners
 when available) → docs build. Nightly: soak, profiling scenarios and

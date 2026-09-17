@@ -3,7 +3,7 @@ title: Agent Core Architecture
 description: Design of the libfjarr core (C++/GStreamer) — process and threading model, object model, the agent-side session state machine, offer construction and renegotiation, the media plane, the DataChannel router, the concrete SessionContext/BackendContext APIs, configuration, supervision, and how it is tested.
 ---
 
-> **Status: draft** — the slice-3 design, written before implementation
+> **Status: review** — the slice-3 design, written before implementation
 > (docs/13), the agent-side counterpart of [docs/21](21-web-client-architecture.md).
 > It turns the one-line idioms of [docs/02](02-architecture.md#the-media-model-produce-once-fan-out)
 > and the [camera-streamer lessons](11-prior-art.md#camera-streamer) into
@@ -152,11 +152,16 @@ elsewhere only through `(weak_ptr, generation)` pairs.
 `SignalingClient` wraps a libsoup-3 `SoupWebsocketConnection`
 ([ADR-0017](adr/0017-libsoup-websocket.md)) on the core context:
 
-- **Hello.** `{role:"agent", auth, agent_info:{fjarr, os, capabilities:[names]}, proto_versions:[1]}`.
+- **Hello.** `{role:"agent", auth, agent_info:{fjarr, os, arch, capabilities:[names]}, proto_versions:[1]}`.
   Until enrollment lands (M5), `auth` is the dev scheme the Rust
-  `DevSharedTokenRegistry` verifies: `{scheme:"dev-token", robot_id, dev_token}`;
-  the M5 scheme `device-signature` (Ed25519 over a server nonce, docs/10)
-  slots into the same field. The credential never appears in logs.
+  `DevSharedTokenRegistry` verifies: `{scheme:"dev-token", robot_id, dev_token}`
+  (the token from `FJARR_DEV_DEVICE_TOKEN` — the same variable name on the
+  server); the M5 scheme `device-signature` (Ed25519 over a server nonce,
+  docs/10) slots into the same field. The credential never appears in logs.
+- **TURN.** The agent never holds TURN secrets: every `session-request`
+  carries that session's ephemeral credentials (`turn`, docs/08), minted
+  by the server exactly like the operator's, and the wrapper passes them
+  to that session's `webrtcbin` via `add-turn-server`.
 - **Backoff** on socket loss: docs/08 numbers (0.5 s ×2, cap 30 s, ±20 %,
   reset after 30 s stable), a pure `Backoff` class shared with tests.
 - **Socket loss ends every session.** The server announces `peer-gone` to
@@ -187,7 +192,7 @@ flowing through it.
 | building | all enabled tracks have fixed caps, or no media tracks | offered | `session-accept`, then `offer{sdp, tracks(manifest with mid), manifest_version:1}`; negotiation watchdog (15 s) armed with milestones |
 | offered | `answer` | offered | set remote description; queued remote ICE applied; trickle continues |
 | offered | DTLS connected **and** control DC open | connected | watchdog cleared; heartbeat liveness armed; `bandwidth-stats` sampler (1 s) started; `SessionEvent{started}` to the embedder |
-| connected | `select-tracks` | connected | valves + tier + keyframe request; `result{ok}` |
+| connected | `<cap>/select-tracks` (docs/08#track-control, served by the core for every track-owning capability) | connected | valves + tier + keyframe request; `result{ok}`; unknown `track_id` → `payload-invalid`, nothing applied |
 | connected | capability `update_tracks` / hot-plug | connected (renegotiating) | coalesce into the renegotiation queue: one un-answered offer at a time, `manifest_version++`, unchanged tracks keep `mid` and keep flowing (docs/08#renegotiation) |
 | connected | `ice-restart` from the operator | closing → (operator reopens) | on GStreamer 1.24: `session-close{reason:"ice-restart", retry:true}` — the operator opens a new session at once; on a stack with ICE restart: a new offer with fresh ICE credentials, same manifest and `manifest_version`, queued like a renegotiation |
 | connected | operator ping | connected | `pong{t0,t1,t2}`; liveness timer reset |
@@ -196,19 +201,22 @@ flowing through it.
 | any | `session-close` / `peer-gone` from the server | closing | — |
 | any | pipeline error on this session's consumer | closing | `session-close(reason="media-error")`; a media-plane rebuild is decided by the plane, not the session |
 | any | watchdog expiry in `building`/`offered` | closing | `session-close(reason="negotiation-timeout:<last milestone>")` — the milestone name is the diagnostic |
-| closing | — | closed | `release_all_input` on every input-bearing capability (unconditionally, before anything else), `session_detached(reason)`, valves closed, consumer pipeline to NULL, `webrtcbin` disposed on the loop, FrameHub subscriptions dropped, `SessionEvent{ended}`; generation bumped |
+| closing | — | closed | `Capability::release_all_input` on every capability whose manifest says `input_bearing` (unconditionally, before anything else), `session_detached(reason, detail)`, valves closed, consumer pipeline to NULL, `webrtcbin` disposed on the loop, FrameHub subscriptions dropped, `SessionEvent{ended}`; generation bumped |
 
 The order in `closing` is a safety behaviour with a regression test
 (docs/15): a session that ends mid-keydown must inject the key-up before
 the pipeline is touched, because pipeline teardown can block.
 
-**Milestones** (the watchdog's vocabulary, also the DOT-dump points):
+**Milestones** (the watchdog's vocabulary, also snapshot triggers):
 `attached`, `channels-created`, `caps-fixed`, `offer-created`,
 `local-description-set`, `answer-received`, `remote-description-set`,
 `ice-gathering-complete`, `ice-connected`, `dtls-connected`,
-`control-open`, `first-frame-sent`. Every milestone is logged with the
-session id and elapsed time; `FJARR_DOT_DIR` set makes each milestone dump
-the consumer pipeline graph.
+`control-open`, `first-frame-sent`. After `connected`, the further
+snapshot triggers are **events**, not milestones (the watchdog is off):
+`select-tracks`, `renegotiation`, `state-changed`, `producer-restart`,
+`plane-rebuild`. Every milestone/event is logged with the session id and
+elapsed time since `attached`; `dot_dir` set makes each dump the pipeline
+graph ([docs/24](24-pipeline-introspection.md)).
 
 ## Offer construction and renegotiation
 
@@ -253,8 +261,11 @@ GStreamer 1.24.2 (its README has the exact API sequences):
   answers the operator's `ice-restart` with
   `session-close{reason:"ice-restart", retry:true}` (docs/08#reconnection):
   the operator opens a new session immediately and the agent builds a fresh
-  peer connection — the media path restarts, the signaling socket and the
-  capabilities' state do not. The wrapper keeps a `supports_ice_restart()`
+  peer connection. It is a new session: capabilities see `session_detached`
+  then `session_attached`, the operator's demand is re-flushed, and the
+  docs/10 ownership lease — keyed on the operator identity and 30 s
+  fail-open — carries across the gap, so no other operator can take control
+  during a restart. The wrapper keeps a `supports_ice_restart()`
   probe so a stack that gains it ([open question #21](18-open-questions.md))
   switches to the in-place re-offer with no protocol change.
 - **ICE.** Trickled both ways; `candidate: ""` marks end-of-candidates;
@@ -500,9 +511,13 @@ created and implements docs/08#datachannel-topology:
   are counted and dropped; oversized outbound envelopes (> 16 KiB UTF-8)
   are refused with an error to the sending capability.
 - **`fjarr.core`** is served by the router itself: `ping` →
-  `pong{ok,t0,t1,t2}` immediately from the core loop (`t1`/`t2` from
-  `g_get_real_time`), `time-sync` identically, and the operator's
-  `release-all`-style session-level messages that later capabilities define.
+  `pong{ok,t0,t1,t2}` immediately from the core loop (`t1`/`t2` =
+  `g_get_real_time() / 1000`, milliseconds), `time-sync` → a `time-sync`
+  result with the same payload. Every `ping` or `time-sync` resets the
+  session's liveness timer.
+- **Track control** (`<cap>/select-tracks`, `bandwidth-stats`,
+  docs/08#track-control) is served by the router for every capability
+  that declared tracks, so no capability implements it.
 - **Dispatch.** `cap` → the capability attached to this session, on the
   core loop, with the session's `SessionContext`. A capability not attached
   to the session (grant did not include it) gets no message; the router
@@ -513,13 +528,22 @@ created and implements docs/08#datachannel-topology:
     the channel's `buffered-amount` property; `on_drain` from
     `buffered-amount-low` with the threshold at LOW_WATER.
   - realtime: `send(Envelope)` on the unordered/unreliable channel; the
-    sender never queues — if `buffered_amount()` exceeds one envelope's
-    worth the message is dropped and counted (newest-wins is the
-    capability's job; the core never lets a lossy channel grow a backlog).
+    sender never queues — if `buffered_amount()` exceeds 64 KiB the message
+    is dropped and counted (newest-wins is the capability's job; the core
+    never lets a lossy channel grow a backlog).
   - bulk (per capability): `send_binary(frame)` with the docs/08 watermarks
-    (HIGH 4 MiB / LOW 1 MiB); `send_binary` above HIGH returns
-    `false`/throws so the capability pumps on `on_drain` — unbounded sends
-    are a spec violation, so the sender refuses them.
+    (HIGH 4 MiB / LOW 1 MiB); above HIGH it returns `false` and sends
+    nothing, so the capability pumps on `on_drain` — unbounded sends are a
+    spec violation, so the sender refuses them. Frames larger than the
+    negotiated SCTP `max-message-size` (65 536 on webrtcbin 1.24) are
+    rejected with `payload-invalid`; chunking is the capability's job
+    (docs/08 file frames are ≤ 256 KiB *and* ≤ the SCTP limit).
+  - DataChannel parameters come only from the class table:
+    control `ordered=true` reliable; realtime `ordered=false,
+    max-retransmits=0`; bulk `ordered=true` reliable; stream
+    `ordered=false, max-retransmits=0`; `protocol` empty, ids negotiated by
+    SCTP (never `negotiated=true`), created in the order control, realtime,
+    bulk…, stream… so the `m=application` index is stable.
 - **Channel creation** per session: `control` and `realtime` always;
   `bulk:<cap>` / `stream:<cap>` for each attached capability whose manifest
   declares them. Reliability parameters (`ordered`, `max-retransmits`) are
@@ -602,21 +626,86 @@ results.
 
 ```toml
 [agent]
-robot_id   = "robot-024"
-server_url = "wss://fjarr.acme.com/ws"
-credential = "/etc/fjarr/device.key"   # M5; dev: FJARR_DEV_TOKEN
-turn_urls  = ["turn:turn.acme.com:3478"]
-log        = "info"                    # trace|debug|info|warn|error; FJARR_LOG
-dot_dir    = ""                        # FJARR_DOT_DIR: pipeline graphs at milestones
+robot_id        = "robot-024"
+server_url      = "wss://fjarr.acme.com/ws"
+credential_file = "/etc/fjarr/device.key"  # M5 device key; until then the dev token:
+dev_token       = ""                       # or FJARR_DEV_DEVICE_TOKEN (env wins); never logged
+ice_policy      = "all"                    # all | relay (relay-only for tests)
+log_level       = "info"                   # trace|debug|info|warn|error  (FJARR_LOG_LEVEL)
+log_format      = "text"                   # text | json                  (FJARR_LOG_FORMAT)
+dot_dir         = ""                       # FJARR_DOT_DIR: snapshots as files (docs/24)
+watchdog_secs   = 0                        # sd_notify WATCHDOG interval; 0 = use WatchdogSec/3 from systemd, or off
 
-[capabilities."fjarr.camera"]          # validated against the capability's JSON Schema
+[media]
+encoder        = "auto"                    # auto | vaapi | software — never a silent fallback (below)
+gop_seconds    = 2                         # keyframe interval; ring and consumer queue are sized to it
+active_kbps    = 4000                      # fixed until adaptive bitrate (slice 6)
+thumbnail_kbps = 300
+tier_grace_ms  = 10000                     # producer lingers this long after the last demand
+
+[introspect]                               # docs/24
+enabled      = true
+bind         = "127.0.0.1"                 # 0.0.0.0 requires `token`
+port         = 7381
+socket       = ""                          # Unix socket path instead of TCP
+token        = ""
+history      = 64                          # snapshots kept per pipeline
+
+[capabilities."fjarr.test"]                # docs/06 — enabled by the install; hooks off in production
+enabled    = true
+test_hooks = false
+
+[capabilities."fjarr.camera"]              # validated against the capability's JSON Schema
 enabled = true
-# capability-specific keys…
+
+[capabilities."fjarr.camera".tracks.front]
+label    = "Front"
+source   = "v4l2src device=/dev/v4l/by-id/usb-Acme_Cam-video-index0 ! image/jpeg,width=1280,height=720,framerate=30/1 ! jpegdec"
+required = false                           # true: a missing driver is a startup error (ADR-0020)
 
 [capabilities."com.acme.arm-teach"]
 enabled = true
-privileges = ["fs-read:/var/lib/acme"] # must match the manifest's requests
+privileges = ["fs-read:/var/lib/acme"]     # must match the manifest's requests
 ```
+
+`FJARR_<SECTION>_<KEY>` environment variables override any key
+(`FJARR_AGENT_SERVER_URL`, `FJARR_INTROSPECT_PORT`); the short forms named
+in the comments are aliases kept for the docs and the compose files.
+
+**Encoder policy.** `auto` picks VA-API when the doctor's `vah264enc`
+smoke passes and otherwise **refuses to start** (exit 1) with the message
+that names the two options; `software` selects `openh264enc` (BSD, docs/14)
+explicitly — for CI, the devcontainer without `/dev/dri`, and robots that
+knowingly trade CPU for portability — and the doctor WARNs while it is in
+use. There is no runtime fallback from hardware to software: a robot that
+silently starts burning a core is the failure mode this rule exists to
+prevent.
+
+**Media-plane constants** (initial values, tuned by the latency harness):
+
+| Constant | Value | Where it applies |
+|---|---|---|
+| GOP | `gop_seconds` × fps (2 s → 60 frames at 30 fps), one keyframe per GOP, no B-frames | encoder config, ring size (GOP + 1), consumer queue |
+| Consumer queue | `queue leaky=downstream max-size-time=<GOP> max-size-buffers=0 max-size-bytes=0` | per track per session |
+| `appsrc` | `is-live=true format=time do-timestamp=false block=false max-bytes=0` | per track per session |
+| PTS rebase | first delivered keyframe's PTS becomes 0; every later PTS and DTS get the same offset; durations unchanged | FrameHub delivery |
+| Payload types | allocated per session from 96 upward in manifest order (video first, then audio); SSRC left to the payloader (random) | offer builder |
+| Realtime drop threshold | 64 KiB buffered | realtime `ChannelSender` |
+| Keyframe request rate limit | ≥ 1 s per producer | FrameHub |
+| Producer restart backoff | 0.5 s → 5 s doubling, 5 attempts | media plane |
+| Plane rebuild escalation | third rebuild within 10 min → exit 2 | media plane |
+
+**Timers** (all GLib sources on the core context, all generation-checked):
+
+| Timer | Period | Owner |
+|---|---|---|
+| Operator liveness | dead after 15 s without `ping`/`time-sync` | Session |
+| Negotiation watchdog | 15 s without a milestone, `building`/`offered` only | Session |
+| `bandwidth-stats` + `get-stats` sample | 1 s | Session |
+| Counters log line | 60 s | Core |
+| Tier producer grace | `tier_grace_ms` | MediaPlane |
+| `sd_notify` WATCHDOG=1 | `WatchdogSec/3` | Core |
+| Signaling backoff | docs/08 | SignalingClient |
 
 The core validates each `[capabilities.X]` table against `X`'s
 `config_schema` (nlohmann `json-schema-validator`, MIT) before
@@ -626,9 +715,12 @@ docs/10).
 
 ## Observability
 
-- **Logs**: structured key=value lines on stderr with a level from config;
-  `FJARR_LOG=json` switches to JSON lines. Every log line inside a session
-  carries `session=<id>`; milestone lines carry `ms=<elapsed>`.
+- **Logs**: one line per event on stderr: `<ISO-8601 ms UTC> <LEVEL>
+  <component> <message> key=value…` (values quoted when they contain
+  spaces); `log_format = "json"` emits the same fields as one JSON object
+  per line. Every line inside a session carries `session=<id>`;
+  milestone lines carry `ms=<elapsed since attached>`. Credentials, grants
+  and TURN passwords are never logged at any level.
 - **Pipeline introspection** ([docs/24](24-pipeline-introspection.md)):
   snapshots (DOT, JSON, summary) at every milestone into a per-pipeline
   ring, served live by the local endpoint and the viewer, written to
@@ -747,31 +839,100 @@ fault-injection tool afterwards.
 "≤ 5 % per viewer") on the CI runner as a trend, not a gate, until the
 latency harness (slice 7) exists.
 
-## Slice 3 gate
+## `fjarr-opsim`: the operator simulator
 
-Slice 3 ships the core **plus a built-in `fjarr.test` capability** — one
-`videotestsrc` track ("test-pattern", with a second track behind a test
-hook to exercise hot-plug), an echo request (`fjarr.test/echo` → result)
-and a deadman-armed realtime consumer — so the whole path is proven before
-any real capability exists:
+A C++ binary in `agent/tools/opsim/` (package `fjarr-tools`) that speaks
+the operator side of docs/08 against the real `fjarr-server`, answers with
+its own `webrtcbin` (the spike's answerer, so its `pad-added`/`src_N`
+quirks are known), and runs named scenarios:
 
-1. `fjarr-agent` with `fjarr.test` connects to `fjarr-server`
-   (`docker compose --profile demo up`), the demo dashboard shows the test
-   pattern through `@fjarr/react`, `select-tracks` toggles it, the health
-   badge reads from `bandwidth-stats` and `get-stats`.
-2. `fjarr-opsim` runs the fault menu against the agent in CI; every row
-   ends in the documented state.
-3. The web client's ladder is exercised against the real agent in the
-   [browser lab](25-browser-lab.md) (`bad`/`offline` profiles plus the
-   agent's fault switches): socket drop, ICE restart, renegotiation
-   (hot-plug hook), heartbeat death, with the frame stamp proving zero
-   dropped frames on unchanged tracks — the mock-versus-browser gap from
-   the [slice-2 review](reviews/slice-2-review.md) closes here.
-4. Unit + loop tests green under ASan; `release_all_input` and deadman
-   regression tests exist; docs/09 headers match this document.
-5. The introspection endpoint and viewer show the producer and session
-   pipelines live; `fjarr-opsim` asserts pipeline shape through
-   `/pipelines/*.json` ([docs/24](24-pipeline-introspection.md)).
+```text
+fjarr-opsim --server ws://fjarr-server:8080/ws --robot demo-robot-01 \
+            --grant-secret "$FJARR_GRANT_HS256_SECRET" \
+            --scenario <name> [--json out.json] [--timeout 60]
+```
+
+It mints its own operator grant (HS256 over the dev secret with GLib's
+`GHmac`, the same claims the demo-backend uses) so it needs no browser and
+no backend. Scenarios, each with the assertions it makes and the state it
+expects the agent to end in:
+
+| Scenario | Drives | Asserts |
+|---|---|---|
+| `smoke` | connect, `select-tracks` on, first frame, `echo`, close | media on both tracks' stamps advance; echo round trip; `session-close` reaches the server |
+| `toggle` | enable/disable `test-pattern` 20× | valve state via `/pipelines/session:<id>.json`; keyframe on every enable; no frames while disabled |
+| `hotplug` | `hotplug{plugged:true}` then `false` while streaming | re-offer with `manifest_version` 2 then 3; `test-pattern` stamp counter has no gap > 1 frame; `test-second` flows then disappears |
+| `silent-operator` | stop sending pings | agent closes with `session-close{reason:"heartbeat"}` within 15–20 s; `release_all_input` observed as `deadman{expired}` |
+| `no-answer` | never answer the offer | `session-close{reason:"negotiation-timeout:offer-created"}` at 15 s |
+| `socket-drop` | drop the operator's socket mid-stream | agent gets `peer-gone`, closes the session, census returns to baseline |
+| `ice-restart` | send `ice-restart` | `session-close{reason:"ice-restart", retry:true}` within 100 ms; new session brokered and streaming |
+| `deadman` | `drive` at 20 Hz, then stop | `deadman{state:"expired"}` within 600 ms of the last `drive` |
+| `relay-only` | `--ice-policy relay` on both sides | media flows through coturn (relay candidates in both stats) |
+| `soak` | N connect/stream/close cycles (default 200) | `/memory` census equal to baseline, RSS growth < 5 MB, no `error` counters |
+| `netem-<profile>` | applies a docs/25 profile on the agent container, runs `smoke` | frames keep arriving; health-relevant stats recorded |
+
+Output: a one-screen verdict per assertion (`PASS`/`FAIL name: detail`)
+and, with `--json`, the same as data plus the captured signaling and
+envelopes; exit 0 on all pass, 1 on any fail, 3 on timeout. `make
+agent-leaks SCENARIO=<name>` runs a scenario under the `leaks` tracer and
+prints the diff.
+
+## Slices 3a, 3b, 3c and their gates
+
+Slice 3 as first written bundled four reviewable deliverables; it lands as
+three increments, each on `main` with its own retrospective review
+(docs/20), in this order:
+
+**3a — browser lab and loopback** (web only, no C++ dependency): the
+`browser` compose service and `lab` profile, `@fjarr/e2e` with the
+`stack`/`dashboard`/`cdp`/`loopback` fixtures (the `stack` fixture
+tolerates a missing introspection endpoint until 3b), the wire tap in
+`@fjarr/core`, `LoopbackAgent`, the frame-stamp reader, `fjarr-lab`'s
+core commands, `make lab-up`/`e2e`, the CI job — plus a half-day spike
+running the existing webrtcbin probe's offerer against the lab's Chromium
+as answerer for the spike's Q1/Q3/Q6, whose report attaches to ADR-0007.
+*Gate:* the slice-2 `<VideoTile>`/`<VideoGrid>`/push-to-talk suites pass
+in real Chromium against `LoopbackAgent`; the client ladder's signaling
+rungs run under the CDP `offline` profile; the Chromium-answerer spike
+report exists.
+
+**3b — agent core, `fjarr.test`, `fjarr-opsim`**: everything in this
+document through "Testing", the docs/09 headers, the introspection walker
+with `dot_dir` and a minimal endpoint (`/pipelines`,
+`/pipelines/<id>.{json,txt,dot}`, `/sources`) with
+`introspect.schema.json` under the conformance gate, the ASan gate, TSan
+and the `leaks` tracer as trends, and the **minimal demo wiring** the gate
+needs: `fjarr-server` configured from the environment, the demo-backend
+minting real HS256 grants that list `fjarr.test`, `demo-robot` registering
+`fjarr::TestCapability` through the public API.
+*Gate:* (1) `docker compose --profile demo up`: the demo dashboard shows
+the test pattern within the docs/16 startup budget, `select-tracks`
+toggles it, `<ConnectionQuality>` reads real `getStats`; (2) every
+`fjarr-opsim` scenario except `soak` and `netem-*` passes in CI; (3) the
+lab's ladder scenarios run against the real agent with the agent's fault
+switches, the `session-close{retry:true}` rung included, and the frame
+stamp proves zero dropped frames on the untouched track during `hotplug`;
+(4) unit + loop tests green under ASan; the `release_all_input` and
+deadman regression tests exist; the headers match docs/09.
+
+**3c — introspection completeness and the memory ladder**: `/events`,
+the history ring and scrubbing, `/stats`, `/memory` with checkpoints, the
+diagnostics bundle, `make introspect` and `fjarr-lab introspect`; the
+`leaks` tracer bracketing promoted to a gate, the `soak` and `netem-*`
+scenarios, valgrind and heaptrack nightly, TSan promoted to a gate if the
+suppressions make it stable. The bundled viewer moves to slice 5 so it is
+built once as `<PipelineGraph>` and served from `GET /` as a data file.
+*Gate:* docs/24 acceptance minus the viewer, via `curl` and `fjarr-lab`;
+the docs/15 memory rows green; the 200-cycle soak returns to the census
+baseline.
+
+## Where `fjarr.test` lives
+
+`fjarr::TestCapability` is a public class in `libfjarr` (docs/06), enabled
+by `[capabilities."fjarr.test"]`. `fjarr-agent` registers it from config;
+`demo-robot` registers it through the public API like any customer
+capability, and the compose `demo-robot` service runs the `demo-robot`
+binary — the demo stays a customer-shaped embedding.
 
 ## What is kept from the camera streamer, and what is changed
 

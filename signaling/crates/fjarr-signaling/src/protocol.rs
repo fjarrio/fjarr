@@ -146,6 +146,10 @@ pub enum Body {
         session_id: String,
         capabilities: Vec<CapabilityGrant>,
         operator: OperatorInfo,
+        /// Ephemeral TURN credentials for the agent's side of this session
+        /// (same TTL discipline as the operator's, docs/10#turn).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        turn: Option<TurnCredentials>,
     },
     SessionAccept {
         session_id: String,

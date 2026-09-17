@@ -12,11 +12,13 @@ import { isEnvelope, isSignalingMessage } from "../src/index.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "../../../../protocol/fixtures");
 const load = (dir: string, name: string): unknown => JSON.parse(readFileSync(join(root, dir, name), "utf8"));
-const guard = (name: string) => (name.startsWith("sig-") ? isSignalingMessage : isEnvelope);
+// intro-* fixtures (pipeline snapshots, docs/24) are schema-only until the
+// TS types land with the fjarr.introspect capability (slice 5).
+const guard = (name: string) => (name.startsWith("sig-") ? isSignalingMessage : name.startsWith("env-") ? isEnvelope : null);
 
 describe("protocol golden fixtures", () => {
-  const valid = readdirSync(join(root, "valid")).filter((f) => f.endsWith(".json"));
-  const invalid = readdirSync(join(root, "invalid")).filter((f) => f.endsWith(".json"));
+  const valid = readdirSync(join(root, "valid")).filter((f) => f.endsWith(".json") && !f.startsWith("intro-"));
+  const invalid = readdirSync(join(root, "invalid")).filter((f) => f.endsWith(".json") && !f.startsWith("intro-"));
 
   it("has the full fixture set", () => {
     expect(valid.length).toBeGreaterThanOrEqual(23);
@@ -25,13 +27,13 @@ describe("protocol golden fixtures", () => {
 
   for (const f of valid) {
     it(`accepts valid/${f}`, () => {
-      expect(guard(f)(load("valid", f))).toBe(true);
+      expect(guard(f)!(load("valid", f))).toBe(true);
     });
   }
 
   for (const f of invalid) {
     it(`rejects invalid/${f}`, () => {
-      expect(guard(f)(load("invalid", f))).toBe(false);
+      expect(guard(f)!(load("invalid", f))).toBe(false);
     });
   }
 });

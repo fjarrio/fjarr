@@ -50,14 +50,12 @@ adaptive bitrate. Extension API paper-validated — **done**:
 **Slices** (each lands on `main`, reviewed retrospectively — docs/20):
 0 protocol + review ✔ · 1 Rust signaling ✔ · 2 web core + React ✔
 ([review](reviews/slice-2-review.md)) ·
-3 agent core (C++, per [docs/23](23-agent-core-architecture.md) — ships
-with a built-in `fjarr.test` capability and the `fjarr-opsim` operator
-simulator so the core is proven end-to-end before any real capability,
-plus the pipeline-introspection walker, local endpoint and viewer of
-[docs/24](24-pipeline-introspection.md), and — as its first task, on the
-web side — the [browser lab](25-browser-lab.md) (CDP Chromium in compose,
-Playwright/CDP harness, loopback agent, `fjarr-lab`); gate in
-[docs/23](23-agent-core-architecture.md#slice-3-gate)) ·
+3 in three increments ([docs/23](23-agent-core-architecture.md#slices-3a-3b-3c-and-their-gates)):
+**3a** the [browser lab](25-browser-lab.md) (web only) · **3b** the agent
+core with the built-in `fjarr.test` capability, `fjarr-opsim`, the
+introspection walker and minimal endpoint ([docs/24](24-pipeline-introspection.md)),
+and the minimal demo wiring the gate needs · **3c** introspection
+completeness and the memory-safety ladder ·
 4 `fjarr.camera` · 5 demo wiring (incl. `fjarr.introspect` +
 `<PipelineGraph>`) · 6 ADR-0007 spike + adaptive bitrate ·
 7 fault injection + latency harness.

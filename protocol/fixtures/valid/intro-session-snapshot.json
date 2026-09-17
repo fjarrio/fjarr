@@ -1,0 +1,79 @@
+{
+  "v": 1,
+  "pipeline_id": "session:0192f3a1-7b2c-7000-8000-000000000001",
+  "kind": "session",
+  "session_id": "0192f3a1-7b2c-7000-8000-000000000001",
+  "robot_id": "demo-robot-01",
+  "generation": 1,
+  "seq": 7,
+  "ts": 1789503000000,
+  "trigger": "select-tracks",
+  "state": "playing",
+  "elements": [
+    {
+      "name": "session:0192f3a1/test-pattern/appsrc",
+      "factory": "appsrc",
+      "state": "playing",
+      "properties": {
+        "is-live": true
+      },
+      "pads": [
+        {
+          "name": "src",
+          "direction": "src",
+          "caps": "video/x-h264, stream-format=byte-stream",
+          "buffers": 1200,
+          "bytes": 4800000,
+          "last_pts_ms": 39966.6
+        }
+      ]
+    },
+    {
+      "name": "session:0192f3a1/test-pattern/valve",
+      "factory": "valve",
+      "state": "playing",
+      "properties": {
+        "drop": false
+      },
+      "pads": [
+        {
+          "name": "sink",
+          "direction": "sink",
+          "caps": "video/x-h264"
+        },
+        {
+          "name": "src",
+          "direction": "src",
+          "caps": "video/x-h264"
+        }
+      ]
+    },
+    {
+      "name": "session:0192f3a1/webrtc",
+      "factory": "webrtcbin",
+      "state": "playing",
+      "properties": {
+        "connection-state": "connected",
+        "ice-connection-state": "connected",
+        "signaling-state": "stable"
+      },
+      "pads": [
+        {
+          "name": "sink_0",
+          "direction": "sink",
+          "caps": "application/x-rtp, payload=96"
+        }
+      ]
+    }
+  ],
+  "links": [
+    {
+      "from": "session:0192f3a1/test-pattern/appsrc:src",
+      "to": "session:0192f3a1/test-pattern/valve:sink"
+    },
+    {
+      "from": "session:0192f3a1/test-pattern/valve:src",
+      "to": "session:0192f3a1/webrtc:sink_0"
+    }
+  ]
+}

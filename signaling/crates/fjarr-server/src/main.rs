@@ -28,8 +28,11 @@ async fn serve() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|_| "0.0.0.0:8080".into())
         .parse()?;
 
+    // Hooks from the environment (FJARR_GRANT_HS256_SECRET, FJARR_DEV_DEVICE_TOKEN,
+    // FJARR_TURN_*, webhook settings): the sidecar's whole configuration
+    // surface (docs/09 contract). Config::default() would reject everyone.
     let app =
-        axum::Router::new().merge(fjarr_signaling::router(fjarr_signaling::Config::default()));
+        axum::Router::new().merge(fjarr_signaling::router(fjarr_signaling::Config::from_env()));
 
     tracing::info!(%bind, "fjarr-server listening");
     let listener = tokio::net::TcpListener::bind(bind).await?;

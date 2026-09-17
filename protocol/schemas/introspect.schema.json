@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fjarr.io/protocol/introspect.schema.json",
+  "title": "Fjarr pipeline snapshot",
+  "description": "One pipeline snapshot as served by GET /pipelines/<id>.json and the fjarr.introspect capability (docs/24). Unknown fields MUST be ignored.",
+  "type": "object",
+  "required": [
+    "v",
+    "pipeline_id",
+    "kind",
+    "seq",
+    "ts",
+    "trigger",
+    "state",
+    "elements",
+    "links"
+  ],
+  "properties": {
+    "v": {
+      "const": 1
+    },
+    "pipeline_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "producer:<track_id>:<tier> | session:<session_id> | agent"
+    },
+    "kind": {
+      "enum": [
+        "producer",
+        "session",
+        "agent"
+      ]
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "robot_id": {
+      "type": "string"
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "monotonic per pipeline"
+    },
+    "ts": {
+      "type": "integer",
+      "description": "unix millis"
+    },
+    "trigger": {
+      "type": "string",
+      "description": "milestone or event name (docs/23)"
+    },
+    "state": {
+      "enum": [
+        "null",
+        "ready",
+        "paused",
+        "playing"
+      ]
+    },
+    "elements": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/element"
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "element": {
+      "type": "object",
+      "required": [
+        "name",
+        "factory",
+        "state",
+        "pads"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "docs/24 addressing grammar, e.g. session:0192f3a1/test-pattern/valve"
+        },
+        "factory": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "null",
+            "ready",
+            "paused",
+            "playing"
+          ]
+        },
+        "properties": {
+          "type": "object",
+          "description": "selected properties: valve.drop, queue.current-level-*, encoder bitrate, webrtcbin connection/ice/signaling state, datachannel ready-state/buffered-amount"
+        },
+        "pads": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "direction"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "direction": {
+                "enum": [
+                  "src",
+                  "sink"
+                ]
+              },
+              "caps": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "buffers": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "last_pts_ms": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/element"
+          }
+        }
+      }
+    }
+  }
+}

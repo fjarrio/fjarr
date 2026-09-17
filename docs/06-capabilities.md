@@ -46,14 +46,10 @@ Peer consumer. Ports the proven camera-streamer v3 model ([prior art](11-prior-a
   Unplugging a camera removes its track through the same renegotiation
   as a monitor hot-plug; replugging restores the same `track_id`.
 
-Control messages (envelopes on `fjarr:control`, docs/08#envelope):
-
-| `type` | kind | payload | semantics |
-|---|---|---|---|
-| `select-tracks` | request → result | `{"tracks": [{"track_id": "cam-front", "enabled": true, "tier": "active" \| "thumbnail", "preference"?: "motion" \| "sharpness"}]}` | full desired state for the tracks listed (unlisted = unchanged); agent flips valves, applies docs/16 tier params, requests a keyframe on enable; `preference` maps to the encoder's degradation preference (desktop text wants `sharpness`); `result.ok` |
-| `bandwidth-stats` | event | `{"interval_ms": 1000, "tracks": [{"track_id", "enabled", "tier", "bitrate_bps", "frames", "dropped"}]}` | per second while any track is enabled |
-
-The client folds all consumers' demand into one `select-tracks`
+Control messages: `select-tracks` and `bandwidth-stats` are the generic
+[track-control messages](08-protocol.md#track-control) the core serves for
+every track-owning capability; `fjarr.camera` adds nothing of its own. The
+client folds all consumers' demand into one `select-tracks` per capability
 ([docs/21](21-web-client-architecture.md#demand-model)); nothing is enabled
 until something on screen asks.
 
@@ -240,6 +236,52 @@ backpressured so a chatty robot can't flood the operator; the same source
 feeds observability (M7) in the backend mode. Cheap, and the single most
 requested support feature after "show me the screen". Milestone: peer mode
 **M4**, backend mode **M7** ([roadmap](17-roadmap.md)).
+
+## `fjarr.test` — the built-in test capability (slice 3) {#fjarrtest--the-built-in-test-capability-slice-3}
+
+Peer consumer, built into `libfjarr` as the public class
+`fjarr::TestCapability` and enabled by config. It exists for two reasons:
+it proves the core end to end before any real capability exists
+([docs/23](23-agent-core-architecture.md#slices-3a-3b-3c-and-their-gates)), and it is the
+customer's **install smoke test** — after `curl … | sh`, a test pattern in
+the dashboard proves the robot, the server and the grant flow work before
+a single camera is configured ([docs/26](26-robot-install-and-drivers.md)).
+It ships in the `fjarr-agent` package for that reason; its hooks are inert
+unless enabled.
+
+Tracks (all `codec: "H264"`, active tier 1280×720@30, thumbnail 640×360@5,
+frame stamp drawn per [docs/25](25-browser-lab.md#frame-stamp-the-latency-harnesss-oracle)):
+
+| `track_id` | label | source | present |
+|---|---|---|---|
+| `test-pattern` | "Test pattern" | `videotestsrc pattern=smpte is-live=true` | always |
+| `test-second` | "Second pattern" | `videotestsrc pattern=ball is-live=true` | only while the hot-plug hook has it "plugged" (default: unplugged) |
+
+Messages (envelopes, `cap: "fjarr.test"`):
+
+| `type` | kind | channel | payload | semantics |
+|---|---|---|---|---|
+| `echo` | request → result | control | request `{any}` → result `{ok:true, echo:<the request payload>, t_agent: ms}` | correlation round trip |
+| `hotplug` | request → result | control | `{"plugged": bool}` | adds/removes `test-second` through `update_tracks` → docs/08 renegotiation; `result{ok:true, manifest_version}`; requires `test_hooks = true` |
+| `silence` | request → result | control | `{"pings": bool, "media": bool, "ms": number}` | for `ms`: stop answering `ping` and/or close all valves — the operator-visible "agent went silent" faults; requires `test_hooks = true` |
+| `drive` | event | realtime | `{"v": number, "seq": number}` | the deadman-armed consumer: the capability arms `SessionContext::arm_deadman(500 ms)` on the first `drive`; each `drive` feeds it |
+| `deadman` | event (agent → operator) | control | `{"state": "armed" \| "expired" \| "fed", "ms_since_feed"}` | emitted on every transition, so a test can assert that `drive` silence of 500 ms expires the deadman and that session end expires it too |
+
+`fjarr.test` is **input-bearing** for the docs/10 ownership lease (one
+driver at a time) and implements `release_all_input` by expiring the
+deadman and emitting `deadman{state:"expired"}` — which is how the docs/15
+"release on session end" regression test observes the behaviour without a
+real actuator.
+
+Config: `[capabilities."fjarr.test"] enabled = true`, `test_hooks = false`
+(the demo and CI set it true; a production install leaves the hooks off,
+and the grant must list `fjarr.test` for an operator to reach it at all).
+
+**Accepted when:** the demo dashboard shows the pattern within the docs/16
+startup budget; `select-tracks` toggles it; `hotplug` adds the second
+track with zero dropped frames on the first (frame-stamp counter);
+`silence{pings}` makes the operator's ladder climb and recover; `drive`
+silence expires the deadman in ≤ 600 ms and so does `session-close`.
 
 ## `fjarr.introspect` — pipeline introspection (slice 3 core, slice 5 UI) {#fjarrintrospect--pipeline-introspection-slice-3-core-slice-5-ui}
 

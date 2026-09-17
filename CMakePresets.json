@@ -93,6 +93,20 @@
       "execution": {
         "noTestsAction": "ignore"
       }
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "ignore"
+      },
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1",
+        "LSAN_OPTIONS": "suppressions=${sourceDir}/agent/tests/lsan.supp"
+      }
     }
   ]
 }

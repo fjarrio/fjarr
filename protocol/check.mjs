@@ -3,7 +3,7 @@
  * Protocol conformance gate: every fixture in fixtures/valid must validate
  * against its schema; every fixture in fixtures/invalid must be rejected.
  * Fixture naming selects the schema: sig-*.json → signaling, env-*.json →
- * envelope. // spec: docs/08-protocol.md#versioning, docs/15 (conformance)
+ * envelope, intro-*.json → pipeline snapshot (docs/24). // spec: docs/08-protocol.md#versioning, docs/15 (conformance)
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -17,11 +17,13 @@ const ajv = new Ajv2020.default({ strict: true, allErrors: true });
 ajv.addSchema(load("schemas/envelope.schema.json"));
 const validateSignaling = ajv.compile(load("schemas/signaling.schema.json"));
 const validateEnvelope = ajv.getSchema("https://fjarr.io/protocol/envelope.schema.json");
+const validateIntrospect = ajv.compile(load("schemas/introspect.schema.json"));
 
 const pick = (name) => {
   if (name.startsWith("sig-")) return validateSignaling;
   if (name.startsWith("env-")) return validateEnvelope;
-  throw new Error(`fixture ${name}: name must start with sig- or env-`);
+  if (name.startsWith("intro-")) return validateIntrospect;
+  throw new Error(`fixture ${name}: name must start with sig-, env- or intro-`);
 };
 
 let failures = 0;

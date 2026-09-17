@@ -1,0 +1,23 @@
+{
+  "v": 1,
+  "type": "hello",
+  "event_id": "0192f3a1-hello-dev",
+  "ts": 1789503000000,
+  "role": "agent",
+  "auth": {
+    "scheme": "dev-token",
+    "robot_id": "demo-robot-01",
+    "dev_token": "dev-only-change-me"
+  },
+  "agent_info": {
+    "fjarr": "0.1.0",
+    "os": "ubuntu-24.04",
+    "arch": "amd64",
+    "capabilities": [
+      "fjarr.test"
+    ]
+  },
+  "proto_versions": [
+    1
+  ]
+}

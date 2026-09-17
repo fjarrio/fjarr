@@ -395,6 +395,16 @@ breaking later. Slice 2 provides them up front:
 - **Events, not toasts**: `client.on("session-event", …)` emits typed
   lifecycle/errors; how they're shown is the host's job.
 
+### Wire tap {#wire-tap}
+
+`createFjarrClient({ wireTap: true })` enables `client.on("wire", (e) => …)`
+with
+`{ robotId, sessionId, dir: "in" | "out", channel: "control" | "realtime" | "bulk" | "stream", cap, type, kind, eventId, bytes, ts }`
+(payloads on request via `e.payload`; envelopes only — bulk/stream report
+sizes). Off by default and never enabled by `@fjarr/react`: envelopes carry
+keystrokes and clipboard text (docs/10). The browser lab and `fjarr-lab
+wire` are its consumers ([docs/25](25-browser-lab.md)).
+
 ## Testing (docs/15)
 
 - **Golden fixtures against TS types** — closes [open question #15](18-open-questions.md):

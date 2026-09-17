@@ -3,7 +3,7 @@ title: Browser Lab
 description: CDP-driven Chromium in the dev stack — end-to-end tests of the whole system and of the web library in a real browser, signaling traffic introspection, network emulation, and performance profiling (CPU, memory, web vitals), usable by developers and by AI agents alike.
 ---
 
-> **Status: draft** — specified alongside slice 3
+> **Status: review** — specified alongside slice 3
 > ([docs/23](23-agent-core-architecture.md)); built as the first task of
 > slice 3 so the slice-3 gate and everything after it run on it. It is the
 > browser-side half of the testing strategy ([docs/15](15-testing-strategy.md))
@@ -30,7 +30,7 @@ public API does not, and it has one hard limit that shapes this design:
 |---|---|---|
 | Drive pages, assert DOM, screenshots, video, trace viewer | Playwright (which speaks CDP underneath) | the harness; raw CDP sessions where needed (`context.newCDPSession(page)`) |
 | Signaling traffic | `Network.webSocketFrameSent/Received` | every docs/08 signaling message with timing, decoded by the harness |
-| DataChannel traffic | **not visible to CDP** (SCTP inside DTLS) | `@fjarr/core` exposes a **wire tap** (`client.on("wire", …)`: every envelope in/out with channel class, timestamp, size) — a library feature usable in production diagnostics too |
+| DataChannel traffic | **not visible to CDP** (SCTP inside DTLS) | `@fjarr/core` exposes an **opt-in wire tap** (`createFjarrClient({ wireTap: true })`, then `client.on("wire", …)`; shape in [docs/21](21-web-client-architecture.md#wire-tap)) — never on by default, since envelopes carry keystrokes and clipboard text |
 | WebRTC internals (ICE pairs, RTP stats, codecs) | `RTCPeerConnection.getStats()` through the library's stats store (`session.stats`) | `chrome://webrtc-internals` is not scriptable; the same data is |
 | Network conditions on HTTP/WebSocket | `Network.emulateNetworkConditions` (latency, throughput, offline) | **does not touch WebRTC media or DataChannels** (UDP bypasses the browser's network stack emulation) |
 | Network conditions on the media path | `tc netem` in the `demo-robot` container (loss, delay, jitter, rate) — docs/15 | applied robot-side; `NET_ADMIN` in the demo profile; profiles below |
@@ -46,15 +46,15 @@ public API does not, and it has one hard limit that shapes this design:
 docker compose --profile demo --profile lab up
   fjarr-server ── demo-backend ── demo-dashboard (Vite)
        │
-  demo-robot (fjarr-agent + fjarr.test)   ← tc netem here for media-path faults
+  demo-robot (embeds libfjarr + fjarr::TestCapability) ← tc netem here for media-path faults
        │  WebRTC (host candidates on the compose network; TURN via coturn with --profile turn)
   browser  ── headless Chromium, CDP on :9222, fake media devices, no sandbox
        ▲
   dev container: the harness (Playwright + CDP helpers) and the `fjarr-lab` CLI
 ```
 
-The `browser` service is a pinned Chromium image (the Playwright image for
-its matching driver) started with `--remote-debugging-address=0.0.0.0
+The `browser` service is the Playwright image pinned to the harness's
+`@playwright/test` version (`mcr.microsoft.com/playwright:v<x.y.z>-noble`) started with `--remote-debugging-address=0.0.0.0
 --remote-debugging-port=9222`, fake media devices, and
 `--disable-features=…` only where a test needs it. The harness connects with
 `chromium.connectOverCDP("http://browser:9222")` from the `dev` container,
@@ -141,13 +141,19 @@ timing, and it is where slice 2's mock-versus-browser gap actually closes:
 
 ## Frame stamp (the latency harness's oracle)
 
-`fjarr.test`'s pattern (and later a `stamp` option on any camera track in
-the demo) draws a **machine-readable stamp** in the top-left 256×16 px: a
-32-bit frame counter and a 48-bit sender timestamp (agent clock,
-`fjarr.core/time-sync` offset applied by the reader) as black/white 8×16
-blocks with a sync marker. The harness reads it with one canvas
-`drawImage` and `getImageData` call per `requestVideoFrameCallback`, no
-OCR, robust to scaling and compression. From it: glass-to-glass per frame, time to first
+`fjarr.test`'s tracks (and later a `stamp = true` option on any track)
+carry a **machine-readable stamp** painted by the core into the raw frame
+before encoding (a luma-only pad probe on `video/x-raw`; no extra
+element or dependency): a horizontal strip of **96 blocks** across the
+top-left, each block `max(4, width/128)` px wide and 16 px tall, black or
+white, encoding 96 bits MSB first: 8-bit sync `0xA5`, 32-bit frame
+counter, 48-bit sender timestamp (unix milliseconds, agent clock; the
+reader applies the `fjarr.core/time-sync` offset), 8-bit XOR checksum of
+the preceding 11 bytes. At 1280 px wide that is a 960×16 strip; at 640 px
+a 480×16 strip. The reader samples each block's centre with one canvas
+`drawImage` and `getImageData` call per `requestVideoFrameCallback`,
+thresholds at mid-grey, verifies sync and checksum, and discards frames
+that fail either — no OCR, robust to scaling and compression. From it: glass-to-glass per frame, time to first
 frame after enable, frame gaps during renegotiation (the docs/16 hot-plug
 "zero dropped frames" criterion becomes a counter, not a claim), and
 frozen-frame detection independent of `getStats`.
@@ -206,14 +212,14 @@ so a transcript of a debugging session is also its evidence.
 
 ## Slice mapping
 
-1. **Slice 3, first task** (web-side, in parallel with the C++ core):
+1. **Slice 3a** (web-side, before the C++ core — [docs/23](23-agent-core-architecture.md#slices-3a-3b-3c-and-their-gates)):
    `browser` service, `@fjarr/e2e` harness with the `cdp` fixture, the
    wire tap in `@fjarr/core`, `LoopbackAgent`, the frame-stamp reader,
    `fjarr-lab` with `open/eval/screenshot/net/signaling/wire/stats/memory/vitals`,
    docs/16 web budgets, component e2e for `<VideoTile>`/`<VideoGrid>`/
    push-to-talk against the loopback agent, `make lab-up` / `make e2e`.
-2. **Slice 3 gate**: the ladder and hot-plug scenarios against the real
-   agent with the `fjarr.test` stamp; `introspect` command.
+2. **Slice 3b gate**: the ladder and hot-plug scenarios against the real
+   agent with the `fjarr.test` stamp; **3c**: the `introspect` command.
 3. **Slice 5**: demo scenarios, profiling scenarios in nightly, budgets
    enforced; **slice 7**: the full latency harness (glass-to-glass,
    input-to-photon) on the frame stamp.

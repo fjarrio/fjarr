@@ -23,6 +23,7 @@ groups with comments.
 | libevdev | 1.13.1 | uinput helper | MIT-ish (X11) | yes (in `fjarr-inputd`) |
 | libdbus / sd-bus | noble | portal negotiation | AFL-2.1/GPL dual → use LGPL path; verify at M2 | yes — in `fjarr-desktop-wayland` only |
 | nlohmann-json | 3.11 | envelopes, config | MIT | yes |
+| openh264 (`openh264enc`, plugins-bad) | 2.4 | the explicit `encoder = "software"` path (CI, no-GPU dev, portable robots) — never a silent fallback (docs/23) | BSD-2 | yes (optional) |
 | libsoup-3 (+ glib-networking) | 3.4 | WS/HTTP signaling client (ADR-0017) | LGPL-2.1 (dynamic) | yes |
 | toml++ (`tomlplusplus`) | 3.4 (header-only) | `fjarr.toml` config (docs/23) | MIT | yes |
 | nlohmann json-schema-validator | 2.3 | capability config validation against `config_schema` | MIT | yes |

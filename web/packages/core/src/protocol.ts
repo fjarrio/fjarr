@@ -86,6 +86,8 @@ export interface SessionRequestMessage extends SignalingCommon {
   session_id: string;
   capabilities: CapabilityGrant[];
   operator: OperatorInfo;
+  /** Ephemeral TURN credentials for the agent's side of this session (agent-bound; never seen by operators). */
+  turn?: TurnCredentials;
 }
 
 export interface SessionAcceptMessage extends SignalingCommon {
@@ -321,7 +323,8 @@ export function isSignalingMessage(x: unknown): x is SignalingMessage {
         x.capabilities.every((c) => isRecord(c) && isStr(c.name) && (c.params === undefined || isRecord(c.params))) &&
         isRecord(x.operator) &&
         isStr(x.operator.id) &&
-        isStr(x.operator.label)
+        isStr(x.operator.label) &&
+        (x.turn === undefined || isTurn(x.turn))
       );
     case "session-accept":
     case "ice-restart":

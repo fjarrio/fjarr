@@ -1,0 +1,9 @@
+# LeakSanitizer suppressions for the agent test binaries (docs/23 memory ladder).
+# GLib/GStreamer keep intentional process-lifetime allocations (type system,
+# registry, quarks). Real leaks in fjarr code are never listed here.
+leak:g_type_register_static
+leak:g_type_add_interface_static
+leak:g_quark_from_static_string
+leak:gst_registry_
+leak:gst_plugin_
+leak:g_object_new_with_properties

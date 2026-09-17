@@ -26,7 +26,7 @@ pub async fn upgrade(
 
 /// A parsed inbound frame, an unparseable one, or a closed socket.
 enum Frame {
-    Msg(Message),
+    Msg(Box<Message>),
     Unparseable,
     Closed,
 }
@@ -78,7 +78,7 @@ async fn handshake(
     stream: &mut SplitStream<WebSocket>,
 ) -> Option<Identity> {
     let msg = match tokio::time::timeout(HELLO_TIMEOUT, next_frame(stream)).await {
-        Ok(Frame::Msg(msg)) => msg,
+        Ok(Frame::Msg(msg)) => *msg,
         Ok(Frame::Unparseable) => {
             Shared::send_error(tx, ec::PAYLOAD_INVALID, "unparseable hello", None);
             return None;
@@ -142,7 +142,7 @@ async fn next_frame(stream: &mut SplitStream<WebSocket>) -> Frame {
     loop {
         match stream.next().await {
             Some(Ok(WsMessage::Text(text))) => match serde_json::from_str::<Message>(&text) {
-                Ok(msg) => return Frame::Msg(msg),
+                Ok(msg) => return Frame::Msg(Box::new(msg)),
                 Err(error) => {
                     tracing::debug!(%error, "unparseable frame");
                     return Frame::Unparseable;
@@ -194,7 +194,7 @@ async fn agent_loop(
 
     loop {
         let msg = match next_frame(stream).await {
-            Frame::Msg(msg) => msg,
+            Frame::Msg(msg) => *msg,
             Frame::Unparseable => {
                 Shared::send_error(&tx, ec::PAYLOAD_INVALID, "unparseable message", None);
                 continue;
@@ -350,16 +350,22 @@ async fn operator_loop(
         session_id: Some(session_id.clone()),
         turn,
     }));
+    let agent_turn = service
+        .config
+        .turn
+        .as_ref()
+        .map(|t| crate::turn::mint(t, &format!("agent:{session_id}")));
     let _ = agent_tx.send(Message::new(Body::SessionRequest {
         session_id: session_id.clone(),
         capabilities: grant.capabilities,
         operator: grant.operator,
+        turn: agent_turn,
     }));
     tracing::info!(%session_id, robot_id = %grant.robot_id, "session requested");
 
     loop {
         let msg = match next_frame(stream).await {
-            Frame::Msg(msg) => msg,
+            Frame::Msg(msg) => *msg,
             Frame::Unparseable => {
                 Shared::send_error(&tx, ec::PAYLOAD_INVALID, "unparseable message", None);
                 continue;

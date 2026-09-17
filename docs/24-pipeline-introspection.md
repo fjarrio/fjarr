@@ -3,7 +3,7 @@ title: Pipeline Introspection
 description: Live, visual and machine-readable introspection of the agent's GStreamer pipelines — for developers, for customers extending the product, and for AI agents building and operating it. A product feature, not a debug flag.
 ---
 
-> **Status: draft** — specified with slice 3 ([docs/23](23-agent-core-architecture.md));
+> **Status: review** — specified with slice 3 ([docs/23](23-agent-core-architecture.md));
 > the core-side walker and local endpoint land in slice 3, the session
 > capability and the dashboard viewer in slice 5. Product positioning in
 > [docs/03](03-product-strategy.md).
@@ -46,6 +46,14 @@ in three renderings from the same walk:
   counters (buffers, bytes, last PTS — from lightweight probes the core
   already has for stats), links, and bins nested. Deterministic key order
   so diffs are meaningful.
+- **Addressing.** Elements are named by the core with a stable grammar
+  used everywhere (DOT node ids, JSON `name`, test assertions):
+  `producer:<track_id>:<tier>/<role>` (roles: `source`, `tee`, `convert`,
+  `encoder`, `parser`, `sink`) and `session:<sid8>/<track_id>/<role>`
+  (roles: `appsrc`, `queue`, `valve`, `payloader`) plus
+  `session:<sid8>/webrtc`, where `<sid8>` is the first 8 characters of the
+  UUIDv7 `session_id` (the full id is in the snapshot metadata). A test
+  asserts `session:0192f3a1/test-pattern/valve.drop == false`.
 - **Summary text** — a few hundred characters per pipeline in topological
   order: `videotestsrc(PLAYING) → vah264enc[bitrate=4M] → appsink … ;
   consumer s-01: appsrc → queue[3/30] → valve[open] → rtph264pay(pt=96,
@@ -88,16 +96,20 @@ Unix socket alternative `introspect.socket = "/run/fjarr/introspect.sock"`):
 | `GET /pipelines` | JSON list: id, kind, state, session, seq, last milestone |
 | `GET /pipelines/<id>.dot` / `.json` / `.txt` | latest snapshot in that form; `?seq=<n>` for history |
 | `GET /pipelines/<id>/history` | the snapshot sequence (metadata only; bodies via `?seq`) |
-| `GET /events` | Server-Sent Events: every new snapshot's metadata (+ body when `?body=json\|dot\|txt`) — this is what "live" means |
+| `GET /events` | Server-Sent Events (`event: snapshot`, `id: <pipeline>@<seq>`, `data:` the metadata JSON, plus the body when `?body=json\|dot\|txt`; `retry: 1000`) — this is what "live" means |
 | `GET /stats` | the per-session `get-stats` sample, FrameHub counters, producer states |
 | `GET /sources` | configured video sources with negotiated caps and availability, and for a missing driver the catalog entry and install command ([docs/26](26-robot-install-and-drivers.md)) |
-| `GET /memory[?since=<checkpoint>]` / `POST /memory/checkpoint` | RSS, live GStreamer/GLib object census by type (elements, pads, samples, promises, sources), FrameHub buffers held, channel bytes buffered, sessions/pipelines alive — and the diff since a checkpoint (the soak-test oracle, [docs/23](23-agent-core-architecture.md#memory-and-lifetime-discipline-and-the-tooling-that-enforces-it)) |
+| `GET /memory[?since=<checkpoint>]` / `POST /memory/checkpoint` (checkpoint = an opaque token, currently the census `seq`) | RSS, live GStreamer/GLib object census by type (elements, pads, samples, promises, sources), FrameHub buffers held, channel bytes buffered, sessions/pipelines alive — and the diff since a checkpoint (the soak-test oracle, [docs/23](23-agent-core-architecture.md#memory-and-lifetime-discipline-and-the-tooling-that-enforces-it)) |
 | `POST /snapshot?pipeline=<id>` | force a snapshot now |
 | `GET /diagnostics.tar.gz` | the diagnostics bundle |
 
 Security: bound to loopback by default; `introspect.bind = "0.0.0.0"` plus
 `introspect.token` is required to expose it on a LAN; it never carries
-credentials or grants (docs/10). It is read-only except `POST /snapshot`.
+credentials or grants (docs/10). The only mutations are `POST /snapshot`
+and `POST /memory/checkpoint`, both harmless. A port already in use is a
+startup error (exit 1) — a silently absent endpoint would break the
+tests that rely on it. Served by libsoup-3's server on the core context
+(no new dependency).
 
 ### The bundled viewer
 
@@ -175,22 +187,26 @@ for first, produced in one command.
 
 ## Slice mapping
 
-- **Slice 3**: walker (DOT/JSON/summary), snapshot ring with milestones,
-  `dot_dir` files, the local endpoint with `/pipelines`, `/events`,
-  `/stats`, `/sources`, `/diagnostics.tar.gz`, and the bundled viewer;
-  `make introspect`. The `fjarr-opsim` tests assert on `/pipelines/*.json`.
-- **Slice 5**: `fjarr.introspect` capability, `<PipelineGraph>` +
-  hooks, the demo dashboard Diagnostics tab, `introspect.schema.json`
-  under conformance.
+- **Slice 3b**: walker (DOT/JSON/summary), `dot_dir` files, the minimal
+  endpoint (`/pipelines`, `/pipelines/<id>.{json,txt,dot}`, `/sources`)
+  and `protocol/schemas/introspect.schema.json` under the conformance
+  gate — `fjarr-opsim` asserts on `/pipelines/*.json` from day one.
+- **Slice 3c**: `/events`, the history ring and `?seq`, `/stats`,
+  `/memory` + checkpoints, `/diagnostics.tar.gz`, `make introspect`,
+  `fjarr-lab introspect`.
+- **Slice 5**: `fjarr.introspect` capability, `<PipelineGraph>` + hooks,
+  the demo dashboard Diagnostics tab; the same built component is served
+  from the endpoint's `GET /` as a data file, so the viewer is built once.
 - **M7**: fleet-wide retention and search in Fjarr Cloud.
 
-## Acceptance (slice 3 part)
+## Acceptance
 
-With demo-robot streaming to one operator: the viewer shows the producer
-and the session pipeline live; toggling a track in the dashboard changes
-the valve node within a second; a hot-plug via the test hook shows the
-new branch appear and the timeline gain a `renegotiation` milestone;
-scrubbing back to `offer-created` shows the pre-renegotiation graph;
-`curl /pipelines/session:<id>.txt` returns a summary under 2 KB; the
-diagnostics bundle contains the whole story. Idle robot: zero snapshots
-per second.
+Slice 3b/3c, via `curl` and `fjarr-lab`: with demo-robot streaming to one
+operator, `/pipelines` lists the producer and the session pipeline;
+toggling a track in the dashboard changes `…/valve.drop` in the JSON
+within a second; `hotplug` makes the new branch appear and the history
+gain a `renegotiation` event; `?seq=` at `offer-created` returns the
+pre-renegotiation graph; `/pipelines/session:<id>.txt` is under 2 KB; the
+diagnostics bundle contains the whole story; an idle robot produces zero
+snapshots per second. Slice 5 adds the same through the viewer and the
+dashboard.

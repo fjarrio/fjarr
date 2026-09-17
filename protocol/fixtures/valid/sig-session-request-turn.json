@@ -1,0 +1,24 @@
+{
+  "v": 1,
+  "type": "session-request",
+  "event_id": "0192f3a1-sreq-turn",
+  "ts": 1789503000000,
+  "session_id": "s-01",
+  "capabilities": [
+    {
+      "name": "fjarr.test"
+    }
+  ],
+  "operator": {
+    "id": "anna@acme.com",
+    "label": "Anna"
+  },
+  "turn": {
+    "urls": [
+      "turn:turn.fjarr.io:3478"
+    ],
+    "username": "1789503600:agent:s-01",
+    "credential": "kJGTju…",
+    "ttl": 600
+  }
+}

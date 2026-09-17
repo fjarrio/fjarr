@@ -43,9 +43,9 @@ JSON text frames on the WSS connection. Common fields on **every** message:
 
 | `type` | Direction | Additional fields | Semantics |
 |---|---|---|---|
-| `hello` | client→server | `role: "agent"\|"operator"`, `auth` (device credential or session grant), `agent_info`/`client_info`, `proto_versions` | authenticate + advertise |
+| `hello` | client→server | `role: "agent"\|"operator"`, `auth`, `agent_info`/`client_info`, `proto_versions` | authenticate + advertise. `auth` for operators: `{scheme:"grant", jwt}`. For agents: `{scheme:"dev-token", robot_id, dev_token}` (the dev registry, until M5) or `{scheme:"device-signature", robot_id, nonce_sig}` (enrollment, M5). `agent_info`: `{fjarr, os, arch, capabilities:[names]}` |
 | `hello-ack` | server→client | `session_id?`, `proto_version`, `turn` (urls + ephemeral credential + ttl) | accept; operator gets TURN creds here |
-| `session-request` | server→agent | `session_id`, `capabilities: [{name, params}]`, `operator` (display identity) | grant-verified request to open a session |
+| `session-request` | server→agent | `session_id`, `capabilities: [{name, params}]`, `operator` (display identity), `turn?` | grant-verified request to open a session; `turn` carries the agent's ephemeral TURN credentials for this session (same minting and TTL as the operator's `hello-ack.turn`, docs/10#turn — agents never hold static TURN secrets) |
 | `session-accept` / `session-reject` | agent→server→operator | `session_id`, reject: `reason` | agent's answer, relayed to the operator (policy hooks may refuse) |
 | `offer` | agent→server→operator | `session_id`, `sdp`, `tracks` ([manifest](#track-manifest)) | **agent always offers** |
 | `answer` | operator→server→agent | `session_id`, `sdp` | |
@@ -121,14 +121,33 @@ Rules:
 |---|---|---|---|
 | `ping` | request (operator → agent) | `{"t0": ms}` | every 5 s while connected; `t0` = sender's clock at send |
 | `pong` | result (echoes the `ping`'s `event_id`) | `{"ok": true, "t0", "t1", "t2"}` | `t1` = agent receive time, `t2` = agent send time, agent clock |
-| `time-sync` | request / result | same as `ping`/`pong` | an explicit on-demand probe (latency harness); heartbeats already keep the estimate fresh |
+| `time-sync` | request / result (result `type` is `time-sync`; only `ping` is answered as `pong`) | same payloads as `ping`/`pong` | an explicit on-demand probe (latency harness); heartbeats already keep the estimate fresh |
 | `ice-restart` | — | — | not an envelope: it is a [signaling message](#signaling), because it must work while the media path is down |
 
-Clock offset and RTT follow NTP: with `t3` = the operator's receive time,
+`t0`..`t3` are unix milliseconds (an agent using `g_get_real_time` divides
+by 1000). Clock offset and RTT follow NTP: with `t3` = the operator's receive time,
 `offset = ((t1 − t0) + (t2 − t3)) / 2`, `rtt = (t3 − t0) − (t2 − t1)`.
 Implementations keep the sample with the smallest RTT over a sliding
 window (the fleet-daemon lesson: a single skewed sample must not jump the
 clock); consumers stamp outgoing commands as `local + offset`.
+
+### Track control (every track-owning capability) {#track-control}
+
+`select-tracks` and `bandwidth-stats` are **served by the agent core for
+every capability that declares tracks**, under that capability's `cap`
+(`fjarr.camera/select-tracks`, `fjarr.desktop/select-tracks`,
+`fjarr.test/select-tracks`); a capability never implements them. The
+client sends one request per track-owning capability
+([docs/21](21-web-client-architecture.md#demand-model)).
+
+| `type` | kind | payload | semantics |
+|---|---|---|---|
+| `select-tracks` | request → result | `{"tracks": [{"track_id", "enabled": bool, "tier": "active" \| "thumbnail", "preference"?: "motion" \| "sharpness"}]}` | full desired state for the tracks listed (unlisted = unchanged); the core flips valves, applies docs/16 tier params, requests a keyframe on enable, maps `preference` to the encoder's degradation preference; `result{ok:true}` once applied. A `track_id` that is not in this capability's manifest makes the whole request fail — `result{ok:false, error:{code:"payload-invalid", message:"unknown track <id>"}}` — and nothing is applied |
+| `bandwidth-stats` | event (agent → operator) | `{"interval_ms": 1000, "tracks": [{"track_id", "enabled", "tier", "bitrate_bps", "frames", "dropped"}]}` | once per second while any of the capability's tracks is enabled. `bitrate_bps` = `outbound-rtp` bytes sent over the interval × 8; `frames` = encoded frames pushed to this peer in the interval; `dropped` = frames skipped for this peer in the interval (FrameHub ring overrun + leaky-queue drops). Informational for the UI; the client's health score uses its own `getStats` (docs/21) |
+
+Codec strings in the manifest are RTP encoding names, uppercase: `H264`,
+`H265`, `VP8`, `VP9`, `OPUS`. `mid` values are opaque strings; a
+GStreamer agent produces `video0`, `application1`, `video2`… (the spike).
 
 ## The envelope {#envelope}
 
@@ -147,7 +166,11 @@ All control/backend messages share one JSON shape:
 
 `kind` ∈ `request` | `accept` | `feedback` | `result` | `event` (unsolicited).
 `accept/feedback/result` echo the request's `event_id`. `result.payload`
-always carries `ok: bool` and, on failure, `error: {code, message}`.
+always carries `ok: bool` and, on failure, `error: {code, message}`. A
+request to a capability not attached to the session is answered
+`result{ok:false, error:{code:"capability-unknown"}}`; an envelope with a
+`v` other than 1 on a DataChannel is dropped and counted, never answered
+(the signaling `hello` already negotiated the major).
 
 Capability payload schemas live in `protocol/schemas/` (JSON Schema),
 versioned with the capability; TS types and C++/Rust validators are

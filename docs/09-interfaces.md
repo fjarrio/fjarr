@@ -22,6 +22,8 @@ fjarr::Agent agent{cfg};
 agent.register_capability(std::make_unique<fjarr::CameraCapability>(cams));
 agent.register_capability(std::make_unique<acme::ArmTeachCapability>());
 agent.on_session_event([](const fjarr::SessionEvent& ev) { /* audit */ });
+// SessionEvent { type: "started"|"ended"|"error"|"audio-uplink"; session_id;
+//                operator {id,label}; reason (ended); code (error) }
 agent.run();   // blocks; or agent.start()/stop() on the host's loop
 ```
 
@@ -37,6 +39,10 @@ offers.
 ```cpp
 namespace fjarr {
 
+using SessionId = std::string;         // the wire session_id (UUIDv7)
+
+enum class ChannelClass { Control, Realtime, Bulk, Stream };   // docs/08 classes
+
 struct CapabilityManifest {
   std::string name;              // reverse-DNS, e.g. "fjarr.camera"
   SemVer version;
@@ -47,17 +53,26 @@ struct CapabilityManifest {
   std::vector<Privilege> privileges;     // explicit grants required
   ConsumerKinds consumers;               // peer, backend, or both
   std::vector<std::string> dependencies; // required capabilities (F4)
+  bool input_bearing = false;            // takes the docs/10 ownership lease;
+                                         // release_all_input() is called on every detach
 };
 
 // Sending surface with mandatory backpressure (docs/08#backpressure — F3):
 class ChannelSender {
 public:
   virtual ~ChannelSender() = default;
-  virtual void send(const Envelope& msg) = 0;                  // ≤ 16 KiB
-  virtual void send_binary(std::span<const std::byte> frame) = 0; // bulk only
+  virtual void send(const Envelope& msg) = 0;     // throws FjarrError(payload-invalid) above 16 KiB UTF-8
+  // bulk/stream only: false = above HIGH_WATER, not sent — pump on on_drain
+  [[nodiscard]] virtual bool send_binary(std::span<const std::byte> frame) = 0;
   virtual std::size_t buffered_amount() const = 0;
   virtual void on_drain(std::function<void()> below_low_watermark) = 0;
 };
+
+// DetachReason is the coarse enum; `reason` is the exact docs/08 string
+// ("operator-closed", "peer-gone", "heartbeat", "media-restart",
+// "ice-restart", "media-error", "negotiation-timeout:<milestone>",
+// "agent-shutdown", "ice-failed").
+enum class DetachReason { Closed, PeerGone, Heartbeat, Error };
 
 class Capability {
 public:
@@ -66,8 +81,13 @@ public:
   virtual void configure(const nlohmann::json& validated_config) = 0;
   // Sessions: attach/detach; ctx provides tracks, channel senders, worker pool.
   virtual void session_attached(SessionContext& ctx, const nlohmann::json& granted_params) = 0;
-  virtual void session_detached(SessionId id, DetachReason reason) = 0;
+  virtual void session_detached(const SessionId& id, DetachReason reason, std::string_view detail) = 0;
+  // Safety (docs/15): called FIRST on every detach path for input-bearing
+  // capabilities, before pipelines are touched. Default no-op.
+  virtual void release_all_input(const SessionId& id) {}
   // Envelopes addressed to this capability's namespace (docs/08#envelope).
+  // select-tracks / bandwidth-stats never arrive here: the core serves them
+  // for every track-owning capability (docs/08#track-control).
   virtual void on_message(SessionContext& ctx, const Envelope& msg) = 0;
   // Backend consumer hooks (F2) — session-independent conversation with
   // fjarr-server/Cloud over the agent's signaling connection. Default

@@ -188,7 +188,7 @@
         },
         "auth": {
           "type": "object",
-          "description": "device credential (agent) or session grant (operator)"
+          "description": "device credential (agent: {scheme:\"dev-token\", robot_id, dev_token} until M5 enrollment; {scheme:\"device-signature\", robot_id, nonce_sig} from M5) or session grant (operator: {scheme:\"grant\", jwt})"
         },
         "agent_info": {
           "type": "object"
@@ -228,32 +228,7 @@
           "$ref": "#/$defs/session_id"
         },
         "turn": {
-          "type": "object",
-          "required": [
-            "urls",
-            "username",
-            "credential",
-            "ttl"
-          ],
-          "properties": {
-            "urls": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "minItems": 1
-            },
-            "username": {
-              "type": "string"
-            },
-            "credential": {
-              "type": "string"
-            },
-            "ttl": {
-              "type": "integer",
-              "minimum": 1
-            }
-          }
+          "$ref": "#/$defs/turn"
         }
       },
       "required": [
@@ -306,6 +281,10 @@
               "type": "string"
             }
           }
+        },
+        "turn": {
+          "$ref": "#/$defs/turn",
+          "description": "ephemeral TURN credentials for the agent's side of this session"
         }
       },
       "required": [
@@ -565,6 +544,34 @@
         "message"
       ],
       "type": "object"
+    },
+    "turn": {
+      "type": "object",
+      "required": [
+        "urls",
+        "username",
+        "credential",
+        "ttl"
+      ],
+      "properties": {
+        "urls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "username": {
+          "type": "string"
+        },
+        "credential": {
+          "type": "string"
+        },
+        "ttl": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
     }
   }
 }
