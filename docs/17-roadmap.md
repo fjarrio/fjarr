@@ -95,9 +95,14 @@ with the **portal-vs-route spike** that fixes the default per browser
 **Plus `fjarr.audio`** (robot microphone downlink, push-to-talk uplink via
 the pre-allocated transceiver, audited) and **desktop audio** on
 `fjarr.desktop`.
+**Plus packaging** per [docs/26](26-robot-install-and-drivers.md): the apt
+repository, `fjarr-agent setup` / `drivers`, the driver catalog, the
+desktop backend packages (ADR-0021) and the first vendor camera packages
+(ADR-0020) chosen by the design partner's hardware.
 **Gate:** capability acceptance criteria ([docs/06](06-capabilities.md))
-for desktop and audio; input-to-photon within budgets; the first
-**design-partner demo** (docs/03 GTM).
+for desktop and audio; input-to-photon within budgets; the design partner
+installs from the repository with `setup` and no hand-written config; the
+first **design-partner demo** (docs/03 GTM).
 
 ## M4 — Files, telemetry, logs, sensors
 

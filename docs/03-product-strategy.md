@@ -30,7 +30,8 @@ and fleet tooling — one protocol, embeddable at every tier — plus a
 developer experience no media stack offers: **live pipeline introspection**
 ([docs/24](24-pipeline-introspection.md)) that lets an integrator, a
 support engineer or an AI coding agent see exactly what the media plane is
-doing, on the robot and from the dashboard.
+doing, on the robot and from the dashboard, and an install that puts only
+the drivers a robot actually needs on it ([docs/26](26-robot-install-and-drivers.md)).
 
 ## Open-core split ([ADR-0011](adr/0011-license-open-core.md), [ADR-0015](adr/0015-backend-integration-strategy.md))
 

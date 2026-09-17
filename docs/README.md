@@ -39,6 +39,7 @@ with rationale).
 | 23 | [Agent core architecture](23-agent-core-architecture.md) | libfjarr core: threading, session state machine, media plane, DC router, SessionContext, supervision, testing | draft |
 | 24 | [Pipeline introspection](24-pipeline-introspection.md) | Live, visual and machine-readable GStreamer pipeline graphs — for developers, customers and AI agents | draft |
 | 25 | [Browser lab](25-browser-lab.md) | CDP-driven Chromium in the stack: e2e, traffic introspection, network emulation, profiling — for people and agents | draft |
+| 26 | [Robot install & drivers](26-robot-install-and-drivers.md) | One-line install; the driver catalog, `setup`, `drivers` and `--check`; only the drivers a use case needs | draft |
 
 ## Architecture decision records
 

@@ -90,7 +90,7 @@ Unix socket alternative `introspect.socket = "/run/fjarr/introspect.sock"`):
 | `GET /pipelines/<id>/history` | the snapshot sequence (metadata only; bodies via `?seq`) |
 | `GET /events` | Server-Sent Events: every new snapshot's metadata (+ body when `?body=json\|dot\|txt`) — this is what "live" means |
 | `GET /stats` | the per-session `get-stats` sample, FrameHub counters, producer states |
-| `GET /sources` | configured video sources with negotiated caps and availability ([docs/09](09-interfaces.md#the-video-source-contract)) |
+| `GET /sources` | configured video sources with negotiated caps and availability, and for a missing driver the catalog entry and install command ([docs/26](26-robot-install-and-drivers.md)) |
 | `GET /memory[?since=<checkpoint>]` / `POST /memory/checkpoint` | RSS, live GStreamer/GLib object census by type (elements, pads, samples, promises, sources), FrameHub buffers held, channel bytes buffered, sessions/pipelines alive — and the diff since a checkpoint (the soak-test oracle, [docs/23](23-agent-core-architecture.md#memory-and-lifetime-discipline-and-the-tooling-that-enforces-it)) |
 | `POST /snapshot?pipeline=<id>` | force a snapshot now |
 | `GET /diagnostics.tar.gz` | the diagnostics bundle |

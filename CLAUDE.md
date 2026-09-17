@@ -80,6 +80,7 @@ CI mirrors all of this in `.github/workflows/ci.yml`.
 | Agent core internals (threading, sessions, media plane, SessionContext) | docs/23-agent-core-architecture.md |
 | Looking at what the media plane is doing (live pipeline graphs, `curl localhost:7381`) | docs/24-pipeline-introspection.md |
 | Driving a real browser: e2e, wire captures, network profiles, CPU/memory profiles (`fjarr-lab`) | docs/25-browser-lab.md |
+| Installing the agent and vendor drivers on a robot (catalog, `setup`, `drivers`) | docs/26-robot-install-and-drivers.md |
 | Capability plugin rules | docs/05-extension-model.md + `/new-capability` |
 | Security constraints | docs/10-security.md |
 | Why decisions were made | docs/adr/README.md |

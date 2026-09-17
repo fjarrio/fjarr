@@ -41,6 +41,7 @@ export default defineConfig({
             "23-agent-core-architecture",
             "24-pipeline-introspection",
             "25-browser-lab",
+            "26-robot-install-and-drivers",
           ],
         },
         {
