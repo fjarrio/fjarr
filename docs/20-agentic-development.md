@@ -80,9 +80,13 @@ The two tools built *for* agents as much as for people: the
 CDP: open, eval, screenshot, network profile, signaling and DataChannel
 captures, CPU/memory profiles, web vitals, all with text + JSON output) and
 [pipeline introspection](24-pipeline-introspection.md)
-(`curl localhost:7381/pipelines/<id>.txt`). An agent debugging a media
-problem uses those before reading code, and cites their artifacts in its
-report.
+(`curl localhost:7381/pipelines/<id>.txt`). For lifetime and memory bugs
+in the C++ agent the ladder in [docs/15](15-testing-strategy.md#memory-safety-c)
+is the tool: `make agent-test-asan` / `agent-test-tsan`,
+`make agent-leaks SCENARIO=…` (GStreamer's `leaks` tracer between
+checkpoints), `curl localhost:7381/memory?since=…` on a running robot. An
+agent debugging a media or memory problem uses those before reading code,
+and cites their artifacts in its report.
 
 - Everything builds in the dev container; agents should prefix with
   `docker compose exec dev …` (CLAUDE.md documents this) — host tools are
