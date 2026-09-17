@@ -30,10 +30,15 @@ description: How the agent is installed on a robot and how a customer discovers,
 
 | Channel | Contents | For |
 |---|---|---|
-| **apt repository** (`deb [arch=amd64,arm64] https://apt.fjarr.io …`) | `fjarr-agent` (core + `fjarr.test` + introspection), `fjarr-desktop-x11`, `fjarr-desktop-wayland`, `fjarr-inputd`, `fjarr-gst-<vendor>` per vendor and architecture, `fjarr-tools` (opsim, probe) | robots on Ubuntu 24.04 (the supported platform, docs/04) |
+| **apt repository** (`deb [arch=amd64,arm64] https://apt.fjarr.io …`) | `fjarr-agent` (core + `fjarr.test` + introspection), `fjarr-desktop-x11`, `fjarr-desktop-wayland`, `fjarr-inputd`, `fjarr-gst-<vendor>` per vendor and architecture, `fjarr-tools` (opsim, probe) | robots on Ubuntu 26.04 LTS (the supported platform, docs/04, ADR-0022) |
 | **Container images** | `ghcr.io/fjarrio/fjarr-agent:<ver>` (core) and per-vendor variants `…:<ver>-zed`, `…:<ver>-realsense`, plus `-desktop-x11`/`-wayland`; the same packages, layered | containerized robot stacks, the demo, CI |
 | **Embedding** | `libfjarr` as a CMake package (`find_package(fjarr)`), headers = docs/09; the customer's app links the core and installs the driver packages it wants | robot companies embedding the library in their own daemon |
 | **Install script** | `curl -fsSL https://get.fjarr.io \| sh` — adds the repository, installs `fjarr-agent`, runs `fjarr-agent setup` | first contact |
+
+The `fjarr-agent` package ships the systemd unit (`Type=notify`,
+`WatchdogSec=30`, `Restart=on-failure`, running as the unprivileged
+`fjarr` user per docs/10) and enables it; the daemon requires systemd on
+robots ([ADR-0019](adr/0019-agent-process-model.md)).
 
 Every package declares its architecture and its vendor prerequisites
 (`Depends`/`Recommends`) so `apt` does the dependency work where the
@@ -119,8 +124,9 @@ can push a driver package to a robot group like any other update.
 
 ## Roadmap
 
-Packaging is an M3 deliverable (the design-partner demo installs from the
-apt repository); `setup`, `drivers` and the catalog land with it, and the
-first two vendor packages are chosen by the design partner's hardware.
-Slice 3 already ships the runtime half: `unavailable` with reason,
-`--check`, `--probe-source`, `/sources`.
+Packaging is the **M2.5** milestone ([docs/17](17-roadmap.md#m25--packaging--install)):
+the repository, the packages and their systemd unit, the install script,
+`setup`, `drivers` and the catalog with the built-in entries. The first
+vendor packages are M3, chosen by the design partner's hardware. Slice 3
+already ships the runtime half: `unavailable` with reason, `--check`,
+`--probe-source`, `/sources`.

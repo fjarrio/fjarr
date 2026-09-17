@@ -23,7 +23,7 @@ options weighed, the choice, and its consequences — so future maintainers
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-webrtc-gstreamer.md) | WebRTC + GStreamer for media transport | accepted |
-| [0002](0002-ubuntu-2404-baseline.md) | Ubuntu 24.04 / GStreamer 1.24 baseline | accepted |
+| [0002](0002-ubuntu-2404-baseline.md) | Ubuntu 24.04 / GStreamer 1.24 baseline | superseded by 0022 |
 | [0003](0003-polyglot-monorepo.md) | Polyglot monorepo | accepted |
 | [0004](0004-rust-signaling.md) | Rust for the signaling server | accepted |
 | [0005](0005-web-library-split.md) | TS core + React bindings + demo split | accepted |
@@ -43,3 +43,4 @@ options weighed, the choice, and its consequences — so future maintainers
 | [0019](0019-agent-process-model.md) | Agent process model — one process, two restartable planes | accepted |
 | [0020](0020-vendor-sources-as-gstreamer-plugins.md) | Vendor camera support ships as separately packaged GStreamer plugins | accepted (desktop sentence superseded by 0021) |
 | [0021](0021-desktop-backends-as-runtime-modules.md) | Desktop backends are in-tree runtime modules in separate packages | accepted |
+| [0022](0022-baseline-ubuntu-2604-gstreamer-128.md) | Baseline bump to Ubuntu 26.04 LTS / GStreamer 1.28 | accepted |

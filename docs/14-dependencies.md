@@ -11,10 +11,10 @@ groups with comments.
 
 ## Agent (`libfjarr`) — ships on robots
 
-| Dependency | Version (noble) | Purpose | License | Ships |
+| Dependency | Version (Ubuntu 26.04 LTS, ADR-0022; re-verified in slice 2.9) | Purpose | License | Ships |
 |---|---|---|---|---|
-| GStreamer core + base/good/bad plugins | 1.24.2 | pipelines, RTP, WebRTC | LGPL-2.1 (dynamic) | yes |
-| `gstreamer1.0-nice` (libnice) | 0.1.21 | ICE for webrtcbin | LGPL-2.1/MPL | yes |
+| GStreamer core + base/good/bad plugins | 1.28.2 | pipelines, RTP, WebRTC | LGPL-2.1 (dynamic) | yes |
+| `gstreamer1.0-nice` (libnice) | 0.1.23 | ICE for webrtcbin | LGPL-2.1/MPL | yes |
 | `gstreamer1.0-pipewire` | 1.0.5 | Wayland capture (`pipewiresrc`) | MIT | yes |
 | libva + intel-media-driver (iHD) | 2.20 / 24.1 | VA-API H.264 encode | MIT | yes (driver from distro) |
 | libx11 / libxtst / libxfixes / libxrandr / libxi | noble | X11 backend | MIT/X11 | yes — in `fjarr-desktop-x11` only ([ADR-0021](adr/0021-desktop-backends-as-runtime-modules.md)) |
@@ -24,10 +24,10 @@ groups with comments.
 | libdbus / sd-bus | noble | portal negotiation | AFL-2.1/GPL dual → use LGPL path; verify at M2 | yes — in `fjarr-desktop-wayland` only |
 | nlohmann-json | 3.11 | envelopes, config | MIT | yes |
 | openh264 (`openh264enc`, plugins-bad) | 2.4 | the explicit `encoder = "software"` path (CI, no-GPU dev, portable robots) — never a silent fallback (docs/23) | BSD-2 | yes (optional) |
-| libsoup-3 (+ glib-networking) | 3.4 | WS/HTTP signaling client (ADR-0017) | LGPL-2.1 (dynamic) | yes |
+| libsoup-3 (+ glib-networking) | 3.6 | WS/HTTP signaling client (ADR-0017) and the introspection server (docs/24) | LGPL-2.1 (dynamic) | yes |
 | toml++ (`tomlplusplus`) | 3.4 (header-only) | `fjarr.toml` config (docs/23) | MIT | yes |
 | nlohmann json-schema-validator | 2.3 | capability config validation against `config_schema` | MIT | yes |
-| libsystemd (`sd_notify`) | noble, optional | READY/WATCHDOG supervision (ADR-0019) | LGPL-2.1 (dynamic) | yes (optional) |
+| libsystemd (`sd_notify`) | 26.04 | READY/WATCHDOG supervision — required by the packaged agent (ADR-0019 addendum) | LGPL-2.1 (dynamic) | yes |
 | GoogleTest | 1.14 | C++ unit/loop tests | BSD-3 | dev-only |
 | Vendor camera SDKs (ZED, RealSense, Jetson multimedia, GigE vendors…) | per vendor | **never a `libfjarr` dependency** — each ships as its own GStreamer plugin package `fjarr-gst-<vendor>` per architecture ([ADR-0020](adr/0020-vendor-sources-as-gstreamer-plugins.md)) | per vendor (checked per package) | optional, separate packages |
 | **Forbidden**: `gstreamer1.0-plugins-ugly` (x264enc) | — | — | GPL | **never** (doctor-enforced) |
@@ -74,7 +74,7 @@ groups with comments.
 | pnpm (via corepack) | 10.x | JS workspace |
 | markdownlint-cli2, lychee | latest | docs gates |
 | ajv | ^8 | protocol schema conformance gate (`make protocol-check`) |
-| CMake/Ninja/ccache, clang-18 suite | noble | C++ build/lint |
+| CMake/Ninja/ccache, clang-21 suite | 26.04 | C++ build/lint |
 | valgrind, heaptrack | noble | nightly memcheck and allocation profiling of the agent (docs/15 memory safety; GPL tools, dev-only, never linked) |
 | coturn (container) | 4.6 | dev/self-host TURN (BSD-3) |
 | Xvfb/openbox/x11vnc/noVNC (robot-sim) | noble | fake robot desktop |
@@ -83,6 +83,6 @@ groups with comments.
 ## Version discipline
 
 Toolchains are pinned (`rust-toolchain.toml`, `packageManager` field,
-Dockerfile base images by tag). Distro libraries float within Ubuntu 24.04
+Dockerfile base images by tag). Distro libraries float within Ubuntu 26.04
 LTS. `Cargo.lock` and `pnpm-lock.yaml` are committed. Upgrades are ordinary
 PRs with a dependencies-row diff; base-image bumps get a changelog note.

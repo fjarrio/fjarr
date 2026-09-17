@@ -43,6 +43,16 @@ Supervision contract: exit 0 clean, 1 configuration error (no restart
 loop), 2 "restart me" after the recovery ladder is exhausted; `READY=1` /
 `WATCHDOG=1` via `sd_notify` when available.
 
+## Addendum (2026-09-17): systemd is required on shipped robots
+
+The packaged `fjarr-agent` (docs/26) ships a `Type=notify` unit with
+`WatchdogSec=30` and `Restart=on-failure`, and the daemon **requires**
+`sd_notify` support (`libsystemd`) — the watchdog is the only defense
+against a wedged core loop and is not optional on a robot. Embedders of
+`libfjarr` get the same behaviour through `Agent::supervision()` (a
+notify/watchdog seam they may leave unset); containers without systemd
+(the demo, CI) run with the watchdog off and log that fact at startup.
+
 ## Consequences
 
 Slice 3 ships without IPC. The measurable trigger for revisiting is a

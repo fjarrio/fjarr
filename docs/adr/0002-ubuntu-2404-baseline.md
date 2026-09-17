@@ -2,7 +2,7 @@
 title: "ADR 0002: Ubuntu 24.04 baseline"
 ---
 
-- **Status**: accepted
+- **Status**: superseded by [ADR-0022](0022-baseline-ubuntu-2604-gstreamer-128.md) (2026-09-17)
 - **Date**: 2026-09-15
 
 ## Context

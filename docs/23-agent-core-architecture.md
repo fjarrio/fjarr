@@ -55,8 +55,11 @@ Process separation (a `fjarr-mediad` child) is the documented upgrade path
 if driver hangs turn out to survive an in-process rebuild; the seam is the
 media-plane interface below, so nothing in the capability API changes.
 
-**Supervision contract** (systemd `Restart=on-failure`, `WatchdogSec` when
-`sd_notify` is available):
+**Supervision contract** — systemd is required on shipped robots
+([ADR-0019 addendum](adr/0019-agent-process-model.md)): the package ships
+a `Type=notify` unit with `Restart=on-failure` and `WatchdogSec=30`;
+embedders reach the same through `Agent::supervision()`; containers
+without systemd run with the watchdog off and say so at startup:
 
 | Exit code | Meaning | Supervisor action |
 |---|---|---|
@@ -67,7 +70,7 @@ media-plane interface below, so nothing in the capability API changes.
 The daemon writes `READY=1` after the first `hello-ack` and `WATCHDOG=1`
 from the core loop every `WatchdogSec/3`; a wedged core loop is therefore
 killed by systemd, which is the only defense against a deadlock in our own
-code.
+code — which is why the packaged agent does not run without it.
 
 ## Threading model
 
@@ -249,15 +252,21 @@ GStreamer 1.24.2 (its README has the exact API sequences):
   *Additions* request a new `sink_%u` pad, wait for its caps and re-offer;
   the existing m-sections keep their `mid` and media on them continues
   (spike Q3: 34–36 ms max gap on the untouched track, within the docs/16
-  budget). *Removals* do **not** stop the transceiver: on 1.24,
-  `direction=inactive` wedges the answerer's ICE socket (Q3), so a removed
-  track is muted (`valve drop=TRUE`, direction `sendonly`), dropped from the
-  manifest, and its transceiver is kept in a pool for the next addition of
-  the same kind — re-plugging a monitor reuses it without a new m-section.
+  budget). *Removals*: on the 1.28 baseline ([ADR-0022](adr/0022-baseline-ubuntu-2604-gstreamer-128.md))
+  a removed track's transceiver goes `inactive` and is re-offered, the
+  JSEP way — the 1.24 stall was the answerer sending EOS down its source
+  pad (fixed by 1.26's `reuse-source-pads`, which `fjarr-opsim` sets;
+  browsers never had it). Until the slice-2.9 re-run confirms it against
+  both answerers, and for embedders on 1.24, the fallback stays specified:
+  mute (`valve drop=TRUE`, direction `sendonly`), drop from the manifest,
+  and keep the transceiver in a pool for the next addition of the same
+  kind. Either way re-plugging a monitor reuses the m-section.
   The queue holds at most one un-answered offer; changes arriving in flight
   fold into the next offer; `manifest_version` increments per offer *sent*.
-- **ICE restart: not on this stack.** `webrtcbin` 1.24 ignores the
-  `ice-restart` offer option (Q4: identical ufrag/pwd). The agent therefore
+- **ICE restart: not on any GStreamer.** `webrtcbin` ignores the offer
+  options argument (a `TODO` in the source through 1.28), reuses the
+  previous ICE credentials on every re-offer (three `FIXME: deal with ICE
+  restarts` sites) and never calls libnice's restart. The agent therefore
   answers the operator's `ice-restart` with
   `session-close{reason:"ice-restart", retry:true}` (docs/08#reconnection):
   the operator opens a new session immediately and the agent builds a fresh
@@ -634,7 +643,8 @@ ice_policy      = "all"                    # all | relay (relay-only for tests)
 log_level       = "info"                   # trace|debug|info|warn|error  (FJARR_LOG_LEVEL)
 log_format      = "text"                   # text | json                  (FJARR_LOG_FORMAT)
 dot_dir         = ""                       # FJARR_DOT_DIR: snapshots as files (docs/24)
-watchdog_secs   = 0                        # sd_notify WATCHDOG interval; 0 = use WatchdogSec/3 from systemd, or off
+watchdog_secs   = 0                        # 0 = WatchdogSec/3 from the unit; the packaged agent refuses to start outside systemd unless `allow_unsupervised = true` (containers, dev)
+allow_unsupervised = false
 
 [media]
 encoder        = "auto"                    # auto | vaapi | software — never a silent fallback (below)

@@ -15,8 +15,8 @@ by revision (this document's history), never by renumbering.
 |---|---|---|
 | M0 Docs & environment | **done** 2026-09-15 | doctor 0 failures, 3 tiers + 3 demos build, site builds |
 | M0.5 Public foundations | **done** 2026-09-16 | CI green, fjarr.io + fjarr.dev live, registrations, prior-art anonymization policy |
-| M1 Core + extension API (camera video) | **in progress** | slices 0–1 done (protocol + API-fit review; Rust signaling, reviewed); slices 2–7 pending |
-| M2 – M8 | planned | revised 2026-09-16 after the slice-2 design ([docs/21](21-web-client-architecture.md), [docs/22](22-remote-desktop-client.md)); slice-3 planning 2026-09-17: [docs/23](23-agent-core-architecture.md) agent core, [docs/24](24-pipeline-introspection.md) introspection, [docs/25](25-browser-lab.md) browser lab, [ADR-0019](adr/0019-agent-process-model.md), the [webrtcbin spike](../agent/spikes/webrtcbin-probe/README.md) |
+| M1 Core + extension API (camera video) | **in progress** | slices 0–2 done and reviewed; slice 2.9 (baseline bump, [ADR-0022](adr/0022-baseline-ubuntu-2604-gstreamer-128.md)), 3a/3b/3c, 4–7 pending |
+| M2 – M8 | planned | revised 2026-09-17 after the slice-3 planning ([docs/23](23-agent-core-architecture.md)–[26](26-robot-install-and-drivers.md), ADR-0019–0022, the [webrtcbin spike](../agent/spikes/webrtcbin-probe/README.md), the [planning review](reviews/slice-3-planning-review.md)): new **M2.5 packaging** milestone; M3 lightened |
 
 ## M0 — Documentation & environment *(done)*
 
@@ -50,15 +50,23 @@ adaptive bitrate. Extension API paper-validated — **done**:
 **Slices** (each lands on `main`, reviewed retrospectively — docs/20):
 0 protocol + review ✔ · 1 Rust signaling ✔ · 2 web core + React ✔
 ([review](reviews/slice-2-review.md)) ·
+**2.9 baseline bump** — dev container, CI and images to Ubuntu 26.04 /
+GStreamer 1.28 ([ADR-0022](adr/0022-baseline-ubuntu-2604-gstreamer-128.md)),
+doctor re-verified, the webrtcbin spike re-run on 1.28 (`inactive` with
+`reuse-source-pads`) ·
 3 in three increments ([docs/23](23-agent-core-architecture.md#slices-3a-3b-3c-and-their-gates)):
-**3a** the [browser lab](25-browser-lab.md) (web only) · **3b** the agent
-core with the built-in `fjarr.test` capability, `fjarr-opsim`, the
+**3a** the [browser lab](25-browser-lab.md) (web only, may run in parallel
+with 2.9; includes the Chromium-answerer spike) · **3b** the agent core
+with the built-in `fjarr.test` capability, `fjarr-opsim`, the
 introspection walker and minimal endpoint ([docs/24](24-pipeline-introspection.md)),
 and the minimal demo wiring the gate needs · **3c** introspection
 completeness and the memory-safety ladder ·
-4 `fjarr.camera` · 5 demo wiring (incl. `fjarr.introspect` +
-`<PipelineGraph>`) · 6 ADR-0007 spike + adaptive bitrate ·
-7 fault injection + latency harness.
+4 `fjarr.camera` (the source contract with `gst`/`test`/`v4l2`/`rtsp`
+types, tiers, keyframe policy, `--probe-source`) · 5 demo wiring
+(demo-backend real grants for every capability, `fjarr.introspect` +
+`<PipelineGraph>` + the dashboard Diagnostics tab, container images) ·
+6 ADR-0007 spike + adaptive bitrate · 7 fault injection + latency harness
+on the frame stamp.
 
 **Gate:** the three-demo stack end-to-end — demo-robot (embedding libfjarr)
 streams 2 tracks to 3 browsers through the `fjarr-server` sidecar, the TS
@@ -71,13 +79,37 @@ written API-fit review for the remaining capabilities.
 ## M2 — Desktop backend spikes + `fjarr.terminal`
 
 The four spikes per [docs/07](07-desktop-backends.md) close ADR-0006 with
-measurements — unattended access is the hard gate; cursor metadata and
-desktop-audio capture are measured per backend for M3. In parallel, the
-terminal capability — the deliberately media-free second consumer of the
-extension API (two unrelated capabilities = minimum bar for "generic").
+measurements — unattended access is the hard gate; cursor metadata,
+desktop-audio capture and monitor hot-plug events are measured per
+backend for M3. The winning backends are built as the runtime modules of
+[ADR-0021](adr/0021-desktop-backends-as-runtime-modules.md) (the module
+loader lands here). In parallel, the terminal capability — the
+deliberately media-free second consumer of the extension API (two
+unrelated capabilities = minimum bar for "generic") and the first user of
+the bulk byte channel.
 **Gate:** ADR-0006 accepted with data; terminal accepted per
 [docs/06](06-capabilities.md); no extension-API changes needed for it (or
-the API amended + re-reviewed).
+the API amended + re-reviewed); a desktop backend loads as a module from
+a separate package on the dev stack.
+
+## M2.5 — Packaging & install
+
+Everything a robot needs to *receive* the product, so M3 can ship
+features into it rather than build the delivery: the apt repository and
+signing, the `fjarr-agent` package with its systemd unit
+(ADR-0019 addendum), `fjarr-desktop-x11` / `fjarr-desktop-wayland` /
+`fjarr-inputd` / `fjarr-tools`, the container image split (base +
+per-vendor layers), the install script, `fjarr-agent setup` / `--check`
+/ `drivers`, and the driver catalog format with the built-in entries
+(`test`, `v4l2`, `rtsp`, desktop backends) — [docs/26](26-robot-install-and-drivers.md).
+Vendor camera packages themselves are M3 (chosen by the design partner's
+hardware). Also here: the [browser lab](25-browser-lab.md) profiling
+scenarios and docs/16 web budgets promoted to CI gates, and release
+process + docs versioning (open question #14).
+**Gate:** a fresh Ubuntu 26.04 machine goes from `curl … | sh` to a test
+pattern in the dashboard with no hand-written config; `apt install
+fjarr-desktop-wayland` adds remote desktop to it; the package set builds
+for amd64 and arm64 in CI.
 
 ## M3 — See, control and hear the robot
 
@@ -93,14 +125,14 @@ with the **portal-vs-route spike** that fixes the default per browser
 **Plus `fjarr.audio`** (robot microphone downlink, push-to-talk uplink via
 the pre-allocated transceiver, audited) and **desktop audio** on
 `fjarr.desktop`.
-**Plus packaging** per [docs/26](26-robot-install-and-drivers.md): the apt
-repository, `fjarr-agent setup` / `drivers`, the driver catalog, the
-desktop backend packages (ADR-0021) and the first vendor camera packages
-(ADR-0020) chosen by the design partner's hardware.
+**Plus** the first vendor camera packages ([ADR-0020](adr/0020-vendor-sources-as-gstreamer-plugins.md))
+chosen by the design partner's hardware, delivered through the M2.5
+repository and catalog.
 **Gate:** capability acceptance criteria ([docs/06](06-capabilities.md))
 for desktop and audio; input-to-photon within budgets; the design partner
-installs from the repository with `setup` and no hand-written config; the
-first **design-partner demo** (docs/03 GTM).
+installs from the repository with `setup`, adds their camera with
+`drivers install`, and no config is hand-written; the first
+**design-partner demo** (docs/03 GTM).
 
 ## M4 — Files, telemetry, logs, sensors
 
