@@ -74,9 +74,12 @@ capture ─ encode ─ appsink ──► FrameHub ──► per-session pipeline
   carry a per-session **generation counter** so late callbacks from a torn
   down session are no-ops.
 
-Whether `webrtcbin`+FrameHub stays hand-rolled or is replaced by
-`webrtcsink` (which ships congestion control and fan-out natively) is decided
-by measurement in M1 — [ADR-0007](adr/0007-webrtcbin-vs-webrtcsink.md).
+The cost model (what is shared, what is per viewer, the zero-copy
+guarantee, why a hub rather than a `tee` in one pipeline) is in
+[docs/23](23-agent-core-architecture.md#fan-out). Whether
+`webrtcbin`+FrameHub stays hand-rolled or is replaced by `webrtcsink`
+(which ships congestion control and fan-out natively) is decided by
+measurement in M1 — [ADR-0007](adr/0007-webrtcbin-vs-webrtcsink.md).
 
 ## Session lifecycle
 

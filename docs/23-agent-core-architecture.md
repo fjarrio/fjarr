@@ -389,6 +389,81 @@ than growing latency. `bandwidth-stats` (docs/06) is sampled every second
 from `get-stats` (`outbound-rtp` bytes/packets per `ssrc` → `track_id`) on
 the core loop and sent as an event on control.
 
+### Fan-out: what is shared, what is per consumer {#fan-out}
+
+The whole point of the media plane is that adding an operator costs
+almost nothing. The cost model, stage by stage, for one source output
+with `V` viewers across `T` demanded tiers:
+
+| Stage | Count | Cost driver | Shared? |
+|---|---|---|---|
+| Capture / source bin | 1 per output | device, format conversion | yes — one device handle, one capture thread |
+| `tee` after the source | 1 | none (buffer refs) | yes |
+| Scale + encode | **1 per demanded tier** (`T ≤ 2`) | the dominant cost: VA-API encode, or software if the adapter falls back | yes — the encoder never knows how many viewers exist |
+| FrameHub ring | 1 per `(output, tier)` | ~1 GOP of encoded samples (≈ 0.5–2 MB at active tier) | yes |
+| Delivery to a subscriber | `V` | one `gst_buffer_ref` + a shallow metadata-only copy for PTS rebase; **no pixel copy, ever** | per consumer, ≈ µs |
+| `appsrc ! queue ! valve ! payloader` | `V` | RTP packetization of an already-encoded stream (fraction of a percent per viewer) | per consumer |
+| `webrtcbin` (SRTP encryption, RTCP, ICE, DTLS, SCTP) | `V` | AES per packet — the real per-viewer cost, unavoidable since every peer has its own DTLS-SRTP keys | per consumer |
+| Keyframe on join / enable | shared, rate-limited (≥ 1 s) | a keyframe is a bitrate spike for *every* viewer of that tier; ten joins in a second cost one | yes |
+
+Guarantees the implementation must keep (each with a loop test):
+
+- **Zero-copy fan-out.** Encoded samples are shared by reference from the
+  producer's `appsink` through the ring to every `appsrc`; the only
+  per-consumer allocation is the `GstBuffer` metadata copy that carries
+  the rebased timestamps (`gst_buffer_copy_region` with
+  `GST_BUFFER_COPY_METADATA`, memory shared). The docs/16 "0 allocations
+  per frame" budget is checked with heaptrack; a `memcpy` of pixel data
+  anywhere after the encoder is a bug.
+- **One encoder per demanded tier, none when idle.** A tier's producer
+  exists only while at least one session demands it (`select-tracks`),
+  with a 10 s grace so an operator toggling a tile does not restart the
+  encoder. The hardware encoder count is bounded by `outputs × tiers`,
+  which is what docs/16's iGPU budget is written against; the encoder
+  adapter reports its instance limit and the core refuses a tier (with a
+  logged reason and the track marked `unavailable` in the manifest)
+  rather than silently falling back to software.
+- **A slow or dead consumer never touches the others.** Each consumer has
+  its own bounded `queue(leaky=downstream)` and its own `appsrc` in
+  non-blocking mode; the hub's delivery loop never waits on a consumer.
+  A consumer that falls a GOP behind is resynced at the next keyframe.
+- **Consumer churn never touches capture or encode.** Subscribe and
+  unsubscribe are list operations under the hub mutex; the producer
+  pipeline's state does not change when sessions come and go.
+
+**Why a hub and not one `tee` in one pipeline.** The camera streamer
+tried both: its v2 linked every peer's branch into the single producer
+pipeline, so one peer's `webrtcbin` error took the encoders down for
+everyone and a stalled peer back-pressured the capture. Its v1 hub with
+per-peer pipelines had none of those problems and the same per-viewer
+cost, because `tee` also only passes buffer references. The hub adds one
+lock and one ring per tier — a price worth paying for the fault isolation,
+the keyframe gate for late joiners, and the ability to feed
+**non-WebRTC subscribers** from the same ring: the snapshot request
+(`fjarr.camera/snapshot`, decoded from the retained keyframe or taken from
+the raw `tee` at full resolution), a future local recorder, and the
+analytics adapter, none of which need a peer connection.
+
+**What is deliberately not shared.** RTP packetization and SRTP could in
+principle be shared by teeing *RTP packets* into every `webrtcbin` with
+the same SSRC; the saving is a payloader per viewer (negligible) and it
+would cost per-peer PLI/NACK handling, per-peer valves and the ability to
+give different tiers to different viewers. Not worth it; revisit only if
+profiling shows payloading above 1 % per viewer.
+
+**Audio** fans out the same way: one Opus encoder per source, the ring
+holds encoded frames, each session gets its own `appsrc ! rtpopuspay`.
+
+**Measurement.** The loop test streams one 1080p30 source to `N` consumer
+branches ending in `fakesink` for `N ∈ {1, 2, 5, 10}` and records CPU per
+process, allocations per frame, and per-consumer delivery latency
+(hub push → `appsrc` push); `fjarr-opsim` repeats it with real
+`webrtcbin` answerers on the compose network. The docs/16 line "≤ 5 % CPU
+per additional viewer" is asserted on the opsim numbers (the loop numbers
+must be far below it, since they exclude SRTP), and the trend is plotted
+per commit so a regression in the hub shows up before a customer's
+ten-operator control room does.
+
 ### Media-plane recovery
 
 A bus `ERROR` on a consumer pipeline closes that session
