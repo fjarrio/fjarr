@@ -41,3 +41,4 @@ options weighed, the choice, and its consequences — so future maintainers
 | [0017](0017-libsoup-websocket.md) | libsoup-3 for agent networking | accepted |
 | [0018](0018-stream-channel-class.md) | Stream channel class (lossy binary frames) | accepted |
 | [0019](0019-agent-process-model.md) | Agent process model — one process, two restartable planes | accepted |
+| [0020](0020-vendor-sources-as-gstreamer-plugins.md) | Vendor camera support ships as separately packaged GStreamer plugins | accepted |

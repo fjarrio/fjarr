@@ -289,6 +289,14 @@ A customer provides a source in one of three ways, in increasing effort:
 | **2 — registered type** | a C++ `VideoSource` implementation registered under a type name (`agent.register_source_type("acme.stereo", factory)`), referenced from config as `source = { type = "acme.stereo", serial = "…" }` with params validated against the type's JSON Schema | SDK-backed devices without a GStreamer plugin (the bin wraps `appsrc` fed by the SDK — Intel RealSense through librealsense, a ZED through its SDK when depth post-processing must run on-device before encoding, industrial GigE cameras via their vendor SDK), multi-output devices (left/right/depth from one device), sources needing custom hot-plug or reconfiguration | one class |
 | **3 — capability** | a capability that creates tracks from its own device model (the way `fjarr.desktop` turns monitors from a `DesktopBackend` into tracks) | devices whose *control* surface is the point, not just video | a capability |
 
+**Vendor support is never a core dependency** ([ADR-0020](adr/0020-vendor-sources-as-gstreamer-plugins.md)):
+drivers Fjarr distributes are GStreamer plugins in separate, per-architecture
+packages (`fjarr-gst-<vendor>`) reached through tier 1; the core links no
+SDK, a customer installs only the packages for the hardware they own, and a
+configured track whose element is missing is `unavailable` with the reason
+(or a startup error if the track is `required = true`) while everything
+else runs. Tier 2 is for the embedding application's own code.
+
 Tier 1 and tier 2 sources are both consumed by the built-in `fjarr.camera`
 capability, whose config is a list of tracks referencing sources
 ([docs/06](06-capabilities.md#fjarrcamera--camera-video-m1-reference-implementation));

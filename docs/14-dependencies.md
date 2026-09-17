@@ -28,6 +28,7 @@ groups with comments.
 | nlohmann json-schema-validator | 2.3 | capability config validation against `config_schema` | MIT | yes |
 | libsystemd (`sd_notify`) | noble, optional | READY/WATCHDOG supervision (ADR-0019) | LGPL-2.1 (dynamic) | yes (optional) |
 | GoogleTest | 1.14 | C++ unit/loop tests | BSD-3 | dev-only |
+| Vendor camera SDKs (ZED, RealSense, Jetson multimedia, GigE vendors…) | per vendor | **never a `libfjarr` dependency** — each ships as its own GStreamer plugin package `fjarr-gst-<vendor>` per architecture ([ADR-0020](adr/0020-vendor-sources-as-gstreamer-plugins.md)) | per vendor (checked per package) | optional, separate packages |
 | **Forbidden**: `gstreamer1.0-plugins-ugly` (x264enc) | — | — | GPL | **never** (doctor-enforced) |
 
 ## Signaling (`fjarr-signaling` / `fjarr-server`) — ships as sidecar/Cloud

@@ -172,6 +172,9 @@ void Agent::register_source_type(SourceType type);   // before run()/start()
 `fjarr-agent --probe-source '<description | type spec>'` validates a source
 standalone (negotiated caps, memory type, measured fps, bus errors) so a
 new camera can be brought up on the robot without a server or a browser.
+Vendor drivers Fjarr distributes are GStreamer plugins in separate packages,
+never linked into the core ([ADR-0020](adr/0020-vendor-sources-as-gstreamer-plugins.md));
+`register_source_type` is for the embedding application's own sources.
 
 ### Adapter seams
 

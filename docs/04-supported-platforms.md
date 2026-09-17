@@ -37,6 +37,16 @@ Both X11 and Wayland are evaluated head-to-head before committing
 | Unattended after reboot | straightforward | portal permission model is the hard part |
 | Ubuntu 24.04 default | available | default session |
 
+## Robot — vendor camera packages
+
+The agent core is architecture-independent; vendor camera support is a
+separate GStreamer plugin package per vendor and per architecture
+([ADR-0020](adr/0020-vendor-sources-as-gstreamer-plugins.md)), so a robot
+installs only what its hardware needs. Availability is a property of the
+vendor's SDK (a Jetson-only SDK yields an arm64-only package); the doctor
+and `fjarr-agent --check` report each configured source's element as
+present or missing.
+
 ## Operator — browser
 
 | | Status | Notes |
