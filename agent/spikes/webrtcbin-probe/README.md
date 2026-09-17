@@ -1,12 +1,13 @@
-# Spike: webrtcbin 1.24 loopback probe
+# Spike: webrtcbin loopback probe (1.24, re-run on 1.28)
 
 Timeboxed technical spike answering six questions about GStreamer `webrtcbin`
-behaviour that the agent architecture (docs/09, docs/21) depends on. A single
-process runs two `webrtcbin` instances — **A = "agent" (offerer)** and
-**B = "browser" (answerer)** — and exchanges SDP/ICE through GLib main-loop
-idle callbacks (no network signaling). Every question is answered with
-PASS/FAIL/UNCLEAR plus the exact API used, and the raw evidence is in
-`results/`.
+behaviour that the agent architecture (docs/09, docs/21, docs/23) depends on.
+A single process runs two `webrtcbin` instances — **A = "agent" (offerer)**
+and **B = "browser" (answerer)** — and exchanges SDP/ICE through GLib
+main-loop idle callbacks (no network signaling). Every question is answered
+with PASS/FAIL/UNCLEAR plus the exact API used, and the raw evidence is in
+`results/` (1.24) and `results/gst-1.28/` (the slice-2.9 re-run, see
+[below](#re-run-on-gstreamer-128)).
 
 This directory is **not** referenced by the root build and is not a product
 of the spec workflow; it is throwaway evidence that feeds the architecture doc.
@@ -14,14 +15,14 @@ Nothing under `agent/src`, `docs/`, `signaling/` or `web/` was touched.
 
 ## Environment (dev container)
 
-| Component | Version |
-|---|---|
-| OS | Ubuntu 24.04 (dev container) |
-| GStreamer | 1.24.2 (`gstreamer1.0-plugins-bad` 1.24.2-1ubuntu4) |
-| libnice / gstreamer1.0-nice | 0.1.21-2build3 |
-| Compiler | g++ 13.3.0 (clang 18.1.3 also present), C++20 |
-| CMake / Ninja | 3.28.3 / 1.11.1 |
-| Encoder used | `vp8enc` (BSD) — `x264enc` is absent by design; `openh264enc` and `vah264enc` are also available |
+| Component | Original run (2026-09-17) | Re-run (2026-09-18, ADR-0022) |
+|---|---|---|
+| OS | Ubuntu 24.04 | Ubuntu 26.04 LTS |
+| GStreamer | 1.24.2 (`gstreamer1.0-plugins-bad` 1.24.2-1ubuntu4) | 1.28.2 |
+| libnice / gstreamer1.0-nice | 0.1.21-2build3 | 0.1.23-2 |
+| Compiler | g++ 13.3.0 (clang 18.1.3 also present), C++20 | g++ 15.2.0 (clang 21.1.8 also present), C++20 |
+| CMake / Ninja | 3.28.3 / 1.11.1 | 4.2.3 / 1.13.2 |
+| Encoder used | `vp8enc` (BSD) — `x264enc` is absent by design; `openh264enc` and `vah264enc` are also available | same |
 
 ## Build and run (from scratch)
 
@@ -35,9 +36,11 @@ docker compose exec -T dev bash -c '
   ./build/webrtcbin-probe --bundle=max-bundle --remove=inactive'
 ```
 
-Flags: `--bundle=none|balanced|max-bundle` (default `max-bundle`) and
+Flags: `--bundle=none|balanced|max-bundle` (default `max-bundle`),
 `--remove=inactive|sendonly|release-pad` (default `inactive`, selects how
-track 2 is "removed" in Q3). The program runs all questions sequentially,
+track 2 is "removed" in Q3) and `--reuse-pads` (sets `reuse-source-pads=TRUE`
+on both webrtcbins where the property exists, i.e. GStreamer ≥ 1.26; a
+no-op on 1.24). The program runs all questions sequentially,
 prints a `RESULT` line per check and a summary table, and exits 0 on
 completion (1 if a prerequisite such as the first connection fails, 3 on the
 120 s watchdog). Full outputs of the four configurations discussed below are
@@ -114,6 +117,51 @@ but do not necessarily affect the agent.
 * TURN: `g_object_set(webrtc, "turn-server", "turn://user:pass@host:port?transport=tcp", NULL)` (single server, read back verbatim) or `g_signal_emit_by_name(webrtc, "add-turn-server", "turns://user:pass@host:5349", &ok)` for several; `turn(s)://timestamp:username:password@host:port` for time-limited credentials (escape `:` and base64 as the property doc says). `stun-server` is `stun://host:port`. No STUN/TURN was configured for the loopback (host candidates only).
 * `on-negotiation-needed` also fires once on B when it goes to PLAYING with nothing to negotiate, and once on A when the first sink pad is linked — always gate it on your own state.
 
+## Re-run on GStreamer 1.28
+
+Slice 2.9 (ADR-0022) rebuilt the probe unchanged (plus the `--reuse-pads`
+flag) on the 26.04 image and ran five configurations; full outputs are in
+`results/gst-1.28/`. Everything that passed on 1.24 passes on 1.28 with the
+same numbers (renegotiation gap 34.3–34.8 ms, 2 MiB burst drained, stats
+types identical, `max-message-size` still 65 536). What changed, and what
+did not:
+
+| Configuration | Q3 removal | DC after removal (A→B / B→A) | Track 1 after valve | Kernel counters (1 s) | Q4 ICE restart |
+|---|---|---|---|---|---|
+| `--remove=inactive` (default props) | stall, as on 1.24 | **lost** / ok | **+0** | `InDatagrams=+0 RcvbufErrors=+48` | FAIL, ufrag unchanged |
+| `--remove=inactive --reuse-pads` | no stall | ok / ok | +45 | `InDatagrams=+69 RcvbufErrors=+0` | FAIL, ufrag unchanged |
+| `--remove=sendonly` | PASS | ok / ok | +45 | clean | FAIL, ufrag unchanged |
+| `--remove=sendonly --reuse-pads` | PASS | ok / ok | +45 | clean | FAIL, ufrag unchanged |
+| `--bundle=none --remove=inactive` | n/a | B `connection-state → failed` after 5 s, DC never opens (as on 1.24) | — | — | — |
+
+* **The `inactive` stall is the answerer's EOS, and it is still there on
+  1.28 by default.** `reuse-source-pads` (added in 1.26, default FALSE:
+  "If FALSE, webrtcbin will send EOS on source pads with inactive
+  transceivers") removes it completely: no receive-buffer errors, the data
+  channel works in both directions, the untouched track keeps flowing
+  before and after the valve. The property lives on the *answerer*; the
+  offerer needs nothing. A browser answerer has no EOS mechanic.
+* The probe still prints `Q3-remove FAIL` for the `--reuse-pads` run
+  because its stop criterion is "track 2 buffers stop at B": with
+  `reuse-source-pads` B keeps delivering the packets A keeps pushing (+57
+  in 1.5 s) until A's valve closes — after which `Q3-rmvalve` shows track 2
+  at +0 and track 1 at +45. Direction `inactive` in the SDP stops nothing
+  by itself on either side; **close the valve before re-offering.**
+* On 1.28 the offerer's transceiver reports `current-direction=sendonly`
+  once negotiated (1.24 reported `sendrecv`); the `mid` timing with
+  `max-bundle` is unchanged (NULL until the answer is applied). With
+  `bundle-policy=none` the `mid` appears after `set-local-description`, but
+  that policy still never connects the data channel.
+* ICE restart: unchanged, exactly as the source read predicted (the
+  options argument is unused through 1.28). `strings libgstwebrtc.so |
+  grep -i restart` still finds nothing.
+
+Decision taken from this (docs/23, ADR-0022): remove a track with the
+valve closed first and the transceiver set to `inactive`; every webrtcbin
+answerer Fjarr ships (`fjarr-opsim`, loop tests) sets
+`reuse-source-pads=TRUE` and needs GStreamer ≥ 1.26; the Chromium-answerer
+check happens in slice 3a.
+
 ## API sequences that worked (for the architecture doc)
 
 All signal handlers marshal to one `GMainLoop` (`g_idle_add_full`); promises are consumed with `gst_promise_new_with_change_func`, the reply is `gst_structure_copy`'d and the promise unref'd in the change func.
@@ -123,12 +171,12 @@ All signal handlers marshal to one `GMainLoop` (`g_idle_add_full`); promises are
 3. **Offer/answer**: A `set-local-description(offer)` → B `set-remote-description(offer)` → flush B's queued remote candidates → B `create-answer` → B `set-local-description(answer)` → A `set-remote-description(answer)` → flush A's queued candidates. `on-ice-candidate(mline, cand)` → peer `add-ice-candidate(mline, cand)`; candidates arriving before the remote description are queued.
 4. **Manifest**: read `a=mid` per m-section from the offer SDP; transceiver `mid` property only after `stable`. Map B's `src_%u` pads via the pad `transceiver` property.
 5. **Add a track**: request + link a new sink pad → `on-negotiation-needed` → repeat 2–3. Other tracks keep flowing (gap ≤ 36 ms).
-6. **Mute/remove a track**: `valve drop=true` on that branch; do not renegotiate. If the SDP must change, use `direction=sendonly`, never `inactive` on 1.24.
+6. **Mute a track**: `valve drop=true` on that branch; do not renegotiate. **Remove a track**: valve closed first, then `direction=inactive` and re-offer — a webrtcbin answerer must have `reuse-source-pads=TRUE` (≥ 1.26), see the [1.28 re-run](#re-run-on-gstreamer-128).
 7. **Bandwidth**: `get-stats` every second, diff `outbound-rtp.bytes-sent` per `ssrc`.
-8. **ICE restart**: not available; recreate the session.
+8. **ICE restart**: not available on any release through 1.28; recreate the session.
 
 ## Files
 
 * `main.cpp` — the probe (~800 lines: RAII wrappers, marshaling, negotiation helper, Q1–Q6 steps, diagnostics).
 * `CMakeLists.txt` — standalone build, `gstreamer-1.0 gstreamer-webrtc-1.0 gstreamer-sdp-1.0`, `GST_USE_UNSTABLE_API`.
-* `results/` — full stdout of the four configurations quoted above.
+* `results/` — full stdout of the four 1.24 configurations quoted above; `results/gst-1.28/` — the five slice-2.9 runs.

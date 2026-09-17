@@ -1,8 +1,8 @@
-# Fjarr development container — Ubuntu 24.04 (noble), GStreamer 1.24
+# Fjarr development container — Ubuntu 26.04 LTS, GStreamer 1.28 (ADR-0022)
 #
 # Package groups are commented with the spec that requires them.
 # See docs/12-development-environment.md and docs/14-dependencies.md.
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 ARG USER_NAME=dev
 ARG USER_UID=1000
@@ -20,8 +20,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     # --- C++ build (docs/09 agent tier) -----------------------------------
     build-essential cmake ninja-build ccache pkg-config gdb \
-    clang-18 clangd-18 clang-tidy-18 clang-format-18 \
-    # --- GStreamer 1.24 (ADR-0001, ADR-0002) ------------------------------
+    clang-21 clangd-21 clang-tidy-21 clang-format-21 \
+    # --- C++ tests + memory-safety ladder (docs/15, docs/23) --------------
+    libgtest-dev valgrind heaptrack \
+    # --- GStreamer 1.28 (ADR-0001, ADR-0022) ------------------------------
     # NOTE: gstreamer1.0-plugins-ugly (GPL: x264enc) is deliberately absent —
     #       ADR-0011 license policy. gstreamer1.0-nice is required for
     #       webrtcbin ICE (camera-streamer lesson, docs/11-prior-art.md).
@@ -38,8 +40,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpipewire-0.3-dev libei-dev libdbus-1-dev xdg-desktop-portal \
     # --- uinput input backend (docs/07, ADR-0009) -------------------------
     libevdev-dev libudev-dev \
-    # --- agent misc (docs/09) ---------------------------------------------
-    nlohmann-json3-dev \
+    # --- agent misc (docs/09, docs/23: TOML config, sd_notify) -------------
+    nlohmann-json3-dev libtomlplusplus-dev libsystemd-dev \
     # --- agent signaling client (ADR-0017) --------------------------------
     libsoup-3.0-dev glib-networking \
     # --- pipeline DOT graph debugging (camera-streamer lesson) ---------------------
@@ -61,7 +63,7 @@ RUN curl -fsSL -o /tmp/lychee.tar.gz \
     && rm -f /tmp/lychee.tar.gz || echo "WARN: lychee install skipped"
 
 # --- non-root user matching the host UID/GID ------------------------------
-# ubuntu:24.04 ships a default `ubuntu` user at UID 1000; replace it.
+# ubuntu:26.04 ships a default `ubuntu` user at UID 1000; replace it.
 RUN userdel -r ubuntu 2>/dev/null || true \
     && groupadd -g "${USER_GID}" "${USER_NAME}" 2>/dev/null || true \
     && useradd -m -s /bin/bash -u "${USER_UID}" -g "${USER_GID}" "${USER_NAME}" \

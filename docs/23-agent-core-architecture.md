@@ -197,7 +197,7 @@ flowing through it.
 | offered | DTLS connected **and** control DC open | connected | watchdog cleared; heartbeat liveness armed; `bandwidth-stats` sampler (1 s) started; `SessionEvent{started}` to the embedder |
 | connected | `<cap>/select-tracks` (docs/08#track-control, served by the core for every track-owning capability) | connected | valves + tier + keyframe request; `result{ok}`; unknown `track_id` → `payload-invalid`, nothing applied |
 | connected | capability `update_tracks` / hot-plug | connected (renegotiating) | coalesce into the renegotiation queue: one un-answered offer at a time, `manifest_version++`, unchanged tracks keep `mid` and keep flowing (docs/08#renegotiation) |
-| connected | `ice-restart` from the operator | closing → (operator reopens) | on GStreamer 1.24: `session-close{reason:"ice-restart", retry:true}` — the operator opens a new session at once; on a stack with ICE restart: a new offer with fresh ICE credentials, same manifest and `manifest_version`, queued like a renegotiation |
+| connected | `ice-restart` from the operator | closing → (operator reopens) | on every `webrtcbin` release to date (1.28 included): `session-close{reason:"ice-restart", retry:true}` — the operator opens a new session at once; on a stack with ICE restart: a new offer with fresh ICE credentials, same manifest and `manifest_version`, queued like a renegotiation |
 | connected | operator ping | connected | `pong{t0,t1,t2}`; liveness timer reset |
 | connected | no ping for 15 s (3 × 5 s) | closing | `session-close(reason="heartbeat")` |
 | connected | ICE/DTLS `failed` | closing | `session-close(reason="ice-failed")` — the operator's ladder decides what to do next; the agent never restarts ICE on its own initiative (it always offers, but only when asked) |
@@ -226,7 +226,8 @@ graph ([docs/24](24-pipeline-introspection.md)).
 The `PeerConnection` wrapper owns the only code that talks to `webrtcbin`.
 The rules it implements, with the element-level facts the
 [webrtcbin spike](../agent/spikes/webrtcbin-probe/README.md) established on
-GStreamer 1.24.2 (its README has the exact API sequences):
+GStreamer 1.24.2 and re-verified on 1.28.2 in slice 2.9 (its README has the
+exact API sequences):
 
 - **`bundle-policy=max-bundle`, always.** With the default policy the
   DataChannel transport never connects (spike Q6). One transport carries
@@ -252,15 +253,21 @@ GStreamer 1.24.2 (its README has the exact API sequences):
   *Additions* request a new `sink_%u` pad, wait for its caps and re-offer;
   the existing m-sections keep their `mid` and media on them continues
   (spike Q3: 34–36 ms max gap on the untouched track, within the docs/16
-  budget). *Removals*: on the 1.28 baseline ([ADR-0022](adr/0022-baseline-ubuntu-2604-gstreamer-128.md))
-  a removed track's transceiver goes `inactive` and is re-offered, the
-  JSEP way — the 1.24 stall was the answerer sending EOS down its source
-  pad (fixed by 1.26's `reuse-source-pads`, which `fjarr-opsim` sets;
-  browsers never had it). Until the slice-2.9 re-run confirms it against
-  both answerers, and for embedders on 1.24, the fallback stays specified:
-  mute (`valve drop=TRUE`, direction `sendonly`), drop from the manifest,
-  and keep the transceiver in a pool for the next addition of the same
-  kind. Either way re-plugging a monitor reuses the m-section.
+  budget). *Removals* (settled in slice 2.9, [ADR-0022](adr/0022-baseline-ubuntu-2604-gstreamer-128.md)):
+  close the track's valve **first**, then set its transceiver to
+  `inactive` and re-offer, the JSEP way; the track leaves the manifest and
+  the transceiver stays in a pool, so the next addition of the same kind
+  (re-plugging a monitor) reuses the m-section by flipping it back to
+  `sendonly`. The valve-first order matters: an offerer keeps pushing RTP
+  on an `inactive` m-section until its valve closes ([re-run](../agent/spikes/webrtcbin-probe/README.md#re-run-on-gstreamer-128)).
+  The 1.24 stall was the *answerer* sending EOS down its source pad, and it
+  reproduces on a 1.28 answerer with default properties; with
+  `reuse-source-pads=TRUE` it is gone (no `RcvbufErrors`, data channel both
+  ways, the other track untouched). Every webrtcbin answerer Fjarr ships
+  (`fjarr-opsim`, the loop tests) therefore sets that property and needs
+  GStreamer ≥ 1.26; browsers never had the mechanic (Chromium check in
+  slice 3a). The offerer side needs nothing version-specific, so an
+  embedder on 1.24 gets the same removal path.
   The queue holds at most one un-answered offer; changes arriving in flight
   fold into the next offer; `manifest_version` increments per offer *sent*.
 - **ICE restart: not on any GStreamer.** `webrtcbin` ignores the offer
@@ -544,7 +551,7 @@ created and implements docs/08#datachannel-topology:
     (HIGH 4 MiB / LOW 1 MiB); above HIGH it returns `false` and sends
     nothing, so the capability pumps on `on_drain` — unbounded sends are a
     spec violation, so the sender refuses them. Frames larger than the
-    negotiated SCTP `max-message-size` (65 536 on webrtcbin 1.24) are
+    negotiated SCTP `max-message-size` (65 536 on webrtcbin 1.24 and 1.28) are
     rejected with `payload-invalid`; chunking is the capability's job
     (docs/08 file frames are ≤ 256 KiB *and* ≤ the SCTP limit).
   - DataChannel parameters come only from the class table:

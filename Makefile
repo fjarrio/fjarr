@@ -99,7 +99,7 @@ docs-links: ## Internal link check (offline: files + anchors)
 # -------------------------------------------------------------- hygiene ---
 .PHONY: fmt
 fmt: ## Format everything
-	find agent demos/demo-robot -name '*.[ch]pp' 2>/dev/null | xargs -r clang-format-18 -i
+	find agent demos/demo-robot -name '*.[ch]pp' 2>/dev/null | xargs -r clang-format-21 -i
 	cd signaling && cargo fmt
 	pnpm -r format 2>/dev/null || true
 

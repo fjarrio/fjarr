@@ -13,15 +13,18 @@ requirement (docs/16). `webrtcsink` (gst-plugins-rs) natively ships GCC
 congestion control, encoder management, and multi-consumer fan-out — i.e.
 much of what the camera streamer hand-built — at the cost of less control over the exact
 session/track model docs/08 specifies, and it is not packaged in Ubuntu
-24.04 (we'd build/vendor it).
+24.04 or 26.04 (re-checked in slice 2.9; we'd build/vendor it).
 
 **Spike finding (2026-09-17, [agent/spikes/webrtcbin-probe](../../agent/spikes/webrtcbin-probe/README.md)):**
 `webrtcbin` 1.24.2 ignores the `ice-restart` offer option and wedges the
 answerer on `direction=inactive`; `max-bundle` is required for
 DataChannels. The protocol gained a `session-close{retry:true}` fallback
 so rung 2 of the reconnection ladder works without in-place ICE restart.
-Whether `webrtcsink` (newer gst-plugins-rs) restarts ICE is a question for
-the spike this ADR waits on.
+Re-run on 1.28.2 (2026-09-18, slice 2.9): ICE restart still absent and
+`bundle-policy=none` still fails; the `inactive` stall is the answerer's
+EOS and is gone once the answerer sets `reuse-source-pads`. Whether
+`webrtcsink` (newer gst-plugins-rs) restarts ICE is a question for the
+spike this ADR waits on.
 
 ## Options considered
 

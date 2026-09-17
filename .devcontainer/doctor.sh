@@ -12,7 +12,7 @@ fail() { printf " \033[31mFAIL\033[0m  %s\n" "$1"; FAILS=$((FAILS+1)); }
 echo "== Fjarr doctor =="
 
 # --- toolchains -----------------------------------------------------------
-for tool in cmake ninja gcc clangd-18 clang-format-18 cargo node pnpm gst-launch-1.0 dot; do
+for tool in cmake ninja gcc clangd-21 clang-format-21 cargo node pnpm gst-launch-1.0 dot; do
   if command -v "$tool" >/dev/null 2>&1; then
     pass "$tool ($($tool --version 2>/dev/null | head -1 | cut -c1-60))"
   else

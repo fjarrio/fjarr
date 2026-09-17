@@ -69,7 +69,7 @@ The operator's ladder, cheapest rung first:
    (the WSS is independent of the media path). An agent whose stack
    supports ICE restart re-offers with new ICE credentials and the same
    manifest; tracks and consumers stay attached. An agent that cannot
-   (GStreamer 1.24's `webrtcbin` ignores the restart option — the
+   (`webrtcbin` ignores the restart option through 1.28 — the
    [spike](../agent/spikes/webrtcbin-probe/README.md)) MUST answer
    `session-close{reason:"ice-restart", retry:true}` at once, so the
    operator climbs to rung 3 without waiting out the re-offer timeout

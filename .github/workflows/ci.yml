@@ -66,17 +66,21 @@ jobs:
       - run: cargo test --workspace
 
   cpp:
-    name: Agent + demo-robot build
+    name: Agent + demo-robot build (Ubuntu 26.04 / GStreamer 1.28)
     runs-on: ubuntu-24.04
+    # The baseline (ADR-0022) is newer than the hosted runner: build inside
+    # the baseline image so the toolchain matches the dev container.
+    container: ubuntu:26.04
     steps:
       - uses: actions/checkout@v4
       - name: install build deps (mirror of .devcontainer/Dockerfile groups)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build ccache pkg-config \
-            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-            libgstreamer-plugins-bad1.0-dev nlohmann-json3-dev
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git ca-certificates build-essential cmake ninja-build ccache pkg-config \
+            clang-21 libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            libgstreamer-plugins-bad1.0-dev nlohmann-json3-dev libtomlplusplus-dev \
+            libsoup-3.0-dev libsystemd-dev libgtest-dev
       - uses: hendrikmuhs/ccache-action@v1
         with:
           key: cpp-${{ runner.os }}

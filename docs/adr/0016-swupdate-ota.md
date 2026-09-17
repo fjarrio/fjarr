@@ -33,7 +33,7 @@ should adopt, not invent.
 Design `fjarr.ota` around SWUpdate: Fjarr transports/orchestrates
 (campaigns, accept→feedback→result, delta streaming over `fjarr.files`
 backend mode), SWUpdate applies (A/B, signatures, rollback), with a
-reference Ubuntu 24.04 partition layout + image recipe shipped in docs.
+reference Ubuntu 26.04 partition layout + image recipe shipped in docs.
 Final confirmation with a fresh SWUpdate-vs-RAUC review at M8 start (open
 question #6).
 

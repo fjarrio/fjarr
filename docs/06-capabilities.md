@@ -196,7 +196,7 @@ documented anti-pattern this replaces (no A/B, no rollback, abort-unsafe).
   the fleet-daemon requirement done safely: refusable, timeout-bounded, logged).
 - Campaigns (Cloud/paid): staged rollout by fleet segment, failure-rate
   auto-halt, per-device accept→feedback→result reporting.
-- **Opinionated out-of-the-box**: a reference Ubuntu 24.04 partition layout +
+- **Opinionated out-of-the-box**: a reference Ubuntu 26.04 partition layout +
   image-build recipe ships with the docs; deviate only via documented hooks.
 
 **Accepted when:** a demo fleet updates via delta with one device

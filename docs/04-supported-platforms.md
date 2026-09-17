@@ -11,7 +11,7 @@ one. Targets outside the primary column are adapters, not core concerns.
 | | Status | Notes |
 |---|---|---|
 | **Ubuntu 26.04 LTS x86-64 / arm64** | **Primary** ([ADR-0022](adr/0022-baseline-ubuntu-2604-gstreamer-128.md)) | GStreamer 1.28, libnice 0.1.23, libsoup 3.6, PipeWire, libei — everything the specs need from distro packages; systemd required for the packaged agent (ADR-0019) |
-| Ubuntu 24.04 LTS | Embedders only, at their own risk | GStreamer 1.24: no `reuse-source-pads`, the documented `sendonly` track-removal fallback applies; not supported by the packaged agent |
+| Ubuntu 24.04 LTS | Embedders only, at their own risk | GStreamer 1.24 works as the offerer against browsers; a `webrtcbin` answerer (`fjarr-opsim`, loop tests) needs ≥ 1.26 for `reuse-source-pads` ([docs/23](23-agent-core-architecture.md#offer-construction-and-renegotiation)); not supported by the packaged agent |
 | Ubuntu 22.04 | Not targeted | GStreamer 1.20 lacks `vah264enc`, unusable libei; upgrade the robot instead |
 | Debian 13 / other distros | Untested, likely works | Same component versions; no CI |
 | NVIDIA Jetson (Ubuntu-based) | Planned adapter | camera-streamer heritage: `nvv4l2h264enc` encoder adapter; post-M6, [open question](18-open-questions.md) |

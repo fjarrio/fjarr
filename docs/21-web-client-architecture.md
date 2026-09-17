@@ -115,7 +115,7 @@ reconnecting → (connected | failed) → closed`. Transitions:
 | reconnecting | attempts exhausted | failed | consumers see `failed` and an `error` event (`reconnect-exhausted`); `retry()` available |
 | reconnecting | `retry()` | connecting round now | skips the remaining backoff (a host "reconnect now" button) |
 | any | `peer-gone` / `session-close` from server | closed (reason) | release tracks, keep subscriptions registered for a possible `open()` again |
-| connected / reconnecting | `session-close{retry:true}` (agent media restart, ICE-restart fallback on GStreamer 1.24) | reconnecting | a counted round, started at once — the agent asked for a fresh session |
+| connected / reconnecting | `session-close{retry:true}` (agent media restart — the ICE-restart fallback, since no `webrtcbin` release restarts ICE in place) | reconnecting | a counted round, started at once — the agent asked for a fresh session |
 | any | `error(grant-expired)` | reconnecting | refetch grant via provider, then retry immediately — the first refresh per attempt is free (no backoff, not counted); a second consecutive `grant-expired` is an ordinary backed-off round, so a host minting rejected tokens can never hot-loop; never a generic failure |
 | any | `error(session-unknown)` | closed (reason) | the server no longer knows our session (a message crossed `peer-gone` on the wire): an orderly close, not a failure |
 

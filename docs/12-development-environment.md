@@ -25,7 +25,7 @@ Or without VS Code: `docker compose up -d dev robot-sim`, then
 
 | Service | Profile | Purpose |
 |---|---|---|
-| `dev` | default | the toolbox: C++/GStreamer 1.24 + Rust + Node 22 (see the Dockerfile's commented package groups) |
+| `dev` | default | the toolbox: Ubuntu 26.04 / C++ (clang 21) / GStreamer 1.28 + Rust + Node 22 (see the Dockerfile's commented package groups; [ADR-0022](adr/0022-baseline-ubuntu-2604-gstreamer-128.md)) |
 | `robot-sim` | default | Xvfb fake robot desktop at `:99` (openbox + moving apps); **watch it at <http://localhost:6080>** (noVNC) |
 | `fjarr-server` | `demo`, `stack` | the production sidecar image, built from `signaling/` only |
 | `demo-backend` | `demo` | the TS "customer backend" beside the sidecar |

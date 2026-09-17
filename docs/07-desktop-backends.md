@@ -4,7 +4,7 @@ description: The four-way X11/Wayland × XTest-libei/uinput evaluation that clos
 ---
 
 The remote desktop capability needs a **capture** path and an **injection**
-path on Ubuntu 24.04. We do not pre-commit: four combinations are spiked and
+path on Ubuntu 26.04. We do not pre-commit: four combinations are spiked and
 measured in M2, closing [ADR-0006](adr/0006-desktop-backend-selection.md)
 with data. All four hide behind the same `DesktopBackend` interface
 ([docs/09](09-interfaces.md)) so the choice is swappable per deployment.

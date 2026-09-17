@@ -7,7 +7,7 @@ title: "ADR 0006: Desktop backend selection"
 
 ## Context
 
-Remote desktop on Ubuntu 24.04 has two capture paths (X11 `ximagesrc`,
+Remote desktop on Ubuntu 26.04 has two capture paths (X11 `ximagesrc`,
 Wayland portals/PipeWire) and three injection paths (XTest, libei, uinput).
 Unattended access after reboot is the make-or-break industrial requirement,
 and the honest answer for Wayland portals is unknown until tested.

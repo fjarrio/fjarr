@@ -67,10 +67,25 @@ closed valve otherwise ([docs/23](../23-agent-core-architecture.md#offer-constru
 The GitHub-hosted runner stays whatever Ubuntu GitHub offers; the agent
 jobs run inside our dev image so the toolchain is the baseline regardless.
 
+## Outcome (2026-09-18, slice 2.9)
+
+Dev container, robot-sim and the CI `cpp` job run on `ubuntu:26.04`. The
+doctor reports 0 failures on GStreamer 1.28.2 (`vah264enc` through iHD
+26.1, `openh264enc`, `pipewiresrc`, libei 1.5.0, libnice 0.1.23, libsoup
+3.6.6, clang 21.1.8) and every gate is green on the new image. The
+[spike re-run](../../agent/spikes/webrtcbin-probe/README.md#re-run-on-gstreamer-128)
+on 1.28.2: ICE restart is still absent (Q4 unchanged); `inactive` against
+an answerer with default properties still stalls (`RcvbufErrors` +48/s,
+identical to 1.24), and is clean once the answerer sets
+`reuse-source-pads=TRUE`; `sendonly` passes as before; `bundle-policy=none`
+still never connects the data channel. **Track removal therefore uses
+`inactive`, valve closed first** ([docs/23](../23-agent-core-architecture.md#offer-construction-and-renegotiation)),
+and every `webrtcbin` answerer Fjarr ships sets `reuse-source-pads`.
+
 ## Consequences
 
 Customers on 24.04 robots are not supported by the packaged agent until
 they upgrade; embedders may build `libfjarr` against 1.24 at their own
-risk (the `inactive` path is then the documented `sendonly` fallback).
-Every version in docs/14 is re-checked in slice 2.9. ADR-0002 is
-superseded.
+risk (the offerer's removal path is version-independent; only a
+`webrtcbin` *answerer* needs ≥ 1.26). Every version in docs/14 was
+re-checked in slice 2.9. ADR-0002 is superseded.

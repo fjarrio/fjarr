@@ -4,6 +4,7 @@
 // summary table. Standalone spike — not part of libfjarr.
 
 #include <gst/gst.h>
+extern bool g_reuse_pads;
 #include <gst/sdp/sdp.h>
 #include <gst/webrtc/webrtc.h>
 
@@ -179,6 +180,10 @@ struct Peer {
     pipeline.reset(gst_pipeline_new(("pipe-" + name).c_str()));
     webrtc = gst_element_factory_make("webrtcbin", ("webrtc-" + name).c_str());
     g_object_set(webrtc, "bundle-policy", bp, nullptr);   // no stun-server: host candidates only
+    // 1.26+: keep source pads across renegotiation instead of sending EOS on
+    // an inactive transceiver (the 1.24 answerer stall — ADR-0022).
+    if (g_reuse_pads && g_object_class_find_property(G_OBJECT_GET_CLASS(webrtc), "reuse-source-pads"))
+      g_object_set(webrtc, "reuse-source-pads", TRUE, nullptr);
     gst_bin_add(GST_BIN(pipeline.get()), webrtc);
     g_signal_connect(webrtc, "on-negotiation-needed", G_CALLBACK(+[](GstElement*, gpointer d) {
         auto* p = static_cast<Peer*>(d); int n = ++p->negotiation_needed;
@@ -789,6 +794,8 @@ void build_steps(GstWebRTCBundlePolicy bp) {
 
 }  // namespace
 
+bool g_reuse_pads = false;
+
 int main(int argc, char** argv) {
   gst_init(&argc, &argv);
   GstWebRTCBundlePolicy bp = GST_WEBRTC_BUNDLE_POLICY_MAX_BUNDLE;
@@ -799,9 +806,10 @@ int main(int argc, char** argv) {
     else if (!std::strcmp(argv[i], "--remove=inactive")) remove_mode = RemoveMode::Inactive;
     else if (!std::strcmp(argv[i], "--remove=sendonly")) remove_mode = RemoveMode::SendOnly;
     else if (!std::strcmp(argv[i], "--remove=release-pad")) remove_mode = RemoveMode::ReleasePad;
-    else { std::fprintf(stderr, "usage: %s [--bundle=none|balanced|max-bundle] [--remove=inactive|sendonly|release-pad]\n", argv[0]); return 2; }
+    else if (!std::strcmp(argv[i], "--reuse-pads")) g_reuse_pads = true;
+    else { std::fprintf(stderr, "usage: %s [--bundle=none|balanced|max-bundle] [--remove=inactive|sendonly|release-pad] [--reuse-pads]\n", argv[0]); return 2; }
   }
-  logf("GStreamer %s, webrtcbin bundle-policy=%s", gst_version_string(), enum_nick(GST_TYPE_WEBRTC_BUNDLE_POLICY, bp).c_str());
+  logf("GStreamer %s, webrtcbin bundle-policy=%s reuse-source-pads=%s", gst_version_string(), enum_nick(GST_TYPE_WEBRTC_BUNDLE_POLICY, bp).c_str(), g_reuse_pads ? "true" : "false");
   loop = g_main_loop_new(nullptr, FALSE);
   build_steps(bp);
   g_timeout_add(120000, [](gpointer) -> gboolean { record("WATCHDOG", "FAIL", "120 s global timeout"); finish(3); return G_SOURCE_REMOVE; }, nullptr);

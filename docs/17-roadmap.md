@@ -15,7 +15,7 @@ by revision (this document's history), never by renumbering.
 |---|---|---|
 | M0 Docs & environment | **done** 2026-09-15 | doctor 0 failures, 3 tiers + 3 demos build, site builds |
 | M0.5 Public foundations | **done** 2026-09-16 | CI green, fjarr.io + fjarr.dev live, registrations, prior-art anonymization policy |
-| M1 Core + extension API (camera video) | **in progress** | slices 0–2 done and reviewed; slice 2.9 (baseline bump, [ADR-0022](adr/0022-baseline-ubuntu-2604-gstreamer-128.md)), 3a/3b/3c, 4–7 pending |
+| M1 Core + extension API (camera video) | **in progress** | slices 0–2 done and reviewed, 2.9 (baseline bump, [ADR-0022](adr/0022-baseline-ubuntu-2604-gstreamer-128.md)) done 2026-09-18; 3a/3b/3c, 4–7 pending |
 | M2 – M8 | planned | revised 2026-09-17 after the slice-3 planning ([docs/23](23-agent-core-architecture.md)–[26](26-robot-install-and-drivers.md), ADR-0019–0022, the [webrtcbin spike](../agent/spikes/webrtcbin-probe/README.md), the [planning review](reviews/slice-3-planning-review.md)): new **M2.5 packaging** milestone; M3 lightened |
 
 ## M0 — Documentation & environment *(done)*
@@ -50,10 +50,10 @@ adaptive bitrate. Extension API paper-validated — **done**:
 **Slices** (each lands on `main`, reviewed retrospectively — docs/20):
 0 protocol + review ✔ · 1 Rust signaling ✔ · 2 web core + React ✔
 ([review](reviews/slice-2-review.md)) ·
-**2.9 baseline bump** — dev container, CI and images to Ubuntu 26.04 /
+**2.9 baseline bump ✔** — dev container, CI and images on Ubuntu 26.04 /
 GStreamer 1.28 ([ADR-0022](adr/0022-baseline-ubuntu-2604-gstreamer-128.md)),
-doctor re-verified, the webrtcbin spike re-run on 1.28 (`inactive` with
-`reuse-source-pads`) ·
+doctor re-verified, the webrtcbin spike re-run on 1.28 (track removal
+settled on `inactive`; answerers set `reuse-source-pads`) ·
 3 in three increments ([docs/23](23-agent-core-architecture.md#slices-3a-3b-3c-and-their-gates)):
 **3a** the [browser lab](25-browser-lab.md) (web only, may run in parallel
 with 2.9; includes the Chromium-answerer spike) · **3b** the agent core

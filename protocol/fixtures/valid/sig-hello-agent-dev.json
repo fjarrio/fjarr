@@ -11,7 +11,7 @@
   },
   "agent_info": {
     "fjarr": "0.1.0",
-    "os": "ubuntu-24.04",
+    "os": "ubuntu-26.04",
     "arch": "amd64",
     "capabilities": [
       "fjarr.test"

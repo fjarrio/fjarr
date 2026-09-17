@@ -1,7 +1,7 @@
 # Fjarr robot-sim: a reproducible fake robot desktop for the agent to capture.
 # Xvfb virtual X server + openbox + a few moving apps, viewable in a browser
 # via x11vnc + noVNC on :6080. See docs/12-development-environment.md.
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \

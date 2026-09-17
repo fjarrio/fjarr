@@ -16,7 +16,7 @@ loop avoids an entire class of thread-marshaling seams.
 
 - **libsoup-3** — GNOME's HTTP/WS client. GLib-native: async results are
   delivered on the same `GMainContext` as GStreamer callbacks; LGPL-2.1
-  dynamically linked (ADR-0011-clean); packaged in Ubuntu 24.04; the pairing
+  dynamically linked (ADR-0011-clean); packaged in Ubuntu 24.04 and 26.04 (3.6.6); the pairing
   used throughout upstream webrtcbin examples.
 - libwebsockets — small MIT C library, embedded pedigree, but brings its own
   event loop that must be glued to GLib, plus manual HTTP plumbing.
