@@ -16,6 +16,16 @@ import { installVitals } from "./vitals.ts";
 
 const vitals = installVitals();
 
+// Test scaffolding: remember the page's peer connections so diagnostics can read raw getStats().
+const peerConnections: RTCPeerConnection[] = [];
+const OriginalPC = window.RTCPeerConnection;
+window.RTCPeerConnection = class extends OriginalPC {
+  constructor(config?: RTCConfiguration) {
+    super(config);
+    peerConnections.push(this);
+  }
+} as typeof RTCPeerConnection;
+
 let agent: LoopbackAgent | null = null;
 let client: FjarrClient | null = null;
 let defaultRobot = "loopback-01";
@@ -77,13 +87,16 @@ const lab: LabApi = {
     wireBuffer.length = 0;
     defaultRobot = s.robotId;
     const signaling = s.mode === "server" ? { serverUrl: s.serverUrl!, robotId: s.robotId, deviceToken: s.deviceToken! } : undefined;
-    agent = new LoopbackAgent({ tracks: s.tracks, uplink: s.uplink, bulkCaps: s.bulkCaps, signaling });
-    agent.iceRestartUnsupported = s.iceRestartUnsupported ?? false;
-    await agent.start();
+    if (s.mode === "client") agent = null;
+    else {
+      agent = new LoopbackAgent({ tracks: s.tracks, uplink: s.uplink, bulkCaps: s.bulkCaps, signaling });
+      agent.iceRestartUnsupported = s.iceRestartUnsupported ?? false;
+      await agent.start();
+    }
     client = createFjarrClient({
-      serverUrl: s.mode === "server" ? s.serverUrl! : "wss://loopback.invalid/ws",
+      serverUrl: s.mode === "in-page" ? "wss://loopback.invalid/ws" : s.serverUrl!,
       grant: async () => s.grant ?? "loopback-grant",
-      socketFactory: s.mode === "server" ? webSocketFactory : agent.socketFactory,
+      socketFactory: s.mode === "in-page" ? agent!.socketFactory : webSocketFactory,
       wireTap: true,
       sessionDefaults: { demandDebounceMs: 20, ...s.sessionDefaults },
     });
@@ -219,6 +232,29 @@ const lab: LabApi = {
     state: () => ({ talking: pttBinding?.talking ?? false, error: pttBinding?.error?.message ?? null, unavailable: pttBinding?.unavailable ?? false }),
   },
   vitals,
+  request: (cap, type, payload, robotId) => sessionOf(robotId).request(cap, type, payload).then((r) => JSON.parse(JSON.stringify(r)) as unknown),
+  publishRealtime: (cap, type, payload, robotId) => {
+    const p = sessionOf(robotId).publisher(cap, type, { maxHz: 100 });
+    p.publish(payload);
+    setTimeout(() => p.release(), 50);
+  },
+  requestIceRestart: (robotId) => sessionOf(robotId).restartIce(),
+  sampleInbound: async (mid, durationMs, everyMs = 250) => {
+    const pc = [...peerConnections].reverse().find((p) => p.connectionState !== "closed");
+    if (!pc) throw new Error("no peer connection");
+    const out: Array<{ t: number; packetsReceived: number; framesReceived: number; framesDecoded: number; framesDropped: number; packetsLost: number }> = [];
+    const t0 = Date.now();
+    while (Date.now() - t0 < durationMs) {
+      const report = await pc.getStats();
+      report.forEach((r) => {
+        const st = r as { type: string; kind?: string; mid?: string; packetsReceived?: number; framesReceived?: number; framesDecoded?: number; framesDropped?: number; packetsLost?: number };
+        if (st.type === "inbound-rtp" && st.kind === "video" && st.mid === mid)
+          out.push({ t: Date.now() - t0, packetsReceived: st.packetsReceived ?? 0, framesReceived: st.framesReceived ?? 0, framesDecoded: st.framesDecoded ?? 0, framesDropped: st.framesDropped ?? 0, packetsLost: st.packetsLost ?? 0 });
+      });
+      await new Promise((r) => setTimeout(r, everyMs));
+    }
+    return out;
+  },
 };
 
 window.__lab = lab;

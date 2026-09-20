@@ -48,8 +48,10 @@ in three renderings from the same walk:
   so diffs are meaningful.
 - **Addressing.** Elements are named by the core with a stable grammar
   used everywhere (DOT node ids, JSON `name`, test assertions):
-  `producer:<track_id>:<tier>/<role>` (roles: `source`, `tee`, `convert`,
-  `encoder`, `parser`, `sink`) and `session:<sid8>/<track_id>/<role>`
+  `producer:<track_id>/<role>` for the shared head of a producer (roles:
+  `source`, `convert`, `rawcaps`, `tee`) and `producer:<track_id>:<tier>/<role>`
+  for each tier branch (roles: `queue`, `encode` — the encoder bin, whose
+  children are `encoder`, `parser`, `caps` — and `sink`), and `session:<sid8>/<track_id>/<role>`
   (roles: `appsrc`, `queue`, `valve`, `payloader`) plus
   `session:<sid8>/webrtc`, where `<sid8>` is the first 8 characters of the
   UUIDv7 `session_id` (the full id is in the snapshot metadata). A test
@@ -61,7 +63,7 @@ in three renderings from the same walk:
   control=open(0 B) realtime=open`. This is the form an AI agent (or a
   support engineer reading a ticket) wants first.
 
-Every snapshot carries: `pipeline_id` (`producer:<track>:<tier>`,
+Every snapshot carries: `pipeline_id` (`producer:<track>` — one pipeline per track, its tiers are branches —,
 `session:<session_id>`, or `agent` for the combined view), `session_id`
 and `robot_id` when applicable, `generation`, the triggering **milestone**
 or event (`state-changed`, `caps-fixed`, `offer-created`, `renegotiation`,
@@ -71,9 +73,10 @@ increasing `seq` per pipeline.
 **Triggers and rate.** A snapshot is taken on every session milestone
 (docs/23), on every producer/consumer state change, on `select-tracks`, on
 renegotiation, on producer restart and plane rebuild, and on demand.
-Snapshots are coalesced to at most one per pipeline per 250 ms, and the
-walk runs on the core loop (it reads element state without locking the
-streaming threads). Cost is bounded: a graph is a few KB; a busy robot with
+Snapshots are coalesced to at most one per pipeline per 250 ms —
+trailing-edge, so a burst of triggers yields one snapshot of the *final*
+state, never a stale one — and the walk runs on the core loop (it reads
+element state without locking the streaming threads). Cost is bounded: a graph is a few KB; a busy robot with
 three sessions produces well under 100 KB/s at peak and nothing when idle.
 
 **History (flight recorder).** The core keeps the last 64 snapshots per
@@ -187,10 +190,12 @@ for first, produced in one command.
 
 ## Slice mapping
 
-- **Slice 3b**: walker (DOT/JSON/summary), `dot_dir` files, the minimal
-  endpoint (`/pipelines`, `/pipelines/<id>.{json,txt,dot}`, `/sources`)
-  and `protocol/schemas/introspect.schema.json` under the conformance
-  gate — `fjarr-opsim` asserts on `/pipelines/*.json` from day one.
+- **Slice 3b** ✔ (2026-09-20): walker (DOT/JSON/summary), `dot_dir`
+  files, the endpoint with `/pipelines`, `/pipelines/<id>.{json,txt,dot}`
+  (`?seq=`), `/pipelines/<id>/history`, `/sources`, `POST /snapshot`, and
+  `introspect.schema.json` under the conformance gate — the lab validates
+  a live session snapshot against it and asserts `…/valve.drop` follows
+  `select-tracks` within a second.
 - **Slice 3c**: `/events`, the history ring and `?seq`, `/stats`,
   `/memory` + checkpoints, `/diagnostics.tar.gz`, `make introspect`,
   `fjarr-lab introspect`.

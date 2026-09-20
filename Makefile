@@ -60,6 +60,32 @@ agent-build: ## Build libfjarr + fjarr-agent + demo-robot
 agent-test: ## Run C++ tests
 	ctest --preset $(BUILD_PRESET) --output-on-failure
 
+.PHONY: agent-test-asan
+agent-test-asan: ## Unit + loop tests under Address/Undefined/Leak sanitizers (a gate, docs/15)
+	cmake --preset asan && cmake --build --preset asan && ctest --preset asan --output-on-failure
+
+.PHONY: agent-test-tsan
+agent-test-tsan: ## Unit + loop tests under ThreadSanitizer (a trend until 3c; needs host vm.mmap_rnd_bits=28, docs/12)
+	@echo "TSan needs ASLR entropy <= 28 bits: on the host run 'sudo sysctl -w vm.mmap_rnd_bits=28' (Docker's seccomp blocks setarch -R in the container)"
+	cmake --preset tsan && cmake --build --preset tsan && ctest --preset tsan --output-on-failure
+
+.PHONY: agent-raii-gate
+agent-raii-gate: ## Refuse raw GObject/GLib refcount and source calls outside the RAII kit (docs/23 memory ladder)
+	@bad=$$(grep -rnE '\b(g_object_ref|gst_object_ref|g_object_unref|gst_object_unref|gst_sample_unref|gst_buffer_unref|gst_promise_unref|g_source_remove|g_signal_connect)\s*\(' agent/src agent/daemon demos/demo-robot --include='*.cpp' --include='*.hpp' | grep -v 'agent/src/core/glib/' | grep -v 'NOLINT' || true); \
+	if [ -n "$$bad" ]; then echo "raw refcount/source calls outside agent/src/core/glib/ (use the RAII kit):"; echo "$$bad"; exit 1; fi; echo "agent-raii-gate: clean"
+
+OPSIM_SERVER ?= ws://fjarr-server:8080/ws
+OPSIM_ROBOT ?= demo-robot-01
+OPSIM_SCENARIO ?= smoke
+.PHONY: opsim
+OPSIM_IN ?= demo-robot
+opsim: ## Run one fjarr-opsim scenario against the demo robot, from inside its container (OPSIM_SCENARIO=smoke|toggle|…)
+	docker compose exec -T $(OPSIM_IN) ./build/$(BUILD_PRESET)/agent/tools/fjarr-opsim --server $(OPSIM_SERVER) --robot $(OPSIM_ROBOT) --grant-secret $${FJARR_GRANT_HS256_SECRET:-dev-only-grant-secret} --scenario $(OPSIM_SCENARIO) --introspect http://127.0.0.1:7381 --timeout 90
+
+.PHONY: opsim-all
+opsim-all: ## Every CI opsim scenario (docs/23: all but soak and netem-*)
+	@for s in smoke toggle hotplug silent-operator no-answer socket-drop ice-restart deadman; do echo "== $$s"; $(MAKE) --no-print-directory opsim OPSIM_SCENARIO=$$s || exit 1; done
+
 # -------------------------------------------------------------- signaling --
 .PHONY: signaling-run
 signaling-run: ## Run fjarr-server from source
@@ -121,7 +147,7 @@ fmt: ## Format everything
 	pnpm -r format 2>/dev/null || true
 
 .PHONY: lint
-lint: signaling-clippy web-lint docs-lint ## All lints
+lint: signaling-clippy web-lint docs-lint agent-raii-gate ## All lints
 
 .PHONY: help
 help: ## List targets

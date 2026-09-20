@@ -50,7 +50,7 @@ jobs:
       - run: pnpm --filter fjarr-demo-backend typecheck
 
   e2e:
-    name: Browser lab (loopback + fjarr-server, real Chromium over CDP)
+    name: Browser lab + real agent (Chromium over CDP, fjarr-server, demo robot, opsim)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -62,10 +62,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter '@fjarr/core' --filter '@fjarr/react' build
       - run: pnpm --filter '@fjarr/e2e' typecheck
-      - name: start the lab browser and fjarr-server (docs/25 topology)
+      - name: start the lab browser, fjarr-server and the demo stack (docs/25 topology; the real agent on the software encoder)
         run: |
           cp .env.example .env
           docker compose --profile lab --profile stack up -d --build --wait browser fjarr-server
+          docker compose build dev
+          docker compose up -d dev
+          docker compose exec -T dev make agent-build
+          sudo mkdir -p /dev/dri   # the compose file maps /dev/dri (VA-API); an empty directory maps nothing and keeps the software path
+          FJARR_MEDIA_ENCODER=software docker compose --profile demo --profile stack up -d demo-backend demo-robot demo-dashboard
+          sleep 8 && docker compose logs --no-color demo-robot | tail -20
       - name: run the e2e suites (loopback + stack)
         env:
           # The runner serves the lab page; the browser container reaches it via host-gateway.
@@ -73,9 +79,12 @@ jobs:
           E2E_PAGE_ORIGIN: http://host.docker.internal:5174
           E2E_SERVER_WS: ws://fjarr-server:8080/ws
           E2E_SERVER_HTTP: http://localhost:8080
+          E2E_DASHBOARD_HTTP: http://localhost:5173
           CI: "true"
         # pnpm 10 forwards `--` literally: call playwright through `exec` to pass flags
         run: pnpm --filter '@fjarr/e2e' exec playwright test --project loopback --project stack
+      - name: fjarr-opsim scenarios against the demo robot (docs/23 gate 2)
+        run: docker compose exec -T dev make opsim-all
       - name: lab artifacts (summaries, captures, traces)
         if: always()
         uses: actions/upload-artifact@v4
@@ -88,7 +97,7 @@ jobs:
           if-no-files-found: ignore
       - name: stack logs on failure
         if: failure()
-        run: docker compose --profile lab --profile stack logs --no-color --tail 200 browser fjarr-server
+        run: docker compose --profile lab --profile stack --profile demo logs --no-color --tail 200 browser fjarr-server demo-robot demo-backend
 
   rust:
     name: Signaling (test + clippy + fmt)
@@ -118,16 +127,24 @@ jobs:
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            git ca-certificates build-essential cmake ninja-build ccache pkg-config \
+            git ca-certificates build-essential cmake ninja-build ccache pkg-config make \
             clang-21 libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-            libgstreamer-plugins-bad1.0-dev nlohmann-json3-dev libtomlplusplus-dev \
+            libgstreamer-plugins-bad1.0-dev gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
+            gstreamer1.0-nice nlohmann-json3-dev libtomlplusplus-dev \
             libsoup-3.0-dev libsystemd-dev libgtest-dev
       - uses: hendrikmuhs/ccache-action@v1
         with:
           key: cpp-${{ runner.os }}
       - run: cmake --preset release
       - run: cmake --build --preset release
-      - run: ctest --preset release
+      - run: ctest --preset release --output-on-failure
+      - name: RAII kit gate (docs/23 memory ladder)
+        run: make agent-raii-gate
+      - name: unit + loop tests under ASan/UBSan/LSan (a gate, docs/15)
+        run: |
+          cmake --preset asan
+          cmake --build --preset asan
+          ctest --preset asan --output-on-failure
       # ADR-0011 license policy is enforced structurally too:
       - name: assert no GPL plugin package in the dependency docs
         run: "! grep -i 'plugins-ugly' CMakeLists.txt agent/CMakeLists.txt"

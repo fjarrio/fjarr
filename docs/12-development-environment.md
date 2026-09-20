@@ -28,7 +28,7 @@ Or without VS Code: `docker compose up -d dev robot-sim`, then
 | `dev` | default | the toolbox: Ubuntu 26.04 / C++ (clang 21) / GStreamer 1.28 + Rust + Node 22 (see the Dockerfile's commented package groups; [ADR-0022](adr/0022-baseline-ubuntu-2604-gstreamer-128.md)) |
 | `robot-sim` | default | Xvfb fake robot desktop at `:99` (openbox + moving apps); **watch it at <http://localhost:6080>** (noVNC) |
 | `fjarr-server` | `demo`, `stack` | the production sidecar image, built from `signaling/` only |
-| `demo-backend` | `demo` | the TS "customer backend" beside the sidecar |
+| `demo-backend` | `demo` | the TS "customer backend" beside the sidecar — mints real HS256 grants with `FJARR_GRANT_HS256_SECRET` |
 | `demo-robot` | `demo` | the C++ "customer robot" capturing robot-sim |
 | `demo-dashboard` | `demo` | Vite dev server on <http://localhost:5173> |
 | `coturn` | `turn` | TURN relay in `use-auth-secret` mode (ephemeral creds only) |
@@ -120,6 +120,14 @@ netem, pause or restart stack containers from inside — set `DOCKER_GID`
 in `.env` to the group owning `/var/run/docker.sock`. Details and the
 environment variables: [docs/25](25-browser-lab.md#implementation-notes-slice-3a).
 
+## ThreadSanitizer in the container
+
+`make agent-test-tsan` fails with "incompatible memory layout … unable to
+disable ASLR" unless the host lowers ASLR entropy: `sudo sysctl -w
+vm.mmap_rnd_bits=28` (Docker's default seccomp profile blocks the
+`personality` call `setarch -R` would use inside the container). TSan is a
+trend in slice 3b, a gate from 3c (docs/15).
+
 ## Pipeline introspection
 
 With the demo profile up, `make introspect` opens the agent's live pipeline
@@ -132,6 +140,8 @@ e2e tests assert against.
 ## Make targets
 
 `doctor` · `agent-configure/build/test` · `agent-test-asan/tsan` ·
+`agent-raii-gate` · `opsim` / `opsim-all` (the docs/23 operator simulator
+against the demo robot) ·
 `agent-leaks` · `agent-memcheck` · `agent-heaptrack` (docs/15 memory
 safety) · `signaling-run/test/clippy` ·
 `web-dev/build/lint` · `sim-up` · `demo-up/down` · `stack-up` ·

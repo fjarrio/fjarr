@@ -203,8 +203,8 @@ flowing through it.
 | connected | ICE/DTLS `failed` | closing | `session-close(reason="ice-failed")` — the operator's ladder decides what to do next; the agent never restarts ICE on its own initiative (it always offers, but only when asked) |
 | any | `session-close` / `peer-gone` from the server | closing | — |
 | any | pipeline error on this session's consumer | closing | `session-close(reason="media-error")`; a media-plane rebuild is decided by the plane, not the session |
-| any | watchdog expiry in `building`/`offered` | closing | `session-close(reason="negotiation-timeout:<last milestone>")` — the milestone name is the diagnostic |
-| closing | — | closed | `Capability::release_all_input` on every capability whose manifest says `input_bearing` (unconditionally, before anything else), `session_detached(reason, detail)`, valves closed, consumer pipeline to NULL, `webrtcbin` disposed on the loop, FrameHub subscriptions dropped, `SessionEvent{ended}`; generation bumped |
+| any | watchdog expiry in `building`/`offered` | closing | `session-close(reason="negotiation-timeout:<last milestone>")` — the milestone name is the diagnostic. Only milestones that need the peer count (`offer-created`, `answer-received`, …): the local `local-description-set` / `ice-gathering-complete` neither re-arm the watchdog nor name the timeout, so an unanswered offer reads `negotiation-timeout:offer-created` |
+| closing | — | closed | `Capability::release_all_input` on every capability whose manifest says `input_bearing` (unconditionally, before anything else), `session_detached(reason, detail)`, `session-close` sent, valves closed, FrameHub subscriptions dropped; then, after a bounded flush window (150 ms, so what the release emitted on `fjarr:control` leaves before the transport does), consumer pipeline to NULL, `webrtcbin` disposed on the loop, `SessionEvent{ended}`; generation bumped. Inbound envelopes are dropped from `closing` on; `close_all` (shutdown, socket loss, plane rebuild) skips the window |
 
 The order in `closing` is a safety behaviour with a regression test
 (docs/15): a session that ends mid-keydown must inject the key-up before
@@ -583,7 +583,7 @@ struct TrackSpec {
 
 class SessionContext {
 public:
-  SessionId id() const;
+  const SessionId& id() const;
   const OperatorInfo& operator_info() const;
   const nlohmann::json& granted_params(std::string_view cap) const;
 
@@ -611,7 +611,7 @@ public:
   void run_async(std::function<void()> job, std::function<void()> done);
 
   // Safety helpers (docs/15): a deadman the capability arms per input stream.
-  DeadmanHandle arm_deadman(std::chrono::milliseconds budget, std::function<void()> on_expiry);
+  std::unique_ptr<DeadmanHandle> arm_deadman(std::chrono::milliseconds budget, std::function<void()> on_expiry);
 
   void close(std::string_view reason);   // capability-initiated session end
 };
@@ -932,7 +932,99 @@ lab's ladder scenarios run against the real agent with the agent's fault
 switches, the `session-close{retry:true}` rung included, and the frame
 stamp proves zero dropped frames on the untouched track during `hotplug`;
 (4) unit + loop tests green under ASan; the `release_all_input` and
-deadman regression tests exist; the headers match docs/09.
+deadman regression tests exist; the headers match docs/09. **Met
+2026-09-20** — `web/e2e/tests/stack/{agent,dashboard}.spec.ts` (first
+frame in the dashboard 1.3 s after connect; hot-plug with max stamp gap 1;
+deadman 497 ms; `session-close{retry:true}` on `ice-restart`; the
+introspection JSON validated against the schema), `make opsim-all`,
+`make agent-test-asan`, `agent/tests/test_session.cpp`.
+
+**Implementation notes (slice 3b)** — where the code settled something
+the text above left open, or learned from the lab:
+
+- *Caps for the offer come from the transceiver's `codec-preferences`*,
+  not from a data-driven pad probe: a disabled track pushes no buffers, so
+  the payloader's caps would never fix; the wrapper sets
+  `application/x-rtp, media=video, encoding-name=H264, payload=<pt>,
+  clock-rate=90000, packetization-mode=1` on each transceiver at pad
+  request time and the `caps-fixed` milestone is immediate. The pad probe
+  on the payloader still records the negotiated caps for introspection.
+- *Tier profiles*: `active` is the source size at ≤ 30 fps, `thumbnail`
+  is half the source capped at 960×540 at 5 fps (fjarr.test's 1280×720
+  source therefore gives the docs/06 640×360). GOP = `gop_seconds × fps`.
+- *Transport errors are not media errors*: a bus `ERROR` from the
+  SCTP/DTLS/ICE elements (the peer went away) closes the session with
+  `ice-failed`; only errors elsewhere in the consumer pipeline are
+  `media-error`. The lab found this when the client's heartbeat tore its
+  peer down and the agent blamed its own media plane.
+- *The SSRC is signalled from the first offer.* Without `ssrc` in the
+  transceiver's codec preferences, webrtcbin signals no `a=ssrc` for a
+  track that has not flowed yet and a fresh one once it has; Chromium then
+  recreates its receiver on the re-offer and loses a GOP on an *untouched*
+  track during hot-plug (found by the lab as a 30-frame stamp gap with
+  the browser's inbound counters resetting). The payloader's SSRC therefore
+  goes into the preferences with the payload type.
+- *PLI/FIR from the peer reach the producer.* webrtcbin turns them into
+  upstream force-key-unit events that would die at the consumer's
+  `appsrc`; a probe there relays them through the hub to the producer's
+  encoder (rate-limited and deferred by the media plane).
+- *"Zero dropped frames" is measured at the receiver's decoder*: across a
+  hot-plug the browser's `framesDropped` and `packetsLost` for the untouched
+  track stay at zero and `framesDecoded` keeps climbing, while the
+  frame-stamp counter (read per presented frame) may show a single
+  coalesced presentation when Chromium applies the new remote description —
+  a compositor skip, not a lost frame. The lab test asserts both.
+- *Snapshot coalescing is trailing-edge*: a trigger inside the 250 ms
+  window is deferred to the window's end, never dropped, so the served
+  snapshot is always the latest state within a quarter second.
+- *Input lease*: a session whose operator does not hold the lease is
+  accepted read-only — requests to input-bearing capabilities get
+  `capability-denied`, events are dropped and counted; the lease refreshes
+  on the owner's pings and fails open after 30 s (docs/10).
+- *Closing has a flush window.* `release_all_input` runs synchronously and
+  what it emits on `fjarr:control` (`deadman{expired}`) must reach the
+  operator; a NULL state change in the same loop turn discarded it. The
+  session therefore detaches, tells the operator (`session-close`) and
+  closes its valves at once, drops every inbound envelope from then on, and
+  tears the consumer pipeline down 150 ms later (`close_all` — shutdown,
+  socket loss, plane rebuild — skips the window). Track registrations on
+  the plane are counted, because a reconnecting operator registers the same
+  track id before the old session's deferred close unregisters it.
+- *The watchdog names only peer-facing milestones*: `local-description-set`
+  and `ice-gathering-complete` neither re-arm it nor name the timeout, so an
+  unanswered offer closes as `negotiation-timeout:offer-created`.
+- *A late joiner gets the ring, not just the keyframe*: the hub delivers the
+  whole current GOP (keyframe first, then its deltas, every one decodable in
+  order) to the new subscriber only, deduplicated by a per-hub sequence
+  number against frames still queued for fan-out; a ring that overflowed
+  past its keyframe is no catch-up and the joiner waits for the requested
+  one. The PTS base is set once per subscriber, so a resync keeps the RTP
+  timeline monotonic.
+- *A second tier starts downstream-first*: the branch is synced sink →
+  encoder → queue and only then linked to the tee; the other order let a
+  PLAYING queue push into a not-yet-READY encoder bin, take `FLUSHING` and
+  park the tee for good with no bus error (a regression test starts the
+  thumbnail tier on a running producer).
+- *A removed track's branch goes; the transceiver stays.* Parented elements
+  cannot be renamed, so a re-added track rebuilds `appsrc ! queue ! valve !
+  payloader` under its own name and relinks it to the pooled `sink_%u`.
+- *The input lease ends with the owner's last session* (docs/10): nobody
+  waits out the 30 s fail-open after a clean close. Promotion of an
+  already-open read-only session when the lease frees is not implemented:
+  it reconnects.
+- *Signals are loop callbacks*: `Agent::stop_on_signal(SIGTERM)` installs a
+  `g_unix_signal` source on the core context; shutdown never runs in
+  async-signal context and `Supervision::stop_deadline_ms` bounds it. On
+  shutdown the WebSocket close handshake is pumped (≤ 300 ms) so operators
+  see `session-close{agent-shutdown}` rather than `peer-gone`.
+- *Nothing inbound may throw through GLib*: the router, the signaling hooks
+  and the RAII kit's source trampolines catch `std::exception` (any granted
+  operator can send `{"tracks":[1]}`); inbound envelopes above 16 KiB are
+  dropped and counted, error messages echoing input are clamped.
+- *Deferred to 3c/M4*: the `stream` sender (ADR-0018), the backend bus,
+  `/memory`, the `leaks` tracer gate, TSan as a gate, `soak`/`netem-*`, a
+  producer bus-error → restart test under ASan, the duplicate
+  `deadman{expired}` a capability emits before the core's own expiry.
 
 **3c — introspection completeness and the memory ladder**: `/events`,
 the history ring and scrubbing, `/stats`, `/memory` with checkpoints, the

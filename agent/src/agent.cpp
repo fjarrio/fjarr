@@ -1,59 +1,345 @@
+// Agent — the public entry point wiring the core: loop, config, capability
+// registry, media plane, signaling client, session manager, introspection,
+// supervision.
+// spec: docs/09-interfaces.md#embedding · docs/23-agent-core-architecture.md#object-model
 #include <fjarr/agent.hpp>
 
-#include <chrono>
-#include <cstdio>
-#include <thread>
-#include <utility>
-#include <vector>
+#include <atomic>
+#include <csignal>
+
+#include <nlohmann/json-schema.hpp>
+
+#include <fjarr/errors.hpp>
+#include <fjarr/version.hpp>
+
+#include "core/log.hpp"
+#include "core/loop.hpp"
+#include "core/protocol.hpp"
+#include "core/session_manager.hpp"
+#include "core/signaling_client.hpp"
+#include "introspect/introspector.hpp"
+#include "introspect/server.hpp"
+#include "media/encoder.hpp"
+#include "media/media_plane.hpp"
 
 namespace fjarr {
 
-// M0 skeleton: holds registrations, logs, idles. The real core —
-// signaling client, session lifecycle, FrameHub, DC router, reconnect
-// ladder (docs/02-architecture.md) — is the M1 deliverable and is written
-// only against docs/05, docs/08, docs/09.
 struct Agent::Impl {
     AgentConfig config;
     std::vector<std::unique_ptr<Capability>> capabilities;
+    std::map<std::string, core::RegisteredCapability> registry;
+    std::vector<SourceType> source_types;
     std::function<void(const SessionEvent&)> session_callback;
-    bool running = false;
-};
+    bool shut_down = false;
+    std::vector<glib::SourceGuard> signal_sources;
+    Supervision supervision;
+    CoreLoop loop;
+    std::unique_ptr<media::MediaPlane> plane;
+    std::unique_ptr<core::SignalingClient> signaling;
+    std::unique_ptr<core::SessionManager> sessions;
+    std::unique_ptr<introspect::SnapshotStore> snapshots;
+    std::unique_ptr<introspect::Server> introspect_server;
+    glib::SourceGuard watchdog_timer;
+    glib::SourceGuard counters_timer;
+    glib::SourceGuard snapshot_timer;
+    std::atomic<int> exit_code{0};
+    bool started = false;
+    bool ready_notified = false;
 
-AgentConfig AgentConfig::from_file(const std::string& path) {
-    std::fprintf(stderr, "fjarr: AgentConfig::from_file(%s) — M1, not implemented\n",
-                 path.c_str());
-    return {};
-}
+    void emit(const SessionEvent& e) {
+        if (session_callback) session_callback(e);
+    }
+
+    /// Validate `[capabilities.X]` tables against schemas and configure (docs/23#configuration).
+    void configure_capabilities() {
+        for (const auto& [name, table] : config.capabilities) {
+            if (!registry.count(name)) throw FjarrError("config", "capabilities." + name + " names an unregistered capability");
+        }
+        for (auto& [name, rc] : registry) {
+            nlohmann::json table = nlohmann::json::object();
+            auto it = config.capabilities.find(name);
+            if (it != config.capabilities.end()) table = it->second;
+            rc.enabled = table.value("enabled", true);
+            nlohmann::json schema = rc.manifest.config_schema.is_object() ? rc.manifest.config_schema : nlohmann::json{{"type", "object"}};
+            try {
+                nlohmann::json_schema::json_validator validator;
+                validator.set_root_schema(schema);
+                validator.validate(table);
+            } catch (const std::exception& e) {
+                throw FjarrError("config", "capabilities." + name + ": " + e.what());
+            }
+            rc.capability->configure(table);
+        }
+    }
+
+    void take_snapshot(GstBin* bin, const std::string& trigger, const std::string& session_id) {
+        if (!snapshots) return;
+        introspect::SnapshotMeta meta;
+        meta.pipeline_id = glib::element_name(GST_ELEMENT(bin));
+        meta.kind = session_id.empty() ? "producer" : "session";
+        meta.session_id = session_id;
+        meta.robot_id = config.agent.robot_id;
+        meta.trigger = trigger;
+        if (!session_id.empty()) meta.pipeline_id = "session:" + session_id;
+        snapshots->take(bin, meta);
+    }
+
+    nlohmann::json sources_json() const {
+        nlohmann::json arr = nlohmann::json::array();
+        if (plane)
+            for (const auto& s : plane->source_status())
+                arr.push_back({{"track_id", s.track_id}, {"cap", s.cap}, {"identity", s.identity},
+                               {"status", s.available ? "available" : "missing"}, {"reason", s.reason}, {"caps", s.caps},
+                               {"tiers", s.tiers}, {"playing", s.playing}});
+        return nlohmann::json{{"encoder", plane ? plane->encoder().name : ""}, {"sources", arr}};
+    }
+
+    void boot() {
+        // Called on the core loop.
+        auto encoder = media::resolve_encoder(config.media.encoder);
+        plane = std::make_unique<media::MediaPlane>(loop, config.media, encoder);
+        for (auto& t : source_types) plane->sources().add(t);
+        snapshots = std::make_unique<introspect::SnapshotStore>(
+            static_cast<std::size_t>(config.introspect.history), config.agent.dot_dir,
+            [this](std::chrono::milliseconds delay, std::function<void()> fn) {
+                // One-shot timers the store owns: destroying the store cancels what is pending.
+                return loop.add_timeout(delay, [fn] {
+                    fn();
+                    return false;
+                });
+            });
+        plane->on_producer_event([this](const std::string& track_id, const std::string& event) {
+            if (track_id.empty()) return;
+            if (auto* p = plane->producer(track_id); p && p->pipeline()) take_snapshot(GST_BIN(p->pipeline()), event, "");
+        });
+        plane->on_rebuild_needed([this](const std::string& reason) {
+            log::error("agent", "media plane rebuild", {{"reason", reason}});
+            sessions->close_all("media-restart", /*retry=*/true); // docs/08: a rung of the reconnection ladder
+            plane->rebuild();
+            if (plane->rebuilds_in_window() >= 3) {
+                log::error("agent", "third plane rebuild within 10 minutes: exit 2 (restart me)");
+                exit_code = 2;
+                loop.quit();
+            }
+        });
+        core::SessionDeps deps;
+        deps.loop = &loop;
+        deps.plane = plane.get();
+        deps.config = &config;
+        deps.send_signal = [this](nlohmann::json m) {
+            if (signaling) signaling->send(m);
+        };
+        deps.emit = [this](const SessionEvent& e) {
+            if (e.type == "ended" && snapshots) snapshots->retire("session:" + e.session_id); // docs/24: last 8 for 10 min
+            emit(e);
+        };
+        deps.snapshot = [this](GstBin* bin, const std::string& trigger) {
+            const std::string name = glib::element_name(GST_ELEMENT(bin));
+            std::string sid;
+            for (const auto& s : sessions->list())
+                if (name == "session:" + s->sid8()) sid = s->id();
+            take_snapshot(bin, trigger, sid);
+        };
+        auto tcfg = config.capabilities.find("fjarr.test");
+        deps.test_hooks = tcfg != config.capabilities.end() && tcfg->second.value("test_hooks", false);
+        sessions = std::make_unique<core::SessionManager>(deps, [this](const std::string& name) -> const core::RegisteredCapability* {
+            auto it = registry.find(name);
+            return it == registry.end() ? nullptr : &it->second;
+        });
+        if (config.introspect.enabled) {
+            introspect_server = std::make_unique<introspect::Server>(
+                config.introspect, *snapshots, [this] { return sources_json(); },
+                [this](const std::string& pid) {
+                    for (const auto& s : sessions->list())
+                        if (s->consumer() && (pid.empty() || pid == "session:" + s->id())) snapshots->take(GST_BIN(s->consumer()->pipeline()), {"session:" + s->id(), "session", s->id(), config.agent.robot_id, static_cast<unsigned>(s->generation()), 0, 0, "on-demand", ""}, true);
+                    for (auto* p : plane->producers())
+                        if (pid.empty() || pid == p->name()) take_snapshot(GST_BIN(p->pipeline()), "on-demand", "");
+                });
+            introspect_server->start();
+        }
+        core::SignalingConfig scfg;
+        scfg.url = config.agent.server_url;
+        scfg.robot_id = config.agent.robot_id;
+        scfg.dev_token = config.agent.dev_token;
+        scfg.fjarr_version = version();
+        for (const auto& [name, rc] : registry)
+            if (rc.enabled) scfg.capability_names.push_back(name);
+        core::SignalingHooks hooks;
+        hooks.on_ready = [this] {
+            if (!ready_notified && supervision.ready) {
+                supervision.ready();
+                ready_notified = true;
+            }
+        };
+        hooks.on_message = [this](const protocol::SignalingMessage& m) {
+            if (m.type == "session-request") sessions->on_session_request(m);
+            else if (m.type == "backend-stream") log::debug("agent", "backend-stream ignored (M4)");
+            else if (m.type == "error") log::warn("agent", "server error", {{"code", m.body.value("code", "")}, {"message", m.body.value("message", "")}});
+            else sessions->on_signal(m);
+        };
+        hooks.on_closed = [this](const std::string&) { sessions->close_all("peer-gone"); };
+        hooks.on_error = [this](const std::string& code, const std::string&) {
+            if (code == "auth-failed") {
+                log::error("agent", "device auth failed: check FJARR_DEV_DEVICE_TOKEN / the credential (exit 1)");
+                exit_code = 1;
+                loop.quit();
+            }
+        };
+        signaling = std::make_unique<core::SignalingClient>(loop, scfg, hooks);
+        signaling->start();
+        if (supervision.watchdog && supervision.watchdog_interval_ms > 0) {
+            watchdog_timer = loop.add_timeout(std::chrono::milliseconds(supervision.watchdog_interval_ms), [this] {
+                supervision.watchdog();
+                return true;
+            });
+        }
+        counters_timer = loop.add_timeout(std::chrono::seconds(60), [this] {
+            const auto& c = glib::ObjectCensus::instance();
+            log::info("agent", "counters", {{"sessions", std::to_string(sessions->size())}, {"elements", std::to_string(c.elements.load())},
+                                            {"pads", std::to_string(c.pads.load())}, {"samples", std::to_string(c.samples.load())},
+                                            {"buffers", std::to_string(c.buffers.load())}, {"pipelines", std::to_string(c.pipelines.load())},
+                                            {"hub_buffers", std::to_string(plane->hub().buffers_held())}});
+            snapshots->expire_retired();
+            return true;
+        });
+        log::info("agent", "core started", {{"robot_id", config.agent.robot_id}, {"encoder", encoder.name},
+                                            {"capabilities", std::to_string(registry.size())}});
+    }
+
+    void shutdown() {
+        // On the core loop: orderly, bounded by Supervision::stop_deadline_ms. Idempotent.
+        if (shut_down) return;
+        shut_down = true;
+        if (sessions) sessions->close_all("agent-shutdown");
+        if (signaling) {
+            // Let the queued session-close frames leave before the socket goes (docs/23: operators
+            // see agent-shutdown, not peer-gone). Bounded pump of our own context.
+            signaling->begin_close("agent-shutdown");
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(300);
+            auto wake = loop.add_timeout(std::chrono::milliseconds(300), [] { return false; });
+            while (!signaling->closed() && std::chrono::steady_clock::now() < deadline) loop.iterate(true);
+            signaling->stop();
+        }
+        for (auto& c : capabilities) {
+            try {
+                c->shutdown();
+            } catch (...) {
+            }
+        }
+        introspect_server.reset();
+        sessions.reset();
+        signaling.reset();
+        plane.reset();
+        snapshots.reset();
+        watchdog_timer.cancel();
+        counters_timer.cancel();
+    }
+};
 
 Agent::Agent(AgentConfig config) : impl_(std::make_unique<Impl>()) {
     impl_->config = std::move(config);
+    if (!gst_is_initialized()) gst_init(nullptr, nullptr);
+    log::set_level(impl_->config.agent.log_level);
+    log::set_json(impl_->config.agent.log_format == "json");
 }
 
-Agent::~Agent() = default;
+Agent::~Agent() {
+    stop();
+}
 
 void Agent::register_capability(std::unique_ptr<Capability> capability) {
-    std::printf("fjarr: registered capability %s\n",
-                capability->manifest().name.c_str());
+    if (impl_->started) throw FjarrError("config", "register_capability must precede run()/start()");
+    const auto manifest = capability->manifest();
+    if (!protocol::valid_cap_name(manifest.name)) throw FjarrError("config", "invalid capability name: " + manifest.name);
+    if (impl_->registry.count(manifest.name)) throw FjarrError("config", "capability registered twice: " + manifest.name);
+    for (const auto& dep : manifest.dependencies)
+        if (!impl_->registry.count(dep)) throw FjarrError("config", manifest.name + " depends on unregistered capability " + dep);
+    impl_->registry[manifest.name] = core::RegisteredCapability{capability.get(), manifest, true};
     impl_->capabilities.push_back(std::move(capability));
+    log::info("agent", "capability registered", {{"name", manifest.name}});
 }
 
-void Agent::on_session_event(std::function<void(const SessionEvent&)> callback) {
-    impl_->session_callback = std::move(callback);
+void Agent::register_source_type(SourceType type) {
+    if (impl_->started) throw FjarrError("config", "register_source_type must precede run()/start()");
+    impl_->source_types.push_back(std::move(type));
 }
 
-void Agent::start() { impl_->running = true; }
-void Agent::stop() { impl_->running = false; }
+void Agent::on_session_event(std::function<void(const SessionEvent&)> callback) { impl_->session_callback = std::move(callback); }
+void Agent::supervision(Supervision s) { impl_->supervision = std::move(s); }
 
-void Agent::run() {
-    start();
-    std::printf("fjarr: agent skeleton alive (robot_id=%s, %zu capabilities) — "
-                "core lands in M1 (docs/17-roadmap.md)\n",
-                impl_->config.robot_id.c_str(), impl_->capabilities.size());
-    while (impl_->running) {
-        std::this_thread::sleep_for(std::chrono::seconds(30));
-        std::printf("fjarr: heartbeat (skeleton)\n");
-        std::fflush(stdout);
+int Agent::introspect_port() const { return impl_->introspect_server ? impl_->introspect_server->port() : 0; }
+
+int Agent::run() {
+    impl_->config.validate();
+    impl_->configure_capabilities();
+    impl_->started = true;
+    bool boot_failed = false;
+    impl_->loop.post([this, &boot_failed] {
+        try {
+            impl_->boot();
+        } catch (const FjarrError& e) {
+            log::error("agent", "startup failed", {{"code", e.code()}, {"message", e.message()}});
+            boot_failed = true;
+            impl_->exit_code = 1;
+            impl_->loop.quit();
+        } catch (const std::exception& e) {
+            log::error("agent", "startup failed", {{"code", "internal"}, {"message", e.what()}});
+            boot_failed = true;
+            impl_->exit_code = 1;
+            impl_->loop.quit();
+        }
+    });
+    impl_->loop.run();
+    if (!boot_failed) impl_->loop.call_sync([this] { impl_->shutdown(); });
+    return impl_->exit_code;
+}
+
+void Agent::start() {
+    impl_->config.validate();
+    impl_->configure_capabilities();
+    impl_->started = true;
+    impl_->loop.start();
+    impl_->loop.call_sync([this] {
+        try {
+            impl_->boot();
+        } catch (const FjarrError& e) {
+            log::error("agent", "startup failed", {{"code", e.code()}, {"message", e.message()}});
+            impl_->exit_code = 1;
+        } catch (const std::exception& e) {
+            log::error("agent", "startup failed", {{"code", "internal"}, {"message", e.what()}});
+            impl_->exit_code = 1;
+        }
+    });
+    if (impl_->exit_code == 1) throw FjarrError("config", "agent failed to start (see log)");
+}
+
+void Agent::stop_on_signal(int signum) {
+    if (impl_->started) throw FjarrError("config", "stop_on_signal must precede run()/start()");
+    impl_->signal_sources.push_back(impl_->loop.add_unix_signal(signum, [this, signum] {
+        // On the core loop, not in a signal handler. docs/15: input is released on the way out;
+        // the deadline thread is the bound if a NULL transition wedges.
+        if (impl_->shut_down) return;
+        log::info("agent", "signal: stopping", {{"signal", std::to_string(signum)}});
+        const int deadline = impl_->supervision.stop_deadline_ms;
+        std::thread([deadline] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(deadline));
+            std::fprintf(stderr, "fjarr: shutdown exceeded %d ms, exiting\n", deadline);
+            std::_Exit(0);
+        }).detach();
+        stop();
+    }));
+}
+
+void Agent::stop() {
+    if (!impl_->started) return;
+    if (impl_->loop.running() && !impl_->loop.is_owner_thread()) {
+        impl_->loop.call_sync([this] { impl_->shutdown(); });
+        impl_->loop.stop();
+    } else if (impl_->loop.running()) {
+        impl_->shutdown();
+        impl_->loop.quit();
     }
+    impl_->started = false;
 }
 
 } // namespace fjarr

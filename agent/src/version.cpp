@@ -2,6 +2,8 @@
 
 #include <gst/gst.h>
 
+#include "core/glib/raii.hpp"
+
 namespace fjarr {
 
 std::string version() { return "0.0.1"; }
@@ -20,26 +22,16 @@ bool hardware_encode_available() {
         gst_init(nullptr, nullptr);
     }
     GError* error = nullptr;
-    GstElement* pipeline = gst_parse_launch(
-        "videotestsrc num-buffers=15 ! vapostproc ! vah264enc ! fakesink",
-        &error);
+    glib::GstElementPtr pipeline = glib::sink_element(gst_parse_launch("videotestsrc num-buffers=15 ! vapostproc ! vah264enc ! fakesink", &error));
     if (error != nullptr) {
-        g_clear_error(&error);
+        glib::GErrorPtr e(error);
         return false;
     }
-    gst_element_set_state(pipeline, GST_STATE_PLAYING);
-    GstBus* bus = gst_element_get_bus(pipeline);
-    GstMessage* msg = gst_bus_timed_pop_filtered(
-        bus, 15 * GST_SECOND,
-        static_cast<GstMessageType>(GST_MESSAGE_EOS | GST_MESSAGE_ERROR));
-    const bool ok =
-        (msg != nullptr) && GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS;
-    if (msg != nullptr) {
-        gst_message_unref(msg);
-    }
-    gst_object_unref(bus);
-    gst_element_set_state(pipeline, GST_STATE_NULL);
-    gst_object_unref(pipeline);
+    gst_element_set_state(pipeline.get(), GST_STATE_PLAYING);
+    glib::GstBusPtr bus(gst_element_get_bus(pipeline.get()));
+    glib::GstMessagePtr msg(gst_bus_timed_pop_filtered(bus.get(), 15 * GST_SECOND, static_cast<GstMessageType>(GST_MESSAGE_EOS | GST_MESSAGE_ERROR)));
+    const bool ok = msg && GST_MESSAGE_TYPE(msg.get()) == GST_MESSAGE_EOS;
+    gst_element_set_state(pipeline.get(), GST_STATE_NULL);
     return ok;
 }
 

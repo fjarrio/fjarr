@@ -7,8 +7,12 @@ import type { SessionEvent, SessionOptions, SessionState, SessionStats, WireEven
 import type { LoopbackTrackSpec } from "@fjarr/core/testing/browser";
 
 export interface LabSetup {
-  /** in-page: fake socket pair, no server. server: the agent registers with fjarr-server, the client connects with `grant`. */
-  mode: "in-page" | "server";
+  /**
+   * in-page: fake socket pair, no server. server: the loopback agent registers with
+   * fjarr-server and the client connects with `grant`. client: no loopback agent at
+   * all — the client connects through fjarr-server to a real robot (the C++ agent).
+   */
+  mode: "in-page" | "server" | "client";
   robotId: string;
   serverUrl?: string;
   deviceToken?: string;
@@ -94,6 +98,14 @@ export interface LabApi {
     state(): { talking: boolean; error: string | null; unavailable: boolean };
   };
   vitals(): VitalsSnapshot;
+  /** A request on the control channel; resolves with the result payload (rejects with the error). */
+  request(cap: string, type: string, payload: unknown, robotId?: string): Promise<unknown>;
+  /** A newest-wins event on the realtime channel. */
+  publishRealtime(cap: string, type: string, payload: unknown, robotId?: string): void;
+  /** Ask for an ICE restart the way the ladder's rung 2 does (test seam: forces the request). */
+  requestIceRestart(robotId?: string): void;
+  /** Sample the client's RTCPeerConnection inbound-rtp stats for `mid` every `everyMs` for `durationMs` (diagnostics). */
+  sampleInbound(mid: string, durationMs: number, everyMs?: number): Promise<Array<{ t: number; packetsReceived: number; framesReceived: number; framesDecoded: number; framesDropped: number; packetsLost: number }>>;
 }
 
 declare global {

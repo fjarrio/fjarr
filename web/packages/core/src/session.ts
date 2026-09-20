@@ -111,6 +111,13 @@ export interface Session {
   open(): void;
   close(reason?: string): void;
   retry(): void;
+  /**
+   * Ask the agent for an ICE restart now — rung 2 of docs/08#reconnection on
+   * demand (a host "reconnect media" action, the browser lab). An agent
+   * without in-place restart answers `session-close{retry:true}` and the
+   * session comes back as a fresh one.
+   */
+  restartIce(): void;
 
   // subscribe side (docs/21 three modes)
   on(cap: string, type: string, handler: EnvelopeHandler): () => void;
@@ -296,6 +303,10 @@ export class SessionImpl implements Session {
     this.setInfo({ state: "connecting", reason: null, error: null, round: 0, sessionId: null });
     this.launchRound();
     this.touchIdle(); // the idle policy counts from open(), even with no consumer yet
+  }
+
+  restartIce(): void {
+    if (this.getState() === "connected") this.requestIceRestart("host-requested");
   }
 
   /** From `failed`: open again. From `reconnecting`: skip the backoff and try now. */

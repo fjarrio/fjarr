@@ -48,11 +48,11 @@ export class Loopback {
 
   async setup(s: Partial<LabSetup> & { mode?: LabSetup["mode"] } = {}): Promise<LabSetup> {
     const mode = s.mode ?? "in-page";
-    const robotId = s.robotId ?? (mode === "server" ? `lab-robot-${Math.random().toString(36).slice(2, 8)}` : "loopback-01");
+    const robotId = s.robotId ?? (mode === "server" ? `lab-robot-${Math.random().toString(36).slice(2, 8)}` : mode === "client" ? env.robotId : "loopback-01");
     const full: LabSetup = {
       mode,
       robotId,
-      ...(mode === "server" ? { serverUrl: env.serverWs, deviceToken: env.deviceToken, grant: mintGrant({ robotId, secret: env.grantSecret }) } : {}),
+      ...(mode !== "in-page" ? { serverUrl: env.serverWs, deviceToken: env.deviceToken, grant: mintGrant({ robotId, secret: env.grantSecret }) } : {}),
       ...s,
     };
     await this.lab((lab, arg) => lab.setup(arg), full);
@@ -172,6 +172,20 @@ export class Stack {
     }
   }
 
+  /** The robot's introspection endpoint (docs/24): direct HTTP when E2E_INTROSPECT_HTTP is set, else a curl inside the robot container. */
+  async introspect(path: string): Promise<unknown | null> {
+    if (env.introspectHttp) {
+      try {
+        const r = await fetch(env.introspectHttp + path, { signal: AbortSignal.timeout(3000) });
+        if (!r.ok) return null;
+        return path.endsWith(".txt") || path.endsWith(".dot") ? await r.text() : ((await r.json()) as unknown);
+      } catch {
+        return null;
+      }
+    }
+    return this.robot.introspect(path);
+  }
+
   /** docs/15 "signaling socket killed": restart fjarr-server (every socket drops; agents and operators reconnect on their own). */
   async restartServer(): Promise<void> {
     const { execFile } = await import("node:child_process");
@@ -202,8 +216,21 @@ export class Dashboard {
   ) {}
 
   async goto(): Promise<void> {
-    await this.page.goto(env.dashboardUrl);
+    // From inside the compose network "localhost" is the browser itself: hand the page the service URLs (dev-only overrides).
+    const u = new URL(env.dashboardUrl);
+    u.searchParams.set("fjarr_backend", env.dashboardBackend);
+    u.searchParams.set("fjarr_server", env.serverWs);
+    await this.page.goto(u.toString());
     await this.page.waitForFunction(() => Boolean((window as unknown as { __fjarr?: unknown }).__fjarr), null, { timeout: 15_000 });
+  }
+
+  /** The first live <video> in the page's VideoGrid with decoded frames. */
+  async waitForVideo(timeoutMs = 20_000): Promise<{ width: number; height: number }> {
+    await this.page.waitForFunction(() => [...document.querySelectorAll("video")].some((v) => v.videoWidth > 0 && v.readyState >= 2), null, { timeout: timeoutMs });
+    return this.page.evaluate(() => {
+      const v = [...document.querySelectorAll("video")].find((x) => x.videoWidth > 0)!;
+      return { width: v.videoWidth, height: v.videoHeight };
+    });
   }
 
   async connect(robotId: string): Promise<void> {

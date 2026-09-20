@@ -7,7 +7,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_compile_options(-Wall -Wextra -Wpedantic)
 
+enable_testing() # before the subdirectories, or ctest sees none of their tests (GoogleTest — docs/15)
+
 add_subdirectory(agent)
 add_subdirectory(demos/demo-robot)
-
-enable_testing() # populated from M1 (GoogleTest — docs/15)

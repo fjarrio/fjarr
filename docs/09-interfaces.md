@@ -15,16 +15,20 @@ The three seams a customer integrates against. Signatures here are the
 #include <fjarr/fjarr.hpp>
 
 fjarr::AgentConfig cfg = fjarr::AgentConfig::from_file("/etc/fjarr/fjarr.toml");
-cfg.robot_id = my_robot_id;              // the CUSTOMER'S canonical id
-cfg.credential = my_device_credential;   // per-device, from enrollment
+cfg.apply_env();                          // FJARR_* overrides win (docs/23#configuration)
+cfg.agent.robot_id = my_robot_id;         // the CUSTOMER'S canonical id
+cfg.agent.dev_token = my_dev_token;       // until M5 enrollment: credential_file
 
 fjarr::Agent agent{cfg};
-agent.register_capability(std::make_unique<fjarr::CameraCapability>(cams));
+agent.register_capability(std::make_unique<fjarr::TestCapability>());   // the install smoke test
 agent.register_capability(std::make_unique<acme::ArmTeachCapability>());
 agent.on_session_event([](const fjarr::SessionEvent& ev) { /* audit */ });
 // SessionEvent { type: "started"|"ended"|"error"|"audio-uplink"; session_id;
-//                operator {id,label}; reason (ended); code (error) }
-agent.run();   // blocks; or agent.start()/stop() on the host's loop
+//                operator_info {id,label}; reason (ended); code (error) }
+agent.supervision({ .ready = …, .watchdog = …, .watchdog_interval_ms = … });  // sd_notify seam (ADR-0019)
+agent.stop_on_signal(SIGTERM);  // orderly stop as a core-loop callback (never in signal context), bounded by stop_deadline_ms
+int rc = agent.run();   // blocks; exit code 0/1/2 per ADR-0019; or agent.start()/stop() on the host's loop
+// fjarr::probe_source("v4l2src device=/dev/video0") — what `fjarr-agent --probe-source` prints
 ```
 
 `fjarr-agent` (the reference daemon) is ~100 lines doing exactly this from
@@ -157,7 +161,7 @@ namespace fjarr {
 struct SourceOutput {
   std::string name;        // "src" for single-output sources; "left"/"right"/"depth" …
   TrackKind kind;          // Video | Audio
-  GstCaps* declared_caps;  // what the output will produce (raw, DMABuf/VAMemory, or x-h264…)
+  std::string declared_caps;  // caps string of what the output will produce (raw, DMABuf/VAMemory, or x-h264…)
 };
 
 struct SourceInfo {
@@ -178,7 +182,7 @@ public:
 };
 
 // Registered source types: config `source = { type = "acme.stereo", … }`
-// → factory(params validated against schema). Built-ins: gst, test, v4l2, rtsp.
+// → factory(params validated against schema). Built-ins: gst, test (v4l2, rtsp: docs/26 drivers).
 struct SourceType {
   std::string name;                   // reverse-DNS for third parties
   nlohmann::json params_schema;

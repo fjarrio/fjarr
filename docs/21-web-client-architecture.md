@@ -114,6 +114,7 @@ reconnecting → (connected | failed) → closed`. Transitions:
 | reconnecting | recovered | connected | re-flush demand (agent keyframes on enable) |
 | reconnecting | attempts exhausted | failed | consumers see `failed` and an `error` event (`reconnect-exhausted`); `retry()` available |
 | reconnecting | `retry()` | connecting round now | skips the remaining backoff (a host "reconnect now" button) |
+| connected | `restartIce()` | reconnecting (rung 2) | a host "reconnect media" action: the same `ice-restart` request the ladder sends on ICE loss; an agent without in-place restart answers `session-close{retry:true}` |
 | any | `peer-gone` / `session-close` from server | closed (reason) | release tracks, keep subscriptions registered for a possible `open()` again |
 | connected / reconnecting | `session-close{retry:true}` (agent media restart — the ICE-restart fallback, since no `webrtcbin` release restarts ICE in place) | reconnecting | a counted round, started at once — the agent asked for a fresh session |
 | any | `error(grant-expired)` | reconnecting | refetch grant via provider, then retry immediately — the first refresh per attempt is free (no backoff, not counted); a second consecutive `grant-expired` is an ordinary backed-off round, so a host minting rejected tokens can never hot-loop; never a generic failure |
