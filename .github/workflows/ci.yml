@@ -89,6 +89,10 @@ jobs:
           CI: "true"
         # pnpm 10 forwards `--` literally: call playwright through `exec` to pass flags
         run: pnpm --filter '@fjarr/e2e' exec playwright test --project loopback --project stack
+      - name: unit + loop tests under ThreadSanitizer (a gate, docs/15; runner-level because of the sysctl)
+        run: |
+          sudo sysctl -w vm.mmap_rnd_bits=28   # TSan's shadow layout vs 32-bit ASLR entropy (docs/12)
+          docker compose exec -T dev make agent-test-tsan
       - name: fjarr-opsim scenarios against the demo robot (docs/23 gate 2)
         # From the runner: the target execs into the demo robot's container itself.
         run: make opsim-all

@@ -16,6 +16,18 @@
 
 namespace fjarr::glib {
 
+/// Happens-before for closures handed to another thread through GLib/GStreamer queues
+/// (idle sources, thread pools, promises, probes). Those libraries' own locks are invisible
+/// to ThreadSanitizer, so the kit pairs every hand-off with a release on the sending side
+/// and an acquire in the trampoline; one uncontended atomic op each (docs/23 memory ladder).
+inline std::atomic<unsigned>& handoff_clock() {
+    static std::atomic<unsigned> clock{0};
+    return clock;
+}
+inline void handoff_release() { handoff_clock().fetch_add(1, std::memory_order_release); }
+inline void handoff_acquire() { (void)handoff_clock().load(std::memory_order_acquire); }
+
+
 // ------------------------------------------------------------ census
 
 /// Live wrapper counts by type (docs/24 `/memory`). Negligible cost.
@@ -294,9 +306,11 @@ class SourceGuard {
     /// Takes ownership of a new (unattached) source and attaches it.
     SourceGuard(GSource* source, GMainContext* ctx, std::function<bool()> fn) {
         auto* boxed = new std::function<bool()>(std::move(fn));
+        handoff_release();
         g_source_set_callback(
             source,
             [](gpointer d) -> gboolean {
+                handoff_acquire();
                 // Last line of defence: an exception cannot unwind through GLib's dispatch (docs/23 threading model).
                 try {
                     return (*static_cast<std::function<bool()>*>(d))() ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
@@ -345,11 +359,13 @@ class SourceGuard {
 /// Fire-and-forget: run `fn` once on `ctx` (the callback owns its closure).
 inline void invoke_once(GMainContext* ctx, std::function<void()> fn, int priority = G_PRIORITY_DEFAULT) {
     auto* boxed = new std::function<void()>(std::move(fn));
+    handoff_release();
     GSource* s = g_idle_source_new();
     g_source_set_priority(s, priority);
     g_source_set_callback(
         s,
         [](gpointer d) -> gboolean {
+            handoff_acquire();
             try {
                 (*static_cast<std::function<void()>*>(d))();
             } catch (const std::exception& e) {
@@ -378,8 +394,10 @@ template <class T>
 /// `g_signal_emit_by_name` and forget it (the camera streamer's idiom).
 [[nodiscard]] inline GstPromise* make_promise(std::function<void(GstPromiseResult, GstStructurePtr)> on_reply) {
     auto* boxed = new std::function<void(GstPromiseResult, GstStructurePtr)>(std::move(on_reply));
+    handoff_release();
     GstPromise* p = gst_promise_new_with_change_func(
         [](GstPromise* pr, gpointer d) {
+            handoff_acquire();
             auto* fn = static_cast<std::function<void(GstPromiseResult, GstStructurePtr)>*>(d);
             const GstStructure* reply = gst_promise_get_reply(pr);
             const GstPromiseResult result = gst_promise_wait(pr);

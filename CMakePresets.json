@@ -92,6 +92,9 @@
       },
       "execution": {
         "noTestsAction": "error"
+      },
+      "environment": {
+        "TSAN_OPTIONS": "suppressions=${sourceDir}/agent/tests/tsan.supp"
       }
     },
     {

@@ -1,0 +1,19 @@
+# ThreadSanitizer suppressions for the agent test binaries (docs/23 memory ladder, docs/12).
+# GLib, GObject, GStreamer, libnice and libsoup are not built with TSan: their mutexes and
+# atomics are invisible to it, so every hand-off through their queues (thread pools, idle
+# sources, bus messages, pad probes) is reported as a race between the two ends. The
+# kit's own hand-offs carry an acquire/release pair (glib::handoff_*), so what is left
+# is the libraries' internal traffic, matched here by module name. A race with both ends
+# in fjarr code has no frame in these modules and is never suppressed.
+# (`called_from_lib` is deliberately not used: it refuses wildcards that match more
+# than one library and aborts the process.)
+race:libglib-2.0.so*
+race:libgobject-2.0.so*
+race:libgio-2.0.so*
+race:libgmodule-2.0.so*
+race:libgst*.so*
+race:libnice.so*
+race:libgupnp-igd-*.so*
+race:libsoup-3.0.so*
+race:libsrtp2.so*
+race:libusrsctp.so*

@@ -65,7 +65,7 @@ agent-test-asan: ## Unit + loop tests under Address/Undefined/Leak sanitizers (a
 	cmake --preset asan && cmake --build --preset asan && ctest --preset asan --output-on-failure
 
 .PHONY: agent-test-tsan
-agent-test-tsan: ## Unit + loop tests under ThreadSanitizer (a trend until 3c; needs host vm.mmap_rnd_bits=28, docs/12)
+agent-test-tsan: ## Unit + loop tests under ThreadSanitizer (a gate; needs host vm.mmap_rnd_bits=28, docs/12)
 	@echo "TSan needs ASLR entropy <= 28 bits: on the host run 'sudo sysctl -w vm.mmap_rnd_bits=28' (Docker's seccomp blocks setarch -R in the container)"
 	cmake --preset tsan && cmake --build --preset tsan && ctest --preset tsan --output-on-failure
 

@@ -1017,6 +1017,13 @@ the text above left open, or learned from the lab:
   async-signal context and `Supervision::stop_deadline_ms` bounds it. On
   shutdown the WebSocket close handshake is pumped (≤ 300 ms) so operators
   see `session-close{agent-shutdown}` rather than `peer-gone`.
+- *TSan sees the kit's hand-offs.* GLib and GStreamer are not built with
+  ThreadSanitizer, so a closure handed to the loop, a thread-pool job, a
+  promise or a probe would look like a race between its two ends; the kit
+  pairs every such hand-off with a release/acquire on one atomic
+  (`glib::handoff_release/acquire`), and `tsan.supp` names the
+  uninstrumented modules. With that, the 3b tests run clean under TSan and it
+  is a gate (docs/15).
 - *Nothing inbound may throw through GLib*: the router, the signaling hooks
   and the RAII kit's source trampolines catch `std::exception` (any granted
   operator can send `{"tracks":[1]}`); inbound envelopes above 16 KiB are

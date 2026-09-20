@@ -17,7 +17,8 @@ dev container. Report results as a compact PASS/FAIL table, then fix failures
 3. C++: `docker compose exec dev make agent-build` then
    `docker compose exec dev make agent-test`, then the two memory-ladder
    gates (docs/15): `make agent-raii-gate` and `make agent-test-asan`
-   (ASan + UBSan + LSan; TSan is a trend until 3c). When the agent binary
+   (ASan + UBSan + LSan) and `make agent-test-tsan` (needs the host sysctl in
+   docs/12; the doctor says whether it can run). When the agent binary
    changed, also `make opsim-all` against the demo profile and the real-agent
    lab suite (`make e2e`, docs/25).
 4. Rust: `docker compose exec dev bash -c "cd signaling && cargo fmt --check"`,

@@ -16,7 +16,7 @@ struct RecordingSink final : FrameSink {
     std::mutex m;
     std::vector<GstClockTime> pts;
     std::atomic<int> count{0};
-    bool accept = true;
+    std::atomic<bool> accept{true};
     bool push(glib::GstBufferPtr b, GstCaps*) override {
         if (!accept) return false;
         std::lock_guard<std::mutex> lock(m);

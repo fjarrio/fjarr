@@ -82,7 +82,7 @@ The agent wraps a C object system, so lifetime bugs get their own ladder
 |---|---|---|---|
 | RAII kit only touches refcounts | grep gate in `/verify`, clang-tidy `-Werror` | every commit | yes |
 | Address/Undefined/Leak | `asan` preset (`-fsanitize=address,undefined`, UB non-recoverable, LSan with `lsan.supp`) on unit + loop tests | every commit (CI) | yes |
-| Data races in the threading model | `tsan` preset on unit + loop tests | every commit | trend until 3c (needs the host sysctl in docs/12), then a gate |
+| Data races in the threading model | `tsan` preset (+ `tsan.supp` for the uninstrumented GLib/GStreamer modules; the RAII kit's hand-offs carry acquire/release pairs so TSan sees them) on unit + loop tests | every commit (CI, in the runner-level e2e job: the container job cannot set the host sysctl, docs/12) | yes |
 | Live GStreamer objects per test / scenario | `leaks` tracer checkpoints bracketing every test case and every `fjarr-opsim` scenario | every commit (CI) | 3c (docs/23 slices) |
 | Uninitialised reads MSan would need every library rebuilt for | valgrind memcheck (below); MemorySanitizer is deliberately not used — GLib, GStreamer, libsoup and libstdc++ would all need instrumenting | nightly | — |
 | Object census + RSS over a soak | `GET /memory` before/after 200 sessions (`fjarr-opsim`) | nightly | yes (docs/16 budget) |

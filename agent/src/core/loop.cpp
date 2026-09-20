@@ -13,6 +13,7 @@ namespace fjarr {
 CoreLoop::CoreLoop() : ctx_(g_main_context_new()), loop_(g_main_loop_new(ctx_, FALSE)) {
     pool_ = g_thread_pool_new(
         [](gpointer data, gpointer) {
+            glib::handoff_acquire();
             auto* job = static_cast<std::function<void()>*>(data);
             (*job)();
             delete job;
@@ -131,6 +132,7 @@ void CoreLoop::run_async(std::function<void()> job, std::function<void()> done, 
         if (done) post_guarded(alive, done);
     });
     GError* err = nullptr;
+    glib::handoff_release();
     if (!g_thread_pool_push(pool_, boxed, &err)) {
         glib::GErrorPtr guard(err);
         log::error("core", "thread pool push failed", {{"error", err ? err->message : "?"}});

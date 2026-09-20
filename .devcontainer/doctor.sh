@@ -93,6 +93,16 @@ else
   warn "/dev/uinput absent (opt in via docker-compose.uinput.yml when needed)"
 fi
 
+# --- sanitizers -----------------------------------------------------------
+# TSan needs host vm.mmap_rnd_bits<=28 (docs/12); /proc/sys is root-only, so probe it by running TSan.
+tsan_probe=$(mktemp /tmp/tsan-probe.XXXXXX)
+if echo 'int main(){return 0;}' | c++ -fsanitize=thread -x c++ - -o "$tsan_probe" 2>/dev/null && "$tsan_probe" >/dev/null 2>&1; then
+  pass "ThreadSanitizer runs (host vm.mmap_rnd_bits is TSan-compatible)"
+else
+  warn "ThreadSanitizer cannot start here — on the host: sudo sysctl -w vm.mmap_rnd_bits=28 (docs/12)"
+fi
+rm -f "$tsan_probe"
+
 # --- docs tooling ---------------------------------------------------------
 command -v markdownlint-cli2 >/dev/null 2>&1 && pass "markdownlint-cli2" \
   || warn "markdownlint-cli2 missing"

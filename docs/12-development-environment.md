@@ -13,6 +13,8 @@ your setup can do what the specs assume.
 git clone <repo> fjarr && cd fjarr
 cp .env.example .env            # then check RENDER_GID matches your host:
 stat -c %g /dev/dri/renderD128  # → RENDER_GID in .env
+# recommended, once per host: let ThreadSanitizer run inside containers (below)
+sudo sysctl -w vm.mmap_rnd_bits=28 && echo 'vm.mmap_rnd_bits=28' | sudo tee /etc/sysctl.d/60-tsan.conf
 code .                          # "Reopen in Container"
 # post-create runs pnpm install, cargo fetch, cmake configure, doctor
 make doctor
@@ -122,11 +124,30 @@ environment variables: [docs/25](25-browser-lab.md#implementation-notes-slice-3a
 
 ## ThreadSanitizer in the container
 
-`make agent-test-tsan` fails with "incompatible memory layout … unable to
-disable ASLR" unless the host lowers ASLR entropy: `sudo sysctl -w
-vm.mmap_rnd_bits=28` (Docker's default seccomp profile blocks the
-`personality` call `setarch -R` would use inside the container). TSan is a
-trend in slice 3b, a gate from 3c (docs/15).
+TSan keeps its shadow memory at fixed addresses; with the 32 bits of ASLR
+entropy recent kernels default to, the program's own mappings can land on
+them and TSan refuses to start ("incompatible memory layout … unable to
+disable ASLR"). Its usual self-repair — re-exec with
+`personality(ADDR_NO_RANDOMIZE)` — is blocked by Docker's default seccomp
+profile, and so is `setarch -R`. The fix is a host kernel setting, which
+every container inherits (the recommended one-time step in the quickstart):
+
+```bash
+sudo sysctl -w vm.mmap_rnd_bits=28                                # now
+echo 'vm.mmap_rnd_bits=28' | sudo tee /etc/sysctl.d/60-tsan.conf   # after reboots
+```
+
+28 bits of randomisation instead of 32 is the sanitizer maintainers' own
+recommendation and immaterial on a development machine. The doctor probes
+this functionally (it compiles and runs a one-line TSan program) and WARNs
+when `make agent-test-tsan` would not run. TSan is a gate (docs/15): CI's
+`cpp` job runs inside a container and cannot set the sysctl, so the gate
+runs in the runner-level `e2e` job, which sets it first. `agent/tests/tsan.supp`
+lists the modules TSan cannot see into (GLib, GStreamer, libnice, libsoup
+are not instrumented, so their locks are invisible and every hand-off through
+their queues would otherwise be reported); the RAII kit pairs its own
+hand-offs (posts, sources, promises, thread-pool jobs) with an acquire/release
+so a race with both ends in fjarr code is always reported.
 
 ## Pipeline introspection
 
