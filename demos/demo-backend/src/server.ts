@@ -71,7 +71,7 @@ const server = createServer(async (req, res) => {
     const robotId = url.searchParams.get("robot") ?? "demo-robot-01";
     if (!robots.some((r) => r.id === robotId)) return respond(404, { error: `unknown robot ${robotId}` });
     const operator = { id: "demo@example.com", label: "Demo Operator" };
-    const capabilities = [{ name: "fjarr.test" }];
+    const capabilities = [{ name: "fjarr.test" }, { name: "fjarr.camera" }];
     return respond(200, { grant: mintGrant(robotId, operator, capabilities), robot_id: robotId, capabilities });
   }
 

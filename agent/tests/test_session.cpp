@@ -35,7 +35,7 @@ struct Recorder final : Capability {
         m.input_bearing = true;
         return m;
     }
-    void configure(const nlohmann::json&) override {}
+    void configure(const nlohmann::json&, const fjarr::SourceFactory&) override {}
     void session_attached(SessionContext& c, const nlohmann::json&) override {
         calls.push_back("attached");
         ctx = &c;
@@ -54,6 +54,7 @@ struct Recorder final : Capability {
 struct Harness {
     CoreLoop loop;
     AgentConfig config;
+    media::SourceRegistry sources{loop.context()};
     std::unique_ptr<media::MediaPlane> plane;
     std::vector<nlohmann::json> sent;
     std::vector<SessionEvent> events;
@@ -65,7 +66,7 @@ struct Harness {
         config.agent.robot_id = "t";
         config.media.encoder = "software";
         loop.start();
-        loop.call_sync([&] { plane = std::make_unique<media::MediaPlane>(loop, config.media, media::EncoderChoice{media::EncoderKind::Software, "software"}); });
+        loop.call_sync([&] { plane = std::make_unique<media::MediaPlane>(loop, config.media, media::EncoderChoice{media::EncoderKind::Software, "software"}, sources); });
         deps.loop = &loop;
         deps.plane = plane.get();
         deps.config = &config;

@@ -54,8 +54,9 @@ the [M1 extension-API fit review](reviews/m1-api-fit-review.md), the
 [slice-2 web core + React review](reviews/slice-2-review.md), the
 [slice-3 planning review](reviews/slice-3-planning-review.md), the
 [slice-3a browser lab review](reviews/slice-3a-review.md), the
-[slice-3b agent core review](reviews/slice-3b-review.md) and the
-[slice-3c introspection + memory ladder review](reviews/slice-3c-review.md).
+[slice-3b agent core review](reviews/slice-3b-review.md), the
+[slice-3c introspection + memory ladder review](reviews/slice-3c-review.md)
+and the [slice-4 camera review](reviews/slice-4-review.md).
 
 ## Reading paths
 

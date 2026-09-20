@@ -34,6 +34,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
     gstreamer1.0-plugins-bad gstreamer1.0-nice gstreamer1.0-libav \
     gstreamer1.0-tools gstreamer1.0-pipewire \
+    # --- lab fixtures (docs/25): the RTSP camera simulator (dev only, never shipped) --------
+    python3-gi gir1.2-gst-rtsp-server-1.0 gstreamer1.0-rtsp \
     # --- VA-API hardware encode (docs/16 budgets; Intel iHD) --------------
     intel-media-va-driver libva-dev vainfo mesa-va-drivers \
     # --- X11 desktop backend (docs/07) ------------------------------------

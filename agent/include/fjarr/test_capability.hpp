@@ -15,7 +15,7 @@ class TestCapability final : public Capability {
     ~TestCapability() override;
 
     CapabilityManifest manifest() const override;
-    void configure(const nlohmann::json& validated_config) override;
+    void configure(const nlohmann::json& validated_config, const SourceFactory& sources) override;
     void session_attached(SessionContext& ctx, const nlohmann::json& granted_params) override;
     void session_detached(const SessionId& id, DetachReason reason, std::string_view detail) override;
     void release_all_input(const SessionId& id) override;

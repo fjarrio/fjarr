@@ -6,8 +6,8 @@
 
 namespace fjarr::media {
 
-MediaPlane::MediaPlane(CoreLoop& loop, const AgentConfig::MediaSection& config, EncoderChoice encoder)
-    : loop_(loop), config_(config), encoder_(std::move(encoder)), hub_(static_cast<std::size_t>(config.gop_seconds * 30 + 1)) {
+MediaPlane::MediaPlane(CoreLoop& loop, const AgentConfig::MediaSection& config, EncoderChoice encoder, SourceRegistry& sources)
+    : loop_(loop), config_(config), encoder_(std::move(encoder)), hub_(static_cast<std::size_t>(config.gop_seconds * 30 + 1)), sources_(sources) {
     // Hub hooks fire on the delivery thread; the plane may be gone by the time the post runs (shutdown).
     hub_.on_keyframe_request([this, alive = std::weak_ptr<bool>(alive_)](const HubKey& key) {
         loop_.post_guarded([alive] { return !alive.expired(); }, [this, key] { request_keyframe(key); });
@@ -55,8 +55,8 @@ bool MediaPlane::track_available(const std::string& track_id, std::string* reaso
     }
     if (!src->available()) {
         if (reason) {
-            if (auto* d = dynamic_cast<GstDescriptionSource*>(src.get())) *reason = d->last_error();
-            else *reason = "source unavailable";
+            *reason = src->unavailable_reason();
+            if (reason->empty()) *reason = "source unavailable";
         }
         return false;
     }
@@ -149,23 +149,43 @@ void MediaPlane::restart_producer(const std::string& track_id, const std::string
     if (now - r.last_error > std::chrono::minutes(1)) r.restarts = 0;
     r.last_error = now;
     r.restarts++;
-    if (r.restarts > 5) {
+    // docs/23 media-plane recovery: an error inside the source bin (a camera unplugged or
+    // unreachable) is that track's problem — it is retried slowly and reported as the track's
+    // reason, and it never takes the plane (and every session) down. The ladder to a plane
+    // rebuild is for the encode path.
+    const bool source_failure = (r.producer && r.producer->error_in_source()) || !track_available(track_id);
+    std::string reason;
+    if (!track_available(track_id, &reason)) {
+        r.source_error = reason.empty() ? error : reason;
+    } else if (source_failure) {
+        r.source_error = error;
+    }
+    if (!source_failure && r.restarts > 5) {
         log::error("media", "producer restart budget exhausted: plane rebuild", {{"track", track_id}, {"error", error}});
         if (rebuild_needed_) rebuild_needed_("producer:" + track_id + ": " + error);
         return;
     }
-    const int delay_ms = std::min(5000, 500 << (r.restarts - 1));
-    log::warn("media", "producer restart scheduled", {{"track", track_id}, {"attempt", std::to_string(r.restarts)}, {"delay_ms", std::to_string(delay_ms)}});
+    const int delay_ms = source_failure ? std::min(30000, 1000 << std::min(r.restarts - 1, 5)) : std::min(5000, 500 << (r.restarts - 1));
+    log::warn("media", source_failure ? "source failed: producer retry scheduled" : "producer restart scheduled",
+              {{"track", track_id}, {"attempt", std::to_string(r.restarts)}, {"delay_ms", std::to_string(delay_ms)}, {"error", error}});
     r.producer.reset();
-    if (producer_event_) producer_event_(track_id, "producer-restart");
+    if (producer_event_) producer_event_(track_id, source_failure ? "source-failed" : "producer-restart");
     r.restart_timer = loop_.add_timeout(std::chrono::milliseconds(delay_ms), [this, track_id] {
         auto it2 = tracks_.find(track_id);
         if (it2 == tracks_.end()) return false;
         Registered& r2 = it2->second;
+        bool demanded = false;
+        for (const char* t : {"active", "thumbnail"}) demanded = demanded || hub_.subscriber_count(HubKey{track_id, t}) > 0;
+        if (!demanded) return false; // nobody is waiting: the next subscription builds it (and a source that is back is tried then)
+        if (!track_available(track_id, &r2.source_error)) {
+            restart_producer(track_id, r2.source_error); // parked on the slow ladder until the device is back
+            return false;
+        }
         if (!ensure_producer(r2)) {
             restart_producer(track_id, r2.producer ? r2.producer->error() : "build failed");
             return false;
         }
+        r2.source_error.clear();
         // Every tier with demand, not only those that were running: a tier whose start failed
         // before the error still has its subscribers waiting (demand only fires on 0↔1).
         for (const char* t : {"active", "thumbnail"})
@@ -199,6 +219,10 @@ std::vector<SourceStatus> MediaPlane::source_status() const {
         s.cap = r.reg.cap;
         if (r.reg.spec.source.source) s.identity = r.reg.spec.source.source->describe().identity;
         s.available = track_available(id, &s.reason);
+        if (s.available && !r.source_error.empty() && !(r.producer && r.producer->pipeline())) {
+            s.available = false; // the device is there but its stream failed (an unreachable camera): the reason is the bus error
+            s.reason = r.source_error;
+        }
         if (r.producer) {
             s.caps = r.producer->source_caps();
             s.playing = r.producer->playing();

@@ -1,0 +1,12 @@
+# Opt-in override (docs/12): pass the host's V4L2 devices to the demo robot so fjarr.camera's
+# `webcam` track sees a real camera. `VIDEO_GID` in .env must match the host's `video` group.
+#   docker compose -f docker-compose.yml -f docker-compose.camera.yml --profile demo up -d demo-robot
+services:
+  demo-robot:
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/video0:/dev/video0
+    volumes:
+      - /dev/v4l:/dev/v4l:ro   # the by-id names fjarr.toml refers to (udev populates them)
+    group_add:
+      - "${VIDEO_GID:-44}"

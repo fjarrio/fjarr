@@ -32,8 +32,8 @@ int usage() {
 int probe_source(const std::string& spec) {
     // docs/09: negotiated caps, measured fps, bus errors — no server, no browser.
     const fjarr::ProbeResult r = fjarr::probe_source(spec);
-    std::printf("probe: source  %s\nprobe: caps    %s\nprobe: frames  %d in 2 s (%.1f fps)\n", r.description.c_str(),
-                r.caps.empty() ? "(none negotiated)" : r.caps.c_str(), r.frames, r.fps);
+    std::printf("probe: source  %s\nprobe: caps    %s\nprobe: memory  %s\nprobe: frames  %d in 2 s (%.1f fps)\n", r.description.c_str(),
+                r.caps.empty() ? "(none negotiated)" : r.caps.c_str(), r.memory.empty() ? "(unknown)" : r.memory.c_str(), r.frames, r.fps);
     if (!r.error.empty()) std::printf("probe: ERROR   %s\n", r.error.c_str());
     std::printf("probe: result  %s\n", r.ok ? "OK" : "FAILED");
     return r.ok ? 0 : 1;
@@ -83,13 +83,29 @@ int main(int argc, char** argv) {
     const bool hw = fjarr::hardware_encode_available();
     std::printf("hardware H.264 encode: %s (media.encoder = %s)\n", hw ? "available" : "UNAVAILABLE", config.media.encoder.c_str());
     if (check_only) {
-        const bool ok = config.media.encoder == "software" || hw;
-        std::printf("check: %s\n", ok ? "OK" : "FAILED — VA-API unavailable; set media.encoder = \"software\" or fix /dev/dri");
+        bool ok = config.media.encoder == "software" || hw;
+        // docs/23: the doctor gains a row per configured source.
+        if (config.capabilities.count("fjarr.camera")) {
+            fjarr::CameraCapability cam;
+            try {
+                fjarr::validate_json_schema(cam.manifest().config_schema, config.capabilities["fjarr.camera"]); // as the agent does at start
+                cam.configure(config.capabilities["fjarr.camera"], *fjarr::builtin_source_factory());
+            } catch (const std::exception& e) {
+                std::printf("source: %s\n", e.what());
+                ok = false;
+            }
+            for (const auto& t : cam.configured_sources())
+                std::printf("source %-16s %-12s %s%s%s\n", t.track_id.c_str(), t.available ? "available" : "UNAVAILABLE", t.identity.c_str(),
+                            t.required ? " (required)" : "", t.reason.empty() ? "" : (" — " + t.reason).c_str());
+        }
+        const bool encoder_ok = config.media.encoder == "software" || hw;
+        std::printf("check: %s\n", ok ? "OK" : (encoder_ok ? "FAILED — see the source rows above" : "FAILED — VA-API unavailable; set media.encoder = \"software\" or fix /dev/dri"));
         return ok ? 0 : 1;
     }
 
     fjarr::Agent agent{config};
     if (config.capabilities["fjarr.test"].value("enabled", true)) agent.register_capability(std::make_unique<fjarr::TestCapability>());
+    if (config.capabilities.count("fjarr.camera")) agent.register_capability(std::make_unique<fjarr::CameraCapability>()); // tracks from fjarr.toml (docs/06)
     agent.on_session_event([](const fjarr::SessionEvent& ev) {
         std::printf("audit: session %s %s operator=%s %s\n", fjarr::short_session_id(ev.session_id).c_str(), ev.type.c_str(), ev.operator_info.label.c_str(),
                     ev.reason.c_str());

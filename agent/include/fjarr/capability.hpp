@@ -17,6 +17,8 @@
 
 namespace fjarr {
 
+class SourceFactory; // fjarr/video_source.hpp
+
 /// The wire session_id (UUIDv7 from fjarr-server). spec: docs/08-protocol.md#signaling
 using SessionId = std::string;
 
@@ -109,7 +111,9 @@ class Capability {
     virtual CapabilityManifest manifest() const = 0;
 
     /// Config already validated against manifest().config_schema.
-    virtual void configure(const nlohmann::json& validated_config) = 0;
+    /// `sources` resolves a `source = …` value (a description string or {type = …}) into a
+    /// VideoSource through the agent's registry, so no capability re-implements the contract.
+    virtual void configure(const nlohmann::json& validated_config, const SourceFactory& sources) = 0;
 
     /// Sessions: attach/detach; ctx provides tracks, channel senders, the
     /// worker pool. Both run on the core loop.
@@ -131,6 +135,17 @@ class Capability {
     virtual void backend_attached(BackendContext&) {}
     virtual void backend_detached() {}
     virtual void on_backend_message(BackendContext&, const Envelope&) {}
+
+    /// A configured source as the endpoint and the doctor list it (docs/24 `/sources`), before any
+    /// session registers its track: the docs/26 missing-device behaviour needs the reason up front.
+    struct ConfiguredSource {
+        std::string track_id, label, identity;
+        bool available = false;
+        bool required = false;
+        std::string reason; // why unavailable
+    };
+    /// Track-owning capabilities describe their configured sources; others return nothing.
+    virtual std::vector<ConfiguredSource> configured_sources() const { return {}; }
 
     virtual void shutdown() = 0;
 };

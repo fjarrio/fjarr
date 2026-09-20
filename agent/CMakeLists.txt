@@ -51,6 +51,7 @@ add_library(fjarr STATIC
   src/introspect/diagnostics.cpp
   src/introspect/server.cpp
   src/capabilities/test_capability.cpp
+  src/capabilities/camera_capability.cpp
 )
 add_library(fjarr::fjarr ALIAS fjarr)
 target_include_directories(fjarr

@@ -122,6 +122,22 @@ services:
     depends_on:
       - robot-sim
       - fjarr-server
+      - rtsp-sim
+
+  rtsp-sim:
+    # A network camera stand-in for fjarr.camera's `rtsp` track (docs/06, slice 4): GStreamer's
+    # RTSP server serving a test pattern as H.264 at rtsp://rtsp-sim:8554/pattern.
+    profiles: [demo]
+    image: fjarr-dev
+    volumes:
+      - .:/workspace:cached
+    working_dir: /workspace
+    command: python3 docker/lab/rtsp-sim.py
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 8554), timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   demo-dashboard:
     profiles: [demo]

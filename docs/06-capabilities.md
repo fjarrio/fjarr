@@ -36,7 +36,17 @@ Peer consumer. Ports the proven camera-streamer v3 model ([prior art](11-prior-a
 
   [capabilities."fjarr.camera".tracks.arm]
   label  = "Arm"
-  source = { type = "acme.stereo", serial = "0123", output = "left" }   # registered in-process, tier 2
+  source = { type = "acme.stereo", serial = "0123" }                    # registered in-process, tier 2
+  output = "left"                                                       # which of the source's outputs (default "src")
+
+  [capabilities."fjarr.camera".tracks.rear]
+  label    = "Rear"
+  source   = { type = "v4l2", device = "usb-Acme_Rear-video-index0", format = "mjpeg", width = 1280, height = 720, fps = 30 }
+  required = true                                                       # a missing camera is a startup error (ADR-0020)
+
+  [capabilities."fjarr.camera".tracks.gate]
+  label  = "Gate camera"
+  source = { type = "rtsp", url = "rtsp://10.0.0.7/stream1", latency = 200, protocols = "tcp" }
 
   [capabilities."fjarr.camera".tracks.pattern]
   label  = "Test"

@@ -39,7 +39,7 @@ struct SourceStatus {
 
 class MediaPlane {
   public:
-    MediaPlane(CoreLoop& loop, const AgentConfig::MediaSection& config, EncoderChoice encoder);
+    MediaPlane(CoreLoop& loop, const AgentConfig::MediaSection& config, EncoderChoice encoder, SourceRegistry& sources);
     ~MediaPlane();
 
     FrameHub& hub() { return hub_; }
@@ -73,6 +73,7 @@ class MediaPlane {
         std::unique_ptr<Producer> producer;
         int restarts = 0;
         std::chrono::steady_clock::time_point last_error{};
+        std::string source_error; // the source failed (device gone, camera unreachable): retried slowly, never a plane rebuild
         glib::SourceGuard restart_timer;
         std::map<std::string, glib::SourceGuard> grace_timers; // tier → stop timer
         std::map<std::string, std::chrono::steady_clock::time_point> last_keyframe; // tier → last request
@@ -86,7 +87,7 @@ class MediaPlane {
     AgentConfig::MediaSection config_;
     EncoderChoice encoder_;
     FrameHub hub_;
-    SourceRegistry sources_;
+    SourceRegistry& sources_;
     std::map<std::string, Registered> tracks_;
     std::function<void(const std::string&)> rebuild_needed_;
     std::function<void(const std::string&, const std::string&)> producer_event_;

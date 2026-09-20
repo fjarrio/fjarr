@@ -93,3 +93,53 @@ TEST(LoopMedia, secondTierStartsOnARunningProducerWithoutStallingTheFirst) {
     });
     loop.stop();
 }
+
+#include "media/media_plane.hpp"
+#include "media/sources.hpp"
+
+TEST(LoopMedia, aSourceErrorDegradesItsTrackAndNeverRebuildsThePlane) {
+    // docs/23 media-plane recovery (slice 4): an error from inside the source bin (a camera gone, a
+    // stream unreachable) is retried on the slow ladder and reported as the track's reason; the
+    // plane rebuild — which closes every session — is never requested for it.
+    fjarr::CoreLoop loop;
+    loop.start();
+    fjarr::AgentConfig::MediaSection media;
+    media.tier_grace_ms = 500;
+    media.gop_seconds = 1;
+    fjarr::media::SourceRegistry reg(loop.context());
+    std::unique_ptr<fjarr::media::MediaPlane> plane;
+    std::atomic<int> rebuilds{0}, source_failures{0};
+    loop.call_sync([&] {
+        plane = std::make_unique<fjarr::media::MediaPlane>(loop, media, fjarr::media::EncoderChoice{fjarr::media::EncoderKind::Software, "software"}, reg);
+        plane->on_rebuild_needed([&](const std::string&) { rebuilds++; });
+        plane->on_producer_event([&](const std::string&, const std::string& ev) {
+            if (ev == "source-failed") source_failures++;
+        });
+        fjarr::TrackSpec spec;
+        spec.track_id = "flaky";
+        spec.label = "Flaky camera";
+        // identity errors from INSIDE the source bin after 5 buffers: the classification must see it there
+        spec.source = fjarr::SourceRef{reg.create("videotestsrc is-live=true ! identity error-after=5 ! capsfilter caps=\"video/x-raw,width=320,height=240\""), "src"};
+        plane->register_track({spec, "fjarr.camera", false});
+    });
+    auto sink = std::make_shared<CountingSink>();
+    plane->hub().subscribe(HubKey{"flaky", "active"}, sink);
+    // Six errors would exhaust the plane ladder (5 attempts); the slow per-track ladder must carry on instead.
+    for (int i = 0; i < 800 && source_failures < 2; i++) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    EXPECT_GE(source_failures, 2) << "the source's error was not classified as the track's";
+    EXPECT_EQ(rebuilds, 0) << "a bad source must not take the plane down";
+    std::string reason;
+    bool available = true;
+    loop.call_sync([&] {
+        for (const auto& s : plane->source_status())
+            if (s.track_id == "flaky") {
+                available = s.available;
+                reason = s.reason;
+            }
+    });
+    EXPECT_FALSE(available);
+    EXPECT_NE(reason.find("identity"), std::string::npos) << reason; // the bus error is the reason
+    plane->hub().unsubscribe(HubKey{"flaky", "active"}, sink);
+    loop.call_sync([&] { plane.reset(); });
+    loop.stop();
+}

@@ -36,10 +36,26 @@ class VideoSource {
     virtual bool available() const = 0;
     virtual void on_availability_changed(std::function<void(bool)> cb) = 0; // hot-plug
     virtual void on_unavailable(std::function<void(std::string reason)> /*cb*/) {} // permanent failure
+    /// Why available() is false right now, in words ("no such device: …", "element missing: …"); "" when available.
+    virtual std::string unavailable_reason() const { return ""; }
 };
 
+/// What a capability resolves `source = …` config with: the agent's registry of source types,
+/// built-in and register_source_type() alike (docs/09). Handed to Capability::configure().
+class SourceFactory {
+  public:
+    virtual ~SourceFactory() = default;
+    /// A description string (tier 1) or {type = "…", …params} (tier 2); throws FjarrError(config).
+    virtual std::unique_ptr<VideoSource> create(const nlohmann::json& source_config) const = 0;
+    virtual std::vector<std::string> types() const = 0;
+};
+
+/// The built-in types alone (gst, test, v4l2, rtsp) with no core loop behind them: for tools
+/// that validate config without running an agent (`fjarr-agent --check`, tests).
+std::unique_ptr<SourceFactory> builtin_source_factory();
+
 /// Registered source types: config `source = { type = "acme.stereo", … }`
-/// → factory(params validated against schema). Built-ins: gst, test.
+/// → factory(params validated against schema). Built-ins: gst, test, v4l2, rtsp.
 struct SourceType {
     std::string name; // reverse-DNS for third parties
     nlohmann::json params_schema;

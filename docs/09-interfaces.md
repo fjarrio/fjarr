@@ -102,6 +102,9 @@ public:
   virtual void backend_attached(BackendContext&) {}
   virtual void backend_detached() {}
   virtual void on_backend_message(BackendContext&, const Envelope&) {}
+  // Track-owning capabilities list their configured sources (id, identity, availability + reason)
+  // for GET /sources and the doctor, before any session exists (docs/24, docs/26).
+  virtual std::vector<ConfiguredSource> configured_sources() const { return {}; }
   virtual void shutdown() = 0;
 };
 
@@ -182,6 +185,7 @@ public:
   virtual bool available() const = 0;
   virtual void on_availability_changed(std::function<void(bool)> cb) = 0;   // hot-plug
   virtual void on_unavailable(std::function<void(std::string reason)> cb) {} // permanent failure
+  virtual std::string unavailable_reason() const { return ""; }              // why, in words, for /sources and --check
 };
 
 // What a capability resolves `source = …` config with (the agent's registry behind it).

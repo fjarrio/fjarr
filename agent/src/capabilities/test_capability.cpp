@@ -73,7 +73,7 @@ CapabilityManifest TestCapability::manifest() const {
     return m;
 }
 
-void TestCapability::configure(const nlohmann::json& config) { impl_->test_hooks = config.value("test_hooks", false); }
+void TestCapability::configure(const nlohmann::json& config, const SourceFactory&) { impl_->test_hooks = config.value("test_hooks", false); }
 
 void TestCapability::session_attached(SessionContext& ctx, const nlohmann::json&) {
     auto& s = impl_->sessions[ctx.id()];

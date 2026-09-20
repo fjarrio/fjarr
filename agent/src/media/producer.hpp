@@ -48,6 +48,8 @@ class Producer {
     void request_keyframe(const std::string& tier);
     GstPipeline* pipeline() const { return GST_PIPELINE(pipeline_.get()); }
     const std::string& error() const { return error_; }
+    /// True when the last bus error originated inside the source bin: a device or network problem, the source's to recover from, never a plane rebuild.
+    bool error_in_source() const { return error_in_source_; }
     /// Bus error hook (core loop).
     void on_error(std::function<void(const std::string&)> fn) { on_error_ = std::move(fn); }
     /// Negotiated caps at the source output (after PLAYING), for /sources.
@@ -86,6 +88,7 @@ class Producer {
     std::map<std::string, std::unique_ptr<Tier>> tiers_;
     std::function<void(const std::string&)> on_error_;
     std::string error_;
+    bool error_in_source_ = false; // the bus error came from inside the source bin (device/network), not the encode path
     bool playing_ = false;
     int source_width_ = 0, source_height_ = 0, source_fps_ = 30;
 };

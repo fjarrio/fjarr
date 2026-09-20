@@ -86,7 +86,10 @@ gboolean Producer::on_bus(GstBus*, GstMessage* msg, gpointer user) {
         glib::GErrorPtr e(err);
         glib::GStrPtr d(dbg);
         self->error_ = std::string(GST_OBJECT_NAME(GST_MESSAGE_SRC(msg))) + ": " + (err ? err->message : "error");
-        log::error("producer", "pipeline error", {{"producer", self->name()}, {"error", self->error_}, {"debug", dbg ? dbg : ""}});
+        self->error_in_source_ = self->source_bin_ && GST_IS_OBJECT(GST_MESSAGE_SRC(msg)) &&
+                                 gst_object_has_as_ancestor(GST_MESSAGE_SRC(msg), GST_OBJECT(self->source_bin_.get()));
+        log::error("producer", "pipeline error", {{"producer", self->name()}, {"error", self->error_}, {"debug", dbg ? dbg : ""},
+                                                  {"in_source", self->error_in_source_ ? "yes" : "no"}});
         if (self->on_error_) self->on_error_(self->error_);
         break;
     }

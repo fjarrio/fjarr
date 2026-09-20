@@ -78,6 +78,11 @@ Test with fixtures:
   `restartServer()`.
 - `dashboard` — a page on the demo dashboard with the grant flow done;
   `connect(robotId)`, `waitForState("connected")`, `tracks()`.
+- fixtures beside the harness: the `rtsp-sim` compose service
+  (`docker/lab/rtsp-sim.py`, GStreamer's RTSP server serving a moving test
+  pattern as H.264) stands in for a network camera, so `fjarr.camera`'s
+  `rtsp` source type is exercised in CI without hardware
+  (`tests/stack/camera.spec.ts`).
 - `cdp` — a CDP session for the page with helpers: `network.emulate(profile)`,
   `signaling.capture()` (WebSocket frames → docs/08 messages),
   `wire.capture()` (the library's DataChannel tap), `profile.cpu(ms)`,

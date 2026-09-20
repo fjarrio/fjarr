@@ -371,7 +371,9 @@ The contract, in prose (the C++ is in docs/09):
   through `update_tracks` and the docs/08 renegotiation — with the same
   stable `track_id` (from the config key, never from a device index).
   Sources without native events may poll; `v4l2` watches the kernel's
-  `/dev/v4l/by-id` tree (udev populates it) through a GIO file monitor.
+  `/dev/v4l/by-id` tree (udev populates it) through a GIO file monitor
+  (a directory that does not exist yet is polled by GIO, so the first
+  camera on a machine that had none is noticed within a few seconds).
 - **Errors.** A bin that errors on the bus is restarted with the producer
   backoff; a source may additionally report a permanent failure
   (`unavailable(reason)`) so the core stops retrying and the track shows
@@ -516,15 +518,30 @@ ten-operator control room does.
 ### Media-plane recovery
 
 A bus `ERROR` on a consumer pipeline closes that session
-(`media-error`). A bus `ERROR` on a **producer** (capture died, encoder
-reset) triggers a producer restart with backoff (0.5 s → 5 s, 5 attempts);
-subscribers see a gap and a fresh keyframe. If a producer cannot come back
-within its budget, or the pipeline fails to reach `PLAYING` after a
-rebuild, the media plane escalates: every session closes with
-`media-restart`, the plane is disposed and rebuilt from config; the third
-plane rebuild within 10 minutes exits with code 2. Each step is a counted
-metric and a log line with the element name — the camera streamer's
-ladder, with the numbers written down.
+(`media-error`). A bus `ERROR` on a **producer** is classified by where it
+came from (slice 4):
+
+- **Inside the source bin** — a camera unplugged, an RTSP camera
+  unreachable, a driver that died: that is *the track's* failure. The
+  producer is retried on a slow ladder (1 s → 30 s, for as long as
+  something demands the track), the track is reported unavailable with
+  the bus error as its reason (`/sources`, the doctor), and nothing else is
+  affected: no session closes, the plane stays up. A source that also
+  reports itself unavailable (a device node gone) parks the retry until it
+  is back; the capability's hot-plug callback removes and re-adds the track
+  by renegotiation.
+- **Anywhere else** — the encode path, the tee, the sinks: the producer is
+  restarted with backoff (0.5 s → 5 s, 5 attempts); subscribers see a gap
+  and a fresh keyframe. If it cannot come back within its budget, or the
+  pipeline fails to reach `PLAYING` after a rebuild, the media plane
+  escalates: every session closes with `media-restart`, the plane is
+  disposed and rebuilt from config; the third plane rebuild within 10
+  minutes exits with code 2.
+
+Each step is a counted metric and a log line with the element name — the
+camera streamer's ladder, with the numbers written down, and with the one
+distinction it lacked: a bad camera never takes the robot's other cameras
+with it.
 
 ## DataChannel router
 
@@ -1099,6 +1116,26 @@ the text above left open, or learned from the lab:
 - *The log ring keeps `info` and above regardless of the configured level*,
   so a bundle from a `warn`-level robot still shows what happened.
 
+**Implementation notes (slice 4)** — sources as built:
+
+- *Decodebin-based bins get a late ghost pad.* The parser's
+  ghost-unlinked-pads would ghost decodebin's internal typefind pad (and
+  break rtspsrc's delayed link), so `rtsp` and the sizeless `v4l2 auto`
+  form parse without ghosting and add a targetless `src` that decodebin's
+  first *video* pad targets on `pad-added` — and re-targets after a
+  NULL→PLAYING cycle, because decodebin rebuilds its pads and a stale
+  target starved the second start of a producer (found by the lab).
+- *Two hardware encodes at the iGPU's floor clock do not make 30 fps
+  each*: with the 3c throttle still on this host, three viewers on two
+  VA-API tracks presented 3–16 frames per two seconds while the software
+  path streamed 30 to every viewer. The lab's camera tests are gated on
+  CI's software path; VA-API multi-track throughput is a GPU-runner
+  measurement (docs/12).
+- *`/sources` lists configured sources before any session*
+  (`Capability::configured_sources()`), with each source's own reason for
+  being unavailable; the plane adds caps and tiers once a session
+  registers the track.
+
 **3c — introspection completeness and the memory ladder**: `/events`,
 the history ring and scrubbing, `/stats`, `/memory` with checkpoints, the
 diagnostics bundle (with the agent's in-memory log ring, docs/24),
@@ -1127,8 +1164,10 @@ opt-in compose override). *Gate:* (1) three lab pages watch two
 and a `select-tracks` toggle takes effect < 500 ms without renegotiation;
 (2) the RTSP track streams in CI from the simulator; a `v4l2` track with no
 device is `unavailable` with its reason in `/sources` and absent from the
-manifest, and appears by renegotiation when the device arrives (unit test
-on a temporary by-id directory; on a laptop with the override, for real);
+manifest, and appears (and leaves) by renegotiation when the device
+arrives (unit tests on a temporary by-id directory and with a recording
+session context; for real only on bare metal — a container's `devices:`
+cannot hot-plug); an unreachable RTSP camera degrades its own track only;
 (3) `--probe-source` reports caps, memory type and fps for `test`, `gst`,
 `rtsp` and a missing `v4l2` device; (4) every 3b/3c gate still green,
 the soak included. Loss recovery, adaptive bitrate and elementary-stream

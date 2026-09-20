@@ -3,6 +3,7 @@
 #include <sstream>
 
 #include <fjarr/errors.hpp>
+#include <nlohmann/json-schema.hpp>
 
 #include "core/glib/raii.hpp"
 #include "core/log.hpp"
@@ -79,7 +80,206 @@ GstBin* TestPatternSource::create_bin() {
 
 // ----------------------------------------------------------- registry
 
-SourceRegistry::SourceRegistry() {
+// ------------------------------------------------------- v4l2
+
+V4l2Source::V4l2Source(Params p, GMainContext* ctx) : p_(std::move(p)), ctx_(ctx) {}
+V4l2Source::~V4l2Source() = default;
+
+std::string V4l2Source::device_path() const {
+    if (!p_.device.empty() && p_.device[0] == '/') return p_.device;
+    return by_id_dir_ + "/" + p_.device;
+}
+
+std::string V4l2Source::description() const {
+    // Always an explicit capsfilter: a bare caps string at the end of a description does not parse
+    // (the same trap TestPatternSource documents).
+    std::string d = "v4l2src device=" + device_path() + " ! ";
+    std::string size;
+    if (p_.width > 0) size += ",width=" + std::to_string(p_.width);
+    if (p_.height > 0) size += ",height=" + std::to_string(p_.height);
+    if (p_.fps > 0) size += ",framerate=" + std::to_string(p_.fps) + "/1";
+    if (p_.format == "mjpeg") d += "capsfilter caps=\"image/jpeg" + size + "\" ! jpegdec";
+    else if (p_.format == "yuyv") d += "capsfilter caps=\"video/x-raw,format=YUY2" + size + "\"";
+    else if (!size.empty()) d += "capsfilter caps=\"video/x-raw" + size + "\"";
+    else d += "decodebin name=fjarr-v4l2-decode"; // auto without a size: whatever the device prefers, decoded if compressed
+    return d;
+}
+
+SourceInfo V4l2Source::describe() const { return SourceInfo{"v4l2:" + p_.device, {SourceOutput{"src", TrackKind::Video, "video/x-raw"}}}; }
+
+GstBin* V4l2Source::create_bin() {
+    const std::string desc = description();
+    if (desc.find("fjarr-v4l2-decode") != std::string::npos) {
+        std::string err;
+        GstBin* bin = make_late_ghost_bin(desc, "fjarr-v4l2-decode", decode_pad_added_, &err);
+        if (!bin) {
+            last_error_ = err;
+            log::error("source", "v4l2 description failed", {{"description", desc}, {"error", err}});
+        }
+        return bin;
+    }
+    GError* err = nullptr;
+    GstElement* bin = gst_parse_bin_from_description(desc.c_str(), TRUE, &err);
+    if (err) {
+        glib::GErrorPtr guard(err);
+        if (bin) [[maybe_unused]] auto released = glib::sink_element(bin);
+        last_error_ = err->message;
+        log::error("source", "v4l2 description failed", {{"description", desc}, {"error", last_error_}});
+        return nullptr;
+    }
+    return GST_BIN(bin);
+}
+
+bool V4l2Source::available() const {
+    if (!glib::GstObjectPtr<GstElementFactory>(gst_element_factory_find("v4l2src"))) {
+        last_error_ = "element missing: v4l2src (gstreamer1.0-plugins-good)";
+        return false;
+    }
+    if (p_.device.empty()) {
+        last_error_ = "device is empty";
+        return false;
+    }
+    const std::string path = device_path();
+    if (!g_file_test(path.c_str(), G_FILE_TEST_EXISTS)) {
+        last_error_ = "no such device: " + path + (p_.device[0] == '/' ? "" : " (not in " + by_id_dir_ + ")");
+        return false;
+    }
+    return true;
+}
+
+void V4l2Source::on_availability_changed(std::function<void(bool)> cb) {
+    cb_ = std::move(cb);
+    last_available_ = available();
+    watch();
+}
+
+void V4l2Source::watch() {
+    // The monitors are created with the core context as thread-default, so their `changed` signal
+    // is dispatched on the core loop (docs/23: source callbacks are marshaled by the core).
+    if (ctx_) g_main_context_push_thread_default(ctx_);
+    auto make = [this](const std::string& dir, glib::GObjectPtr<GFileMonitor>& mon, glib::SignalConnection& conn) {
+        glib::GObjectPtr<GFile> f(g_file_new_for_path(dir.c_str()));
+        GError* err = nullptr;
+        mon.reset(g_file_monitor_directory(f.get(), G_FILE_MONITOR_NONE, nullptr, &err));
+        if (err) {
+            glib::GErrorPtr e(err);
+            log::warn("source", "v4l2 hot-plug watch unavailable", {{"dir", dir}, {"error", err->message}});
+            return;
+        }
+        conn = glib::SignalConnection(mon.get(), "changed", G_CALLBACK((+[](GFileMonitor*, GFile*, GFile*, GFileMonitorEvent ev, gpointer d) {
+                                          if (ev != G_FILE_MONITOR_EVENT_CREATED && ev != G_FILE_MONITOR_EVENT_DELETED && ev != G_FILE_MONITOR_EVENT_MOVED_IN &&
+                                              ev != G_FILE_MONITOR_EVENT_MOVED_OUT && ev != G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT)
+                                              return;
+                                          auto* self = static_cast<V4l2Source*>(d);
+                                          const bool now = self->available();
+                                          if (now == self->last_available_) return;
+                                          self->last_available_ = now;
+                                          log::info("source", now ? "v4l2 device arrived" : "v4l2 device left", {{"device", self->device_path()}});
+                                          try { // docs/23: nothing unwinds through a GLib signal emission
+                                              if (self->cb_) self->cb_(now);
+                                          } catch (const std::exception& e) {
+                                              log::error("source", "hot-plug callback threw", {{"device", self->device_path()}, {"error", e.what()}});
+                                          }
+                                      })),
+                                      this);
+    };
+    make(by_id_dir_, monitor_by_id_, changed_by_id_);
+    // A plain /dev/videoN path: udev creates the by-id link and the node together; watching /dev
+    // catches the node itself (the by-id dir may not exist on a machine without cameras).
+    const std::string path = device_path();
+    const auto slash = path.rfind('/');
+    const std::string dir = slash == std::string::npos ? "/dev" : path.substr(0, slash);
+    if (dir != by_id_dir_) make(dir, monitor_dev_, changed_dev_);
+    if (ctx_) g_main_context_pop_thread_default(ctx_);
+}
+
+// ------------------------------------------------------- rtsp
+
+RtspSource::RtspSource(Params p) : p_(std::move(p)) {}
+
+std::string RtspSource::description() const {
+    std::string d = "rtspsrc location=" + p_.url + " latency=" + std::to_string(p_.latency_ms);
+    if (p_.protocols == "tcp") d += " protocols=tcp";
+    else if (p_.protocols == "udp") d += " protocols=udp";
+    return d + " ! decodebin name=fjarr-rtsp-decode";
+}
+
+SourceInfo RtspSource::describe() const { return SourceInfo{"rtsp:" + p_.url, {SourceOutput{"src", TrackKind::Video, "video/x-raw"}}}; }
+
+GstBin* RtspSource::create_bin() {
+    std::string err;
+    GstBin* bin = make_late_ghost_bin(description(), "fjarr-rtsp-decode", rtsp_pad_added_, &err);
+    if (!bin) {
+        log::error("source", "rtsp description failed", {{"description", description()}, {"error", err}});
+        return nullptr;
+    }
+    // Video only in slice 4: an audio stream announced first would take decodebin's single sink
+    // through the parser's delayed link and the video would never arrive.
+    GstIterator* it = gst_bin_iterate_elements(bin);
+    GValue v = G_VALUE_INIT;
+    while (gst_iterator_next(it, &v) == GST_ITERATOR_OK) {
+        auto* e = static_cast<GstElement*>(g_value_get_object(&v));
+        if (gst_element_get_factory(e) && std::string(GST_OBJECT_NAME(gst_element_get_factory(e))) == "rtspsrc") {
+            rtsp_select_stream_ = glib::SignalConnection(e, "select-stream", G_CALLBACK((+[](GstElement*, guint, GstCaps* caps, gpointer) -> gboolean {
+                                                             const GstStructure* st = caps ? gst_caps_get_structure(caps, 0) : nullptr;
+                                                             const char* media = st ? gst_structure_get_string(st, "media") : nullptr;
+                                                             return media == nullptr || g_strcmp0(media, "video") == 0;
+                                                         })),
+                                                         nullptr);
+        }
+        g_value_unset(&v);
+    }
+    gst_iterator_free(it);
+    return bin;
+}
+
+// ------------------------------------------------------- late-ghost bins
+
+GstBin* make_late_ghost_bin(const std::string& desc, const std::string& decodebin_name, glib::SignalConnection& pad_added, std::string* error) {
+    GError* err = nullptr;
+    GstElement* raw = gst_parse_bin_from_description(desc.c_str(), FALSE /* the parser would ghost decodebin's internals */, &err);
+    if (err) {
+        glib::GErrorPtr guard(err);
+        if (raw) [[maybe_unused]] auto released = glib::sink_element(raw);
+        if (error) *error = err->message;
+        return nullptr;
+    }
+    GstBin* bin = GST_BIN(raw);
+    GstPad* ghost = gst_ghost_pad_new_no_target("src", GST_PAD_SRC);
+    gst_pad_set_active(ghost, TRUE);
+    gst_element_add_pad(raw, ghost); // the bin owns the ghost pad; the handler below borrows it for the bin's lifetime
+    glib::GstElementPtr dec = glib::adopt_element(gst_bin_get_by_name(bin, decodebin_name.c_str()));
+    if (!dec) {
+        if (error) *error = "no decodebin named " + decodebin_name + " in the description";
+        [[maybe_unused]] auto released = glib::sink_element(raw);
+        return nullptr;
+    }
+    pad_added = glib::SignalConnection(dec.get(), "pad-added", G_CALLBACK((+[](GstElement*, GstPad* pad, gpointer d) {
+                                           auto* ghost = static_cast<GstPad*>(d);
+                                           glib::GstCapsPtr caps(gst_pad_get_current_caps(pad));
+                                           if (!caps) caps.reset(gst_pad_query_caps(pad, nullptr));
+                                           const GstStructure* st = caps ? gst_caps_get_structure(caps.get(), 0) : nullptr;
+                                           if (!st || !g_str_has_prefix(gst_structure_get_name(st), "video/")) return;
+                                           glib::GstPadPtr current(gst_ghost_pad_get_target(GST_GHOST_PAD(ghost)));
+                                           // The first video pad wins — unless the current target is a pad decodebin already
+                                           // removed (a NULL→PLAYING cycle rebuilds them): then this is the new first pad.
+                                           if (current) {
+                                               glib::GstObjectPtr<GstObject> parent(gst_object_get_parent(GST_OBJECT(current.get())));
+                                               if (parent && gst_pad_is_active(current.get())) return;
+                                           }
+                                           gst_ghost_pad_set_target(GST_GHOST_PAD(ghost), pad);
+                                       })),
+                                       ghost);
+    return bin;
+}
+
+// ------------------------------------------------------- registry
+
+namespace {
+nlohmann::json int_prop() { return nlohmann::json{{"type", "integer"}, {"minimum", 0}}; }
+} // namespace
+
+SourceRegistry::SourceRegistry(GMainContext* ctx) : ctx_(ctx) {
     add(SourceType{"gst", nlohmann::json{{"type", "object"}, {"properties", {{"description", {{"type", "string"}}}}}, {"required", {"description"}}},
                    [](const nlohmann::json& p) -> std::unique_ptr<VideoSource> {
                        return std::make_unique<GstDescriptionSource>(p.at("description").get<std::string>());
@@ -87,13 +287,42 @@ SourceRegistry::SourceRegistry() {
     add(SourceType{"test",
                    nlohmann::json{{"type", "object"},
                                   {"properties",
-                                   {{"pattern", {{"type", "string"}}},
-                                    {"width", {{"type", "integer"}}},
-                                    {"height", {{"type", "integer"}}},
-                                    {"fps", {{"type", "integer"}}}}}},
+                                   {{"pattern", {{"type", "string"}}}, {"width", int_prop()}, {"height", int_prop()}, {"fps", int_prop()}}}},
                    [](const nlohmann::json& p) -> std::unique_ptr<VideoSource> {
                        return std::make_unique<TestPatternSource>(p.value("pattern", "smpte"), p.value("width", 1280),
                                                                   p.value("height", 720), p.value("fps", 30));
+                   }});
+    add(SourceType{"v4l2",
+                   nlohmann::json{{"type", "object"},
+                                  {"properties",
+                                   {{"device", {{"type", "string"}, {"minLength", 1}}},
+                                    {"format", {{"type", "string"}, {"enum", {"auto", "mjpeg", "yuyv"}}}},
+                                    {"width", int_prop()},
+                                    {"height", int_prop()},
+                                    {"fps", int_prop()}}},
+                                  {"required", {"device"}}},
+                   [ctx](const nlohmann::json& p) -> std::unique_ptr<VideoSource> {
+                       V4l2Source::Params vp;
+                       vp.device = p.at("device").get<std::string>();
+                       vp.format = p.value("format", "auto");
+                       vp.width = p.value("width", 0);
+                       vp.height = p.value("height", 0);
+                       vp.fps = p.value("fps", 0);
+                       return std::make_unique<V4l2Source>(vp, ctx);
+                   }});
+    add(SourceType{"rtsp",
+                   nlohmann::json{{"type", "object"},
+                                  {"properties",
+                                   {{"url", {{"type", "string"}}},
+                                    {"latency", int_prop()},
+                                    {"protocols", {{"type", "string"}, {"enum", {"auto", "tcp", "udp"}}}}}},
+                                  {"required", {"url"}}},
+                   [](const nlohmann::json& p) -> std::unique_ptr<VideoSource> {
+                       RtspSource::Params rp;
+                       rp.url = p.at("url").get<std::string>();
+                       rp.latency_ms = p.value("latency", 200);
+                       rp.protocols = p.value("protocols", "auto");
+                       return std::make_unique<RtspSource>(rp);
                    }});
 }
 
@@ -111,10 +340,27 @@ std::unique_ptr<VideoSource> SourceRegistry::create(const nlohmann::json& config
         throw FjarrError("config", "source must be a description string or {type = …}");
     const std::string type = config["type"];
     auto it = types_.find(type);
-    if (it == types_.end()) throw FjarrError("config", "unknown source type: " + type);
+    if (it == types_.end()) {
+        std::string known;
+        for (const auto& [k, _] : types_) known += (known.empty() ? "" : ", ") + k;
+        throw FjarrError("config", "unknown source type: " + type + " (registered: " + known + ")");
+    }
     nlohmann::json params = config;
     params.erase("type");
+    if (it->second.params_schema.is_object()) {
+        try {
+            nlohmann::json_schema::json_validator validator;
+            validator.set_root_schema(it->second.params_schema);
+            validator.validate(params);
+        } catch (const std::exception& e) {
+            throw FjarrError("config", "source type " + type + ": " + e.what());
+        }
+    }
     return it->second.create(params);
 }
 
 } // namespace fjarr::media
+
+namespace fjarr {
+std::unique_ptr<SourceFactory> builtin_source_factory() { return std::make_unique<media::SourceRegistry>(); }
+} // namespace fjarr

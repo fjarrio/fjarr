@@ -109,7 +109,7 @@ Unix socket alternative `introspect.socket = "/run/fjarr/introspect.sock"`):
 | `GET /pipelines/<id>/history` | the snapshot sequence (metadata only; bodies via `?seq`) |
 | `GET /events` | Server-Sent Events (`event: snapshot`, `id: <pipeline>@<seq>`, `data:` the metadata JSON, plus the body when `?body=json\|dot\|txt`; `retry: 1000`) — this is what "live" means |
 | `GET /stats` | the per-session `get-stats` sample, FrameHub counters, producer states |
-| `GET /sources` | configured video sources with negotiated caps and availability, and for a missing driver the catalog entry and install command ([docs/26](26-robot-install-and-drivers.md)) |
+| `GET /sources` | configured video sources — from every capability's `configured_sources()` (docs/09), so a missing device shows its reason before any session exists — with negotiated caps, tiers and state once a session registered the track; for a missing driver the catalog entry and install command ([docs/26](26-robot-install-and-drivers.md), M2.5) |
 | `GET /memory[?since=<checkpoint>]` / `POST /memory/checkpoint` (checkpoint = an opaque token) | RSS, live GStreamer/GLib object census by type (elements, pads, samples, promises, sources), FrameHub buffers held, channel bytes buffered, sessions/pipelines alive — and the diff since a checkpoint (the soak-test oracle, [docs/23](23-agent-core-architecture.md#memory-and-lifetime-discipline-and-the-tooling-that-enforces-it)) |
 | `POST /snapshot?pipeline=<id>` | force a snapshot now |
 | `GET /log[?minutes=<n>]` | the in-memory log ring (last 10 minutes, `info` and above), newest last |

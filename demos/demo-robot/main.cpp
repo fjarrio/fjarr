@@ -17,6 +17,15 @@ int main() {
     config.agent.robot_id = "demo-robot-01";
     config.agent.allow_unsupervised = true;
     config.capabilities["fjarr.test"] = {{"enabled", true}, {"test_hooks", true}}; // the demo drives the hooks
+    // fjarr.camera (docs/06): three tracks through the video source contract — a pattern, the lab's
+    // RTSP simulator (rtsp-sim in docker-compose.yml), and the host webcam, which is only there
+    // with docker-compose.camera.yml (docs/12); without it the track is unavailable, with its reason
+    // in /sources, and absent from the manifest — the docs/26 missing-device behaviour.
+    config.capabilities["fjarr.camera"] = {
+        {"tracks",
+         {{"pattern", {{"label", "Pattern (camera)"}, {"source", {{"type", "test"}, {"pattern", "ball"}, {"width", 1280}, {"height", 720}, {"fps", 30}}}}},
+          {"rtsp", {{"label", "RTSP simulator"}, {"source", {{"type", "rtsp"}, {"url", std::getenv("FJARR_DEMO_RTSP_URL") ? std::getenv("FJARR_DEMO_RTSP_URL") : "rtsp://rtsp-sim:8554/pattern"}, {"latency", 200}, {"protocols", "tcp"}}}}},
+          {"webcam", {{"label", "Webcam"}, {"source", {{"type", "v4l2"}, {"device", std::getenv("FJARR_DEMO_WEBCAM") ? std::getenv("FJARR_DEMO_WEBCAM") : "/dev/video0"}, {"format", "auto"}}}}}}}};
     config.apply_env(); // FJARR_SERVER_URL, FJARR_DEV_DEVICE_TOKEN, FJARR_MEDIA_ENCODER, FJARR_ROBOT_ID …
     try {
         config.validate();
@@ -26,6 +35,7 @@ int main() {
     }
     fjarr::Agent agent{config};
     agent.register_capability(std::make_unique<fjarr::TestCapability>());
+    agent.register_capability(std::make_unique<fjarr::CameraCapability>());
     agent.on_session_event([](const fjarr::SessionEvent& ev) {
         std::printf("demo-robot audit: session %s %s operator=%s %s\n", fjarr::short_session_id(ev.session_id).c_str(), ev.type.c_str(),
                     ev.operator_info.label.c_str(), ev.reason.c_str());

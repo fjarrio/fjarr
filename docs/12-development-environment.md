@@ -33,6 +33,7 @@ Or without VS Code: `docker compose up -d dev robot-sim`, then
 | `demo-backend` | `demo` | the TS "customer backend" beside the sidecar — mints real HS256 grants with `FJARR_GRANT_HS256_SECRET` |
 | `demo-robot` | `demo` | the C++ "customer robot" capturing robot-sim |
 | `demo-dashboard` | `demo` | Vite dev server on <http://localhost:5173> |
+| `rtsp-sim` | `demo` | a network-camera stand-in: GStreamer's RTSP server on `rtsp://rtsp-sim:8554/pattern`, the demo robot's `fjarr.camera` `rtsp` track (slice 4) |
 | `coturn` | `turn` | TURN relay in `use-auth-secret` mode (ephemeral creds only) |
 | `browser` | `lab` | headless Chromium with CDP on <http://localhost:9222> and fake media devices — the [browser lab](25-browser-lab.md) |
 
@@ -87,9 +88,13 @@ docker compose -f docker-compose.yml -f docker-compose.camera.yml --profile demo
 
 Without the override the track is `unavailable` (reason in
 `curl localhost:7381/sources`) and simply absent from the manifest — the
-docs/26 missing-device behaviour, exercised by CI. `fjarr-agent
---probe-source '{type = "v4l2", device = "/dev/video0"}'` validates a
-camera before it goes into `fjarr.toml`.
+docs/26 missing-device behaviour, exercised by CI. The demo reads
+`/dev/video0` by default; set `FJARR_DEMO_WEBCAM` to a `/dev/v4l/by-id`
+name (the stable form real config uses) or another node. A container's
+`devices:` are static, so unplug/replug is verified by the unit tests and
+on bare metal, not through this override. `fjarr-agent --probe-source
+'{type = "v4l2", device = "/dev/video0"}'` validates a camera before it
+goes into `fjarr.toml`.
 
 ## GPU / VA-API troubleshooting
 

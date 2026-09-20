@@ -22,6 +22,7 @@
 #include "introspect/server.hpp"
 #include "media/encoder.hpp"
 #include "media/media_plane.hpp"
+#include "media/sources.hpp"
 
 namespace fjarr {
 
@@ -29,12 +30,12 @@ struct Agent::Impl {
     AgentConfig config;
     std::vector<std::unique_ptr<Capability>> capabilities;
     std::map<std::string, core::RegisteredCapability> registry;
-    std::vector<SourceType> source_types;
     std::function<void(const SessionEvent&)> session_callback;
     bool shut_down = false;
     std::vector<glib::SourceGuard> signal_sources;
     Supervision supervision;
     CoreLoop loop;
+    media::SourceRegistry sources{loop.context()}; // built-ins + register_source_type(); hot-plug callbacks land on the loop
     std::unique_ptr<media::MediaPlane> plane;
     std::unique_ptr<core::SignalingClient> signaling;
     std::unique_ptr<core::SessionManager> sessions;
@@ -64,13 +65,11 @@ struct Agent::Impl {
             rc.enabled = table.value("enabled", true);
             nlohmann::json schema = rc.manifest.config_schema.is_object() ? rc.manifest.config_schema : nlohmann::json{{"type", "object"}};
             try {
-                nlohmann::json_schema::json_validator validator;
-                validator.set_root_schema(schema);
-                validator.validate(table);
-            } catch (const std::exception& e) {
-                throw FjarrError("config", "capabilities." + name + ": " + e.what());
+                validate_json_schema(schema, table);
+            } catch (const FjarrError& e) {
+                throw FjarrError("config", "capabilities." + name + ": " + e.message());
             }
-            rc.capability->configure(table);
+            rc.capability->configure(table, sources);
         }
     }
 
@@ -134,20 +133,41 @@ struct Agent::Impl {
     }
 
     nlohmann::json sources_json() const {
-        nlohmann::json arr = nlohmann::json::array();
+        // Configured sources come from the capabilities (visible before any session, with the reason a
+        // missing device is missing — docs/26); the plane adds negotiated caps and tier state once a
+        // session has registered the track.
+        std::map<std::string, nlohmann::json> by_track;
+        std::vector<std::string> order;
+        for (const auto& [name, rc] : registry)
+            for (const auto& s : rc.capability->configured_sources()) {
+                by_track[s.track_id] = {{"track_id", s.track_id}, {"cap", name}, {"label", s.label}, {"identity", s.identity},
+                                        {"status", s.available ? "available" : "missing"}, {"reason", s.reason}, {"required", s.required},
+                                        {"caps", ""}, {"tiers", nlohmann::json::array()}, {"playing", false}};
+                order.push_back(s.track_id);
+            }
         if (plane)
-            for (const auto& s : plane->source_status())
-                arr.push_back({{"track_id", s.track_id}, {"cap", s.cap}, {"identity", s.identity},
-                               {"status", s.available ? "available" : "missing"}, {"reason", s.reason}, {"caps", s.caps},
-                               {"tiers", s.tiers}, {"playing", s.playing}});
+            for (const auto& s : plane->source_status()) {
+                auto it = by_track.find(s.track_id);
+                if (it == by_track.end()) {
+                    by_track[s.track_id] = {{"track_id", s.track_id}, {"cap", s.cap}, {"identity", s.identity}};
+                    order.push_back(s.track_id);
+                    it = by_track.find(s.track_id);
+                }
+                it->second["status"] = s.available ? "available" : "missing";
+                it->second["reason"] = s.reason;
+                it->second["caps"] = s.caps;
+                it->second["tiers"] = s.tiers;
+                it->second["playing"] = s.playing;
+            }
+        nlohmann::json arr = nlohmann::json::array();
+        for (const auto& id : order) arr.push_back(by_track[id]);
         return nlohmann::json{{"encoder", plane ? plane->encoder().name : ""}, {"sources", arr}};
     }
 
     void boot() {
         // Called on the core loop.
         auto encoder = media::resolve_encoder(config.media.encoder);
-        plane = std::make_unique<media::MediaPlane>(loop, config.media, encoder);
-        for (auto& t : source_types) plane->sources().add(t);
+        plane = std::make_unique<media::MediaPlane>(loop, config.media, encoder, sources);
         snapshots = std::make_unique<introspect::SnapshotStore>(
             static_cast<std::size_t>(config.introspect.history), config.agent.dot_dir,
             [this](std::chrono::milliseconds delay, std::function<void()> fn) {
@@ -296,6 +316,16 @@ struct Agent::Impl {
     }
 };
 
+void validate_json_schema(const nlohmann::json& schema, const nlohmann::json& instance) {
+    try {
+        nlohmann::json_schema::json_validator validator;
+        validator.set_root_schema(schema);
+        validator.validate(instance);
+    } catch (const std::exception& e) {
+        throw FjarrError("config", e.what());
+    }
+}
+
 Agent::Agent(AgentConfig config) : impl_(std::make_unique<Impl>()) {
     impl_->config = std::move(config);
     if (!gst_is_initialized()) gst_init(nullptr, nullptr);
@@ -321,7 +351,7 @@ void Agent::register_capability(std::unique_ptr<Capability> capability) {
 
 void Agent::register_source_type(SourceType type) {
     if (impl_->started) throw FjarrError("config", "register_source_type must precede run()/start()");
-    impl_->source_types.push_back(std::move(type));
+    impl_->sources.add(std::move(type));
 }
 
 void Agent::on_session_event(std::function<void(const SessionEvent&)> callback) { impl_->session_callback = std::move(callback); }

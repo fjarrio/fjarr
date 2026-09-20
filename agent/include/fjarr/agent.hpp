@@ -81,6 +81,10 @@ struct Supervision {
     int stop_deadline_ms = 3000;  // stop_on_signal(): orderly shutdown must finish within this, else _Exit(0)
 };
 
+/// Validate `instance` against a JSON Schema the way the agent validates capability config
+/// (throws FjarrError("config", …) with the validator's message).
+void validate_json_schema(const nlohmann::json& schema, const nlohmann::json& instance);
+
 class Agent {
   public:
     explicit Agent(AgentConfig config);
