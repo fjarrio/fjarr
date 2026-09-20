@@ -8,6 +8,8 @@ exactly these meanings. Add here first; then use.
 
 | Term | Meaning |
 |---|---|
+| **Milestone** | A product-level promise (`M0`…`M8`) with a gate anyone can check; the roadmap's unit ([docs/17](17-roadmap.md), [docs/13](13-development-workflow.md#milestones-and-slices)). |
+| **Slice** | One reviewable increment inside a milestone: lands on `main`, reviewed retrospectively in `docs/reviews/`; split or inserted as planning finds necessary ([docs/13](13-development-workflow.md#milestones-and-slices)). |
 | **Agent** | The Fjarr process on the robot: `libfjarr` embedded in the customer's software, or the `fjarr-agent` reference daemon. |
 | **Capability** | A pluggable unit of functionality (camera video, remote desktop, file transfer…). Owns media tracks and/or DataChannel message namespaces. See [docs/05](05-extension-model.md). |
 | **Capability consumer** | Whoever the capability serves: a **peer consumer** (a dashboard connected P2P) or the **backend consumer** (observability ingest, OTA orchestration). |

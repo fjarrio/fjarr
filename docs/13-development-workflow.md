@@ -26,6 +26,32 @@ Decisions with alternatives → `docs/adr/NNNN-slug.md`
 accepted ADRs are immutable history. Small reversible choices don't need an
 ADR; anything expensive to reverse does.
 
+## Milestones and slices
+
+Two units of planning, defined here because the roadmap and the reviews use
+them as if they were:
+
+- A **milestone** (`M0` … `M8`, [docs/17](17-roadmap.md)) is a product-level
+  promise with a **gate** someone outside the project could check (M1: the
+  three-demo stack runs end to end with reconnect and ICE restart
+  demonstrated under fault injection). Milestones are stable, public on the
+  site, and only change through a roadmap revision that says why.
+- A **slice** is one reviewable increment *inside* a milestone: sized so a
+  single working session can finish it and a retrospective review
+  ([docs/20](20-agentic-development.md)) can read all of it. Every slice
+  lands on `main` green, gets its own review record in `docs/reviews/`, and
+  its findings land as follow-up commits. A slice has its own gate only when
+  it is large enough to need one, and then the gate lives in the spec it
+  implements (slices 3a–3c in [docs/23](23-agent-core-architecture.md#slices-3a-3b-3c-and-their-gates)).
+  Numbering is loose by design: an increment discovered mid-milestone is
+  inserted (2.9, the baseline bump), and a slice a planning review judges
+  too large to review in one pass is split (3 → 3a/3b/3c).
+
+A milestone's slices are planned when the milestone starts (a planning
+review, e.g. [slice 3](reviews/slice-3-planning-review.md)), not up front
+for the whole roadmap; the milestone gate is checked once all its slices
+have landed.
+
 ## Branches, commits, PRs
 
 - `main` is always green (builds + doctor + lint). Work on
