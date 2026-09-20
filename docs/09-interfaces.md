@@ -82,7 +82,10 @@ class Capability {
 public:
   virtual ~Capability() = default;
   virtual CapabilityManifest manifest() const = 0;
-  virtual void configure(const nlohmann::json& validated_config) = 0;
+  // `sources` resolves a `source = …` config value (a description string or {type = …})
+  // into a VideoSource through the agent's registry — built-in and register_source_type()
+  // types alike — so a capability never re-implements the source contract.
+  virtual void configure(const nlohmann::json& validated_config, const SourceFactory& sources) = 0;
   // Sessions: attach/detach; ctx provides tracks, channel senders, worker pool.
   virtual void session_attached(SessionContext& ctx, const nlohmann::json& granted_params) = 0;
   virtual void session_detached(const SessionId& id, DetachReason reason, std::string_view detail) = 0;
@@ -181,8 +184,17 @@ public:
   virtual void on_unavailable(std::function<void(std::string reason)> cb) {} // permanent failure
 };
 
+// What a capability resolves `source = …` config with (the agent's registry behind it).
+class SourceFactory {
+public:
+  virtual ~SourceFactory() = default;
+  /// A description string (tier 1) or {type = "…", …params} (tier 2); throws FjarrError(config).
+  virtual std::unique_ptr<VideoSource> create(const nlohmann::json& source_config) const = 0;
+  virtual std::vector<std::string> types() const = 0;
+};
+
 // Registered source types: config `source = { type = "acme.stereo", … }`
-// → factory(params validated against schema). Built-ins: gst, test (v4l2, rtsp: docs/26 drivers).
+// → factory(params validated against schema). Built-ins: gst, test, v4l2, rtsp.
 struct SourceType {
   std::string name;                   // reverse-DNS for third parties
   nlohmann::json params_schema;
@@ -193,9 +205,10 @@ void Agent::register_source_type(SourceType type);   // before run()/start()
 } // namespace fjarr
 ```
 
-`fjarr-agent --probe-source '<description | type spec>'` validates a source
-standalone (negotiated caps, memory type, measured fps, bus errors) so a
-new camera can be brought up on the robot without a server or a browser.
+`fjarr-agent --probe-source '<description | {type = "…", …}>'` validates a
+source standalone (negotiated caps, memory type, measured fps, bus errors)
+so a new camera can be brought up on the robot without a server or a
+browser; the type form takes the same inline table as `fjarr.toml`.
 Vendor drivers Fjarr distributes are GStreamer plugins in separate packages,
 never linked into the core ([ADR-0020](adr/0020-vendor-sources-as-gstreamer-plugins.md));
 `register_source_type` is for the embedding application's own sources.

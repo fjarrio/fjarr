@@ -53,7 +53,8 @@ signatures live in [docs/09](09-interfaces.md); semantically, a capability:
      integrators);
    - required privileges (e.g. `uinput`, filesystem paths) — granted
      explicitly by integrator config, never assumed.
-3. **Receives lifecycle calls**: `configure(config)` → per-session
+3. **Receives lifecycle calls**: `configure(config, sources)` (the
+   source factory resolves `source = …` values, docs/09) → per-session
    `session_attached(session, granted_params)` / `session_detached` →
    `shutdown`. All calls arrive on the core's main loop; capabilities must
    not block it (the core provides a worker-pool handle).

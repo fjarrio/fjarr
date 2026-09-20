@@ -334,11 +334,18 @@ capability, whose config is a list of tracks referencing sources
 ([docs/06](06-capabilities.md#fjarrcamera--camera-video-m1-reference-implementation));
 a customer therefore adds a camera Fjarr has never heard of by editing
 config, and adds a whole new *kind* of camera by registering one class,
-without touching the capability or the core. Built-in source types:
+without touching the capability or the core. A capability receives the
+registry as a `SourceFactory` in `configure()` ([docs/09](09-interfaces.md#the-capability-interface-agent-side)),
+so tier-2 types the embedding application registered resolve exactly like
+the built-ins. Built-in source types (slice 4):
 `gst` (tier 1, the default when `source` is a string), `test`
-(`videotestsrc` with pattern/size/fps params), `v4l2` (device path or
-`by-id` name, format, size, fps — a convenience over tier 1 with hot-plug
-via udev), `rtsp` (url, latency, TCP/UDP).
+(`videotestsrc` with pattern/size/fps params), `v4l2` (`device` — a path or
+a `/dev/v4l/by-id` name — `format` mjpeg|yuyv|auto, `width`, `height`,
+`fps`: a convenience over tier 1 with hot-plug from the kernel's
+`/dev/v4l/by-id` tree, watched with GIO; no libudev in the core), `rtsp`
+(`url`, `latency` ms, `protocols` tcp|udp|auto — decoded to raw in slice 4;
+passthrough of a camera's own elementary stream lands with adaptive
+bitrate in slice 6, where the tier model for undecoded streams is decided).
 
 The contract, in prose (the C++ is in docs/09):
 
@@ -350,8 +357,9 @@ The contract, in prose (the C++ is in docs/09):
   `memory:VAMemory`, NVMM later) for zero-copy into the hardware encoder,
   or an elementary stream (`video/x-h264`, `video/x-h265`) for cameras
   with on-board encoders, in which case the core parses and never
-  transcodes. A source declares each output's kind (`video` or `audio`;
-  audio outputs feed `fjarr.audio`).
+  transcodes (from slice 6; until then an `rtsp` source decodes). A source
+  declares each output's kind (`video` or `audio`; audio outputs feed
+  `fjarr.audio`).
 - **Lifecycle.** `describe()` (outputs, declared caps, stable identity),
   `create_bin()` on demand, and the bin's normal GStreamer state changes;
   the core creates the bin when the first tier of the first output is
@@ -362,7 +370,8 @@ The contract, in prose (the C++ is in docs/09):
   makes its tracks disappear and reappear exactly like monitors do —
   through `update_tracks` and the docs/08 renegotiation — with the same
   stable `track_id` (from the config key, never from a device index).
-  Sources without native events may poll; `v4l2` uses udev.
+  Sources without native events may poll; `v4l2` watches the kernel's
+  `/dev/v4l/by-id` tree (udev populates it) through a GIO file monitor.
 - **Errors.** A bin that errors on the bus is restarted with the producer
   backoff; a source may additionally report a permanent failure
   (`unavailable(reason)`) so the core stops retrying and the track shows
@@ -1104,6 +1113,26 @@ the docs/15 memory rows green; the 200-cycle soak returns to the census
 baseline. Order settled in planning: 3c precedes slice 4 because real
 capture sources are where leaks and races surface, and the ladder must be
 in place to see them.
+
+**4 — `fjarr.camera` on real sources**: the built-in capability whose
+config is a list of tracks referencing sources (docs/06), the `v4l2` and
+`rtsp` source types beside `gst` and `test`, the `SourceFactory` seam in
+`configure()`, hot-plug of a `v4l2` track from the `/dev/v4l/by-id` watch,
+`required = true` as a startup error, `fjarr-agent --probe-source` for
+every type incl. the memory type, a doctor/`--check` row per configured
+source, and the demo robot exposing `fjarr.camera` (a pattern track, an
+RTSP track from the lab's RTSP simulator, the host webcam through an
+opt-in compose override). *Gate:* (1) three lab pages watch two
+`fjarr.camera` tracks of the demo robot concurrently (docs/06 acceptance)
+and a `select-tracks` toggle takes effect < 500 ms without renegotiation;
+(2) the RTSP track streams in CI from the simulator; a `v4l2` track with no
+device is `unavailable` with its reason in `/sources` and absent from the
+manifest, and appears by renegotiation when the device arrives (unit test
+on a temporary by-id directory; on a laptop with the override, for real);
+(3) `--probe-source` reports caps, memory type and fps for `test`, `gst`,
+`rtsp` and a missing `v4l2` device; (4) every 3b/3c gate still green,
+the soak included. Loss recovery, adaptive bitrate and elementary-stream
+passthrough are slice 6.
 
 ## Where `fjarr.test` lives
 

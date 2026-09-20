@@ -78,6 +78,19 @@ docker compose -f docker-compose.yml -f docker-compose.uinput.yml up -d dev
 
 Caveat: the container can synthesize input on the **host** kernel.
 
+**Host webcam for `fjarr.camera`** (slice 4) — the demo robot's `webcam`
+track reads `/dev/v4l/by-id/<name>`; pass the host's video devices in:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.camera.yml --profile demo up -d demo-robot
+```
+
+Without the override the track is `unavailable` (reason in
+`curl localhost:7381/sources`) and simply absent from the manifest — the
+docs/26 missing-device behaviour, exercised by CI. `fjarr-agent
+--probe-source '{type = "v4l2", device = "/dev/video0"}'` validates a
+camera before it goes into `fjarr.toml`.
+
 ## GPU / VA-API troubleshooting
 
 - `vainfo` errors inside `dev` → check `LIBVA_DRIVER_NAME=iHD` (set in the
