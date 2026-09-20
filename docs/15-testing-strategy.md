@@ -81,9 +81,10 @@ The agent wraps a C object system, so lifetime bugs get their own ladder
 | Layer | Tool | When | Gate? |
 |---|---|---|---|
 | RAII kit only touches refcounts | grep gate in `/verify`, clang-tidy `-Werror` | every commit | yes |
-| Address/Undefined/Leak | `asan` preset (+ `lsan.supp`) on unit + loop tests | every commit (CI) | yes |
-| Data races in the threading model | `tsan` preset on unit + loop tests | every commit (CI) | yes |
-| Live GStreamer objects per test / scenario | `leaks` tracer checkpoints bracketing every test case and every `fjarr-opsim` scenario | every commit (CI) | yes |
+| Address/Undefined/Leak | `asan` preset (`-fsanitize=address,undefined`, UB non-recoverable, LSan with `lsan.supp`) on unit + loop tests | every commit (CI) | yes |
+| Data races in the threading model | `tsan` preset on unit + loop tests | every commit | trend until 3c (needs the host sysctl in docs/12), then a gate |
+| Live GStreamer objects per test / scenario | `leaks` tracer checkpoints bracketing every test case and every `fjarr-opsim` scenario | every commit (CI) | 3c (docs/23 slices) |
+| Uninitialised reads MSan would need every library rebuilt for | valgrind memcheck (below); MemorySanitizer is deliberately not used — GLib, GStreamer, libsoup and libstdc++ would all need instrumenting | nightly | — |
 | Object census + RSS over a soak | `GET /memory` before/after 200 sessions (`fjarr-opsim`) | nightly | yes (docs/16 budget) |
 | Uninitialised reads, invalid frees sanitizers miss | valgrind memcheck on loop tests | nightly | trend → gate at M3 |
 | Allocations on the hot path | heaptrack on a streaming scenario | nightly | docs/16 "0 per frame" budget |

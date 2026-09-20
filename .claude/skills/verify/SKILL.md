@@ -15,7 +15,11 @@ dev container. Report results as a compact PASS/FAIL table, then fix failures
 2. Environment: `docker compose exec dev make doctor`
    (expected: 0 failures; WARNs for uinput and webrtcsink are by design).
 3. C++: `docker compose exec dev make agent-build` then
-   `docker compose exec dev make agent-test`.
+   `docker compose exec dev make agent-test`, then the two memory-ladder
+   gates (docs/15): `make agent-raii-gate` and `make agent-test-asan`
+   (ASan + UBSan + LSan; TSan is a trend until 3c). When the agent binary
+   changed, also `make opsim-all` against the demo profile and the real-agent
+   lab suite (`make e2e`, docs/25).
 4. Rust: `docker compose exec dev bash -c "cd signaling && cargo fmt --check"`,
    then `make signaling-clippy`, then `make signaling-test`.
 5. Web: `docker compose exec dev make web-build` and `make web-lint`.
