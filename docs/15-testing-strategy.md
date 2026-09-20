@@ -85,9 +85,9 @@ The agent wraps a C object system, so lifetime bugs get their own ladder
 | Data races in the threading model | `tsan` preset (+ `tsan.supp` for the uninstrumented GLib/GStreamer modules; the RAII kit's hand-offs carry acquire/release pairs so TSan sees them) on unit + loop tests | every commit (CI, in the runner-level e2e job: the container job cannot set the host sysctl, docs/12) | yes |
 | Live GStreamer objects per test / scenario | `leaks` tracer checkpoints bracketing every test case and every `fjarr-opsim` scenario | every commit (CI) | 3c (docs/23 slices) |
 | Uninitialised reads MSan would need every library rebuilt for | valgrind memcheck (below); MemorySanitizer is deliberately not used — GLib, GStreamer, libsoup and libstdc++ would all need instrumenting | nightly | — |
-| Object census + RSS over a soak | `GET /memory` before/after 200 sessions (`fjarr-opsim`) | nightly | yes (docs/16 budget) |
+| Object census + RSS over a soak | `GET /memory` before/after N sessions (`fjarr-opsim soak --cycles N`) | 20 cycles every commit (the e2e job); 200 nightly and at the 3c gate | yes (docs/16 budget) |
 | Uninitialised reads, invalid frees sanitizers miss | valgrind memcheck on loop tests | nightly | trend → gate at M3 |
-| Allocations on the hot path | heaptrack on a streaming scenario | nightly | docs/16 "0 per frame" budget |
+| Allocations on the hot path | heaptrack on a streaming scenario | nightly | docs/16 budget (one buffer header per subscriber per frame, nothing else) |
 
 Every tool prints a one-screen verdict and writes JSON, so an AI agent
 running `make agent-test-asan` or `curl :7381/memory` gets an answer it
@@ -103,9 +103,15 @@ display **with zero local interaction**. This test decides ADR-0006.
 
 Today (M0.5–slice 2): lint, Rust and web unit tests, builds, docs gates.
 From slice 3a/3b: lint (clang-tidy, clippy, eslint, markdownlint, lychee)
-→ unit + component (C++ under ASan; TSan as a trend until 3c) →
-browser-lab e2e on the compose stack ([docs/25](25-browser-lab.md): real
-Chromium over CDP, software encoders; VA-API asserted only on GPU runners
-when available) → docs build. Nightly: soak, profiling scenarios and
-latency trends, with lab artifacts (traces, profiles, captures) attached
-to the run.
+→ unit + component (C++ under ASan and TSan) → browser-lab e2e on the
+compose stack ([docs/25](25-browser-lab.md): real Chromium over CDP,
+software encoders; the real agent, `fjarr-opsim` incl. a 20-cycle soak;
+VA-API asserted only on GPU runners when available) → docs build.
+**Nightly** (`nightly.yml`, from slice 3c; also on demand): the 200-cycle
+soak, valgrind memcheck on the loop tests, heaptrack on a streaming
+scenario, the `netem-*` scenarios and latency trends, with lab artifacts
+(traces, profiles, captures) attached to the run. It runs on the hosted
+runner by default and on a **self-hosted GPU runner** when one is
+registered (docs/12): the same job, with `media.encoder = auto` engaging
+VA-API where `/dev/dri` exists, so the nightly measures the product path
+as soon as such a machine is available.

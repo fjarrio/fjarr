@@ -104,6 +104,7 @@ Unix socket alternative `introspect.socket = "/run/fjarr/introspect.sock"`):
 | `GET /sources` | configured video sources with negotiated caps and availability, and for a missing driver the catalog entry and install command ([docs/26](26-robot-install-and-drivers.md)) |
 | `GET /memory[?since=<checkpoint>]` / `POST /memory/checkpoint` (checkpoint = an opaque token, currently the census `seq`) | RSS, live GStreamer/GLib object census by type (elements, pads, samples, promises, sources), FrameHub buffers held, channel bytes buffered, sessions/pipelines alive — and the diff since a checkpoint (the soak-test oracle, [docs/23](23-agent-core-architecture.md#memory-and-lifetime-discipline-and-the-tooling-that-enforces-it)) |
 | `POST /snapshot?pipeline=<id>` | force a snapshot now |
+| `GET /log[?minutes=<n>]` | the in-memory log ring (last 10 minutes, `info` and above), newest last |
 | `GET /diagnostics.tar.gz` | the diagnostics bundle |
 
 Security: bound to loopback by default; `introspect.bind = "0.0.0.0"` plus
@@ -187,6 +188,28 @@ for first, produced in one command.
 - Element naming is a core rule from slice 3 on: every element the core
   creates gets a stable, meaningful name; capability-provided source bins
   are wrapped in a bin named after the track.
+- `/events` (slice 3c) is a libsoup-3 streaming response: the message is
+  paused with chunked encoding, every snapshot the store records appends
+  one SSE frame (`id: <pipeline>@<seq>`, `event: snapshot`, `data:` the
+  metadata JSON, plus the body when `?body=json|dot|txt` — on one line,
+  newlines escaped), a `: keep-alive` comment goes out every 15 s, and
+  `Last-Event-ID` replays what the ring still holds after it. Clients that
+  stop reading are dropped when their write buffer exceeds 1 MiB; the
+  endpoint never blocks the core loop on a slow reader.
+- The **log ring** (slice 3c): the agent's logger keeps its last 10
+  minutes (bounded to 4 000 lines) of `info`-and-above in memory, so the
+  diagnostics bundle carries "what happened just before" without the
+  agent owning log files (journald does, on a robot). The ring is also
+  `GET /log` for the lab and the future dashboard Diagnostics tab.
+- `/memory`'s census is the RAII kit's `ObjectCensus` plus RSS from
+  `/proc/self/statm`, FrameHub buffers held and channel bytes buffered;
+  `POST /memory/checkpoint` stores the current numbers under a token and
+  `?since=<token>` answers with the diff — the soak's oracle. Checkpoints
+  are bounded (last 16).
+- `make introspect [PIPELINE=<id>] [FORMAT=txt|json|dot]` and `fjarr-lab
+  introspect [pipelines|<id>[.txt|.json|.dot]|stats|memory|log|events]`
+  wrap the endpoint for the terminal and for agents: the summary text by
+  default, `events` streams until interrupted.
 
 ## Slice mapping
 
@@ -196,9 +219,9 @@ for first, produced in one command.
   `introspect.schema.json` under the conformance gate — the lab validates
   a live session snapshot against it and asserts `…/valve.drop` follows
   `select-tracks` within a second.
-- **Slice 3c**: `/events`, the history ring and `?seq`, `/stats`,
-  `/memory` + checkpoints, `/diagnostics.tar.gz`, `make introspect`,
-  `fjarr-lab introspect`.
+- **Slice 3c**: `/events`, `/stats`, `/memory` + checkpoints, `/log`,
+  `/diagnostics.tar.gz` and `fjarr-agent --diagnostics`, `make introspect`,
+  `fjarr-lab introspect` (the history ring and `?seq` landed in 3b).
 - **Slice 5**: `fjarr.introspect` capability, `<PipelineGraph>` + hooks,
   the demo dashboard Diagnostics tab; the same built component is served
   from the endpoint's `GET /` as a data file, so the viewer is built once.

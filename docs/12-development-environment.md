@@ -149,6 +149,30 @@ their queues would otherwise be reported); the RAII kit pairs its own
 hand-offs (posts, sources, promises, thread-pool jobs) with an acquire/release
 so a race with both ends in fjarr code is always reported.
 
+## Nightly CI and the self-hosted GPU runner
+
+`.github/workflows/nightly.yml` (docs/15) runs the 200-cycle soak, valgrind,
+heaptrack and the `netem-*` scenarios every night and on demand. Its
+`runs-on` is the repository variable `FJARR_NIGHTLY_RUNNER`, falling back
+to GitHub's `ubuntu-24.04` (software encoder only, no GPU). To measure the
+VA-API path, register a machine with an Intel iGPU as a self-hosted runner
+and point the variable at it; nothing else changes:
+
+1. On the machine: Ubuntu 24.04 or later, Docker Engine with Compose v2,
+   the user in the `docker`, `render` and `video` groups, `/dev/dri`
+   present (`vainfo` shows H.264 encode entrypoints),
+   `vm.mmap_rnd_bits=28` in `/etc/sysctl.d/` (TSan, above), and `make`.
+2. GitHub → Settings → Actions → Runners → *New self-hosted runner*;
+   install it as a service with the labels `self-hosted,fjarr-gpu`.
+3. GitHub → Settings → Secrets and variables → Actions → *Variables*:
+   `FJARR_NIGHTLY_RUNNER = fjarr-gpu`. Unset it to go back to the hosted
+   runner.
+
+The job writes `RENDER_GID`/`VIDEO_GID` from the machine into `.env`, runs
+the doctor, and asserts VA-API only when `/dev/dri` exists. The runner
+should be dedicated (the nightly applies `tc netem` to containers and
+leaves nothing behind, but it does need `NET_ADMIN`).
+
 ## Pipeline introspection
 
 With the demo profile up, `make introspect` opens the agent's live pipeline

@@ -812,10 +812,11 @@ result it reads ([docs/15](15-testing-strategy.md#memory-safety-c)):
 Two more tools run nightly rather than per commit: **valgrind memcheck**
 on the loop tests (`G_SLICE=always-malloc G_DEBUG=gc-friendly`,
 GStreamer's `gst.supp`) for the errors sanitizers structurally miss, and
-**heaptrack** on a streaming scenario for the "no allocation on the hot
-path" budget (docs/16): steady-state pushes through FrameHub and appsrc
-must allocate nothing per frame beyond the buffer refs GStreamer itself
-takes.
+**heaptrack** on a streaming scenario for the hot-path allocation budget
+(docs/16): steady-state pushes through FrameHub and appsrc allocate one
+metadata-only `GstBuffer` header per subscriber per frame — the fan-out's
+per-subscriber PTS rebase, accepted by design in slice 3c planning — and
+nothing else beyond the refs GStreamer itself takes.
 
 The agent-first surface is deliberately small: `make agent-test`
 (release), `make agent-test-asan`, `make agent-test-tsan`,
@@ -885,7 +886,7 @@ expects the agent to end in:
 | `ice-restart` | send `ice-restart` | `session-close{reason:"ice-restart", retry:true}` within 100 ms; new session brokered and streaming |
 | `deadman` | `drive` at 20 Hz, then stop | `deadman{state:"expired"}` within 600 ms of the last `drive` |
 | `relay-only` | `--ice-policy relay` on both sides | media flows through coturn (relay candidates in both stats) |
-| `soak` | N connect/stream/close cycles (default 200) | `/memory` census equal to baseline, RSS growth < 5 MB, no `error` counters |
+| `soak` | N connect/stream/close cycles (`--cycles`, default 200; CI runs 20 per commit, 200 nightly and at the 3c gate) | `/memory` census equal to baseline after the first cycle's warm-up checkpoint, RSS growth < 5 MB, no `error` counters |
 | `netem-<profile>` | applies a docs/25 profile on the agent container, runs `smoke` | frames keep arriving; health-relevant stats recorded |
 
 Output: a one-screen verdict per assertion (`PASS`/`FAIL name: detail`)
@@ -1035,14 +1036,18 @@ the text above left open, or learned from the lab:
 
 **3c — introspection completeness and the memory ladder**: `/events`,
 the history ring and scrubbing, `/stats`, `/memory` with checkpoints, the
-diagnostics bundle, `make introspect` and `fjarr-lab introspect`; the
-`leaks` tracer bracketing promoted to a gate, the `soak` and `netem-*`
-scenarios, valgrind and heaptrack nightly, TSan promoted to a gate if the
-suppressions make it stable. The bundled viewer moves to slice 5 so it is
-built once as `<PipelineGraph>` and served from `GET /` as a data file.
+diagnostics bundle (with the agent's in-memory log ring, docs/24),
+`make introspect` and `fjarr-lab introspect`; the `leaks` tracer
+bracketing promoted to a gate, the `soak` and `netem-*` scenarios, the
+nightly workflow (valgrind, heaptrack, the full soak) prepared to run on a
+self-hosted GPU runner when one is registered (docs/12). TSan became a
+gate at the end of 3b. The bundled viewer moves to slice 5 so it is built
+once as `<PipelineGraph>` and served from `GET /` as a data file.
 *Gate:* docs/24 acceptance minus the viewer, via `curl` and `fjarr-lab`;
 the docs/15 memory rows green; the 200-cycle soak returns to the census
-baseline.
+baseline. Order settled in planning: 3c precedes slice 4 because real
+capture sources are where leaks and races surface, and the ladder must be
+in place to see them.
 
 ## Where `fjarr.test` lives
 

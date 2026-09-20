@@ -47,7 +47,7 @@ Fixed-CBR-only operation is a spec violation.
 | GPU | encode within iGPU capacity for 2 concurrent 1080p30 encodes |
 | RAM | agent RSS < 300 MB steady state |
 | Store-and-forward disk | bounded ≤ 200 MB (oldest-first eviction + drop counter) |
-| Heap allocations per frame on the streaming hot path (FrameHub → appsrc), steady state | 0 beyond GStreamer's own buffer refs (heaptrack) |
+| Heap allocations per frame on the streaming hot path (FrameHub → appsrc), steady state | one metadata-only `GstBuffer` header per subscriber per frame (the fan-out's per-subscriber PTS rebase, [docs/23](23-agent-core-architecture.md#fan-out)) and GStreamer's own refs — nothing else: no pixel copy, no per-frame `std::function`, string or container allocation (heaptrack) |
 | Object census after a 200-session soak | identical to baseline; RSS growth < 5 MB |
 
 Multi-viewer scales via FrameHub: +1 viewer ≈ +RTP fan-out cost only (no new
