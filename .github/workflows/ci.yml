@@ -65,11 +65,13 @@ jobs:
       - name: start the lab browser, fjarr-server and the demo stack (docs/25 topology; the real agent on the software encoder)
         run: |
           cp .env.example .env
+          # dev and demo-robot map /dev/dri (VA-API); a hosted runner has none. An empty
+          # directory maps no device and the demo robot stays on the software encoder.
+          sudo mkdir -p /dev/dri
           docker compose --profile lab --profile stack up -d --build --wait browser fjarr-server
           docker compose build dev
           docker compose up -d dev
           docker compose exec -T dev make agent-build
-          sudo mkdir -p /dev/dri   # the compose file maps /dev/dri (VA-API); an empty directory maps nothing and keeps the software path
           FJARR_MEDIA_ENCODER=software docker compose --profile demo --profile stack up -d demo-backend demo-robot demo-dashboard
           sleep 8 && docker compose logs --no-color demo-robot | tail -20
       - name: run the e2e suites (loopback + stack)
@@ -84,7 +86,8 @@ jobs:
         # pnpm 10 forwards `--` literally: call playwright through `exec` to pass flags
         run: pnpm --filter '@fjarr/e2e' exec playwright test --project loopback --project stack
       - name: fjarr-opsim scenarios against the demo robot (docs/23 gate 2)
-        run: docker compose exec -T dev make opsim-all
+        # From the runner: the target execs into the demo robot's container itself.
+        run: make opsim-all
       - name: lab artifacts (summaries, captures, traces)
         if: always()
         uses: actions/upload-artifact@v4

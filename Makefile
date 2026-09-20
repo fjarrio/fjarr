@@ -53,8 +53,8 @@ agent-configure: ## CMake configure (BUILD_PRESET=release|debug|asan)
 	cmake --preset $(BUILD_PRESET)
 
 .PHONY: agent-build
-agent-build: ## Build libfjarr + fjarr-agent + demo-robot
-	cmake --build --preset $(BUILD_PRESET)
+agent-build: ## Build libfjarr + fjarr-agent + demo-robot (configures the preset on a fresh tree)
+	cmake --preset $(BUILD_PRESET) && cmake --build --preset $(BUILD_PRESET)
 
 .PHONY: agent-test
 agent-test: ## Run C++ tests
