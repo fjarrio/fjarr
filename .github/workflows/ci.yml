@@ -96,7 +96,7 @@ jobs:
       - name: fjarr-opsim scenarios against the demo robot (docs/23 gate 2)
         # From the runner: the target execs into the demo robot's container itself.
         run: make opsim-all
-      - name: 20-cycle soak (docs/15: the census returns to baseline every commit; 200 nightly)
+      - name: "20-cycle soak (docs/15: the census returns to baseline every commit; 200 nightly)"
         run: make opsim-soak OPSIM_CYCLES=20
       - name: lab artifacts (summaries, captures, traces)
         if: always()

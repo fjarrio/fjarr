@@ -19,6 +19,7 @@
 #include <condition_variable>
 #include <cstdarg>
 #include <cstdio>
+#include <unistd.h>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
@@ -2152,5 +2153,10 @@ int main(int argc, char** argv) {
     }
     loop.stop();
     finished = true;
-    return code;
+    std::fflush(stdout);
+    std::fflush(stderr);
+    // The verdict is complete: exit without running GStreamer/libnice/libsoup static destructors —
+    // a glibc priority-protect assertion fired in that teardown on a hosted runner after a passing
+    // scenario (exit 134), which is not what the scenario measures.
+    _exit(code);
 }

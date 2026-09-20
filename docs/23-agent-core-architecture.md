@@ -974,9 +974,14 @@ the text above left open, or learned from the lab:
 - *"Zero dropped frames" is measured at the receiver's decoder*: across a
   hot-plug the browser's `framesDropped` and `packetsLost` for the untouched
   track stay at zero and `framesDecoded` keeps climbing, while the
-  frame-stamp counter (read per presented frame) may show a single
-  coalesced presentation when Chromium applies the new remote description —
-  a compositor skip, not a lost frame. The lab test asserts both.
+  frame-stamp counter (read per presented frame) may skip a few
+  presentations when Chromium applies the new remote description and starts
+  a second software decoder — a presentation artifact of the browser on a
+  shared host (1 frame on an idle machine, 3–4 on a loaded one, measured
+  identically on the 3b and 3c agents), not a lost frame. The lab test
+  asserts the wire-level counters exactly and budgets presentation at 6
+  frames; `fjarr-opsim`'s `hotplug` asserts a wire-level stamp gap ≤ 1 with
+  a GStreamer receiver.
 - *Snapshot coalescing is trailing-edge*: a trigger inside the 250 ms
   window is deferred to the window's end, never dropped, so the served
   snapshot is always the latest state within a quarter second.
