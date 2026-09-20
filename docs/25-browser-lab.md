@@ -77,12 +77,21 @@ Test with fixtures:
   `robot.netem(profile)`, `robot.freeze()/thaw()/restart()` and
   `restartServer()`.
 - `dashboard` — a page on the demo dashboard with the grant flow done;
-  `connect(robotId)`, `waitForState("connected")`, `tracks()`.
+  `goto({ role })` picks the demo's operator/developer role,
+  `connect(robotId)`, `waitForState("connected")`, `tracks()`,
+  `diagnostics()` (the Diagnostics tab's state and its graph's SVG node
+  count).
 - fixtures beside the harness: the `rtsp-sim` compose service
   (`docker/lab/rtsp-sim.py`, GStreamer's RTSP server serving a moving test
   pattern as H.264) stands in for a network camera, so `fjarr.camera`'s
   `rtsp` source type is exercised in CI without hardware
   (`tests/stack/camera.spec.ts`).
+- `tests/stack/introspect.spec.ts` (slice 5a): `fjarr.introspect` through
+  the session pipeline feed on the lab page — bodies as blob references
+  over the bulk channel, the valve following `select-tracks`, the hot-plug
+  branch appearing, history scrubbing; an operator grant answered
+  `capability-denied`; the demo dashboard's Diagnostics tab rendering the
+  session graph with d3-graphviz for the developer role only.
 - `cdp` — a CDP session for the page with helpers: `network.emulate(profile)`,
   `signaling.capture()` (WebSocket frames → docs/08 messages),
   `wire.capture()` (the library's DataChannel tap), `profile.cpu(ms)`,
@@ -262,12 +271,16 @@ that connects over CDP; every test gets `out`, `cdp`, `loopback`, `stack`,
 | `E2E_DASHBOARD_HTTP` | `E2E_DASHBOARD_URL` | the dashboard as the *harness* probes it, when that differs (CI) |
 | `E2E_OUT` | `web/e2e/out/` | artifact root; each test's directory is recreated per run |
 | `FJARR_GRANT_HS256_SECRET`, `FJARR_DEV_DEVICE_TOKEN` | the `.env` dev values | the harness mints grants and registers loopback robots with these |
+| `E2E_INTROSPECT_TOKEN` | `FJARR_INTROSPECT_TOKEN`, else none | sent as `Authorization: Bearer` to the endpoint when it is exposed beyond loopback (the demo profile from slice 5b, docs/24) |
 
 **The lab page** (`web/e2e/app`) exposes `window.__lab` (contract:
 `web/e2e/src/lab-page.d.ts`): `setup({mode, robotId, …})`,
 `open/close/state/info/waitForState`, `mount("tile"|"grid"|"ptt")`,
 `tracks()`, `videos()`, `stats()`, `stamps.watch/summary`, `wire.drain()`,
-`agent.*` (the loopback agent's faults and stimuli), `ptt.*`, `vitals()`.
+`agent.*` (the loopback agent's faults and stimuli), `ptt.*`, `vitals()`,
+`request()`, `blob(cap, ref)` (a blob reference resolved over the bulk
+channel) and `feed.*` (a session pipeline feed under test control:
+`start/stop/status/pipelines/snapshot/body/history`).
 It creates its client with `wireTap: true` and pushes every wire event to
 the harness. `LoopbackAgent` runs in two modes: **in-page** (a fake socket
 pair, no server) and **server** (it registers with fjarr-server as a

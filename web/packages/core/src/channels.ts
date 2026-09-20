@@ -5,6 +5,7 @@
  * spec: docs/08-protocol.md#datachannel-topology · docs/08#backpressure
  *       docs/21-web-client-architecture.md#publishing-sending-toward-the-robot
  */
+import { BlobReceiver, blobChunks, type BlobChunk, type BlobRef } from "./blob.js";
 import { FjarrError } from "./errors.js";
 import type { DataChannelLike } from "./peer.js";
 import { parseEnvelope, type Envelope } from "./protocol.js";
@@ -16,6 +17,8 @@ export const LOW_WATER = 1 * 1024 * 1024;
 export const PRE_OPEN_QUEUE_LIMIT = 1024 * 1024;
 /** control/realtime envelopes MUST stay ≤ 16 KiB (docs/08). */
 export const MAX_ENVELOPE_BYTES = 16 * 1024;
+/** webrtcbin's negotiated SCTP message limit: a blob chunk is this minus its header (docs/23). */
+export const SCTP_MAX_MESSAGE = 65_536;
 
 export type ChannelClass = "control" | "realtime" | "bulk" | "stream";
 
@@ -46,6 +49,8 @@ export class ChannelSet {
   realtime: DataChannelLike | null = null;
   readonly bulk = new Map<string, DataChannelLike>();
   readonly stream = new Map<string, DataChannelLike>();
+  /** Blob receivers per capability (docs/08#blob-frames), created by the first `bulk(cap)`; survive rebinding. */
+  readonly blobs = new Map<string, BlobReceiver>();
 
   readonly onControlOpen = new Emitter<void>();
   readonly onControlClose = new Emitter<void>();
@@ -94,6 +99,7 @@ export class ChannelSet {
         dc.onopen = () => this.onBulkOpen.emit(cap);
         dc.onclose = () => {
           if (this.bulk.get(cap) === dc) this.bulk.delete(cap);
+          this.blobs.get(cap)?.close();
           this.onBulkClose.emit(cap);
         };
         dc.onbufferedamountlow = () => this.onBulkDrain.emit(cap);
@@ -101,6 +107,7 @@ export class ChannelSet {
           if (!(ev.data instanceof ArrayBuffer)) return;
           if (this.onWire.size > 0) this.onWire.emit({ dir: "in", channel: "bulk", cap, bytes: ev.data.byteLength });
           this.onBulkData.emit({ cap, data: ev.data });
+          this.blobs.get(cap)?.onMessage(ev.data); // a `blob`-framed channel: chunks collect here (docs/08)
         };
         if (dc.readyState === "open") this.onBulkOpen.emit(cap);
         break;
@@ -128,6 +135,16 @@ export class ChannelSet {
     if (!env) return;
     if (this.onWire.size > 0) this.onWire.emit({ dir: "in", channel, env, bytes: encoder.encode(data).byteLength });
     this.onEnvelope.emit(env);
+  }
+
+  /** The blob receiver of `cap`'s channel, created on first use. */
+  blobReceiver(cap: string): BlobReceiver {
+    let r = this.blobs.get(cap);
+    if (!r) {
+      r = new BlobReceiver();
+      this.blobs.set(cap, r);
+    }
+    return r;
   }
 
   /** Bulk bytes went out on `cap`'s channel (the byte channel and bulk sender report here). */
@@ -176,6 +193,7 @@ export class ChannelSet {
     this.control = this.realtime = null;
     this.bulk.clear();
     this.stream.clear();
+    for (const cap of bulkCaps) this.blobs.get(cap)?.close("peer gone");
     for (const cap of bulkCaps) this.onBulkClose.emit(cap);
     this.onReset.emit();
   }
@@ -317,6 +335,19 @@ export interface BulkSender {
   readonly cap: string;
   /** Pumps frames while below HIGH_WATER; resumes on drain (docs/08#backpressure). */
   sendFrames(frames: Iterable<Uint8Array> | AsyncIterable<Uint8Array>, signal?: AbortSignal): Promise<{ frames: number; bytes: number }>;
+  /**
+   * Send one blob (docs/08#blob-frames): chunked to the SCTP limit and pumped like frames. Resolves
+   * with the reference to put in the envelope — send that envelope *first*, then await this.
+   */
+  sendBlob(bytes: Uint8Array, type?: string, options?: { id?: string; signal?: AbortSignal }): { ref: BlobRef; done: Promise<void> };
+  /**
+   * Resolve a blob reference found in an envelope: the whole bytes once complete (16 MiB cap),
+   * whichever of the envelope and the chunks arrived first; rejects after the docs/08 timeout, on a
+   * length mismatch, or when the channel closes.
+   */
+  receive(ref: BlobRef, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<Uint8Array>;
+  /** Streaming form: every validated chunk in order (files, M4). */
+  onChunk(handler: (chunk: BlobChunk) => void): () => void;
 }
 
 export function createByteChannel(set: ChannelSet, cap: string, onRelease: () => void): ByteChannel {
@@ -389,7 +420,8 @@ export function createByteChannel(set: ChannelSet, cap: string, onRelease: () =>
   };
 }
 
-export function createBulkSender(set: ChannelSet, cap: string): BulkSender {
+export function createBulkSender(set: ChannelSet, cap: string, newBlobId: () => string = defaultBlobId): BulkSender {
+  const receiver = set.blobReceiver(cap);
   /** Wait for `event` on `cap`, or reject on abort / channel close. Listeners never leak. */
   const waitFor = (event: Emitter<string>, signal: AbortSignal | undefined, what: string) =>
     new Promise<void>((resolve, reject) => {
@@ -435,5 +467,22 @@ export function createBulkSender(set: ChannelSet, cap: string): BulkSender {
       }
       return { frames: count, bytes };
     },
+    sendBlob(bytes, type, options = {}) {
+      const id = options.id ?? newBlobId();
+      const ref: BlobRef = { blob: id, len: bytes.byteLength, ...(type ? { type } : {}) };
+      // The chunks start on the next turn so the caller's envelope goes out first (docs/08).
+      const done = Promise.resolve().then(() => this.sendFrames(blobChunks(id, bytes, SCTP_MAX_MESSAGE - 37), options.signal)).then(() => undefined);
+      return { ref, done };
+    },
+    receive: (ref, options) => receiver.receive(ref, options),
+    onChunk: (handler) => receiver.onChunk(handler),
   };
+}
+
+function defaultBlobId(): string {
+  // UUIDv7-shaped like every id on the wire (docs/08); crypto.randomUUID gives v4, so build v7 by hand.
+  const t = Date.now();
+  const hex = (n: number, w: number) => n.toString(16).padStart(w, "0");
+  const rnd = () => Math.floor(Math.random() * 0xffff);
+  return `${hex(Math.floor(t / 0x10000), 8)}-${hex(t & 0xffff, 4)}-7${hex(rnd() & 0xfff, 3)}-${hex(0x8000 | (rnd() & 0x3fff), 4)}-${hex(rnd(), 4)}${hex(rnd(), 4)}${hex(rnd(), 4)}`;
 }

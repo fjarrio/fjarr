@@ -8,7 +8,7 @@
  */
 import { StrictMode, useEffect, useRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { createFjarrClient, webSocketFactory, type FjarrClient, type Session, type SessionEvent, type SessionState, type WireEvent } from "@fjarr/core";
+import { createFjarrClient, sessionPipelineFeed, webSocketFactory, type FjarrClient, type PipelineFeed, type Session, type SessionEvent, type SessionState, type WireEvent } from "@fjarr/core";
 import { LoopbackAgent, watchFrameStamps, type LoopbackTrackSpec } from "@fjarr/core/testing/browser";
 import { FjarrProvider, VideoGrid, VideoTile, usePushToTalk, type PushToTalkBinding } from "@fjarr/react";
 import type { LabApi, LabSetup, Scenario, StampSummary } from "../../src/lab-page.d.ts";
@@ -33,6 +33,7 @@ const sessionEvents: SessionEvent[] = [];
 const wireBuffer: WireEvent[] = [];
 let root: Root | null = null;
 let pttBinding: PushToTalkBinding | null = null;
+let feed: PipelineFeed | null = null;
 
 interface StampWatch {
   stop: () => void;
@@ -233,6 +234,31 @@ const lab: LabApi = {
   },
   vitals,
   request: (cap, type, payload, robotId) => sessionOf(robotId).request(cap, type, payload).then((r) => JSON.parse(JSON.stringify(r)) as unknown),
+  blob: (cap, ref, robotId) => sessionOf(robotId).bulk(cap).receive(ref).then((b) => new TextDecoder().decode(b)),
+  feed: {
+    start: (robotId) => {
+      feed?.close();
+      feed = sessionPipelineFeed(sessionOf(robotId));
+    },
+    stop: () => {
+      feed?.close();
+      feed = null;
+    },
+    status: () => feed?.status.getSnapshot() ?? { live: false, error: "no feed" },
+    pipelines: () => (feed?.pipelines.getSnapshot() ?? []).map((p) => ({ id: p.id, kind: p.kind, state: p.state, seq: p.seq, lastTrigger: p.lastTrigger })),
+    snapshot: (id) => {
+      const s = feed?.snapshot(id).getSnapshot();
+      return s ? { seq: s.seq, trigger: s.trigger, state: s.state } : null;
+    },
+    body: (id, seq, form) => {
+      if (!feed) throw new Error("feed.start() first");
+      return feed.body(id, seq, form);
+    },
+    history: async (id) => {
+      if (!feed) throw new Error("feed.start() first");
+      return (await feed.history(id)).map((h) => h.seq);
+    },
+  },
   publishRealtime: (cap, type, payload, robotId) => {
     const p = sessionOf(robotId).publisher(cap, type, { maxHz: 100 });
     p.publish(payload);

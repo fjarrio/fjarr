@@ -12,6 +12,7 @@
 
 #include "core/loop.hpp"
 #include "media/sources.hpp"
+#include "recording_context.hpp"
 
 using namespace fjarr;
 
@@ -65,37 +66,7 @@ TEST(CameraCapability, aRequiredTrackWhoseSourceIsMissingIsAStartupError) {
     EXPECT_THROW(cam.configure(bad, reg), FjarrError);
 }
 
-namespace {
-/// A SessionContext that records what the capability asks of it (hot-plug re-offers).
-struct RecordingContext final : SessionContext {
-    SessionId sid = "01a0-test-session";
-    std::vector<std::vector<std::string>> updates; // each update_tracks call's track ids
-    std::vector<std::string> added;
-    const SessionId& id() const override { return sid; }
-    const OperatorInfo& operator_info() const override { static OperatorInfo o; return o; }
-    const nlohmann::json& granted_params(std::string_view) const override { static nlohmann::json j = nlohmann::json::object(); return j; }
-    void add_track(TrackSpec spec) override { added.push_back(spec.track_id); }
-    void update_tracks(std::vector<TrackSpec> full_set) override {
-        std::vector<std::string> ids;
-        for (const auto& t : full_set) ids.push_back(t.track_id);
-        updates.push_back(ids);
-    }
-    TrackState track_state(std::string_view) const override { return {}; }
-    unsigned manifest_version() const override { return 1; }
-    ChannelSender& control() override { throw std::runtime_error("no channel"); }
-    ChannelSender& realtime() override { throw std::runtime_error("no channel"); }
-    ChannelSender& bulk() override { throw std::runtime_error("no channel"); }
-    ChannelSender& stream() override { throw std::runtime_error("no channel"); }
-    void accept(const Envelope&) override {}
-    void feedback(const Envelope&, nlohmann::json) override {}
-    void result(const Envelope&, nlohmann::json) override {}
-    void fail(const Envelope&, std::string_view, std::string_view) override {}
-    void event(std::string_view, nlohmann::json) override {}
-    void run_async(std::function<void()>, std::function<void()>) override {}
-    std::unique_ptr<DeadmanHandle> arm_deadman(std::chrono::milliseconds, std::function<void()>) override { return nullptr; }
-    void close(std::string_view) override {}
-};
-} // namespace
+using fjarr::testing::RecordingContext;
 
 TEST(CameraCapability, hotPlugReoffersEverySessionWithWhatIsAvailable) {
     // A by-id directory stands in for udev; the source's callback lands on the core loop, where the

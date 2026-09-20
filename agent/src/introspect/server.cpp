@@ -310,9 +310,7 @@ struct Server::Impl {
 
 std::string Server::sse_frame(const Snapshot& snap, const std::string& body) {
     const auto& m = snap.meta;
-    nlohmann::json meta{{"pipeline_id", m.pipeline_id}, {"kind", m.kind}, {"session_id", m.session_id}, {"seq", m.seq},
-                        {"trigger", m.trigger}, {"state", m.state}, {"ts", m.ts}, {"generation", m.generation}};
-    std::string frame = "id: " + m.pipeline_id + "@" + std::to_string(m.seq) + "\nevent: snapshot\ndata: " + meta.dump();
+    std::string frame = "id: " + m.pipeline_id + "@" + std::to_string(m.seq) + "\nevent: snapshot\ndata: " + meta_json(m).dump();
     if (body == "json") frame += "\ndata: " + snap.json;
     else if (body == "dot") frame += "\ndata: " + escape_newlines(snap.dot);
     else if (body == "txt") frame += "\ndata: " + escape_newlines(snap.txt);
@@ -322,11 +320,11 @@ std::string Server::sse_frame(const Snapshot& snap, const std::string& body) {
 
 Server::Server(const AgentConfig::IntrospectSection& config, SnapshotStore& store, Providers providers)
     : impl_(std::make_unique<Impl>(config, store, std::move(providers))) {
-    impl_->store.on_snapshot([this](const Snapshot& s) { impl_->broadcast(s); });
+    listener_ = impl_->store.add_listener([this](const Snapshot& s) { impl_->broadcast(s); });
 }
 
 Server::~Server() {
-    impl_->store.on_snapshot(nullptr);
+    impl_->store.remove_listener(listener_);
     impl_->keepalive.cancel();
     for (auto& c : impl_->clients) {
         c->finished = glib::SignalConnection();

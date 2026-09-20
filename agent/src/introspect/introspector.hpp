@@ -41,6 +41,8 @@ struct Snapshot {
 Snapshot walk(GstBin* bin, SnapshotMeta meta);
 /// The summary line form (docs/24) from a JSON snapshot.
 std::string summarize(const nlohmann::json& snapshot);
+/// The metadata object every reader sends (SSE `data:`, the capability's events; docs/24).
+nlohmann::json meta_json(const SnapshotMeta& meta);
 
 /// Per-pipeline history ring with 250 ms trailing-edge coalescing (a burst of
 /// triggers yields one snapshot per window, the LAST one always lands) and
@@ -57,7 +59,9 @@ class SnapshotStore {
     std::shared_ptr<const Snapshot> latest(const std::string& pipeline_id) const;
     std::shared_ptr<const Snapshot> at(const std::string& pipeline_id, unsigned seq) const;
     std::vector<SnapshotMeta> history(const std::string& pipeline_id) const;
-    void on_snapshot(std::function<void(const Snapshot&)> fn) { listener_ = std::move(fn); }
+    /// Readers of new snapshots (the endpoint's /events, the fjarr.introspect capability); core loop.
+    unsigned add_listener(std::function<void(const Snapshot&)> fn);
+    void remove_listener(unsigned id);
     void expire_retired();
 
   private:
@@ -80,7 +84,8 @@ class SnapshotStore {
     std::string dot_dir_;
     Scheduler schedule_;
     std::map<std::string, Ring> rings_;
-    std::function<void(const Snapshot&)> listener_;
+    std::map<unsigned, std::function<void(const Snapshot&)>> listeners_;
+    unsigned next_listener_ = 1;
 };
 
 } // namespace fjarr::introspect

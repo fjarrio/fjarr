@@ -10,9 +10,15 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./pipelines": {
+      "types": "./dist/pipelines-graph.d.ts",
+      "default": "./dist/pipelines-graph.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
@@ -23,16 +29,36 @@
   },
   "peerDependencies": {
     "react": ">=19",
-    "react-dom": ">=19"
+    "react-dom": ">=19",
+    "d3-graphviz": ">=5",
+    "d3-selection": ">=3",
+    "d3-transition": ">=3"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.0",
+    "@types/d3-graphviz": "^3.1.0",
+    "@types/d3-selection": "^3.0.0",
+    "@types/d3-transition": "^3.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "d3-graphviz": "^5.6.0",
+    "d3-selection": "^3.0.0",
+    "d3-transition": "^3.0.1",
     "happy-dom": "^20.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "typescript": "^5.9.0",
     "vitest": "^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "d3-graphviz": {
+      "optional": true
+    },
+    "d3-selection": {
+      "optional": true
+    },
+    "d3-transition": {
+      "optional": true
+    }
   }
 }

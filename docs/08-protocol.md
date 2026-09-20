@@ -171,7 +171,10 @@ All control/backend messages share one JSON shape:
 `accept/feedback/result` echo the request's `event_id`. `result.payload`
 always carries `ok: bool` and, on failure, `error: {code, message}`. A
 request to a capability not attached to the session is answered
-`result{ok:false, error:{code:"capability-unknown"}}`; an envelope with a
+`result{ok:false, error:{code:"capability-denied"}}` when the agent has
+that capability but the grant did not include it, and
+`capability-unknown` when the agent has never heard of it (so a client can
+tell "ask for a wider grant" from "wrong robot"); an envelope with a
 `v` other than 1 on a DataChannel is dropped and counted, never answered
 (the signaling `hello` already negotiated the major).
 

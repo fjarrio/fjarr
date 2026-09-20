@@ -179,7 +179,7 @@ declaration**, never by the caller guessing:
 | Command with outcome | `session.request(cap, type, payload)` | control | accept/feedback*/result correlation |
 | Continuous lossy stream (joystick, pointer, joint targets) | `session.publisher(cap, type, { key?, maxHz })` → `.publish(payload)` | realtime (unordered, no retransmit) | **newest-wins per key**, rate-capped (default 60 Hz); a burst never queues, the latest value always goes out |
 | Byte stream (terminal input, clipboard payload) | `session.channel(cap)` → `.write(bytes)` | the capability's **bulk** channel (`fjarr:bulk:<cap>`, reliable-ordered — [docs/08](08-protocol.md#datachannel-topology)); bytes written before the channel opens are queued (bounded) | ordered; `bufferedAmount`/`onDrain` exposed; incoming bytes via `.onData(cb)` |
-| Large binary, either direction (file upload, a snapshot body) | `session.bulk(cap)` → `.sendFrames(iter)` / `.receive(ref)` / `.onChunk(cb)` | bulk (same DC), [blob frames](08-protocol.md#blob-frames) | send: pumps while below HIGH_WATER, resumes on `bufferedamountlow`. `receive(ref)` resolves a blob reference found in an envelope: whole bytes once complete (16 MiB cap), either arrival order, rejects after the docs/08 timeout or when the channel closes. `onChunk` is the streaming form for files (M4) |
+| Large binary, either direction (file upload, a snapshot body) | `session.bulk(cap)` → `.sendFrames(iter)` / `.sendBlob(bytes, type)` / `.receive(ref)` / `.onChunk(cb)` | bulk (same DC), [blob frames](08-protocol.md#blob-frames) | send: pumps while below HIGH_WATER, resumes on `bufferedamountlow`. `receive(ref)` resolves a blob reference found in an envelope: whole bytes once complete (16 MiB cap), either arrival order, rejects after the docs/08 timeout or when the channel closes. `onChunk` is the streaming form for files (M4) |
 | Lossy binary frames (point clouds, depth, custom sensors — either direction) | `session.stream(cap)` → `.send(frame)` / `.onFrame(cb)` | **stream** (unordered, no retransmit, binary; [ADR-0018](adr/0018-stream-channel-class.md)) | frame-level newest-wins with sequence numbers; chunked to the SCTP message limit; consumers get whole frames or nothing. **Lands in M4** with the first stream-class capability ([roadmap](17-roadmap.md#m4--files-telemetry-logs-sensors)); slice 2 ships the surface without the chunker |
 
 React bindings: `usePublisher(session, cap, type, opts)` returns a stable
@@ -385,14 +385,16 @@ interface, two implementations — otherwise there would be two viewers:
 
 ```ts
 interface PipelineFeed {
-  readonly pipelines: ReadonlyStore<PipelineInfo[]>;               // id, kind, state, seq, last milestone
+  readonly pipelines: ReadonlyStore<PipelineInfo[]>;               // id, kind, state, seq, last trigger
+  readonly status: ReadonlyStore<{ live: boolean; error: string | null }>; // subscribed / stream open; capability-denied lands here
   snapshot(id: string): ReadonlyStore<SnapshotMeta | undefined>;   // newest-wins per pipeline
-  body(id: string, seq: number, form: "txt" | "json" | "dot"): Promise<string>; // bounded cache
+  body(id: string, seq: number, form: "txt" | "json" | "dot"): Promise<string>; // bounded cache (64 bodies)
   history(id: string): Promise<SnapshotMeta[]>;
+  refresh(): Promise<void>;                                        // re-read the list
   close(): void;
 }
-sessionPipelineFeed(session): PipelineFeed   // pipelines/subscribe + blob receive
-httpPipelineFeed(baseUrl, { token? }): PipelineFeed  // GET /pipelines, /events (streamed fetch, Last-Event-ID), /pipelines/<id>.<form>?seq
+sessionPipelineFeed(session, { forms? }): PipelineFeed   // pipelines/subscribe (+ replay) + blob receive; re-subscribes on every new session
+httpPipelineFeed(baseUrl, { token?, retryMs? }): PipelineFeed  // GET /pipelines, /events (streamed fetch, Last-Event-ID), /pipelines/<id>.<form>?seq
 ```
 
 Both live in `@fjarr/core`. The HTTP feed parses SSE from a streamed
@@ -401,12 +403,17 @@ lab's `introspect` command is its third consumer
 ([docs/25](25-browser-lab.md)). Stores use the same `ReadonlyStore` as
 telemetry, so the hooks re-render only on change.
 
-`usePipelines`, `usePipelineSnapshot` and `<PipelineGraph>` take a
-**feed**, not a session — the one deliberate deviation from the
-session-everywhere convention of this document, made so the robot-local
-viewer and the dashboard share every line above the transport.
-`usePipelineFeed(session)` creates and caches the session feed, so a
-Diagnostics tab stays the promised twenty lines. The gate for "one
+`usePipelines`, `usePipelineSnapshot`, `usePipelineBody`, `useFeedStatus`
+and `<PipelineGraph feed pipelineId seq?>` take a **feed**, not a session —
+the one deliberate deviation from the session-everywhere convention of
+this document, made so the robot-local viewer and the dashboard share
+every line above the transport. `usePipelineFeed(session)` creates one
+session feed per session, shared by every consumer and closed by the
+last, so a Diagnostics tab stays the promised twenty lines. The hooks
+live in the main entry; `<PipelineGraph>` is the separate
+`@fjarr/react/pipelines` entry because its default renderer pulls
+d3-graphviz and the Graphviz wasm (optional peer dependencies, docs/14) —
+pass `renderDot` to draw with anything else, and `seq` to scrub. The gate for "one
 viewer" is a contract test that runs one suite against both feeds (the
 session feed through the lab stack, the HTTP feed against the endpoint):
 same list, same newest-wins behaviour under a burst, same bytes for a

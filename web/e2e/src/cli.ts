@@ -15,6 +15,7 @@ import type { WireEvent } from "@fjarr/core";
 import { OutDir } from "./artifacts.ts";
 import { LabCdp } from "./cdp.ts";
 import { env } from "./env.ts";
+import { httpPipelineFeed } from "@fjarr/core";
 import { cdpEndpoint, introspectFollow, introspectText } from "./fixtures.ts";
 import { RobotContainer } from "./netem.ts";
 import { describeProfile, NETWORK_PROFILES, type ProfileName } from "./profiles.ts";
@@ -348,17 +349,25 @@ async function main(): Promise<void> {
         say(JSON.stringify(body, null, 2));
         json(file, { path, result: body });
       };
+      // Over HTTP the CLI is the third consumer of the core's pipeline feed (docs/21#pipeline-feeds);
+      // inside the robot container it stays on curl (the endpoint is loopback-only there).
+      const feed = env.introspectHttp ? httpPipelineFeed(env.introspectHttp, { token: env.introspectToken || undefined }) : null;
       if (what === "pipelines") {
-        const list = JSON.parse(await get("/pipelines")) as { pipelines: Array<{ id: string; kind: string; state: string; seq: number; last_trigger: string }> };
-        if (list.pipelines.length === 0) say("(no pipelines — nothing is streaming)");
-        for (const p of list.pipelines) say(`${p.id}  ${p.kind}  ${p.state}  seq=${p.seq}  ${p.last_trigger}`);
+        let pipelines: Array<{ id: string; kind: string; state: string; seq: number; last_trigger: string }>;
+        if (feed) {
+          await feed.refresh();
+          pipelines = feed.pipelines.getSnapshot().map((p) => ({ id: p.id, kind: p.kind, state: p.state, seq: p.seq, last_trigger: p.lastTrigger }));
+        } else pipelines = (JSON.parse(await get("/pipelines")) as { pipelines: typeof pipelines }).pipelines;
+        if (pipelines.length === 0) say("(no pipelines — nothing is streaming)");
+        for (const p of pipelines) say(`${p.id}  ${p.kind}  ${p.state}  seq=${p.seq}  ${p.last_trigger}`);
         const summaries: Record<string, string> = {};
-        for (const p of list.pipelines) {
-          const txt = await get(`/pipelines/${p.id}.txt`);
+        for (const p of pipelines) {
+          const txt = feed ? await feed.body(p.id, p.seq, "txt") : await get(`/pipelines/${p.id}.txt`);
           summaries[p.id] = txt;
           say(`\n── ${p.id}\n${txt.trimEnd()}`);
         }
-        json("introspect.json", { pipelines: list.pipelines, summaries });
+        json("introspect.json", { pipelines, summaries });
+        feed?.close();
       } else if (what === "stats") await printJson("/stats", "introspect-stats.json");
       else if (what === "memory") {
         const since = flag("since");
@@ -373,6 +382,34 @@ async function main(): Promise<void> {
         const text = await get(minutes ? `/log?minutes=${Number(minutes)}` : "/log");
         say(text.trimEnd());
         say(`→ ${out.writeText("introspect-log.txt", text)}`);
+      } else if (what === "events" && feed) {
+        const body = flag("body");
+        say("following the pipeline feed — one line per snapshot, Ctrl-C to stop");
+        const watched = new Set<string>();
+        const watch = (id: string) => {
+          if (watched.has(id)) return;
+          watched.add(id);
+          const store = feed.snapshot(id);
+          let last = store.getSnapshot()?.seq ?? 0;
+          store.subscribe(() => {
+            const s = store.getSnapshot();
+            if (!s || s.seq === last) return;
+            last = s.seq;
+            say(`${id}@${s.seq}  ${s.trigger}  ${s.state}`);
+            const line = { id: `${id}@${s.seq}`, pipeline_id: id, seq: s.seq, trigger: s.trigger, state: s.state, ts: s.ts, body: null as string | null };
+            if (body === "txt" || body === "json" || body === "dot") {
+              void feed.body(id, s.seq, body).then((text) => {
+                if (body === "txt") say(text.trimEnd().replace(/^/gm, "    "));
+                out.appendJsonl("introspect-events.jsonl", { ...line, body: text });
+              });
+            } else out.appendJsonl("introspect-events.jsonl", line);
+          });
+        };
+        feed.pipelines.subscribe(() => feed.pipelines.getSnapshot().forEach((p) => watch(p.id)));
+        feed.pipelines.getSnapshot().forEach((p) => watch(p.id));
+        await new Promise<void>((resolve) => process.once("SIGINT", () => resolve()));
+        feed.close();
+        say(`→ ${out.path("introspect-events.jsonl")}`);
       } else if (what === "events") {
         const body = flag("body");
         const path = body ? `/events?body=${body}` : "/events";

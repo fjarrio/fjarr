@@ -175,7 +175,8 @@ pipelines from the fleet dashboard without shell access:
 | `type` | kind | payload | channel |
 |---|---|---|---|
 | `pipelines/list` | request → result | `{pipelines: [...]}` | control |
-| `pipelines/subscribe` | request → result | `{pipeline_id?: "*", forms: ["txt","json","dot"]}` — then `snapshot` events | control |
+| `pipelines/subscribe` | request → result | `{pipeline_id?: "*", forms?: ["txt","json","dot"], replay?: true}` → the current list; then `snapshot` events for every matching pipeline — first the latest of each (the replay), so a subscriber never asks twice for "what does it look like now" | control |
+| `pipelines/unsubscribe` | request → result | `{}` | control |
 | `snapshot` | event | `{pipeline_id, seq, ts, trigger, txt?, json?, dot?}` — metadata and `txt` inline; `json` and `dot` are always [blob references](08-protocol.md#blob-frames) on `fjarr:bulk:fjarr.introspect`, so a client has one path per form | control + bulk |
 | `pipelines/history` | request → result | `{pipeline_id, seq_from?}` → the metadata sequence | control |
 | `pipelines/snapshot` | request → result | `{pipeline_id, seq, forms}` → one historical snapshot in the same shape as the event (bodies as blob references) — the session's `?seq=` | control + bulk |
@@ -277,9 +278,10 @@ in one command.
   checkpoints, `/log`, `/diagnostics.tar.gz` and `fjarr-agent
   --diagnostics`, `make introspect`, `fjarr-lab introspect` (the history
   ring and `?seq` landed in 3b).
-- **Slice 5a**: the docs/08 blob frames on both tiers, the
+- **Slice 5a** ✔ (2026-09-21): the docs/08 blob frames on both tiers, the
   `fjarr.introspect` capability, the pipeline feeds, `<PipelineGraph>` +
-  hooks, the demo dashboard Diagnostics tab behind the developer role.
+  hooks, the demo dashboard Diagnostics tab behind the developer role
+  ([review](reviews/slice-5a-review.md)).
 - **Slice 5b**: the viewer app served from `introspect.viewer_dir`,
   `make introspect` opening it against the demo robot (token path), the
   CI-built `fjarr-agent` image carrying it ([docs/23](23-agent-core-architecture.md#slices-3a-3b-3c-and-their-gates)).

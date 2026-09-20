@@ -17,6 +17,7 @@
 #include "core/protocol.hpp"
 #include "core/session_manager.hpp"
 #include "core/signaling_client.hpp"
+#include "capabilities/introspect_capability.hpp"
 #include "introspect/introspector.hpp"
 #include "introspect/memory.hpp"
 #include "introspect/server.hpp"
@@ -211,6 +212,7 @@ struct Agent::Impl {
         };
         auto tcfg = config.capabilities.find("fjarr.test");
         deps.test_hooks = tcfg != config.capabilities.end() && tcfg->second.value("test_hooks", false);
+        deps.known_capability = [this](const std::string& name) { return registry.count(name) > 0; };
         sessions = std::make_unique<core::SessionManager>(deps, [this](const std::string& name) -> const core::RegisteredCapability* {
             auto it = registry.find(name);
             return it == registry.end() ? nullptr : &it->second;
@@ -331,6 +333,15 @@ Agent::Agent(AgentConfig config) : impl_(std::make_unique<Impl>()) {
     if (!gst_is_initialized()) gst_init(nullptr, nullptr);
     log::set_level(impl_->config.agent.log_level);
     log::set_json(impl_->config.agent.log_format == "json");
+    if (impl_->config.introspect.enabled) {
+        // Built in (docs/06): the rings exist once the agent boots, so the capability resolves them lazily.
+        auto cap = std::make_unique<capabilities::IntrospectCapability>([this] { return impl_->snapshots.get(); },
+                                                                         [this] { return impl_->stats_json(); });
+        const auto manifest = cap->manifest();
+        impl_->registry[manifest.name] = core::RegisteredCapability{cap.get(), manifest, true};
+        impl_->capabilities.push_back(std::move(cap));
+        log::info("agent", "capability registered", {{"name", manifest.name}, {"built_in", "true"}});
+    }
 }
 
 Agent::~Agent() {

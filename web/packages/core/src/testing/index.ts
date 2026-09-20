@@ -525,6 +525,15 @@ export class MockAgent {
     this.control?.receive(JSON.stringify(makeEnvelope(cap, type, "event", payload, newEventId(this.now()))));
   }
 
+  /** Agent → client binary message on `cap`'s bulk channel (a blob chunk, docs/08#blob-frames). */
+  sendBulk(cap: string, bytes: Uint8Array): void {
+    const dc = this.pc.channel(`fjarr:bulk:${cap}`);
+    if (!dc) throw new Error(`no bulk channel for ${cap} (bulkCaps option)`);
+    const copy = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(copy).set(bytes);
+    dc.receive(copy);
+  }
+
   /** Agent → client event on realtime. */
   sendRealtime(cap: string, type: string, payload: unknown): void {
     this.pc.channel("fjarr:realtime")?.receive(JSON.stringify(makeEnvelope(cap, type, "event", payload, newEventId(this.now()))));

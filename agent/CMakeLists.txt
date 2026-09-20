@@ -34,6 +34,8 @@ add_library(fjarr STATIC
   src/core/protocol.cpp
   src/core/config.cpp
   src/core/signaling_client.cpp
+  src/core/blob.cpp
+  src/core/blob_pump.cpp
   src/core/session.cpp
   src/core/session_manager.cpp
   src/media/frame_stamp.cpp
@@ -52,6 +54,7 @@ add_library(fjarr STATIC
   src/introspect/server.cpp
   src/capabilities/test_capability.cpp
   src/capabilities/camera_capability.cpp
+  src/capabilities/introspect_capability.cpp
 )
 add_library(fjarr::fjarr ALIAS fjarr)
 target_include_directories(fjarr

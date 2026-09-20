@@ -28,6 +28,21 @@ export type {
 export { rtcPeerConnectionFactory, domMediaStreamFactory } from "./peer.js";
 export { EnvelopeRouter, TelemetryStore, DEFAULT_REQUEST_TIMEOUT_MS, type EnvelopeHandler, type RequestOptions } from "./router.js";
 export {
+  BlobReceiver,
+  blobChunks,
+  encodeBlobChunk,
+  isBlobRef,
+  parseBlobChunk,
+  BLOB_HEADER_BYTES,
+  BLOB_MAX_BYTES,
+  BLOB_MAX_CHUNK,
+  BLOB_PENDING_BYTES,
+  BLOB_PENDING_TTL_MS,
+  type BlobChunk,
+  type BlobReceiverOptions,
+  type BlobRef,
+} from "./blob.js";
+export {
   ChannelSet,
   PublisherSlot,
   parseChannelLabel,
@@ -35,6 +50,7 @@ export {
   LOW_WATER,
   MAX_ENVELOPE_BYTES,
   PRE_OPEN_QUEUE_LIMIT,
+  SCTP_MAX_MESSAGE,
   type BulkSender,
   type ByteChannel,
   type ChannelClass,
@@ -64,4 +80,19 @@ export { FocusRegistry, type FocusOptions, type FocusRegistration, type WindowLi
 export { createSession, type AudioUplink, type Session, type SessionDeps, type SessionEvent, type SessionInfo, type SessionOptions, type SessionState, type TrackApi } from "./session.js";
 export { createFjarrClient, type FjarrClient, type FjarrClientConfig, type PersistenceAdapter, type SessionManager } from "./client.js";
 export type { WireEvent } from "./wire.js";
+export {
+  httpPipelineFeed,
+  sessionPipelineFeed,
+  SseParser,
+  INTROSPECT_CAP,
+  SNAPSHOT_FORMS,
+  type FeedStatus,
+  type HttpFeedOptions,
+  type PipelineFeed,
+  type PipelineInfo,
+  type SessionFeedOptions,
+  type SnapshotForm,
+  type SnapshotMeta,
+  type SseEvent,
+} from "./pipelines.js";
 export { FJARR_CORE_VERSION } from "./version.js";

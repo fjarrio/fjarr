@@ -38,6 +38,12 @@ function mintGrant(robotId: string, operator: { id: string; label: string }, cap
   return `${header}.${claims}.${sig}`;
 }
 
+/** The company's own roles → the Fjarr capabilities each may open (a demo-only convention, docs/09). */
+const ROLES: Record<string, string[]> = {
+  operator: ["fjarr.test", "fjarr.camera"],
+  developer: ["fjarr.test", "fjarr.camera", "fjarr.introspect"],
+};
+
 /** The company's own robot registry — their data, not Fjarr's. */
 const robots = [
   { id: "demo-robot-01", name: "Demo Robot 01", site: "Lab" },
@@ -65,14 +71,19 @@ const server = createServer(async (req, res) => {
 
   // …plus ENDPOINT 1 of the Fjarr contract: mint a session grant — a real
   // HS256 JWT the sidecar verifies (docs/09#a-session-grants). The company's
-  // own auth would decide the operator and the capabilities; the demo grants
-  // the built-in test capability (slice 3b) and the camera (slice 4+).
+  // own auth decides the operator and the capabilities; the demo stands in
+  // for it with a ROLE the dashboard picks: an operator gets the robot's
+  // media capabilities, a developer additionally `fjarr.introspect`
+  // (docs/24) — nobody gets everything by default.
   if (url.pathname === "/api/fjarr/grant" && req.method === "POST") {
     const robotId = url.searchParams.get("robot") ?? "demo-robot-01";
     if (!robots.some((r) => r.id === robotId)) return respond(404, { error: `unknown robot ${robotId}` });
-    const operator = { id: "demo@example.com", label: "Demo Operator" };
-    const capabilities = [{ name: "fjarr.test" }, { name: "fjarr.camera" }];
-    return respond(200, { grant: mintGrant(robotId, operator, capabilities), robot_id: robotId, capabilities });
+    const role = url.searchParams.get("role") ?? "operator";
+    const grants = ROLES[role];
+    if (!grants) return respond(400, { error: `unknown role ${role} (operator | developer)` });
+    const operator = { id: `${role}@example.com`, label: role === "developer" ? "Demo Developer" : "Demo Operator" };
+    const capabilities = grants.map((name) => ({ name }));
+    return respond(200, { grant: mintGrant(robotId, operator, capabilities), robot_id: robotId, role, capabilities });
   }
 
   // …and ENDPOINT 2: the webhook receiver (docs/09#b-webhooks).

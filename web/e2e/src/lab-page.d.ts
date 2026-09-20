@@ -100,6 +100,18 @@ export interface LabApi {
   vitals(): VitalsSnapshot;
   /** A request on the control channel; resolves with the result payload (rejects with the error). */
   request(cap: string, type: string, payload: unknown, robotId?: string): Promise<unknown>;
+  /** Resolve a blob reference from an envelope on `cap`'s bulk channel (docs/08#blob-frames); the bytes as text. */
+  blob(cap: string, ref: { blob: string; len: number; type?: string }, robotId?: string): Promise<string>;
+  /** The session pipeline feed (docs/21#pipeline-feeds) of the default robot, driven from the test. */
+  feed: {
+    start(robotId?: string): void;
+    stop(): void;
+    status(): { live: boolean; error: string | null };
+    pipelines(): Array<{ id: string; kind: string; state: string; seq: number; lastTrigger: string }>;
+    snapshot(pipelineId: string): { seq: number; trigger: string; state: string } | null;
+    body(pipelineId: string, seq: number, form: "txt" | "json" | "dot"): Promise<string>;
+    history(pipelineId: string): Promise<number[]>;
+  };
   /** A newest-wins event on the realtime channel. */
   publishRealtime(cap: string, type: string, payload: unknown, robotId?: string): void;
   /** Ask for an ICE restart the way the ladder's rung 2 does (test seam: forces the request). */

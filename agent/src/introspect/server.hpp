@@ -45,6 +45,7 @@ class Server {
     struct Impl;
     std::unique_ptr<Impl> impl_;
     int port_ = 0;
+    unsigned listener_ = 0;
 };
 
 } // namespace fjarr::introspect

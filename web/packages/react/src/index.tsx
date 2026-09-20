@@ -28,6 +28,7 @@ export {
   type CommandState,
   type TelemetryReader,
 } from "./hooks.js";
+export { useFeedStatus, usePipelineBody, usePipelineFeed, usePipelines, usePipelineSnapshot, type PipelineBody } from "./pipelines.js";
 export { useAudioTrack, usePushToTalk, useVideoTrack, type AudioSinkStatus, type AudioTrackBinding, type PushToTalkBinding, type PushToTalkOptions, type UseVideoTrackOptions, type VideoTrackBinding } from "./media.js";
 export {
   AudioSink,
@@ -82,4 +83,10 @@ export type {
   TrackStats,
   TrackStatus,
   TrackTier,
+  PipelineFeed,
+  PipelineInfo,
+  SnapshotForm,
+  SnapshotMeta,
+  FeedStatus,
 } from "@fjarr/core";
+export { httpPipelineFeed, sessionPipelineFeed } from "@fjarr/core";

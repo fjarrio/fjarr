@@ -4,6 +4,7 @@
 
 #include <algorithm>
 
+#include <fjarr/blob.hpp>
 #include <fjarr/errors.hpp>
 
 #include "log.hpp"
@@ -173,6 +174,10 @@ void SessionContextImpl::fail(const Envelope& request, std::string_view code, st
                                                   nlohmann::json{{"ok", false}, {"error", {{"code", std::string(code)}, {"message", std::string(message)}}}},
                                                   request.event_id));
 }
+blob::BlobRef SessionContextImpl::send_blob(std::string bytes, std::string media_type, std::function<void(bool)> done) {
+    return session_.send_blob(cap_, std::move(bytes), std::move(media_type), std::move(done));
+}
+void SessionContextImpl::cancel_blob(std::string_view blob_id) { session_.cancel_blob(blob_id); }
 void SessionContextImpl::event(std::string_view type, nlohmann::json payload) {
     session_.send_control(protocol::make_envelope(cap_, std::string(type), "event", std::move(payload)));
 }
@@ -437,7 +442,8 @@ void Session::on_channel_open(GstWebRTCDataChannel* dc, const std::string& label
         s->dc = dc;
         g_object_set(dc, "buffered-amount-low-threshold", static_cast<guint64>(LOW_WATER), nullptr);
         senders_[label] = std::move(s);
-        // Fires on webrtcbin's thread: the capability's drain callback runs on the loop, looked up by label.
+        // Fires on webrtcbin's thread: the core's blob pump and then the capability's drain callback
+        // run on the loop, looked up by label.
         auto* drain_ctx = new ChannelContext{weak_from_this(), generation_, deps_.loop, label};
         dc_signals_.emplace_back(
             dc, "on-buffered-amount-low",
@@ -446,13 +452,100 @@ void Session::on_channel_open(GstWebRTCDataChannel* dc, const std::string& label
                 c->loop->post([w = c->session, g = c->generation, label = c->label] {
                     auto self = w.lock();
                     if (!self || self->generation_ != g || self->closing()) return;
+                    self->pump_blobs(label);
                     auto it = self->senders_.find(label);
                     if (it == self->senders_.end()) return;
                     if (auto* bulk = dynamic_cast<BulkSender*>(it->second.get()); bulk && bulk->drain) bulk->drain();
                 });
             })),
             drain_ctx, [](gpointer d, GClosure*) { delete static_cast<ChannelContext*>(d); });
+        // Inbound binary (docs/08#blob-frames): copied off the SCTP thread, framed on the loop.
+        auto* data_ctx = new ChannelContext{weak_from_this(), generation_, deps_.loop, label};
+        dc_signals_.emplace_back(
+            dc, "on-message-data",
+            G_CALLBACK((+[](GstWebRTCDataChannel*, GBytes* data, gpointer d) {
+                const auto* c = static_cast<const ChannelContext*>(d);
+                gsize n = 0;
+                const auto* p = static_cast<const char*>(data ? g_bytes_get_data(data, &n) : nullptr);
+                std::string bytes(p ? p : "", p ? n : 0);
+                c->loop->post([w = c->session, g = c->generation, label = c->label, bytes = std::move(bytes)] {
+                    auto self = w.lock();
+                    if (!self || self->generation_ != g) return;
+                    self->on_channel_data(label, bytes);
+                });
+            })),
+            data_ctx, [](gpointer d, GClosure*) { delete static_cast<ChannelContext*>(d); });
+        pump_blobs(label); // blobs queued before the channel opened go out now
     }
+}
+
+void Session::on_channel_data(const std::string& label, const std::string& bytes) {
+    if (closing()) {
+        dropped_binary_++;
+        return;
+    }
+    const std::string cap_name = label.substr(std::string("fjarr:bulk:").size());
+    AttachedCapability* cap = attached(cap_name);
+    auto ctx = contexts_.find(cap_name);
+    if (!cap || ctx == contexts_.end()) {
+        dropped_binary_++;
+        return;
+    }
+    BulkFraming framing = BulkFraming::Raw;
+    for (const auto& d : cap->manifest.channels)
+        if (d.channel == ChannelClass::Bulk) framing = d.framing;
+    const std::span<const std::byte> view(reinterpret_cast<const std::byte*>(bytes.data()), bytes.size());
+    try {
+        if (framing == BulkFraming::Raw) {
+            cap->capability->on_binary(*ctx->second, view);
+            return;
+        }
+        const auto chunk = blob::parse_chunk(view);
+        if (!chunk) { // docs/08: a bad header is dropped and counted, never delivered
+            dropped_binary_++;
+            log::debug("router", "dropped blob chunk", {{"session", sid8_}, {"cap", cap_name}, {"bytes", std::to_string(bytes.size())}});
+            return;
+        }
+        cap->capability->on_blob_chunk(*ctx->second, *chunk);
+    } catch (const std::exception& e) {
+        log::error("router", "capability threw on binary", {{"session", sid8_}, {"cap", cap_name}, {"error", e.what()}});
+    }
+}
+
+blob::BlobRef Session::send_blob(const std::string& cap, std::string bytes, std::string media_type, std::function<void(bool)> done) {
+    deps_.loop->assert_owner("Session::send_blob");
+    AttachedCapability* c = attached(cap);
+    bool declared = false;
+    if (c)
+        for (const auto& d : c->manifest.channels)
+            if (d.channel == ChannelClass::Bulk) declared = true;
+    if (!declared) throw FjarrError(std::string(error_codes::payload_invalid), cap + " declares no bulk channel; blobs need one (docs/08#blob-frames)");
+    if (closing()) throw FjarrError(std::string(error_codes::payload_invalid), "session is closing");
+    blob::BlobRef ref{protocol::new_event_id(), bytes.size(), std::move(media_type)};
+    const std::string label = "fjarr:bulk:" + cap;
+    auto it = blob_pumps_.find(label);
+    if (it == blob_pumps_.end()) it = blob_pumps_.emplace(label, BlobPump(SCTP_MAX_MESSAGE - blob::HEADER_BYTES)).first;
+    it->second.enqueue(BlobTransfer{ref.id, std::move(bytes), 0, std::move(done)});
+    // docs/08: the referencing envelope goes out first — the caller sends it right after this
+    // returns, so the first chunks leave on the next loop turn.
+    deps_.loop->post([w = weak_from_this(), g = generation_, label] {
+        auto self = w.lock();
+        if (!self || self->generation_ != g) return;
+        self->pump_blobs(label);
+    });
+    return ref;
+}
+
+void Session::cancel_blob(std::string_view blob_id) {
+    for (auto& [_, pump] : blob_pumps_)
+        if (pump.cancel(blob_id)) return;
+}
+
+void Session::pump_blobs(const std::string& label) {
+    auto pump = blob_pumps_.find(label);
+    if (pump == blob_pumps_.end()) return;
+    auto s = senders_.find(label);
+    pump->second.pump(s == senders_.end() ? nullptr : s->second.get());
 }
 
 void Session::maybe_connected() {
@@ -497,7 +590,12 @@ void Session::route(const Envelope& env, const std::string& label) {
     }
     AttachedCapability* cap = attached(env.cap);
     if (!cap) {
-        if (env.kind == "request") reply_error(env, error_codes::capability_unknown, "capability not attached to this session");
+        // docs/08#envelope: registered but not in this session's grant → denied; unheard of → unknown.
+        const bool known = deps_.known_capability && deps_.known_capability(env.cap);
+        if (env.kind == "request") {
+            if (known) reply_error(env, error_codes::capability_denied, "capability not granted to this session");
+            else reply_error(env, error_codes::capability_unknown, "capability not attached to this session");
+        }
         return;
     }
     if (env.type == "select-tracks" && env.kind == "request") {
@@ -783,12 +881,14 @@ nlohmann::json Session::describe() const {
 std::size_t Session::buffered_bytes() const {
     std::size_t n = 0;
     for (const auto& [_, s] : senders_) n += s->buffered_amount();
+    for (const auto& [_, p] : blob_pumps_) n += p.queued_bytes();
     return n;
 }
 
 void Session::close(const std::string& reason, bool retry, bool from_server) {
     deps_.loop->assert_owner("Session::close");
     if (state_ == State::Closing || state_ == State::Closed) return;
+    for (auto& [_, pump] : blob_pumps_) pump.fail_all(); // blobs never complete on a closing session (done(false) while the capability is still attached)
     set_state(State::Closing);
     log::info("session", "closing", {{"session", sid8_}, {"reason", reason}, {"retry", retry ? "true" : "false"}});
     watchdog_.cancel();
@@ -858,6 +958,7 @@ void Session::finish_close(const std::string& reason, bool retry, bool from_serv
     unsubscribe_all(); // nothing may have re-subscribed during the flush window, but the hub must agree
     dc_signals_.clear();
     senders_.clear();
+    blob_pumps_.clear();
     channels_.clear();
     if (consumer_) {
         consumer_->stop();

@@ -122,10 +122,11 @@ public:
 // coalesces into one serialized offer and keeps other tracks flowing,
 // docs/08#renegotiation), per-class ChannelSender access, the
 // accept/feedback/result/fail correlation helpers, run_async on the worker
-// pool, arm_deadman, close — and `send_blob(bytes, media_type)`, which
-// returns the BlobRef to put in an envelope and a handle to cancel: the
-// core chunks, pumps under the docs/08 watermarks and reports completion,
-// so no capability writes its own pump. `BlobAssembler` (a helper, not a
+// pool, arm_deadman, close — and `send_blob(bytes, media_type, done)`, which
+// returns the BlobRef to put in the envelope you send next: the core chunks,
+// pumps under the docs/08 watermarks and calls `done(ok)` on completion (false
+// when the session ended first), so no capability writes its own pump;
+// `cancel_blob(id)` drops one not yet sent. `BlobAssembler` (a helper, not a
 // hook) collects on_blob_chunk() deliveries into whole blobs under a size
 // cap for capabilities that want values rather than streams.
 // Both contexts are core-loop-only; capabilities never touch sockets, SDP

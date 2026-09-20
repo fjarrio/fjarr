@@ -39,8 +39,23 @@ struct TrackDecl {
 /// DataChannel classes. spec: docs/08-protocol.md#datachannel-topology
 enum class ChannelClass : std::uint8_t { Control, Realtime, Bulk, Stream };
 
+/// A bulk channel's framing, declared here and never guessed by a peer (docs/08#blob-frames):
+/// `Raw` hands every binary message to the capability as-is (terminal input); `Blob` carries
+/// blob frames the core parses and checks before delivering chunks.
+enum class BulkFraming : std::uint8_t { Raw, Blob };
+
 struct ChannelDecl {
     ChannelClass channel = ChannelClass::Control;
+    BulkFraming framing = BulkFraming::Raw; // bulk only
+};
+
+/// One validated chunk of a blob as the core delivers it (docs/08#blob-frames). The payload view
+/// is valid for the duration of the on_blob_chunk() call only.
+struct BlobChunk {
+    std::string blob_id; // uuid text, as the envelope's reference names it
+    std::uint64_t offset = 0;
+    std::uint64_t blob_len = 0;
+    std::span<const std::byte> payload;
 };
 
 /// Privileges a capability requires; granted explicitly by integrator
@@ -129,6 +144,13 @@ class Capability {
     /// bandwidth-stats never arrive here: the core serves them for every
     /// track-owning capability (docs/08#track-control).
     virtual void on_message(SessionContext& ctx, const Envelope& msg) = 0;
+
+    /// Incoming bytes on this capability's bulk channel (docs/08#blob-frames). A `Raw` channel
+    /// delivers every binary message as-is; a `Blob` channel delivers chunks whose header the core
+    /// already parsed and checked (a bad chunk is counted and never delivered). Default no-ops: a
+    /// capability that only sends declares nothing more. Both run on the core loop.
+    virtual void on_binary(SessionContext& /*ctx*/, std::span<const std::byte> /*bytes*/) {}
+    virtual void on_blob_chunk(SessionContext& /*ctx*/, const BlobChunk& /*chunk*/) {}
 
     /// Backend-consumer hooks (F2) — default no-ops so peer-only
     /// capabilities are unaffected.

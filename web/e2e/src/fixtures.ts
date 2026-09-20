@@ -158,8 +158,12 @@ export interface IntrospectOptions {
 }
 
 const curlArgs = (opts: IntrospectOptions) => [...(opts.method === "POST" ? ["-X", "POST"] : []), ...Object.entries(opts.headers ?? {}).flatMap(([k, v]) => ["-H", `${k}: ${v}`])];
+/** The endpoint's token, when the demo exposes it beyond loopback (docs/24). */
+export const introspectAuth = (): Record<string, string> => (env.introspectToken ? { Authorization: `Bearer ${env.introspectToken}` } : {});
+const withAuth = (opts: IntrospectOptions): IntrospectOptions => ({ ...opts, headers: { ...introspectAuth(), ...opts.headers } });
 
 export async function introspectText(path: string, opts: IntrospectOptions = {}): Promise<string> {
+  opts = withAuth(opts);
   if (env.introspectHttp) {
     const r = await fetch(env.introspectHttp + path, { method: opts.method ?? "GET", headers: opts.headers, signal: AbortSignal.timeout(5000) });
     if (!r.ok) throw new Error(`${opts.method ?? "GET"} ${path} → HTTP ${r.status}`);
@@ -170,7 +174,7 @@ export async function introspectText(path: string, opts: IntrospectOptions = {})
 
 export async function introspectBytes(path: string): Promise<Buffer> {
   if (env.introspectHttp) {
-    const r = await fetch(env.introspectHttp + path, { signal: AbortSignal.timeout(10_000) });
+    const r = await fetch(env.introspectHttp + path, { headers: introspectAuth(), signal: AbortSignal.timeout(10_000) });
     if (!r.ok) throw new Error(`GET ${path} → HTTP ${r.status}`);
     return Buffer.from(await r.arrayBuffer());
   }
@@ -190,6 +194,7 @@ async function readChunks(body: ReadableStream<Uint8Array>, onChunk: (text: stri
 }
 
 export async function introspectStream(path: string, seconds: number, opts: IntrospectOptions = {}): Promise<string> {
+  opts = withAuth(opts);
   if (env.introspectHttp) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), seconds * 1000);
@@ -216,6 +221,7 @@ export async function introspectStream(path: string, seconds: number, opts: Intr
 
 /** Follow a streaming route line by line until `stop()` (the CLI's `events`). */
 export function introspectFollow(path: string, onLine: (line: string) => void, opts: IntrospectOptions = {}): { stop(): void; done: Promise<void> } {
+  opts = withAuth(opts);
   const ctl = new AbortController();
   const lines = (chunk: string, rest: { s: string }) => {
     rest.s += chunk;
@@ -338,11 +344,12 @@ export class Dashboard {
     readonly out: OutDir,
   ) {}
 
-  async goto(): Promise<void> {
+  async goto(options: { role?: "operator" | "developer" } = {}): Promise<void> {
     // From inside the compose network "localhost" is the browser itself: hand the page the service URLs (dev-only overrides).
     const u = new URL(env.dashboardUrl);
     u.searchParams.set("fjarr_backend", env.dashboardBackend);
     u.searchParams.set("fjarr_server", env.serverWs);
+    if (options.role) u.searchParams.set("fjarr_role", options.role); // the demo's role picker (docs/09): decides the grant
     await this.page.goto(u.toString());
     await this.page.waitForFunction(() => Boolean((window as unknown as { __fjarr?: unknown }).__fjarr), null, { timeout: 15_000 });
   }
@@ -366,6 +373,21 @@ export class Dashboard {
       [robotId, state] as const,
       { timeout: timeoutMs },
     );
+  }
+
+  /** The Diagnostics tab's state and what its graph shows (docs/24: the viewer as a component). */
+  diagnostics(): Promise<{ state: string | null; pipelineId: string | null; seq: string | null; nodes: number; error: string | null }> {
+    return this.page.evaluate(() => {
+      const tab = document.querySelector("[data-demo-diagnostics]");
+      const graph = document.querySelector("[data-fjarr-pipeline-graph]");
+      return {
+        state: tab?.getAttribute("data-demo-diagnostics") ?? null,
+        pipelineId: graph?.getAttribute("data-fjarr-pipeline-graph") ?? null,
+        seq: graph?.getAttribute("data-fjarr-pipeline-seq") ?? null,
+        nodes: graph ? graph.querySelectorAll("svg g.node").length : 0,
+        error: graph?.getAttribute("data-fjarr-error") ?? graph?.getAttribute("data-fjarr-render-error") ?? null,
+      };
+    });
   }
 
   tracks(robotId: string) {

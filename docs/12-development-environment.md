@@ -39,7 +39,15 @@ Or without VS Code: `docker compose up -d dev robot-sim`, then
 
 `make demo-up` = `docker compose --profile demo up -d` — the full customer
 topology. The `dev` and `robot-sim` containers share `/tmp/.X11-unix` via the
-`x11sock` volume, which is why `DISPLAY=:99` works inside `dev`.
+`x11sock` volume, which is why `DISPLAY=:99` works inside `dev`. The demo
+dashboard's sidebar has a **role** picker (operator / developer): the demo
+backend mints the grant for the role on the next connect, and only the
+developer role's grant carries `fjarr.introspect`, so its *Diagnostics*
+panel shows the robot's live pipeline graphs while an operator sees
+"not available for this role" ([docs/24](24-pipeline-introspection.md)).
+The demo backend and the dashboard run from the mounted sources: after
+pulling a change to either, `docker compose --profile demo restart
+demo-backend demo-dashboard` (and `demo-robot` after `make agent-build`).
 
 ## The doctor {#doctor}
 

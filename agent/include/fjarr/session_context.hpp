@@ -11,6 +11,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <fjarr/blob.hpp>
 #include <fjarr/capability.hpp>
 #include <fjarr/video_source.hpp>
 
@@ -87,6 +88,15 @@ class SessionContext {
     virtual void result(const Envelope& request, nlohmann::json payload) = 0; // payload.ok required
     virtual void fail(const Envelope& request, std::string_view code, std::string_view message) = 0;
     virtual void event(std::string_view type, nlohmann::json payload) = 0;    // kind=event on control
+
+    // Blobs (docs/08#blob-frames): the core chunks `bytes` onto this capability's `blob`-framed
+    // bulk channel, pumps under the watermarks and reports completion — `done(ok)` runs on the core
+    // loop, false when cancelled or the session ended first. Put the returned reference into the
+    // envelope you send *before* the bytes. Throws FjarrError when the manifest declares no bulk
+    // channel. Queued until the channel opens; never blocks.
+    virtual blob::BlobRef send_blob(std::string bytes, std::string media_type, std::function<void(bool ok)> done = {}) = 0;
+    /// Drop a blob not yet fully sent (its receiver times out per docs/08); done(false) if queued.
+    virtual void cancel_blob(std::string_view blob_id) = 0;
 
     // Off-loop work: run `job` on the pool, then `done` back on the core loop
     // — dropped if the session is gone by then (generation-guarded).

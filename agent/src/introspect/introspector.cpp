@@ -255,7 +255,24 @@ void SnapshotStore::take_now(Ring& ring, GstBin* bin, SnapshotMeta meta) {
         std::ofstream f(dot_dir_ + "/" + id + "-" + std::to_string(meta.seq) + "-" + meta.trigger + ".dot");
         f << snap->dot;
     }
-    if (listener_) listener_(*snap);
+    // Listeners may add or remove themselves while notified: iterate a copy of the ids.
+    std::vector<unsigned> ids;
+    for (const auto& [id, _] : listeners_) ids.push_back(id);
+    for (unsigned id : ids)
+        if (auto it = listeners_.find(id); it != listeners_.end()) it->second(*snap);
+}
+
+unsigned SnapshotStore::add_listener(std::function<void(const Snapshot&)> fn) {
+    const unsigned id = next_listener_++;
+    listeners_[id] = std::move(fn);
+    return id;
+}
+
+void SnapshotStore::remove_listener(unsigned id) { listeners_.erase(id); }
+
+nlohmann::json meta_json(const SnapshotMeta& m) {
+    return nlohmann::json{{"pipeline_id", m.pipeline_id}, {"kind", m.kind}, {"session_id", m.session_id}, {"seq", m.seq},
+                          {"trigger", m.trigger}, {"state", m.state}, {"ts", m.ts}, {"generation", m.generation}};
 }
 
 void SnapshotStore::retire(const std::string& pipeline_id) {

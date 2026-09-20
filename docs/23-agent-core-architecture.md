@@ -564,9 +564,10 @@ created and implements docs/08#datachannel-topology:
   that declared tracks, so no capability implements it.
 - **Dispatch.** `cap` → the capability attached to this session, on the
   core loop, with the session's `SessionContext`. A capability not attached
-  to the session (grant did not include it) gets no message; the router
-  answers requests to unknown capabilities with
-  `result{ok:false, error:{code:"capability-unknown"}}`.
+  to the session gets no message; the router answers a request for one the
+  agent has but the grant left out with `capability-denied`, and one the
+  agent has never heard of with `capability-unknown` (docs/08#envelope;
+  `SessionDeps::known_capability` asks the registry).
 - **`ChannelSender` implementations** per class:
   - control: reliable ordered; `send(Envelope)`; `buffered_amount()` from
     the channel's `buffered-amount` property; `on_drain` from
@@ -587,12 +588,15 @@ created and implements docs/08#datachannel-topology:
     declared `blob` has its header parsed and checked by the router
     (version, lengths, offset within `blob_len`; a bad chunk is counted
     and its blob discarded) and delivered as `on_blob_chunk()`. The
-    router keeps the docs/08 pending store per channel (chunks of blobs
-    no envelope has named: 8 MiB or 30 s, oldest evicted) and
-    `SessionContext::send_blob()` is the one outbound pump: it chunks,
-    honours the watermarks, reports completion and cancels on detach.
-    `BlobAssembler` is a helper over `on_blob_chunk()` for capabilities
-    that want whole small blobs.
+    docs/08 pending store (chunks of blobs no envelope has named: 8 MiB or
+    30 s per channel, oldest evicted) is `BlobAssembler`, the helper over
+    `on_blob_chunk()` for capabilities that want whole small blobs — the
+    router itself keeps nothing. `SessionContext::send_blob()` is the one
+    outbound pump (`BlobPump`, one per open bulk channel): it chunks to the
+    SCTP limit minus the header, honours the watermarks, resumes on the
+    channel's drain signal, reports completion, and fails every queued
+    blob with `done(false)` when the session closes — before the
+    capabilities are detached. `cancel_blob(id)` drops one not yet sent.
   - DataChannel parameters come only from the class table:
     control `ordered=true` reliable; realtime `ordered=false,
     max-retransmits=0`; bulk `ordered=true` reliable; stream
@@ -1149,6 +1153,35 @@ the text above left open, or learned from the lab:
   being unavailable; the plane adds caps and tiers once a session
   registers the track.
 
+**Implementation notes (slice 5a)** — blob frames and `fjarr.introspect` as built:
+
+- *The first chunks leave on the next loop turn.* `send_blob()` queues the
+  transfer and posts the pump, so the capability's synchronous code sends
+  the referencing envelope first, as docs/08 asks — and a `done()` that
+  runs inside the pump can enqueue the next blob without re-entering it.
+- *Newest-wins is the capability's, not the pump's.* `fjarr.introspect`
+  counts blobs in flight per (session, pipeline); a snapshot that arrives
+  while one is pumping is held (only the newest), and sent when the pump
+  reports completion. The pump never drops, so a subscriber never sees a
+  reference whose bytes were withdrawn.
+- *The built-in is registered in the agent's constructor* with the store
+  and the stats provider resolved lazily, because the rings exist only
+  once the agent boots; the capability adds its store listener on the
+  first attach. The `SnapshotStore` grew a listener list (the endpoint's
+  `/events` and the capability read the same ring).
+- *On the web the receiver lives on the channel set*, not the sender:
+  `session.bulk(cap)` hands out a fresh sender per call, and a blob that
+  arrives before anyone asked must survive that. It gives up its waiters
+  when the channel closes or the peer is gone.
+- *A blob chunk is 65 499 bytes*: webrtcbin's SCTP message limit minus the
+  37-byte header. A 87 KiB session DOT is two chunks.
+- *The lab found nothing wrong in the agent* this time; both defects it
+  surfaced were in the test (producers are listed only once something
+  streams; the error code travels on the error object, not in its
+  message). The dashboard test renders the session graph with d3-graphviz
+  in real Chromium and counts its SVG nodes — the "one viewer" gate's
+  first half, the served viewer being 5b.
+
 **3c — introspection completeness and the memory ladder**: `/events`,
 the history ring and scrubbing, `/stats`, `/memory` with checkpoints, the
 diagnostics bundle (with the agent's in-memory log ring, docs/24),
@@ -1212,6 +1245,7 @@ never completes, a channel that closes mid-blob, a subscriber above
 HIGH_WATER receiving only the newest snapshot; (4) the lab's
 `introspect` command runs on the HTTP feed; (5) every earlier gate still
 green, the soak included (blob traffic must not move the census).
+**Met 2026-09-21** ([review](reviews/slice-5a-review.md)).
 
 **5b — the delivery half.** `introspect.viewer_dir` and the static
 serving rules (docs/24), the viewer app in the web workspace on the HTTP

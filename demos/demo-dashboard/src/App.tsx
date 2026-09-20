@@ -9,7 +9,9 @@
  *  - three robots can be open at once, each with its own state chip;
  *  - VideoGrid/FloatingVideo demand tracks only while on screen;
  *  - the host's own RobotStatusProvider built on useTelemetry (~30 lines);
- *  - a teleop publisher with a deadman, released when the panel unmounts.
+ *  - a teleop publisher with a deadman, released when the panel unmounts;
+ *  - a Diagnostics tab: the robot's live pipeline graphs through
+ *    `fjarr.introspect`, which only the developer role is granted (docs/24).
  */
 import { useMemo, useState, type ReactNode } from "react";
 import {
@@ -29,6 +31,7 @@ import {
   type Session,
 } from "@fjarr/react";
 import { RobotStatusProvider, useRobotStatus } from "./robot-status.tsx";
+import { Diagnostics } from "./diagnostics.tsx";
 
 // Dev only: the browser lab (docs/25) opens this page from inside the compose
 // network, where "localhost" is the lab browser itself — it passes the
@@ -36,6 +39,12 @@ import { RobotStatusProvider, useRobotStatus } from "./robot-status.tsx";
 const params = import.meta.env.DEV ? new URLSearchParams(window.location.search) : null;
 const BACKEND = params?.get("fjarr_backend") ?? import.meta.env.VITE_DEMO_BACKEND ?? "http://localhost:9090";
 const SIGNALING = params?.get("fjarr_server") ?? import.meta.env.VITE_FJARR_SERVER ?? "ws://localhost:8080/ws";
+
+// The company's own notion of who the user is. The demo backend turns the role into a grant
+// (operator: media; developer: media + fjarr.introspect). Real backends read this from their auth.
+type Role = "operator" | "developer";
+const ROLE_KEY = "fjarr-demo-role";
+let role: Role = (params?.get("fjarr_role") as Role | null) ?? (localStorage.getItem(ROLE_KEY) as Role | null) ?? "operator";
 
 interface Robot {
   id: string;
@@ -54,7 +63,7 @@ const FAKE_ROBOTS: Robot[] = [
 const client = createFjarrClient({
   serverUrl: SIGNALING,
   grant: async (robotId) => {
-    const res = await fetch(`${BACKEND}/api/fjarr/grant?robot=${encodeURIComponent(robotId)}`, { method: "POST" });
+    const res = await fetch(`${BACKEND}/api/fjarr/grant?robot=${encodeURIComponent(robotId)}&role=${role}`, { method: "POST" });
     if (!res.ok) throw new Error(`grant request failed: ${res.status}`);
     const body = (await res.json()) as { grant: string };
     return body.grant;
@@ -79,8 +88,14 @@ export function App() {
 
 function Shell() {
   const [selected, setSelected] = useState<Robot>(FAKE_ROBOTS[0]!);
+  const [currentRole, setRole] = useState<Role>(role);
   const sessions = useStore(useFjarrClient().sessions.store);
   const session = sessions.get(selected.id);
+  const pickRole = (r: Role) => {
+    role = r;
+    localStorage.setItem(ROLE_KEY, r);
+    setRole(r);
+  };
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", display: "grid", gridTemplateColumns: "280px 1fr", minHeight: "100vh", margin: 0 }}>
       <aside style={{ background: "#1b1e24", color: "#c9d1d9", padding: 16 }}>
@@ -108,6 +123,15 @@ function Shell() {
             </button>
           );
         })}
+        <label style={{ display: "block", fontSize: 12, marginTop: 16 }}>
+          Signed in as{" "}
+          <select value={currentRole} onChange={(e) => pickRole(e.target.value as Role)} data-demo-role={currentRole}>
+            <option value="operator">operator (cameras)</option>
+            <option value="developer">developer (+ diagnostics)</option>
+          </select>
+          <br />
+          <small style={{ opacity: 0.6 }}>the backend mints the grant for this role; applies to the next connect</small>
+        </label>
         <p style={{ fontSize: 11, opacity: 0.6, marginTop: 24 }}>
           Sessions stay open while you switch robots — that is the point (
           <a href="https://fjarr.io/docs/21-web-client-architecture/" style={{ color: "inherit" }}>
@@ -152,6 +176,9 @@ function RemoteView() {
       </Panel>
       <Panel title="Teleop (publisher with deadman; unmounting stops the robot)">
         <TeleopPanel session={session} />
+      </Panel>
+      <Panel title="Diagnostics (fjarr.introspect — the developer role's grant; an operator sees capability-denied)">
+        <Diagnostics session={session} />
       </Panel>
     </div>
   );

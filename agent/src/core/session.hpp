@@ -21,6 +21,7 @@
 #include <fjarr/capability.hpp>
 #include <fjarr/session_context.hpp>
 
+#include "blob_pump.hpp"
 #include "glib/raii.hpp"
 #include "loop.hpp"
 #include "media/consumer.hpp"
@@ -49,6 +50,9 @@ struct SessionDeps {
     std::function<void(const SessionId&)> on_ping;
     /// Test hooks enabled (fjarr.test silence).
     bool test_hooks = false;
+    /// Is this capability registered on the agent at all? A registered-but-ungranted capability is
+    /// answered `capability-denied`, an unknown one `capability-unknown` (docs/08#envelope).
+    std::function<bool(const std::string&)> known_capability;
 };
 
 class Session;
@@ -73,6 +77,8 @@ class SessionContextImpl final : public SessionContext {
     void result(const Envelope& request, nlohmann::json payload) override;
     void fail(const Envelope& request, std::string_view code, std::string_view message) override;
     void event(std::string_view type, nlohmann::json payload) override;
+    blob::BlobRef send_blob(std::string bytes, std::string media_type, std::function<void(bool ok)> done) override;
+    void cancel_blob(std::string_view blob_id) override;
     void run_async(std::function<void()> job, std::function<void()> done) override;
     std::unique_ptr<DeadmanHandle> arm_deadman(std::chrono::milliseconds budget, std::function<void()> on_expiry) override;
     void close(std::string_view reason) override;
@@ -129,6 +135,11 @@ class Session : public std::enable_shared_from_this<Session> {
     TrackState track_state(std::string_view track_id) const;
     ChannelSender& sender(ChannelClass cls, const std::string& cap);
     void send_control(const Envelope& env);
+    /// docs/08#blob-frames: queue a blob on `cap`'s bulk channel; the pump runs now if it is open.
+    blob::BlobRef send_blob(const std::string& cap, std::string bytes, std::string media_type, std::function<void(bool ok)> done);
+    void cancel_blob(std::string_view blob_id);
+    /// Binary frames dropped for a bad blob header or a closing session (GET /stats).
+    unsigned long dropped_binary() const { return dropped_binary_; }
     void run_async(std::function<void()> job, std::function<void()> done);
     std::unique_ptr<DeadmanHandle> arm_deadman(std::chrono::milliseconds budget, std::function<void()> on_expiry);
     void test_silence(bool pings, bool media, std::chrono::milliseconds ms);
@@ -161,6 +172,8 @@ class Session : public std::enable_shared_from_this<Session> {
     void request_offer();
     void on_channel_open(GstWebRTCDataChannel* dc, const std::string& label);
     void on_channel_text(const std::string& label, const std::string& text);
+    void on_channel_data(const std::string& label, const std::string& bytes);
+    void pump_blobs(const std::string& label);
     void route(const Envelope& env, const std::string& label);
     void handle_core(const Envelope& env);
     void handle_select_tracks(const Envelope& env, const AttachedCapability& cap);
@@ -208,8 +221,10 @@ class Session : public std::enable_shared_from_this<Session> {
     std::vector<glib::SignalConnection> dc_signals_;
     std::map<std::string, std::unique_ptr<ChannelSender>> senders_; // label → sender
     std::unique_ptr<ChannelSender> denied_;
+    std::map<std::string, BlobPump> blob_pumps_; // bulk label → outbound blobs (docs/08#blob-frames)
     std::vector<std::weak_ptr<Deadman>> deadmans_;
     unsigned long dropped_envelopes_ = 0;
+    unsigned long dropped_binary_ = 0;
     nlohmann::json last_stats_ = nlohmann::json::object();
     bool closed_sent_ = false;
 };
