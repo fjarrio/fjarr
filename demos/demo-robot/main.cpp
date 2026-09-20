@@ -11,6 +11,23 @@
 
 #include <fjarr/fjarr.hpp>
 
+namespace {
+const char* env_or(const char* name, const char* fallback) {
+    const char* v = std::getenv(name);
+    return v && *v ? v : fallback; // an empty variable (compose's `${X:-}`) means unset
+}
+/// The demo's webcam: FJARR_DEMO_WEBCAM (a by-id name or node), FJARR_DEMO_WEBCAM_FORMAT (mjpeg|yuyv → 1280x720@30).
+nlohmann::json webcam_source() {
+    nlohmann::json src{{"type", "v4l2"}, {"device", env_or("FJARR_DEMO_WEBCAM", "/dev/video0")}, {"format", env_or("FJARR_DEMO_WEBCAM_FORMAT", "auto")}};
+    if (std::string(src["format"]) != "auto") {
+        src["width"] = 1280;
+        src["height"] = 720;
+        src["fps"] = 30;
+    }
+    return src;
+}
+} // namespace
+
 int main() {
     std::setvbuf(stdout, nullptr, _IOLBF, 0);
     fjarr::AgentConfig config;
@@ -25,7 +42,7 @@ int main() {
         {"tracks",
          {{"pattern", {{"label", "Pattern (camera)"}, {"source", {{"type", "test"}, {"pattern", "ball"}, {"width", 1280}, {"height", 720}, {"fps", 30}}}}},
           {"rtsp", {{"label", "RTSP simulator"}, {"source", {{"type", "rtsp"}, {"url", std::getenv("FJARR_DEMO_RTSP_URL") ? std::getenv("FJARR_DEMO_RTSP_URL") : "rtsp://rtsp-sim:8554/pattern"}, {"latency", 200}, {"protocols", "tcp"}}}}},
-          {"webcam", {{"label", "Webcam"}, {"source", {{"type", "v4l2"}, {"device", std::getenv("FJARR_DEMO_WEBCAM") ? std::getenv("FJARR_DEMO_WEBCAM") : "/dev/video0"}, {"format", "auto"}}}}}}}};
+          {"webcam", {{"label", "Webcam"}, {"source", webcam_source()}}}}}};
     config.apply_env(); // FJARR_SERVER_URL, FJARR_DEV_DEVICE_TOKEN, FJARR_MEDIA_ENCODER, FJARR_ROBOT_ID …
     try {
         config.validate();

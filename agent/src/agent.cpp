@@ -360,8 +360,14 @@ void Agent::supervision(Supervision s) { impl_->supervision = std::move(s); }
 int Agent::introspect_port() const { return impl_->introspect_server ? impl_->introspect_server->port() : 0; }
 
 int Agent::run() {
-    impl_->config.validate();
-    impl_->configure_capabilities();
+    try {
+        impl_->config.validate();
+        impl_->configure_capabilities(); // throws FjarrError(config) for a bad or required-but-missing track
+    } catch (const FjarrError& e) {
+        log::error("agent", "configuration refused", {{"code", e.code()}, {"message", e.message()}});
+        impl_->exit_code = 1;
+        return 1;
+    }
     impl_->started = true;
     bool boot_failed = false;
     impl_->loop.post([this, &boot_failed] {
@@ -386,7 +392,7 @@ int Agent::run() {
 
 void Agent::start() {
     impl_->config.validate();
-    impl_->configure_capabilities();
+    impl_->configure_capabilities(); // FjarrError(config) propagates to the embedder, as documented
     impl_->started = true;
     impl_->loop.start();
     impl_->loop.call_sync([this] {

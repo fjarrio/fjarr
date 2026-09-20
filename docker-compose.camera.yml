@@ -1,12 +1,18 @@
-# Opt-in override (docs/12): pass the host's V4L2 devices to the demo robot so fjarr.camera's
-# `webcam` track sees a real camera. `VIDEO_GID` in .env must match the host's `video` group.
+# Opt-in override (docs/12): pass a host V4L2 camera to the demo robot so fjarr.camera's `webcam`
+# track sees a real device. `VIDEO_GID` in .env must match the host's `video` group.
+#   FJARR_WEBCAM_DEVICE=/dev/video2 FJARR_DEMO_WEBCAM=usb-Acme_Cam-video-index0 \
 #   docker compose -f docker-compose.yml -f docker-compose.camera.yml --profile demo up -d demo-robot
+# FJARR_WEBCAM_DEVICE: the capture node (ls -l /dev/v4l/by-id/ shows which node the *-index0 name points at);
+# FJARR_DEMO_WEBCAM: what the demo's track reads — the by-id name (stable) or the node path.
 services:
   demo-robot:
+    environment:
+      FJARR_DEMO_WEBCAM: ${FJARR_DEMO_WEBCAM:-/dev/video0}
+      FJARR_DEMO_WEBCAM_FORMAT: ${FJARR_DEMO_WEBCAM_FORMAT:-}   # mjpeg|yuyv for 1280x720@30; unset = the device's preferred raw format
     devices:
       - /dev/dri:/dev/dri
-      - /dev/video0:/dev/video0
+      - ${FJARR_WEBCAM_DEVICE:-/dev/video0}:${FJARR_WEBCAM_DEVICE:-/dev/video0}
     volumes:
-      - /dev/v4l:/dev/v4l:ro   # the by-id names fjarr.toml refers to (udev populates them)
+      - /dev/v4l:/dev/v4l:ro   # the by-id names (udev populates them)
     group_add:
       - "${VIDEO_GID:-44}"

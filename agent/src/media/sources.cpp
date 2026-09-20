@@ -100,8 +100,9 @@ std::string V4l2Source::description() const {
     if (p_.fps > 0) size += ",framerate=" + std::to_string(p_.fps) + "/1";
     if (p_.format == "mjpeg") d += "capsfilter caps=\"image/jpeg" + size + "\" ! jpegdec";
     else if (p_.format == "yuyv") d += "capsfilter caps=\"video/x-raw,format=YUY2" + size + "\"";
-    else if (!size.empty()) d += "capsfilter caps=\"video/x-raw" + size + "\"";
-    else d += "decodebin name=fjarr-v4l2-decode"; // auto without a size: whatever the device prefers, decoded if compressed
+    else d += "capsfilter caps=\"video/x-raw" + size + "\""; // auto: the device's preferred raw format in system memory
+    // (never decodebin: a webcam's first choice through it was a DMABuf-only DRM format the software
+    // conversion path cannot take; cameras that only offer MJPEG say so in --probe-source and take format = "mjpeg")
     return d;
 }
 
@@ -109,15 +110,6 @@ SourceInfo V4l2Source::describe() const { return SourceInfo{"v4l2:" + p_.device,
 
 GstBin* V4l2Source::create_bin() {
     const std::string desc = description();
-    if (desc.find("fjarr-v4l2-decode") != std::string::npos) {
-        std::string err;
-        GstBin* bin = make_late_ghost_bin(desc, "fjarr-v4l2-decode", decode_pad_added_, &err);
-        if (!bin) {
-            last_error_ = err;
-            log::error("source", "v4l2 description failed", {{"description", desc}, {"error", err}});
-        }
-        return bin;
-    }
     GError* err = nullptr;
     GstElement* bin = gst_parse_bin_from_description(desc.c_str(), TRUE, &err);
     if (err) {

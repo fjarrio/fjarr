@@ -340,7 +340,9 @@ so tier-2 types the embedding application registered resolve exactly like
 the built-ins. Built-in source types (slice 4):
 `gst` (tier 1, the default when `source` is a string), `test`
 (`videotestsrc` with pattern/size/fps params), `v4l2` (`device` — a path or
-a `/dev/v4l/by-id` name — `format` mjpeg|yuyv|auto, `width`, `height`,
+a `/dev/v4l/by-id` name — `format` mjpeg|yuyv|auto (auto = the device's
+preferred raw format in system memory; a camera that only offers MJPEG
+takes `mjpeg`, and `--probe-source` says which), `width`, `height`,
 `fps`: a convenience over tier 1 with hot-plug from the kernel's
 `/dev/v4l/by-id` tree, watched with GIO; no libudev in the core), `rtsp`
 (`url`, `latency` ms, `protocols` tcp|udp|auto — decoded to raw in slice 4;

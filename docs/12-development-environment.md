@@ -83,7 +83,9 @@ Caveat: the container can synthesize input on the **host** kernel.
 track reads `/dev/v4l/by-id/<name>`; pass the host's video devices in:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.camera.yml --profile demo up -d demo-robot
+ls -l /dev/v4l/by-id/          # which node the …-video-index0 name points at
+FJARR_WEBCAM_DEVICE=/dev/video2 FJARR_DEMO_WEBCAM=usb-Acme_Cam-video-index0 \
+  docker compose -f docker-compose.yml -f docker-compose.camera.yml --profile demo up -d demo-robot
 ```
 
 Without the override the track is `unavailable` (reason in

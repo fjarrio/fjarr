@@ -68,7 +68,7 @@ TEST(V4l2Source, buildsTheDescriptionAndReportsAMissingDeviceWithItsReason) {
     EXPECT_NE(w.last_error().find("not in /nonexistent/by-id"), std::string::npos);
     V4l2Source::Params r;
     r.device = "/dev/video0";
-    EXPECT_EQ(V4l2Source(r).description(), "v4l2src device=/dev/video0 ! decodebin name=fjarr-v4l2-decode"); // auto, no size: the device's choice, decoded if compressed
+    EXPECT_EQ(V4l2Source(r).description(), "v4l2src device=/dev/video0 ! capsfilter caps=\"video/x-raw\""); // auto, no size: the device's preferred raw format
 }
 
 TEST(V4l2Source, hotPlugFromTheWatchedByIdDirectoryArrivesOnTheCoreLoop) {

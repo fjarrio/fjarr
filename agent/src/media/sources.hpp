@@ -81,7 +81,7 @@ class V4l2Source final : public VideoSource {
     void watch();
     Params p_;
     GMainContext* ctx_;
-    glib::SignalConnection decode_pad_added_; // the `auto` form without a size decodes (see description())
+
     std::string by_id_dir_ = "/dev/v4l/by-id";
     std::function<void(bool)> cb_;
     bool last_available_ = false;
