@@ -64,7 +64,7 @@ groups with comments.
 | vitest | ^5 | unit tests (core, react) | MIT | dev-only |
 | happy-dom | ^20 | DOM for `@fjarr/react` hook tests | MIT | dev-only |
 | @testing-library/react | ^16 | hook/component tests | MIT | dev-only |
-| d3-graphviz + @hpcc-js/wasm | ^5 / ^2 | DOT rendering in `<PipelineGraph>` and the on-robot viewer (docs/24) | BSD-3 / Apache-2.0 | yes (`@fjarr/react` optional entry; viewer bundled with the agent) |
+| d3-graphviz + @hpcc-js/wasm | ^5 / ^2 | DOT rendering in `<PipelineGraph>` and the on-robot viewer (docs/24) | BSD-3 / Apache-2.0 | yes (`@fjarr/react` optional entry; the viewer app's static files served from `introspect.viewer_dir`, docs/24) |
 | `@playwright/test` (+ pinned Chromium image) | 1.63.0 (pinned) | browser lab harness and e2e (docs/25; rows below) | Apache-2.0 | dev-only |
 | Vite + `@vitejs/plugin-react` | ^8 / ^5 | serves the lab page (`web/e2e/app`) | MIT | dev-only |
 

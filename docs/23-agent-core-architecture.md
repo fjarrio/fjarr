@@ -581,7 +581,18 @@ created and implements docs/08#datachannel-topology:
     spec violation, so the sender refuses them. Frames larger than the
     negotiated SCTP `max-message-size` (65 536 on webrtcbin 1.24 and 1.28) are
     rejected with `payload-invalid`; chunking is the capability's job
-    (docs/08 file frames are ≤ 256 KiB *and* ≤ the SCTP limit).
+    (docs/08 blob chunks are ≤ 256 KiB *and* ≤ the SCTP limit).
+  - bulk framing (docs/08#blob-frames, slice 5a): a channel declared
+    `raw` hands every binary message to `Capability::on_binary()`; one
+    declared `blob` has its header parsed and checked by the router
+    (version, lengths, offset within `blob_len`; a bad chunk is counted
+    and its blob discarded) and delivered as `on_blob_chunk()`. The
+    router keeps the docs/08 pending store per channel (chunks of blobs
+    no envelope has named: 8 MiB or 30 s, oldest evicted) and
+    `SessionContext::send_blob()` is the one outbound pump: it chunks,
+    honours the watermarks, reports completion and cancels on detach.
+    `BlobAssembler` is a helper over `on_blob_chunk()` for capabilities
+    that want whole small blobs.
   - DataChannel parameters come only from the class table:
     control `ordered=true` reliable; realtime `ordered=false,
     max-retransmits=0`; bulk `ordered=true` reliable; stream
@@ -925,7 +936,7 @@ envelopes; exit 0 on all pass, 1 on any fail, 3 on timeout. `make
 agent-leaks SCENARIO=<name>` runs a scenario under the `leaks` tracer and
 prints the diff.
 
-## Slices 3a, 3b, 3c and their gates
+## Slices 3a, 3b, 3c, 4, 5 and their gates {#slices-3a-3b-3c-and-their-gates}
 
 Slice 3 as first written bundled four reviewable deliverables; it lands as
 three increments, each on `main` with its own retrospective review
@@ -1174,6 +1185,48 @@ cannot hot-plug); an unreachable RTSP camera degrades its own track only;
 `rtsp` and a missing `v4l2` device; (4) every 3b/3c gate still green,
 the soak included. Loss recovery, adaptive bitrate and elementary-stream
 passthrough are slice 6.
+
+**5 — demo wiring**, planned 2026-09-21 as two increments, each with its
+own review:
+
+**5a — the protocol half.** docs/08 blob frames on both tiers: the
+manifest's bulk framing (`raw` / `blob`), the router's header parsing,
+pending store and `on_binary()` / `on_blob_chunk()` dispatch,
+`SessionContext::send_blob()` and `BlobAssembler`; `session.bulk(cap)`
+`.receive(ref)` / `.onChunk()` in `@fjarr/core` with the same bounds; the
+`blob-ref` schema fragment under the conformance gate. On that: the
+`fjarr.introspect` capability (docs/24 message table incl.
+`pipelines/snapshot`, `txt` inline, `json`/`dot` always as blobs,
+newest-wins per pipeline under backpressure, grant-gated); the pipeline
+feeds (`sessionPipelineFeed`, `httpPipelineFeed` on streamed fetch) and
+their contract test; `usePipelines` / `usePipelineSnapshot` /
+`usePipelineFeed` / `<PipelineGraph>`; the demo backend's
+operator/developer roles and the dashboard's role picker; the
+Diagnostics tab. *Gate:* (1) docs/06 acceptance for `fjarr.introspect`
+in the lab: a developer-role page watches the session graph change while
+toggling a track and firing the hot-plug hook, an operator-role page gets
+`capability-denied`; (2) the feed contract suite passes against both
+feeds; (3) blob failure modes have tests on both tiers — chunks before
+the envelope, envelope before the chunks, a bad header, a blob that
+never completes, a channel that closes mid-blob, a subscriber above
+HIGH_WATER receiving only the newest snapshot; (4) the lab's
+`introspect` command runs on the HTTP feed; (5) every earlier gate still
+green, the soak included (blob traffic must not move the census).
+
+**5b — the delivery half.** `introspect.viewer_dir` and the static
+serving rules (docs/24), the viewer app in the web workspace on the HTTP
+feed, the demo publishing the endpoint on host loopback with the dev
+token, `make introspect` opening it; `docker/agent/Dockerfile` (viewer,
+build, runtime and demo stages; the runtime stage fails on `x264enc`),
+the `docker-compose.image.yml` override and the CI job that builds the
+image and runs the lab smoke against it (docs/12). *Gate:* (1) the
+viewer opened by `make introspect` renders the demo robot's session
+graph, and a lab test asserts the rendered nodes; (2) a request without
+the token is refused and one with it served; (3) serving tests: index at
+the root, traversal refused, a missing file a 404, API routes shadowing
+files, a robot without the directory still answers the text index; (4)
+CI builds the image, the image-based demo passes the lab smoke, the
+image contains no `x264enc`; (5) nothing is published.
 
 ## Where `fjarr.test` lives
 

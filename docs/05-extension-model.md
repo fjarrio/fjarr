@@ -48,7 +48,9 @@ signatures live in [docs/09](09-interfaces.md); semantically, a capability:
      registration; the typed inter-capability handle is deferred to M4
      ([F4](reviews/m1-api-fit-review.md)) — declaring the field now avoids
      a later ABI break;
-   - DataChannel classes it needs (reliability per [docs/08](08-protocol.md));
+   - DataChannel classes it needs (reliability per [docs/08](08-protocol.md))
+     and, for a bulk channel, its framing — `raw` bytes or
+     [blob frames](08-protocol.md#blob-frames);
    - config schema (JSON Schema — validated by the core, surfaced to
      integrators);
    - required privileges (e.g. `uinput`, filesystem paths) — granted

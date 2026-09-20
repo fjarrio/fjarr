@@ -4,18 +4,71 @@
   "title": "Fjarr DataChannel envelope",
   "description": "All control/backend messages share this shape. Normative prose: docs/08-protocol.md#envelope. Unknown fields MUST be ignored (forward compatibility), therefore additionalProperties stays permissive by design.",
   "type": "object",
-  "required": ["v", "cap", "type", "event_id", "kind", "payload"],
+  "required": [
+    "v",
+    "cap",
+    "type",
+    "event_id",
+    "kind",
+    "payload"
+  ],
   "properties": {
-    "v": { "const": 1 },
+    "v": {
+      "const": 1
+    },
     "cap": {
       "type": "string",
       "description": "Owning capability, reverse-DNS",
       "pattern": "^[a-z0-9]+(\\.[a-z0-9-]+)+$"
     },
-    "type": { "type": "string", "minLength": 1 },
-    "event_id": { "type": "string", "minLength": 1 },
-    "kind": { "enum": ["request", "accept", "feedback", "result", "event"] },
-    "payload": { "type": "object" }
+    "type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kind": {
+      "enum": [
+        "request",
+        "accept",
+        "feedback",
+        "result",
+        "event"
+      ]
+    },
+    "payload": {
+      "type": "object"
+    }
   },
-  "$comment": "kind=accept/feedback/result echo the request's event_id. result.payload carries ok:bool and, on failure, error:{code,message}."
+  "$comment": "kind=accept/feedback/result echo the request's event_id. result.payload carries ok:bool and, on failure, error:{code,message}.",
+  "$defs": {
+    "blob-ref": {
+      "title": "Blob reference",
+      "description": "A payload field whose bytes travel as blob frames on the capability's bulk channel. Normative prose: docs/08-protocol.md#blob-frames.",
+      "type": "object",
+      "required": [
+        "blob",
+        "len"
+      ],
+      "properties": {
+        "blob": {
+          "type": "string",
+          "description": "UUIDv7 of the blob, text form",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "len": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "blob_len \u2014 the whole blob in bytes"
+        },
+        "type": {
+          "type": "string",
+          "description": "media type of the bytes, e.g. text/vnd.graphviz"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
 }

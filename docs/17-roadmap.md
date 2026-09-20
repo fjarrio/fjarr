@@ -76,9 +76,13 @@ machine; it found an upstream webrtcbin stats leak on day one —
 renegotiation, per-track failure that never rebuilds the plane,
 `--probe-source` for every type, the demo robot on a pattern, the lab's
 RTSP simulator and the host webcam —
-[review](reviews/slice-4-review.md)) · 5 demo wiring
-(demo-backend real grants for every capability, `fjarr.introspect` +
-`<PipelineGraph>` + the dashboard Diagnostics tab, container images) ·
+[review](reviews/slice-4-review.md)) · **5a** demo wiring, protocol
+half (planned 2026-09-21, [docs/23](23-agent-core-architecture.md#slices-3a-3b-3c-and-their-gates):
+docs/08 blob frames on both tiers, `fjarr.introspect`, the pipeline
+feeds, `<PipelineGraph>` + the dashboard Diagnostics tab, the demo
+backend's operator/developer roles) · **5b** demo wiring, delivery half
+(the viewer served from `introspect.viewer_dir`, `make introspect`
+opening it, the CI-built `fjarr-agent` image — unpublished until M2.5) ·
 6 ADR-0007 spike + adaptive bitrate · 7 fault injection + latency harness
 on the frame stamp.
 
@@ -113,7 +117,9 @@ features into it rather than build the delivery: the apt repository and
 signing, the `fjarr-agent` package with its systemd unit
 (ADR-0019 addendum), `fjarr-desktop-x11` / `fjarr-desktop-wayland` /
 `fjarr-inputd` / `fjarr-tools`, the container image split (base +
-per-vendor layers), the install script, `fjarr-agent setup` / `--check`
+per-vendor layers, arm64 — the core image itself is built and tested in
+CI from slice 5b and first *published* here, with the release process),
+the install script, `fjarr-agent setup` / `--check`
 / `drivers`, and the driver catalog format with the built-in entries
 (`test`, `v4l2`, `rtsp`, desktop backends) — [docs/26](26-robot-install-and-drivers.md).
 Vendor camera packages themselves are M3 (chosen by the design partner's

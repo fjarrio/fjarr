@@ -1,0 +1,17 @@
+{
+  "v": 1,
+  "cap": "fjarr.introspect",
+  "type": "snapshot",
+  "event_id": "01936b1e-2c1a-7c3e-9a8b-0f1e2d3c4b5a",
+  "kind": "event",
+  "payload": {
+    "pipeline_id": "session:01936b1e-2c1a-7c3e-9a8b-0f1e2d3c4b5b",
+    "seq": 12,
+    "txt": "session \u2026",
+    "dot": {
+      "blob": "01936b1e-2c1a-7c3e-9a8b-0f1e2d3c4b5c",
+      "len": 87107,
+      "type": "text/vnd.graphviz"
+    }
+  }
+}

@@ -31,10 +31,14 @@ description: How the agent is installed on a robot and how a customer discovers,
 | Channel | Contents | For |
 |---|---|---|
 | **apt repository** (`deb [arch=amd64,arm64] https://apt.fjarr.io …`) | `fjarr-agent` (core + `fjarr.test` + introspection), `fjarr-desktop-x11`, `fjarr-desktop-wayland`, `fjarr-inputd`, `fjarr-gst-<vendor>` per vendor and architecture, `fjarr-tools` (opsim, probe) | robots on Ubuntu 26.04 LTS (the supported platform, docs/04, ADR-0022) |
-| **Container images** | `ghcr.io/fjarrio/fjarr-agent:<ver>` (core) and per-vendor variants `…:<ver>-zed`, `…:<ver>-realsense`, plus `-desktop-x11`/`-wayland`; the same packages, layered | containerized robot stacks, the demo, CI |
+| **Container images** | `ghcr.io/fjarrio/fjarr-agent:<ver>` (core) and per-vendor variants `…:<ver>-zed`, `…:<ver>-realsense`, plus `-desktop-x11`/`-wayland`; the same packages, layered. The core image exists from slice 5b (`docker/agent/Dockerfile`, built and smoke-tested in CI, amd64, unpublished — [docs/12](12-development-environment.md#running-the-demo-robot-from-the-agent-image-slice-5b)); the variants, arm64 and publishing are this milestone | containerized robot stacks, the demo, CI |
 | **Embedding** | `libfjarr` as a CMake package (`find_package(fjarr)`), headers = docs/09; the customer's app links the core and installs the driver packages it wants | robot companies embedding the library in their own daemon |
 | **Install script** | `curl -fsSL https://get.fjarr.io \| sh` — adds the repository, installs `fjarr-agent`, runs `fjarr-agent setup` | first contact |
 
+The `fjarr-agent` package installs the introspection viewer's static
+files under `/usr/share/fjarr/viewer` and points `introspect.viewer_dir`
+there in its shipped `fjarr.toml` ([docs/24](24-pipeline-introspection.md#the-viewer));
+the container image carries the same directory.
 The `fjarr-agent` package ships the systemd unit (`Type=notify`,
 `WatchdogSec=30`, `Restart=on-failure`, running as the unprivileged
 `fjarr` user per docs/10) and enables it; the daemon requires systemd on

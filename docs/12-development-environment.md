@@ -205,12 +205,38 @@ leaves nothing behind, but it does need `NET_ADMIN`).
 
 ## Pipeline introspection
 
-With the demo profile up, `make introspect` opens the agent's live pipeline
-viewer (`http://localhost:7381/`, [docs/24](24-pipeline-introspection.md));
-`curl localhost:7381/pipelines` lists pipelines and
-`curl localhost:7381/pipelines/<id>.txt` prints a one-screen summary — the
-first thing to look at when media misbehaves, and what `/verify` and the
-e2e tests assert against.
+With the demo profile up, `make introspect` (no arguments, slice 5b) opens
+the agent's live pipeline viewer at `http://localhost:7381/`
+([docs/24](24-pipeline-introspection.md#the-viewer)). The endpoint is
+loopback-only inside the robot container, so the demo profile binds it on
+the container's interface with the dev token `FJARR_INTROSPECT_TOKEN`
+(`.env.example`) and publishes it on the host's loopback only; the viewer
+asks for the token once. `make introspect PIPELINE=<id>` and
+`curl localhost:7381/pipelines/<id>.txt` inside the container print a
+one-screen summary — the first thing to look at when media misbehaves,
+and what `/verify` and the e2e tests assert against.
+
+### Running the demo robot from the agent image (slice 5b)
+
+The demo robot runs in the dev image with the workspace mounted, so an
+agent change is `make agent-build` and a container restart, never an
+image rebuild. The product artifact is the `fjarr-agent` image
+(`docker/agent/Dockerfile`, repo-root context: a node stage builds the
+viewer, a build stage the library and daemon, the runtime stage is Ubuntu
+26.04 with the runtime GStreamer and VA-API packages, no compilers, a
+non-root user, the viewer under `/usr/share/fjarr/viewer`, a healthcheck
+on the endpoint, and a build that fails if `x264enc` is present — the
+doctor's rule applied to the artifact). A `demo` stage layers the demo
+robot binary on the runtime image, the topology an embedding customer
+uses. To run the demo from it:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.image.yml --profile demo up -d --build demo-robot
+```
+
+CI runs the lab smoke against this variant on every push and discards
+the image; publishing to GHCR arrives with M2.5's release process
+([docs/26](26-robot-install-and-drivers.md#distribution-channels)).
 
 ## Make targets
 

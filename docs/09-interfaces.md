@@ -46,13 +46,15 @@ namespace fjarr {
 using SessionId = std::string;         // the wire session_id (UUIDv7)
 
 enum class ChannelClass { Control, Realtime, Bulk, Stream };   // docs/08 classes
+enum class BulkFraming { Raw, Blob };                          // docs/08#blob-frames
+struct ChannelDecl { ChannelClass channel; BulkFraming framing = BulkFraming::Raw; };
 
 struct CapabilityManifest {
   std::string name;              // reverse-DNS, e.g. "fjarr.camera"
   SemVer version;
   std::vector<TrackDecl> tracks;         // track CAPACITY (docs/05; actual
                                          // per-session set at attach — F1)
-  std::vector<ChannelDecl> channels;     // DC classes it needs (docs/08)
+  std::vector<ChannelDecl> channels;     // DC classes it needs + bulk framing (docs/08)
   nlohmann::json config_schema;          // JSON Schema for its config
   std::vector<Privilege> privileges;     // explicit grants required
   ConsumerKinds consumers;               // peer, backend, or both
@@ -96,6 +98,12 @@ public:
   // select-tracks / bandwidth-stats never arrive here: the core serves them
   // for every track-owning capability (docs/08#track-control).
   virtual void on_message(SessionContext& ctx, const Envelope& msg) = 0;
+  // Incoming bytes on this capability's bulk channel (docs/08#blob-frames).
+  // A `raw` channel delivers every binary message as-is; a `blob` channel
+  // delivers chunks whose header the core already parsed and checked.
+  // Default no-ops: a capability that only sends declares nothing more.
+  virtual void on_binary(SessionContext& ctx, std::span<const std::byte> bytes) {}
+  virtual void on_blob_chunk(SessionContext& ctx, const BlobChunk& chunk) {}
   // Backend consumer hooks (F2) — session-independent conversation with
   // fjarr-server/Cloud over the agent's signaling connection. Default
   // no-ops so peer-only capabilities are unaffected.
@@ -114,8 +122,14 @@ public:
 // coalesces into one serialized offer and keeps other tracks flowing,
 // docs/08#renegotiation), per-class ChannelSender access, the
 // accept/feedback/result/fail correlation helpers, run_async on the worker
-// pool, arm_deadman, close. Both are core-loop-only; capabilities never
-// touch sockets, SDP or GStreamer negotiation.
+// pool, arm_deadman, close — and `send_blob(bytes, media_type)`, which
+// returns the BlobRef to put in an envelope and a handle to cancel: the
+// core chunks, pumps under the docs/08 watermarks and reports completion,
+// so no capability writes its own pump. `BlobAssembler` (a helper, not a
+// hook) collects on_blob_chunk() deliveries into whole blobs under a size
+// cap for capabilities that want values rather than streams.
+// Both contexts are core-loop-only; capabilities never touch sockets, SDP
+// or GStreamer negotiation.
 // spec: docs/23-agent-core-architecture.md#the-concrete-sessioncontext-and-backendcontext
 
 } // namespace fjarr
@@ -248,7 +262,12 @@ A JWT signed with a key registered in `fjarr-server` (per tenant):
 
 Short-lived (≤ 5 min to *start* a session; the session may outlive it).
 The customer's own auth decides who gets grants — Fjarr never sees their
-user database.
+user database. The demo backend stands in for that auth with a **role**
+the dashboard picks before connecting: `operator` is granted the robot's
+media capabilities, `developer` additionally `fjarr.introspect`
+([docs/24](24-pipeline-introspection.md)) — a demo-only convention, not
+part of this contract, kept so the demo never grants everything to
+everyone.
 
 ### b) Webhooks (fjarr-server → customer backend)
 
@@ -306,6 +325,7 @@ const cam = session.tracks.acquire("cam-front", { tier: "active", visible: true 
 session.on("fjarr.telemetry", "joint-state", (env) => …);  // stream mode
 await session.request("fjarr.camera", "select-tracks", …); // accept/feedback*/result
 session.publisher("com.acme.teleop", "cmd_vel", { maxHz: 50 }).publish(…);
+await session.bulk("fjarr.introspect").receive(ref);        // a blob an envelope referred to (docs/08#blob-frames)
 session.stats.getSnapshot();                               // per-track, transport
 session.close("operator-closed");
 ```

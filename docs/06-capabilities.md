@@ -145,8 +145,9 @@ reconnect, newest-first lane before backfill, without unbounded growth.
 Peer + backend consumers. No prior art in the inspiration projects (fleet-daemon had
 literally zero `bytes` fields) — designed fresh in [docs/08](08-protocol.md#file-frames).
 
-- Manifest → chunked binary frames (64–256 KiB, ≤ `sctp.maxMessageSize`) on
-  a dedicated reliable DC; SHA-256 whole-file integrity.
+- Manifest → [blob frames](08-protocol.md#blob-frames) (chunks ≤ 256 KiB
+  and ≤ `sctp.maxMessageSize`, one blob per transfer) on a dedicated
+  reliable DC; SHA-256 whole-file integrity.
 - **Backpressure** both directions (`bufferedAmount` low-water pumping —
   never queue-unbounded).
 - **Resume** by received-ranges after reconnect; a 4 GB diagnostic dump over
@@ -300,7 +301,8 @@ Peer consumer, built in. Exposes the agent's live pipeline snapshots
 media plane can be inspected from the dashboard without shell access —
 the product feature specified in [docs/24](24-pipeline-introspection.md).
 Grant-gated (`{"name":"fjarr.introspect"}`, developer/support roles);
-large bodies ride `fjarr:bulk:fjarr.introspect`.
+`json` and `dot` bodies ride `fjarr:bulk:fjarr.introspect` as
+[blob references](08-protocol.md#blob-frames).
 
 **Accepted when:** from the demo dashboard's Diagnostics tab, an operator
 with the introspect grant watches the session pipeline update live while

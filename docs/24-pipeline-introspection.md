@@ -103,7 +103,7 @@ Unix socket alternative `introspect.socket = "/run/fjarr/introspect.sock"`):
 
 | Route | Returns |
 |---|---|
-| `GET /` | the bundled viewer (below) |
+| `GET /` | the viewer, when `introspect.viewer_dir` is set ([below](#the-viewer)); otherwise a text index of these routes naming the key |
 | `GET /pipelines` | JSON list: id, kind, state, session, seq, last milestone |
 | `GET /pipelines/<id>.dot` / `.json` / `.txt` | latest snapshot in that form; `?seq=<n>` for history |
 | `GET /pipelines/<id>/history` | the snapshot sequence (metadata only; bodies via `?seq`) |
@@ -123,18 +123,48 @@ startup error (exit 1) — a silently absent endpoint would break the
 tests that rely on it. Served by libsoup-3's server on the core context
 (no new dependency).
 
-### The bundled viewer
+### The viewer {#the-viewer}
 
-A single-page viewer served from the endpoint, rendering DOT in the
-browser (d3-graphviz on `@hpcc-js/wasm`, both permissively licensed —
-docs/14) so the robot needs no Graphviz installation and no network:
-pipeline list on the left, the live graph in the middle (nodes that
-changed since the previous snapshot highlighted, caps on hover, state
-colouring), a timeline scrubber below with milestones marked, and the
-summary text and JSON as tabs. Layout updates are animated between
-snapshots so a renegotiation reads as "this branch appeared", not as a
-new picture. `make introspect` in the devcontainer opens it against the
-running demo-robot.
+A single-page viewer rendering DOT in the browser (d3-graphviz on
+`@hpcc-js/wasm`, both permissively licensed — docs/14) so the robot needs
+no Graphviz installation and no network: pipeline list on the left, the
+live graph in the middle (nodes that changed since the previous snapshot
+highlighted, caps on hover, state colouring), a timeline scrubber below
+with milestones marked, and the summary text and JSON as tabs. Layout
+updates are animated between snapshots so a renegotiation reads as "this
+branch appeared", not as a new picture.
+
+It is the `<PipelineGraph>` component of `@fjarr/react` mounted on the
+HTTP [pipeline feed](21-web-client-architecture.md#pipeline-feeds) — a
+small app in the web workspace (`web/apps/introspect-viewer`, built by
+`make web-build` into plain static files) that consumes only the public
+library API, the same rule the demos follow. The dashboard's Diagnostics
+tab mounts the same component on the session feed.
+
+**How it ships.** The viewer is static files, several MB of them (the
+Graphviz wasm), so it is neither compiled into `libfjarr` nor fetched from
+the network. The endpoint serves the directory named by
+`introspect.viewer_dir` (config / `FJARR_INTROSPECT_VIEWER_DIR`; empty by
+default) at `/`: `index.html` at the root, assets under their built
+paths, correct media types for html/js/css/wasm, long cache headers only
+for Vite's hashed asset names, path traversal refused, a missing file a
+404, and every API route above shadowing a file of the same name. Without
+the key, `GET /` stays the text index plus one line naming the key and
+the package that provides the files. The `fjarr-agent` package (M2.5,
+[docs/26](26-robot-install-and-drivers.md)) installs them under
+`/usr/share/fjarr/viewer` and its shipped `fjarr.toml` points the key
+there; an embedder who never sets it loses nothing. The `fjarr-agent`
+container image carries the same directory.
+
+**In the demo.** The endpoint is loopback-only inside the robot
+container, which a browser on the host cannot reach. The demo profile
+therefore binds it on the container's interface with a fixed dev token
+(`FJARR_INTROSPECT_TOKEN`, from `.env.example`) and publishes the port on
+the host's loopback only; the compose file mounts the viewer's build
+output at the share directory. `make introspect` opens
+`http://localhost:7381/`; the viewer asks for the token once and keeps it
+for the tab, the lab sends it as a header — which is also the only place
+the token path (docs/10) is exercised by tests.
 
 ### From the dashboard: the `fjarr.introspect` capability
 
@@ -146,18 +176,28 @@ pipelines from the fleet dashboard without shell access:
 |---|---|---|---|
 | `pipelines/list` | request → result | `{pipelines: [...]}` | control |
 | `pipelines/subscribe` | request → result | `{pipeline_id?: "*", forms: ["txt","json","dot"]}` — then `snapshot` events | control |
-| `snapshot` | event | metadata + the requested forms; bodies over 12 KiB ride `fjarr:bulk:fjarr.introspect` as a referenced blob | control / bulk |
-| `pipelines/history` | request → result | `{pipeline_id, seq_from?}` | control / bulk |
+| `snapshot` | event | `{pipeline_id, seq, ts, trigger, txt?, json?, dot?}` — metadata and `txt` inline; `json` and `dot` are always [blob references](08-protocol.md#blob-frames) on `fjarr:bulk:fjarr.introspect`, so a client has one path per form | control + bulk |
+| `pipelines/history` | request → result | `{pipeline_id, seq_from?}` → the metadata sequence | control |
+| `pipelines/snapshot` | request → result | `{pipeline_id, seq, forms}` → one historical snapshot in the same shape as the event (bodies as blob references) — the session's `?seq=` | control + bulk |
 | `stats` | request → result | as `GET /stats` | control |
+
+The capability declares its bulk channel with `blob` framing and sends
+under the docs/08 watermarks with **newest-wins per pipeline**: while a
+subscriber's channel is above HIGH_WATER, a newer snapshot of the same
+pipeline replaces the pending one, so a slow viewer gets the current
+graph when it drains, never a backlog.
 
 Gated by a grant param: `{"name":"fjarr.introspect"}` in the grant, which
 the customer's backend issues to developer and support roles only — a
 pipeline graph reveals device paths, encoder settings and session ids.
+The demo backend models this as a role picked on the dashboard
+(`operator` / `developer`, [docs/09](09-interfaces.md#a-session-grants-customer-backend--operator-client)).
 
-`@fjarr/react` ships `usePipelines(session)` / `usePipelineSnapshot(session,
-id)` (docs/21 selector mode, newest-wins per pipeline) and `<PipelineGraph
-session pipelineId>` — the same viewer as a component, headless-first, so
-the demo dashboard's *Diagnostics* tab is ~20 lines. Fjarr Cloud later
+`@fjarr/react` ships `usePipelines(feed)` / `usePipelineSnapshot(feed,
+id)` (docs/21 selector mode, newest-wins per pipeline), `<PipelineGraph
+feed pipelineId>` and `usePipelineFeed(session)` — the same viewer as a
+component over a [pipeline feed](21-web-client-architecture.md#pipeline-feeds),
+headless-first, so the demo dashboard's *Diagnostics* tab is ~20 lines. Fjarr Cloud later
 shows the same view fleet-wide (M7), which is where the retention and
 cross-robot search live — the hosted-value line of docs/03.
 
@@ -237,9 +277,12 @@ in one command.
   checkpoints, `/log`, `/diagnostics.tar.gz` and `fjarr-agent
   --diagnostics`, `make introspect`, `fjarr-lab introspect` (the history
   ring and `?seq` landed in 3b).
-- **Slice 5**: `fjarr.introspect` capability, `<PipelineGraph>` + hooks,
-  the demo dashboard Diagnostics tab; the same built component is served
-  from the endpoint's `GET /` as a data file, so the viewer is built once.
+- **Slice 5a**: the docs/08 blob frames on both tiers, the
+  `fjarr.introspect` capability, the pipeline feeds, `<PipelineGraph>` +
+  hooks, the demo dashboard Diagnostics tab behind the developer role.
+- **Slice 5b**: the viewer app served from `introspect.viewer_dir`,
+  `make introspect` opening it against the demo robot (token path), the
+  CI-built `fjarr-agent` image carrying it ([docs/23](23-agent-core-architecture.md#slices-3a-3b-3c-and-their-gates)).
 - **M7**: fleet-wide retention and search in Fjarr Cloud.
 
 ## Acceptance

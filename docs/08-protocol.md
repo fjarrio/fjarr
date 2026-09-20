@@ -1,6 +1,6 @@
 ---
 title: Protocol
-description: Normative wire specification — signaling messages, DataChannel topology, envelopes, file frames.
+description: Normative wire specification — signaling messages, DataChannel topology, envelopes, blob frames.
 ---
 
 > **Normative.** This document defines the wire behavior implemented three
@@ -91,7 +91,7 @@ Channels are created by the agent at session setup, named
 |---|---|---|---|---|
 | `fjarr:control` | control | yes | reliable | envelopes: capability control, telemetry, clipboard metadata, heartbeat |
 | `fjarr:realtime` | realtime | **no** | **0** | pointer motion, joint states — newest-wins data only |
-| `fjarr:bulk:<cap>` | bulk | yes | reliable | file frames, clipboard payloads; one per bulk-using capability |
+| `fjarr:bulk:<cap>` | bulk | yes | reliable | one per bulk-using capability; either [blob frames](#blob-frames) (file chunks, clipboard payloads, snapshot bodies) or a raw byte stream — the capability declares which |
 | `fjarr:stream:<cap>` | stream | **no** | **0** | lossy binary frames (point clouds, depth maps, custom sensor data) in either direction; frame-level newest-wins ([ADR-0018](adr/0018-stream-channel-class.md)) |
 
 Rules:
@@ -111,9 +111,12 @@ Rules:
   the [reconnection ladder](#reconnection) (its signaling socket death, or a
   `session-close(reason="heartbeat")` if the socket is still up, tells the
   server); the agent ends the session with `session-close(reason="heartbeat")`.
-- A capability that needs an **ordered byte stream** (terminal input,
-  clipboard payloads) declares a bulk channel; raw bytes ride it as binary
-  messages. Control and realtime carry envelopes only.
+- A bulk channel's **framing is declared** in the capability manifest,
+  never guessed by a peer: `raw` (terminal input — every binary message is
+  bytes for the capability, no header) or `blob` ([blob frames](#blob-frames):
+  files, clipboard payloads, introspection snapshots — chunks of a named,
+  sized blob that an envelope refers to). Control and realtime carry
+  envelopes only.
 
 ### Session-level messages (`fjarr.core`) {#fjarr-core}
 
@@ -175,6 +178,14 @@ request to a capability not attached to the session is answered
 Capability payload schemas live in `protocol/schemas/` (JSON Schema),
 versioned with the capability; TS types and C++/Rust validators are
 generated from them (single source — *fleet-daemon schema-drift lesson*).
+
+**Blob references.** A payload field may be a *blob reference* instead of
+the value itself: `{"blob": "<blob_id>", "len": <bytes>, "type":
+"<media type>"}` (the `blob-ref` fragment of `envelope.schema.json`). The
+bytes travel as [blob frames](#blob-frames) on the capability's bulk
+channel. A payload whose serialized form would exceed 8 KiB MUST use a
+reference — the 16 KiB control ceiling leaves headroom for the envelope
+around it, and the control channel never waits behind a large body.
 
 ## Track manifest {#track-manifest}
 
@@ -259,22 +270,56 @@ Control-channel input messages (all `cap: "fjarr.desktop"`):
 
 Full client-side semantics: [docs/22](22-remote-desktop-client.md#input-pipeline).
 
-## File frames (fjarr.files) {#file-frames}
+## Blob frames {#blob-frames}
 
-Manifest/resume/complete are envelopes on control; data rides binary frames
-on `fjarr:bulk:fjarr.files`:
+A bulk channel declared with `blob` framing carries binary messages of one
+shape, whatever the capability — the same chunker, reassembler and
+backpressure pump serve introspection snapshots (slice 5), clipboard
+payloads (M3) and file transfer (M4):
 
 ```text
 offset  size  field
 0       1     version (0x01)
-1       15    transfer_id (uuid, truncated binary)
-16      8     byte_offset (u64 BE)
-24      4     payload_len (u32 BE)
-28      …     payload (≤ 256 KiB and ≤ sctp maxMessageSize)
+1       16    blob_id (UUIDv7, binary)
+17      8     byte_offset (u64 BE)
+25      8     blob_len (u64 BE — the whole blob)
+33      4     payload_len (u32 BE)
+37      …     payload (≤ 256 KiB and ≤ sctp maxMessageSize)
 ```
 
-Envelope flow: `file-offer` (name, size, sha256, direction) → `accept` →
-frames → `file-complete(result)`. Resume: receiver sends
+Rules:
+
+- A blob is **complete** when every byte of `[0, blob_len)` has arrived.
+  Chunks of one blob are sent in offset order (the channel is ordered);
+  chunks of different blobs may interleave.
+- A chunk whose version is not 1, whose `payload_len` disagrees with the
+  message length, or whose `byte_offset + payload_len` exceeds `blob_len`
+  is dropped and counted; the blob it belongs to is discarded.
+- **Order between channels.** The sender emits the referencing envelope
+  first, then the chunks. Control and bulk are different DataChannels, so
+  receivers MUST accept either arrival order: chunks of a blob no envelope
+  has named yet wait in a bounded pending store (8 MiB or 30 s per
+  channel, oldest evicted); a reference whose blob has not completed 30 s
+  after the envelope arrived fails locally (the caller of the request or
+  the subscriber sees an error; nothing goes back on the wire). An
+  unreferenced blob that completes is kept under the same bound until an
+  envelope claims it.
+- **Backpressure** ([below](#backpressure)) applies to blob senders like
+  any bulk sender. A capability that produces blobs faster than the
+  channel drains decides what to drop; the core never queues unboundedly
+  (`fjarr.introspect`: the newest snapshot per pipeline wins,
+  [docs/24](24-pipeline-introspection.md#from-the-dashboard-the-fjarrintrospect-capability)).
+- A blob that must **survive reconnect** (a file) is resumed by ranges,
+  below; a blob that is a *value* (a snapshot) is simply sent again by the
+  new session. Receivers reassemble small blobs in memory (16 MiB cap by
+  default) and consume large ones chunk by chunk.
+
+### File transfer (fjarr.files) {#file-frames}
+
+Manifest/resume/complete are envelopes on control; the data is one blob
+per transfer with `blob_id = transfer_id`: `file-offer` (name, size,
+sha256, direction — the offer *is* the blob reference) → `accept` →
+chunks → `file-complete(result)`. Resume: receiver sends
 `file-resume {transfer_id, ranges:[[start,end],…]}` after reconnect; sender
 fills gaps only. Integrity: whole-file SHA-256 verified before `result.ok`.
 
