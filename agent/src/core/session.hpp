@@ -117,6 +117,10 @@ class Session : public std::enable_shared_from_this<Session> {
     unsigned manifest_version() const { return manifest_version_; }
     std::vector<protocol::ManifestEntry> manifest() const { return consumer_ ? consumer_->manifest() : std::vector<protocol::ManifestEntry>{}; }
     nlohmann::json describe() const;
+    /// The last per-second stats sample as sent on `bandwidth-stats`, per capability (GET /stats).
+    const nlohmann::json& last_stats() const { return last_stats_; }
+    /// Bytes queued in every DataChannel sender (GET /memory).
+    std::size_t buffered_bytes() const;
 
     // --- used by SessionContextImpl (core loop only)
     const nlohmann::json& granted_params(std::string_view cap) const;
@@ -206,6 +210,7 @@ class Session : public std::enable_shared_from_this<Session> {
     std::unique_ptr<ChannelSender> denied_;
     std::vector<std::weak_ptr<Deadman>> deadmans_;
     unsigned long dropped_envelopes_ = 0;
+    nlohmann::json last_stats_ = nlohmann::json::object();
     bool closed_sent_ = false;
 };
 

@@ -791,7 +791,8 @@ result it reads ([docs/15](15-testing-strategy.md#memory-safety-c)):
 3. **GStreamer's own accounting, in every test and every scenario.**
    The `leaks` tracer (`GST_TRACERS="leaks(filters="GstElement,GstPad,
    GstBuffer,GstSample,GstPromise",stack-traces-flags=full)"`) is
-   loaded by the test binaries and by `fjarr-agent --memcheck`; its action
+   loaded by the test binaries and by the agent when `GST_TRACERS` is set
+   (`make agent-leaks` does that for the demo robot); its action
    signals (`activity-start-tracking`, `activity-get-checkpoint`) bracket
    every test case and every `fjarr-opsim` scenario, so "created but never
    freed since the checkpoint" is an **assertion**, per test, with stack
@@ -811,7 +812,8 @@ result it reads ([docs/15](15-testing-strategy.md#memory-safety-c)):
 
 Two more tools run nightly rather than per commit: **valgrind memcheck**
 on the loop tests (`G_SLICE=always-malloc G_DEBUG=gc-friendly`,
-GStreamer's `gst.supp`) for the errors sanitizers structurally miss, and
+GLib's `glib.supp`, GStreamer's `gstreamer.supp` and `fjarr.supp`) for the
+errors sanitizers structurally miss, and
 **heaptrack** on a streaming scenario for the hot-path allocation budget
 (docs/16): steady-state pushes through FrameHub and appsrc allocate one
 metadata-only `GstBuffer` header per subscriber per frame — the fan-out's
@@ -886,8 +888,8 @@ expects the agent to end in:
 | `ice-restart` | send `ice-restart` | `session-close{reason:"ice-restart", retry:true}` within 100 ms; new session brokered and streaming |
 | `deadman` | `drive` at 20 Hz, then stop | `deadman{state:"expired"}` within 600 ms of the last `drive` |
 | `relay-only` | `--ice-policy relay` on both sides | media flows through coturn (relay candidates in both stats) |
-| `soak` | N connect/stream/close cycles (`--cycles`, default 200; CI runs 20 per commit, 200 nightly and at the 3c gate) | `/memory` census equal to baseline after the first cycle's warm-up checkpoint, RSS growth < 5 MB, no `error` counters |
-| `netem-<profile>` | applies a docs/25 profile on the agent container, runs `smoke` | frames keep arriving; health-relevant stats recorded |
+| `soak` | N connect/stream/close cycles (`--cycles`, default 200; CI runs 20 per commit, 200 nightly and at the 3c gate) | `/memory` census equal to the baseline checkpointed after a warm-up of 40 cycles (a fifth of a shorter run) — the bounded snapshot history and log ring fill during it — RSS growth < 5 MB after it, no `error` counters |
+| `netem-<profile>` | applies a docs/25 profile on the agent container (`make opsim-netem NETEM_PROFILE=…`, on `lo` and `eth0`: opsim shares the robot's network namespace), runs the smoke assertions with per-profile tolerances | frames keep arriving; health-relevant stats recorded. `wifi-ok`/`4g`/`lossy` run nightly; `bad` (15 % loss, 1.5 Mbit) needs loss recovery and adaptive bitrate (slice 6) and is expected to fail until then |
 
 Output: a one-screen verdict per assertion (`PASS`/`FAIL name: detail`)
 and, with `--json`, the same as data plus the captured signaling and
@@ -1029,10 +1031,49 @@ the text above left open, or learned from the lab:
   and the RAII kit's source trampolines catch `std::exception` (any granted
   operator can send `{"tracks":[1]}`); inbound envelopes above 16 KiB are
   dropped and counted, error messages echoing input are clamped.
-- *Deferred to 3c/M4*: the `stream` sender (ADR-0018), the backend bus,
-  `/memory`, the `leaks` tracer gate, TSan as a gate, `soak`/`netem-*`, a
+- *Deferred to M4*: the `stream` sender (ADR-0018), the backend bus, a
   producer bus-error → restart test under ASan, the duplicate
   `deadman{expired}` a capability emits before the core's own expiry.
+
+**Implementation notes (slice 3c)** — the memory ladder as built:
+
+- *The leaks tracer is read through a ledger, never through
+  `get-live-objects`.* Its `activity-get-checkpoint` window lists what was
+  created and what was removed since the last read and resets on every
+  read, and its `get-live-objects` signal *takes* the listed objects'
+  references (it exists for process exit). The agent therefore keeps a
+  process-wide multiset of created − removed, merged on every read; a
+  checkpoint records that multiset and `/memory?since=` reports the
+  difference, so reads are idempotent and any number of readers agree.
+  `make agent-leaks-selftest` proves the bracketing fires on a deliberate
+  leak — a gate that cannot fire is no gate (the ctest lesson of 3b).
+- *valgrind needs three suppression files*: GLib's installed `glib.supp`,
+  GStreamer's `gstreamer.supp` vendored from the 1.28.2 tree, and
+  `agent/tests/valgrind/fjarr.supp` for what those miss — GLib's per-thread
+  main-loop and source-attach bookkeeping, GIO module unloading, one GLib
+  constructor allocation, and `realloc(p, 0)` in a JavaScript engine a
+  plugin's helper process loads. Every entry is library-internal by
+  construction; a definite loss with a fjarr frame is never listed.
+- *heaptrack found the one per-frame allocation the budget forbade*: the
+  delivery thread built its target list in a fresh vector per frame. It is
+  now a member reused across frames; the remaining per-frame allocations
+  are the buffer headers the budget allows (docs/16).
+- *`/events` is one chunked libsoup response per client*: our reference on
+  the message and its `finished` signal define the client's lifetime, a
+  15 s keep-alive comment keeps proxies from timing it out, and a client
+  more than 1 MiB behind has its stream completed (its `retry` reconnects,
+  `Last-Event-ID` replays what the ring still holds).
+- *webrtcbin's `get-stats` is not used.* In GStreamer 1.28.2 its
+  `_get_data_channel_transport_stats` obtains the RTP session element from
+  rtpbin's `get-session` (a new reference) and never releases it, once per
+  call: a session sampling stats every second kept one reference per
+  second after closing, about 18 MB per session in the lab. The stats
+  sampler reads rtpbin's own per-source counters (`octets-sent`,
+  `packets-sent` of the internal sender sources) synchronously on the
+  loop instead — the soak's RSS budget is what caught it. Reported
+  upstream; the workaround stays until the baseline carries the fix.
+- *The log ring keeps `info` and above regardless of the configured level*,
+  so a bundle from a `warn`-level robot still shows what happened.
 
 **3c — introspection completeness and the memory ladder**: `/events`,
 the history ring and scrubbing, `/stats`, `/memory` with checkpoints, the

@@ -32,8 +32,8 @@ struct SnapshotMeta {
 
 struct Snapshot {
     SnapshotMeta meta;
-    nlohmann::json json; // introspect.schema.json
-    std::string dot;
+    std::string json; // introspect.schema.json, serialized compact: a parsed tree costs several times its text (docs/24 retention)
+    std::string dot;  // empty for a ring's older entries (DOT is kept for the last DOT_KEPT snapshots)
     std::string txt;
 };
 
@@ -74,6 +74,8 @@ class SnapshotStore {
         glib::SourceGuard pending_timer; // owned here: a destroyed store fires nothing
     };
     void take_now(Ring& ring, GstBin* bin, SnapshotMeta meta);
+    static constexpr std::size_t MAX_RETIRED = 8; // closed pipelines kept (docs/24), oldest evicted first
+    static constexpr std::size_t DOT_KEPT = 8;    // DOT bodies kept per ring (the most recent ones)
     std::size_t history_;
     std::string dot_dir_;
     Scheduler schedule_;

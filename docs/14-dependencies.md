@@ -27,6 +27,7 @@ groups with comments.
 | libsoup-3 (+ glib-networking) | 3.6 | WS/HTTP signaling client (ADR-0017) and the introspection server (docs/24) | LGPL-2.1 (dynamic) | yes |
 | toml++ (`tomlplusplus`) | 3.4 (header-only) | `fjarr.toml` config (docs/23) | MIT | yes |
 | nlohmann json-schema-validator | 2.3 (no Ubuntu package: pinned via CMake `FetchContent`, built into `libfjarr`) | capability config validation against `config_schema` | MIT | yes |
+| GStreamer `gstreamer.supp` (valgrind suppressions, vendored at `agent/tests/valgrind/`) | 1.28.2 source tree | `make agent-memcheck` (docs/23 memory ladder, nightly) | LGPL-2.1-or-later (a data file; never linked) | **no** — dev only |
 | `gstreamer1.0-libav` (`avdec_h264`) | 1.28 | receive-side H.264 decode in `fjarr-opsim` (docs/23) — the dev image and CI only | LGPL-2.1 (Ubuntu's ffmpeg build enables GPL parts) | **no** — a test tool; never linked into `libfjarr`, `fjarr-agent` or a demo |
 | libsystemd (`sd_notify`) | 26.04 | READY/WATCHDOG supervision — required by the packaged agent (ADR-0019 addendum) | LGPL-2.1 (dynamic) | yes |
 | GoogleTest | 1.17 | C++ unit/loop tests | BSD-3 | dev-only |

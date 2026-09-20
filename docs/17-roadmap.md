@@ -15,7 +15,7 @@ by revision (this document's history), never by renumbering.
 |---|---|---|
 | M0 Docs & environment | **done** 2026-09-15 | doctor 0 failures, 3 tiers + 3 demos build, site builds |
 | M0.5 Public foundations | **done** 2026-09-16 | CI green, fjarr.io + fjarr.dev live, registrations, prior-art anonymization policy |
-| M1 Core + extension API (camera video) | **in progress** | slices 0–2 done and reviewed, 2.9 (baseline bump, [ADR-0022](adr/0022-baseline-ubuntu-2604-gstreamer-128.md)) done 2026-09-18, 3a (browser lab) 2026-09-19, **3b (agent core) 2026-09-20**; 3c, 4–7 pending |
+| M1 Core + extension API (camera video) | **in progress** | slices 0–2 done and reviewed, 2.9 (baseline bump, [ADR-0022](adr/0022-baseline-ubuntu-2604-gstreamer-128.md)) done 2026-09-18, 3a (browser lab) 2026-09-19, 3b (agent core) 2026-09-20, **3c (introspection + memory ladder) 2026-09-20**; 4–7 pending |
 | M2 – M8 | planned | revised 2026-09-17 after the slice-3 planning ([docs/23](23-agent-core-architecture.md)–[26](26-robot-install-and-drivers.md), ADR-0019–0022, the [webrtcbin spike](../agent/spikes/webrtcbin-probe/README.md), the [planning review](reviews/slice-3-planning-review.md)): new **M2.5 packaging** milestone; M3 lightened |
 
 ## M0 — Documentation & environment *(done)*
@@ -64,8 +64,13 @@ DataChannel router, FrameHub fan-out, producers/consumers on `webrtcbin`,
 the built-in `fjarr.test`, `fjarr-opsim`, the introspection walker and
 minimal endpoint ([docs/24](24-pipeline-introspection.md)), real HS256
 grants in the demo backend, `demo-robot` streaming the test pattern to the
-demo dashboard, the ASan and RAII gates) · **3c** introspection
-completeness and the memory-safety ladder ·
+demo dashboard, the ASan and RAII gates) · **3c ✔** introspection
+completeness and the memory-safety ladder (2026-09-20: `/events`,
+`/stats`, `/memory` + checkpoints, `/log`, the diagnostics bundle,
+`fjarr-lab introspect`; TSan, the leaks-tracer bracketing and the soak as
+gates, valgrind/heaptrack/netem nightly on a runner prepared for a GPU
+machine; it found an upstream webrtcbin stats leak on day one —
+[review](reviews/slice-3c-review.md)) ·
 4 `fjarr.camera` (the source contract with `gst`/`test`/`v4l2`/`rtsp`
 types, tiers, keyframe policy, `--probe-source`) · 5 demo wiring
 (demo-backend real grants for every capability, `fjarr.introspect` +

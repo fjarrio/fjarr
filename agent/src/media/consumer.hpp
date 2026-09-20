@@ -66,7 +66,7 @@ struct StatsSample {
         std::uint64_t packets_sent = 0;
     };
     std::vector<Track> tracks;
-    std::string selected_pair;
+    std::string selected_pair; // reserved (docs/24): not read from webrtcbin's get-stats, see get_stats()
 };
 
 /// Everything the wrapper reports upward runs on the core loop.
@@ -116,6 +116,8 @@ class ConsumerPipeline {
     /// The hub sink for a track (an appsrc pusher).
     std::shared_ptr<FrameSink> sink_for(const std::string& track_id);
 
+    /// Per-track bytes/packets sent, read synchronously from rtpbin's session sources on the loop
+    /// (never webrtcbin's `get-stats`: it leaks an RTP session reference per call in 1.28.2).
     void get_stats(std::function<void(StatsSample)> cb);
     GstPipeline* pipeline() const { return GST_PIPELINE(pipeline_.get()); }
     GstElement* webrtc() const { return webrtc_.get(); }

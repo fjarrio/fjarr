@@ -6,7 +6,7 @@
  * Commands: open <url> · pages · close [n] · eval <js> · screenshot [file]
  *   · net <profile> [--hold <s>] · signaling [--follow] · wire [--follow] [--cap <cap>]
  *   · stats [robot] · profile cpu <s> · profile trace <s> · memory [--cycles N]
- *   · vitals · introspect [path] · netem <profile> · report
+ *   · vitals · introspect [pipelines|<id>[.txt|.json|.dot]|stats|memory|log|events] · netem <profile> · report
  */
 import { mkdirSync, readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -15,7 +15,7 @@ import type { WireEvent } from "@fjarr/core";
 import { OutDir } from "./artifacts.ts";
 import { LabCdp } from "./cdp.ts";
 import { env } from "./env.ts";
-import { cdpEndpoint } from "./fixtures.ts";
+import { cdpEndpoint, introspectFollow, introspectText } from "./fixtures.ts";
 import { RobotContainer } from "./netem.ts";
 import { describeProfile, NETWORK_PROFILES, type ProfileName } from "./profiles.ts";
 
@@ -188,7 +188,7 @@ async function main(): Promise<void> {
       const print = () => {
         for (; seen.n < cap.frames.length; seen.n++) {
           const f = cap.frames[seen.n]!;
-          say(`${String(f.tMs).padStart(7)} ms  ${f.dir === "out" ? "→" : "←"} ${f.type}${f.sessionId ? `  session=${f.sessionId.slice(0, 8)}` : ""}${f.type === "offer" ? `  tracks=${(f.msg as { tracks: Array<{ track_id: string }> }).tracks.map((t) => t.track_id).join(",")}` : ""}${f.type === "error" ? `  ${(f.msg as { code: string }).code}` : ""}`);
+          say(`${String(f.tMs).padStart(7)} ms  ${f.dir === "out" ? "→" : "←"} ${f.type}${f.sessionId ? `  session=${f.sessionId.slice(-8)}` : ""}${f.type === "offer" ? `  tracks=${(f.msg as { tracks: Array<{ track_id: string }> }).tracks.map((t) => t.track_id).join(",")}` : ""}${f.type === "error" ? `  ${(f.msg as { code: string }).code}` : ""}`);
         }
       };
       if (flags.has("follow")) {
@@ -333,19 +333,79 @@ async function main(): Promise<void> {
       return;
     }
     case "introspect": {
-      const robot = new RobotContainer();
-      if (!(await robot.isUp())) {
-        say(`${env.robotService} is not running — \`make demo-up\``);
+      // docs/24 implementation notes: pipelines | <id>[.txt|.json|.dot] | stats | memory | log | events (| /raw/path)
+      if (!env.introspectHttp && !(await new RobotContainer().isUp())) {
+        say(`${env.robotService} is not running — \`make demo-up\` (or set E2E_INTROSPECT_HTTP for an agent started in dev)`);
         process.exit(2);
       }
-      const path = positional[0] ? (positional[0].startsWith("/") ? positional[0] : `/pipelines/${positional[0]}.txt`) : "/pipelines";
-      const r = await robot.introspect(path);
-      if (r === null) {
-        say(`no introspection endpoint answered inside ${env.robotService} (docs/24 — ships with slice 3b)`);
+      const what = positional[0] ?? "pipelines";
+      const get = (path: string) => introspectText(path).catch((e: Error) => {
+        say(`no answer for ${path} from the introspection endpoint (docs/24): ${e.message.trim().split("\n").pop()}`);
         process.exit(1);
+      });
+      const printJson = async (path: string, file: string) => {
+        const body = JSON.parse(await get(path)) as unknown;
+        say(JSON.stringify(body, null, 2));
+        json(file, { path, result: body });
+      };
+      if (what === "pipelines") {
+        const list = JSON.parse(await get("/pipelines")) as { pipelines: Array<{ id: string; kind: string; state: string; seq: number; last_trigger: string }> };
+        if (list.pipelines.length === 0) say("(no pipelines — nothing is streaming)");
+        for (const p of list.pipelines) say(`${p.id}  ${p.kind}  ${p.state}  seq=${p.seq}  ${p.last_trigger}`);
+        const summaries: Record<string, string> = {};
+        for (const p of list.pipelines) {
+          const txt = await get(`/pipelines/${p.id}.txt`);
+          summaries[p.id] = txt;
+          say(`\n── ${p.id}\n${txt.trimEnd()}`);
+        }
+        json("introspect.json", { pipelines: list.pipelines, summaries });
+      } else if (what === "stats") await printJson("/stats", "introspect-stats.json");
+      else if (what === "memory") {
+        const since = flag("since");
+        if (flags.has("checkpoint")) {
+          const cp = JSON.parse(await introspectText("/memory/checkpoint", { method: "POST" })) as { checkpoint: string };
+          say(JSON.stringify(cp, null, 2));
+          say(`checkpoint ${cp.checkpoint} — later: fjarr-lab introspect memory --since ${cp.checkpoint}`);
+          json("introspect-memory.json", { path: "/memory/checkpoint", result: cp });
+        } else await printJson(since ? `/memory?since=${encodeURIComponent(since)}` : "/memory", "introspect-memory.json");
+      } else if (what === "log") {
+        const minutes = flag("minutes");
+        const text = await get(minutes ? `/log?minutes=${Number(minutes)}` : "/log");
+        say(text.trimEnd());
+        say(`→ ${out.writeText("introspect-log.txt", text)}`);
+      } else if (what === "events") {
+        const body = flag("body");
+        const path = body ? `/events?body=${body}` : "/events";
+        say(`following ${path} — one line per snapshot, Ctrl-C to stop`);
+        let frame: { id?: string; event?: string; data: string[] } = { data: [] };
+        const follow = introspectFollow(path, (line) => {
+          if (line === "") {
+            if (frame.event === "snapshot" && frame.data[0]) {
+              const meta = JSON.parse(frame.data[0]) as { trigger: string; state: string };
+              say(`${frame.id}  ${meta.trigger}  ${meta.state}`);
+              if (body === "txt" && frame.data[1]) say(frame.data[1].replace(/\\n/g, "\n").trimEnd().replace(/^/gm, "    "));
+              out.appendJsonl("introspect-events.jsonl", { id: frame.id, ...meta, body: frame.data[1] ?? null });
+            }
+            frame = { data: [] };
+            return;
+          }
+          if (line.startsWith(":")) return; // keep-alive comment
+          const i = line.indexOf(":");
+          const [field, value] = i < 0 ? [line, ""] : [line.slice(0, i), line.slice(i + 1).replace(/^ /, "")];
+          if (field === "data") frame.data.push(value);
+          else if (field === "id") frame.id = value;
+          else if (field === "event") frame.event = value;
+        });
+        process.once("SIGINT", () => follow.stop());
+        await follow.done;
+        say(`→ ${out.path("introspect-events.jsonl")}`);
+      } else {
+        const m = /^(.*?)(?:\.(txt|json|dot))?$/.exec(what);
+        const path = what.startsWith("/") ? what : `/pipelines/${m?.[1] ?? what}.${m?.[2] ?? "txt"}`;
+        const text = await get(path);
+        say(text.trimEnd());
+        json("introspect.json", { path, result: path.endsWith(".json") ? JSON.parse(text) : text });
       }
-      say(typeof r === "string" ? r : JSON.stringify(r, null, 2));
-      json("introspect.json", { path, result: r });
       return;
     }
     case "report": {
@@ -383,7 +443,9 @@ function usage(): void {
   profile cpu <s> | trace <s>   .cpuprofile with top self-time / trace for DevTools
   memory [--cycles N] [--snapshot]   heap/nodes/listeners now, or growth per connect/disconnect cycle
   vitals                        LCP, CLS, INP, long tasks
-  introspect [pipeline|/path]   the robot's docs/24 endpoint (from inside its container)
+  introspect [what]             the robot's docs/24 endpoint (curl inside ${env.robotService}, or E2E_INTROSPECT_HTTP):
+                                pipelines (default: list + each summary) · <id>[.txt|.json|.dot] · stats
+                                · memory [--since cp-n] [--checkpoint] · log [--minutes n] · events [--body txt|json|dot]
   report                        summary.{json,txt} of everything captured in out/adhoc
 env: E2E_BROWSER=${env.browser}  E2E_ROBOT_SERVICE=${env.robotService}  out: ${env.outRoot}`);
   process.exitCode = cmd ? 2 : 0;

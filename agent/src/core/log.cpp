@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <deque>
 #include <mutex>
 #include <string>
 
@@ -14,6 +15,21 @@ namespace {
 std::atomic<Level> g_level{Level::Info};
 std::atomic<bool> g_json{false};
 std::mutex g_mutex;
+
+// The ring (docs/24): bounded by age and by count; `info` and above regardless of the level filter.
+constexpr std::size_t RING_MAX_LINES = 4000;
+constexpr auto RING_MAX_AGE = std::chrono::minutes(10);
+struct RingEntry {
+    std::chrono::steady_clock::time_point at;
+    std::string line; // without the trailing newline
+};
+std::deque<RingEntry> g_ring; // guarded by g_mutex
+
+void ring_push(std::string line) {
+    const auto now = std::chrono::steady_clock::now();
+    g_ring.push_back(RingEntry{now, std::move(line)});
+    while (g_ring.size() > RING_MAX_LINES || (!g_ring.empty() && now - g_ring.front().at > RING_MAX_AGE)) g_ring.pop_front();
+}
 
 const char* name_of(Level l) {
     switch (l) {
@@ -54,7 +70,9 @@ void set_json(bool json) { g_json = json; }
 Level level() { return g_level; }
 
 void write(Level level, std::string_view component, std::string_view message, std::initializer_list<KV> fields) {
-    if (level < g_level) return;
+    const bool emit = level >= g_level;
+    const bool keep = level >= Level::Info;
+    if (!emit && !keep) return;
     std::string line;
     if (g_json) {
         nlohmann::json j{{"ts", timestamp()}, {"level", name_of(level)}, {"component", component}, {"message", message}};
@@ -79,12 +97,33 @@ void write(Level level, std::string_view component, std::string_view message, st
             } else line += v;
         }
     }
-    line += '\n';
     std::lock_guard<std::mutex> lock(g_mutex);
-    std::fputs(line.c_str(), stderr);
-    std::fflush(stderr);
+    if (keep) ring_push(line);
+    if (emit) {
+        line += '\n';
+        std::fputs(line.c_str(), stderr);
+        std::fflush(stderr);
+    }
 }
 
-std::string short_id(std::string_view id) { return std::string(id.substr(0, 8)); }
+std::vector<std::string> recent(std::chrono::seconds max_age) {
+    std::vector<std::string> out;
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(g_mutex);
+    for (const auto& e : g_ring)
+        if (now - e.at <= max_age) out.push_back(e.line);
+    return out;
+}
+
+void clear_ring() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_ring.clear();
+}
+
+std::string short_id(std::string_view id) {
+    // A UUIDv7's first 8 hex digits are the coarse timestamp — every session within ~65 s shares
+    // them (the lab saw six consecutive sessions log as one). The tail is the random part.
+    return std::string(id.size() > 8 ? id.substr(id.size() - 8) : id);
+}
 
 } // namespace fjarr::log

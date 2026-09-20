@@ -18,6 +18,7 @@
 #include "core/session_manager.hpp"
 #include "core/signaling_client.hpp"
 #include "introspect/introspector.hpp"
+#include "introspect/memory.hpp"
 #include "introspect/server.hpp"
 #include "media/encoder.hpp"
 #include "media/media_plane.hpp"
@@ -39,6 +40,7 @@ struct Agent::Impl {
     std::unique_ptr<core::SessionManager> sessions;
     std::unique_ptr<introspect::SnapshotStore> snapshots;
     std::unique_ptr<introspect::Server> introspect_server;
+    std::unique_ptr<introspect::MemoryCensus> memory;
     glib::SourceGuard watchdog_timer;
     glib::SourceGuard counters_timer;
     glib::SourceGuard snapshot_timer;
@@ -82,6 +84,53 @@ struct Agent::Impl {
         meta.trigger = trigger;
         if (!session_id.empty()) meta.pipeline_id = "session:" + session_id;
         snapshots->take(bin, meta);
+    }
+
+    /// GET /stats (docs/24): sessions with their last sample, hub entries, producers.
+    nlohmann::json stats_json() const {
+        nlohmann::json hub = nlohmann::json::array();
+        nlohmann::json producers = nlohmann::json::array();
+        if (plane) {
+            for (const auto& key : plane->hub().keys()) {
+                const auto st = plane->hub().stats(key);
+                hub.push_back({{"track_id", key.track_id}, {"tier", key.tier}, {"subscribers", st.subscribers}, {"frames", st.frames},
+                               {"keyframes", st.keyframes}, {"ring", st.ring}, {"has_keyframe", st.has_keyframe}});
+            }
+            for (auto* p : plane->producers()) {
+                nlohmann::json tiers = nlohmann::json::array();
+                for (const char* t : {"active", "thumbnail"})
+                    if (p->has_tier(t)) tiers.push_back(t);
+                producers.push_back({{"name", p->name()}, {"playing", p->playing()}, {"tiers", tiers}, {"error", p->error()}});
+            }
+        }
+        return nlohmann::json{{"robot_id", config.agent.robot_id}, {"sessions", sessions ? sessions->stats() : nlohmann::json::array()},
+                              {"lease", sessions ? sessions->describe().value("lease", nlohmann::json::object()) : nlohmann::json::object()},
+                              {"hub", hub}, {"producers", producers}, {"encoder", plane ? plane->encoder().name : ""}};
+    }
+
+    /// What the diagnostics bundle carries besides the rings (docs/24): config with secrets redacted, versions, the check.
+    nlohmann::json bundle_extra_json() const {
+        const auto& a = config.agent;
+        nlohmann::json cfg{{"agent",
+                            {{"robot_id", a.robot_id}, {"server_url", a.server_url}, {"credential_file", a.credential_file},
+                             {"dev_token", a.dev_token.empty() ? "" : "<redacted>"}, {"ice_policy", a.ice_policy}, {"log_level", a.log_level},
+                             {"log_format", a.log_format}, {"dot_dir", a.dot_dir}, {"watchdog_secs", a.watchdog_secs},
+                             {"allow_unsupervised", a.allow_unsupervised}}},
+                           {"media",
+                            {{"encoder", config.media.encoder}, {"gop_seconds", config.media.gop_seconds}, {"active_kbps", config.media.active_kbps},
+                             {"thumbnail_kbps", config.media.thumbnail_kbps}, {"tier_grace_ms", config.media.tier_grace_ms}}},
+                           {"introspect",
+                            {{"enabled", config.introspect.enabled}, {"bind", config.introspect.bind}, {"port", config.introspect.port},
+                             {"socket", config.introspect.socket}, {"token", config.introspect.token.empty() ? "" : "<redacted>"},
+                             {"history", config.introspect.history}}},
+                           {"capabilities", config.capabilities}};
+        nlohmann::json versions{{"fjarr", version()}, {"gstreamer", gstreamer_version()}};
+        // No smoke pipeline here (it would block the loop): the resolved encoder is the check's answer.
+        std::string check = "encoder configured: " + config.media.encoder + "\nencoder in use: " + (plane ? plane->encoder().name : "(no plane)") +
+                            "\ncapabilities:";
+        for (const auto& [name, rc] : registry) check += " " + name + (rc.enabled ? "" : "(disabled)");
+        check += "\n";
+        return nlohmann::json{{"config", cfg}, {"versions", versions}, {"check", check}};
     }
 
     nlohmann::json sources_json() const {
@@ -147,14 +196,24 @@ struct Agent::Impl {
             return it == registry.end() ? nullptr : &it->second;
         });
         if (config.introspect.enabled) {
-            introspect_server = std::make_unique<introspect::Server>(
-                config.introspect, *snapshots, [this] { return sources_json(); },
-                [this](const std::string& pid) {
-                    for (const auto& s : sessions->list())
-                        if (s->consumer() && (pid.empty() || pid == "session:" + s->id())) snapshots->take(GST_BIN(s->consumer()->pipeline()), {"session:" + s->id(), "session", s->id(), config.agent.robot_id, static_cast<unsigned>(s->generation()), 0, 0, "on-demand", ""}, true);
-                    for (auto* p : plane->producers())
-                        if (pid.empty() || pid == p->name()) take_snapshot(GST_BIN(p->pipeline()), "on-demand", "");
-                });
+            memory = std::make_unique<introspect::MemoryCensus>([this] {
+                return nlohmann::json{{"hub_buffers_held", plane ? plane->hub().buffers_held() : 0},
+                                      {"channel_bytes_buffered", sessions ? sessions->buffered_bytes() : 0},
+                                      {"sessions_alive", sessions ? sessions->size() : 0},
+                                      {"producers_alive", plane ? plane->producers().size() : 0}};
+            });
+            introspect::Providers providers;
+            providers.sources = [this] { return sources_json(); };
+            providers.snapshot_now = [this](const std::string& pid) {
+                for (const auto& s : sessions->list())
+                    if (s->consumer() && (pid.empty() || pid == "session:" + s->id())) snapshots->take(GST_BIN(s->consumer()->pipeline()), {"session:" + s->id(), "session", s->id(), config.agent.robot_id, static_cast<unsigned>(s->generation()), 0, 0, "on-demand", ""}, true);
+                for (auto* p : plane->producers())
+                    if (pid.empty() || pid == p->name()) take_snapshot(GST_BIN(p->pipeline()), "on-demand", "");
+            };
+            providers.stats = [this] { return stats_json(); };
+            providers.bundle_extra = [this] { return bundle_extra_json(); };
+            providers.memory = memory.get();
+            introspect_server = std::make_unique<introspect::Server>(config.introspect, *snapshots, std::move(providers));
             introspect_server->start();
         }
         core::SignalingConfig scfg;
@@ -227,6 +286,7 @@ struct Agent::Impl {
             }
         }
         introspect_server.reset();
+        memory.reset();
         sessions.reset();
         signaling.reset();
         plane.reset();

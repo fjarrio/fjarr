@@ -119,6 +119,24 @@ void SessionManager::on_ping(const SessionId& id) {
     if (s && s->input_owner() && lease_.operator_id == s->operator_info().id) lease_.refreshed = std::chrono::steady_clock::now();
 }
 
+nlohmann::json SessionManager::stats() const {
+    nlohmann::json arr = nlohmann::json::array();
+    for (const auto& [_, s] : sessions_) {
+        nlohmann::json j = s->describe();
+        j["stats"] = s->last_stats();
+        j["buffered_bytes"] = s->buffered_bytes();
+        j["manifest_version"] = s->manifest_version();
+        arr.push_back(std::move(j));
+    }
+    return arr;
+}
+
+std::size_t SessionManager::buffered_bytes() const {
+    std::size_t n = 0;
+    for (const auto& [_, s] : sessions_) n += s->buffered_bytes();
+    return n;
+}
+
 nlohmann::json SessionManager::describe() const {
     nlohmann::json arr = nlohmann::json::array();
     for (const auto& [_, s] : sessions_) arr.push_back(s->describe());

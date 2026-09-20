@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <fstream>
 #include <functional>
 #include <map>
@@ -65,17 +66,19 @@ struct Options {
     std::string ice_policy = "all";
     std::string introspect; // http://127.0.0.1:7381
     int timeout_s = 60;
+    int cycles = 200; // soak: connect/stream/close cycles
     bool verbose = false;
 };
 
 void usage() {
     std::fprintf(stderr,
                  "usage: fjarr-opsim --server ws://host:8080/ws --robot <id> --grant-secret <secret> --scenario <name>\n"
-                 "                   [--json out.json] [--timeout 60] [--ice-policy all|relay]\n"
+                 "                   [--json out.json] [--timeout 60] [--ice-policy all|relay] [--cycles 200]\n"
                  "                   [--introspect http://127.0.0.1:7381] [--verbose]\n"
                  "scenarios: smoke toggle hotplug silent-operator no-answer socket-drop ice-restart deadman relay-only\n"
-                 "           (soak, netem-<profile>: slice 3c)\n"
-                 "exit: 0 all assertions pass, 1 any fail, 2 usage, 3 timeout / not in this slice\n");
+                 "           soak (--cycles N, needs --introspect)\n"
+                 "           netem-{lan,wifi-ok,4g,lossy,bad} (the profile is applied externally: docker/lab/netem.sh)\n"
+                 "exit: 0 all assertions pass, 1 any fail, 2 usage, 3 timeout\n");
 }
 
 bool parse_args(int argc, char** argv, Options& o) {
@@ -107,6 +110,13 @@ bool parse_args(int argc, char** argv, Options& o) {
         } else if (a == "--timeout") {
             if (!need(v)) return false;
             o.timeout_s = std::atoi(v.c_str());
+        } else if (a == "--cycles") {
+            if (!need(v)) return false;
+            o.cycles = std::atoi(v.c_str());
+            if (o.cycles <= 0) {
+                std::fprintf(stderr, "--cycles must be a positive integer\n");
+                return false;
+            }
         } else if (a == "--verbose" || a == "-v") {
             o.verbose = true;
         } else if (a == "--help" || a == "-h") {
@@ -137,11 +147,13 @@ bool parse_args(int argc, char** argv, Options& o) {
 // -------------------------------------------------------------------- log
 
 std::atomic<bool> g_verbose{false};
+std::atomic<bool> g_quiet{false}; // soak cycles: the per-connect chatter is demoted unless --verbose
 const std::int64_t g_t0_us = g_get_monotonic_time();
 
 double elapsed_s() { return static_cast<double>(g_get_monotonic_time() - g_t0_us) / 1e6; }
 
 void logf(const char* fmt, ...) {
+    if (g_quiet && !g_verbose) return;
     char buf[2048];
     va_list ap;
     va_start(ap, fmt);
@@ -272,6 +284,10 @@ struct TrackRx {
     std::uint32_t max_delta = 0; // largest counter step between consecutive decoded frames since watch reset
     std::uint32_t watch_first = 0, watch_last = 0;
     std::int64_t first_frame_us = 0, last_frame_us = 0;
+    std::int64_t max_gap_us = 0; // longest interval between consecutive decoded frames since watch reset
+    // Encoded access units reaching the parser (before the decoder): the transport-level "frames keep arriving".
+    std::uint64_t encoded = 0;
+    std::int64_t last_encoded_us = 0, max_encoded_gap_us = 0;
 };
 
 struct Captured {
@@ -304,6 +320,7 @@ struct Shared {
     // heartbeat
     std::int64_t last_ping_us = 0, last_drive_us = 0;
     std::int64_t last_ping_t0 = 0;
+    std::deque<std::int64_t> ping_t0s; // the last few pings' t0 (a pong may answer an earlier ping under delay)
     int pongs = 0;
     double best_rtt_ms = -1;
     std::string pong_defect; // first pong whose t0 is not the ping's t0 (docs/08#fjarr-core)
@@ -616,6 +633,36 @@ class Peer {
         return out;
     }
 
+    /// get-stats → the health-relevant fields of every inbound-rtp entry (one string per stream,
+    /// "field=value" pairs; whichever of the known fields this webrtcbin fills in).
+    std::vector<std::string> inbound_rtp_stats() {
+        auto reply = emit_wait("get-stats", nullptr);
+        std::vector<std::string> out;
+        if (!reply) return out;
+        gst_structure_foreach(
+            reply.get(),
+            [](GQuark, const GValue* v, gpointer d) -> gboolean {
+                if (!GST_VALUE_HOLDS_STRUCTURE(v)) return TRUE;
+                const GstStructure* st = gst_value_get_structure(v);
+                gint type = 0;
+                gst_structure_get(st, "type", GST_TYPE_WEBRTC_STATS_TYPE, &type, nullptr);
+                if (type != GST_WEBRTC_STATS_INBOUND_RTP) return TRUE;
+                std::string line;
+                for (const char* f : {"ssrc", "packets-received", "packets-lost", "packets-discarded", "packets-repaired", "packets-duplicated", "jitter",
+                                      "bytes-received", "nack-count", "pli-count", "fir-count"}) {
+                    const GValue* fv = gst_structure_get_value(st, f);
+                    if (!fv) continue;
+                    glib::GStrPtr s(gst_value_serialize(fv));
+                    if (!s) continue;
+                    line += (line.empty() ? "" : " ") + std::string(f) + "=" + s.get();
+                }
+                if (!line.empty()) static_cast<std::vector<std::string>*>(d)->push_back(line);
+                return TRUE;
+            },
+            &out);
+        return out;
+    }
+
   private:
     void add_turn(const json& turn) {
         if (!turn.is_object() || !turn.contains("urls")) return;
@@ -742,9 +789,14 @@ class Peer {
     static GstPadProbeReturn on_encoded(GstPad*, GstPadProbeInfo* info, gpointer user) {
         auto* p = static_cast<std::pair<Peer*, TrackRx*>*>(user);
         GstBuffer* buf = GST_PAD_PROBE_INFO_BUFFER(info);
-        if (!buf || GST_BUFFER_FLAG_IS_SET(buf, GST_BUFFER_FLAG_DELTA_UNIT)) return GST_PAD_PROBE_OK;
+        if (!buf) return GST_PAD_PROBE_OK;
+        const std::int64_t now = g_get_monotonic_time();
         std::lock_guard<std::mutex> lk(p->first->sh_.mu);
-        p->second->keyframes++;
+        TrackRx* rx = p->second;
+        rx->encoded++;
+        if (rx->last_encoded_us && now - rx->last_encoded_us > rx->max_encoded_gap_us) rx->max_encoded_gap_us = now - rx->last_encoded_us;
+        rx->last_encoded_us = now;
+        if (!GST_BUFFER_FLAG_IS_SET(buf, GST_BUFFER_FLAG_DELTA_UNIT)) rx->keyframes++;
         p->first->sh_.notify();
         return GST_PAD_PROBE_OK;
     }
@@ -787,6 +839,7 @@ class Peer {
         std::lock_guard<std::mutex> lk(self->sh_.mu);
         rx->frames++;
         if (!rx->first_frame_us) rx->first_frame_us = now;
+        if (rx->last_frame_us && now - rx->last_frame_us > rx->max_gap_us) rx->max_gap_us = now - rx->last_frame_us;
         rx->last_frame_us = now;
         if (!ok) rx->bad_stamps++;
         else {
@@ -861,8 +914,9 @@ class Peer {
             const double rtt = static_cast<double>((t3 - t0) - (t2 - t1));
             if (sh_.best_rtt_ms < 0 || rtt < sh_.best_rtt_ms) sh_.best_rtt_ms = rtt;
             sh_.pongs++;
-            if (t0 != sh_.last_ping_t0 && sh_.pong_defect.empty())
-                sh_.pong_defect = "pong t0=" + std::to_string(t0) + " but the ping sent t0=" + std::to_string(sh_.last_ping_t0) + " (32-bit truncation?)";
+            const bool known = std::find(sh_.ping_t0s.begin(), sh_.ping_t0s.end(), t0) != sh_.ping_t0s.end();
+            if (!known && sh_.pong_defect.empty())
+                sh_.pong_defect = "pong t0=" + std::to_string(t0) + " matches none of the pings sent (last t0=" + std::to_string(sh_.last_ping_t0) + "; 32-bit truncation?)";
         }
         sh_.inbox.push_back(std::move(*env));
         sh_.notify();
@@ -976,7 +1030,7 @@ class Operator {
     }
 
     std::string session_id() { return locked<std::string>([this] { return sh_.session_id; }); }
-    std::string sid8() { return session_id().substr(0, 8); }
+    std::string sid8() { return session_id().size() > 8 ? session_id().substr(session_id().size() - 8) : session_id(); } // docs/24: the UUIDv7 tail
 
     // ------------------------------------------------------------- session
 
@@ -1063,6 +1117,8 @@ class Operator {
         {
             std::lock_guard<std::mutex> lk(sh_.mu);
             sh_.last_ping_t0 = t0;
+            sh_.ping_t0s.push_back(t0);
+            while (sh_.ping_t0s.size() > 16) sh_.ping_t0s.pop_front();
             sh_.last_ping_us = g_get_monotonic_time();
         }
         send_envelope("fjarr:control", protocol::make_envelope("fjarr.core", "ping", "request", json{{"t0", t0}}));
@@ -1168,6 +1224,8 @@ class Operator {
         std::lock_guard<std::mutex> lk(sh_.mu);
         if (auto* t = sh_.track(track_id)) {
             t->max_delta = 0;
+            t->max_gap_us = 0;
+            t->max_encoded_gap_us = 0;
             t->watch_first = t->have_counter ? t->last_counter : 0;
             t->watch_last = t->watch_first;
         }
@@ -1210,26 +1268,35 @@ class Operator {
         return j;
     }
 
-    /// POST <introspect><path> (no body); true on HTTP 200.
-    bool http_post(const std::string& path, std::string* err = nullptr) {
+    /// POST <introspect><path> (no request body); the parsed JSON response on HTTP 200, nullopt otherwise.
+    std::optional<json> http_post_json(const std::string& path, std::string* err = nullptr) {
         if (opts_.introspect.empty()) {
             if (err) *err = "--introspect not given";
-            return false;
+            return std::nullopt;
         }
         if (!http_) http_.reset(soup_session_new());
         const std::string url = opts_.introspect + path;
         glib::GObjectPtr<SoupMessage> msg(soup_message_new(SOUP_METHOD_POST, url.c_str()));
         if (!msg) {
             if (err) *err = "bad url " + url;
-            return false;
+            return std::nullopt;
         }
         GError* e = nullptr;
         glib::GBytesPtr body(soup_session_send_and_read(http_.get(), msg.get(), nullptr, &e));
         glib::GErrorPtr g(e);
         const unsigned status = body ? soup_message_get_status(msg.get()) : 0;
-        if (status != 200 && err) *err = "POST " + url + ": " + (e ? e->message : "HTTP " + std::to_string(status));
-        return status == 200;
+        if (status != 200) {
+            if (err) *err = "POST " + url + ": " + (e ? e->message : "HTTP " + std::to_string(status));
+            return std::nullopt;
+        }
+        gsize len = 0;
+        const char* data = static_cast<const char*>(g_bytes_get_data(body.get(), &len));
+        json j = json::parse(std::string(data, len), nullptr, false);
+        if (j.is_discarded()) j = json::object(); // an empty 200 is still a success for callers that only want the status
+        return j;
     }
+    /// POST <introspect><path> (no body); true on HTTP 200.
+    bool http_post(const std::string& path, std::string* err = nullptr) { return http_post_json(path, err).has_value(); }
 
     static const json* find_element(const json& elements, const std::string& name) {
         if (!elements.is_array()) return nullptr;
@@ -1341,6 +1408,8 @@ class Operator {
     double best_rtt() { return locked<double>([this] { return sh_.best_rtt_ms; }); }
     int pongs() { return locked<int>([this] { return sh_.pongs; }); }
     const std::string& introspect() const { return opts_.introspect; }
+    const std::string& scenario() const { return opts_.scenario; }
+    int cycles() const { return opts_.cycles; }
     std::string conn_state() { return locked<std::string>([this] { return sh_.conn_state; }); }
 
     Peer* peer() { return peer_.get(); }
@@ -1690,7 +1759,7 @@ void scenario_ice_restart(Operator& op) {
     // Rung 3: a new signaling round with the same grant, immediately.
     op.reset_for_new_session();
     op.connect();
-    r.check("new-session", op.session_id() != first, "session " + op.sid8() + " brokered after " + first.substr(0, 8) + ", connected in " + std::to_string(op.connected_ms()) + " ms");
+    r.check("new-session", op.session_id() != first, "session " + op.sid8() + " brokered after " + (first.size() > 8 ? first.substr(first.size() - 8) : first) + ", connected in " + std::to_string(op.connected_ms()) + " ms");
     stream_and_assert(op, "test-pattern");
     close_and_assert(op);
 }
@@ -1721,13 +1790,295 @@ void scenario_deadman(Operator& op) {
     close_and_assert(op);
 }
 
+// ------------------------------------------------------------------- soak
+// spec: docs/23-agent-core-architecture.md#slices-3a-3b-3c-and-their-gates (the `soak` row)
+// spec: docs/24-pipeline-introspection.md (GET /memory, POST /memory/checkpoint, GET /memory?since=)
+
+/// GET /memory until pred(body) holds, polling every `poll_ms` for at most `timeout_ms`.
+/// `last` receives the final body (or stays null when the endpoint never answered).
+bool wait_memory(Operator& op, const std::function<bool(const json&)>& pred, int timeout_ms, int poll_ms, json* last, std::string* err) {
+    const std::int64_t until = g_get_monotonic_time() + std::int64_t(timeout_ms) * 1000;
+    for (;;) {
+        auto m = op.http_get("/memory", err);
+        if (m) {
+            if (last) *last = *m;
+            if (pred(*m)) return true;
+        }
+        if (g_get_monotonic_time() >= until) return false;
+        op.sleep_ms(poll_ms);
+    }
+}
+
+/// One soak cycle: connect, stream test-pattern to >= 10 decoded frames, orderly close. Throws Abort on a step failure.
+void soak_cycle(Operator& op) {
+    op.connect();
+    const std::string track = "test-pattern";
+    const std::uint64_t before = op.frames(track);
+    if (!op.select(track, true)) throw Abort("select-tracks test-pattern failed");
+    if (!op.wait_frames(track, before, 10, 8000)) throw Abort("fewer than 10 decoded frames within 8 s of enable (" + std::to_string(op.frames(track) - before) + ")");
+    op.close_session("operator-closed");
+    if (!op.wait_for([&] { return op.sh().ws_closed; }, 5000)) throw Abort("socket still open 5 s after session-close");
+}
+
+std::string mib(std::int64_t bytes) {
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%.2f MiB", static_cast<double>(bytes) / (1024.0 * 1024.0));
+    return buf;
+}
+
+void scenario_soak(Operator& op) {
+    Report& r = op.report();
+    if (op.introspect().empty()) throw Abort("soak needs --introspect (the /memory census is the assertion)");
+    const int n = op.cycles();
+    const auto sessions_gone = [](const json& m) { return m.value("sessions_alive", -1) == 0; };
+    int ok = 0, failed = 0;
+    std::string first_failure, checkpoint, err;
+    std::int64_t worst_us = 0, total_us = 0;
+    g_quiet = true;
+    const int warmup = std::max(1, std::min(40, op.cycles() / 5)); // docs/23: baseline after the bounded caches filled
+
+    for (int i = 1; i <= n; i++) {
+        const std::int64_t t0 = g_get_monotonic_time();
+        std::string why;
+        try {
+            soak_cycle(op);
+        } catch (const Abort& e) {
+            why = e.what();
+        }
+        op.reset_for_new_session();
+        json mem;
+        // The agent tears media down after its 150 ms flush window; sessions_alive is the census' view of that.
+        if (!wait_memory(op, sessions_gone, 5000, 100, &mem, &err) && why.empty())
+            why = mem.is_null() ? "GET /memory failed: " + err : "sessions_alive=" + std::to_string(mem.value("sessions_alive", -1)) + " 5 s after close";
+        const std::int64_t took = g_get_monotonic_time() - t0;
+        total_us += took;
+        worst_us = std::max(worst_us, took);
+        if (why.empty()) ok++;
+        else {
+            failed++;
+            if (first_failure.empty()) first_failure = "cycle " + std::to_string(i) + ": " + why;
+        }
+        std::printf("cycle %d/%d %s %lld ms%s\n", i, n, why.empty() ? "ok" : "FAIL", static_cast<long long>(took / 1000), why.empty() ? "" : (": " + why).c_str());
+        std::fflush(stdout);
+        if (i == warmup) {
+            // Warm-up done: everything lazily created on the first sessions exists now — the producer, the hub
+            // ring, and the bounded snapshot history (64 entries, ~2 per cycle) which ramps over ~30 cycles.
+            // docs/23: the baseline is taken after 40 cycles (or a fifth of a short run).
+            if (!sessions_gone(mem)) {
+                g_quiet = false;
+                throw Abort("cycle 1 never settled (sessions_alive != 0): no baseline to checkpoint against");
+            }
+            auto cp = op.http_post_json("/memory/checkpoint", &err);
+            if (!cp) {
+                g_quiet = false;
+                throw Abort("POST /memory/checkpoint failed: " + err);
+            }
+            checkpoint = cp->value("checkpoint", "");
+            if (checkpoint.empty()) {
+                g_quiet = false;
+                throw Abort("POST /memory/checkpoint returned no checkpoint token: " + cp->dump());
+            }
+            std::printf("soak: baseline checkpoint %s after cycle %d (rss %s, producers_alive %s)\n", checkpoint.c_str(), warmup,
+                        mib(cp->value("rss_bytes", std::int64_t(0))).c_str(), cp->value("producers_alive", json()).dump().c_str());
+            std::fflush(stdout);
+        }
+    }
+    g_quiet = false;
+    r.check("soak-cycles", failed == 0,
+            std::to_string(ok) + "/" + std::to_string(n) + " cycles ok, mean " + std::to_string(n ? total_us / n / 1000 : 0) + " ms, worst " + ms_str(worst_us) +
+                (first_failure.empty() ? "" : "; first failure: " + first_failure));
+
+    // Settle, then let a producer the tier grace period still holds match the baseline (docs/23: tier_grace_ms, default 10 s).
+    op.sleep_ms(500);
+    auto since = op.http_get("/memory?since=" + checkpoint, &err);
+    if (!since) throw Abort("GET /memory?since=" + checkpoint + " failed: " + err);
+    if (since->contains("error")) throw Abort("GET /memory?since=" + checkpoint + ": " + since->value("error", "?"));
+    const int then_producers = since->at("then").value("producers_alive", -1);
+    if (since->at("now").value("producers_alive", -1) != then_producers) {
+        json mem;
+        wait_memory(op, [&](const json& m) { return m.value("producers_alive", -1) == then_producers; }, 15000, 250, &mem, &err);
+        since = op.http_get("/memory?since=" + checkpoint, &err);
+        if (!since || since->contains("error")) throw Abort("GET /memory?since=" + checkpoint + " failed after the producer wait: " + (since ? since->dump() : err));
+    }
+    const json& then = since->at("then");
+    const json& now = since->at("now");
+    const json& diff = since->at("diff");
+
+    std::printf("soak: /memory then (%s) -> now, %d cycles\n", checkpoint.c_str(), n);
+    std::printf("  %-24s %14s %14s %10s\n", "field", "then", "now", "diff");
+    auto row = [&](const std::string& name, const json& a, const json& b, const json& d) {
+        std::printf("  %-24s %14s %14s %10s\n", name.c_str(), a.dump().c_str(), b.dump().c_str(), d.dump().c_str());
+    };
+    for (const auto& [k, v] : then.at("census").items()) row("census." + k, v, now.at("census").value(k, json()), diff.at("census").value(k, json()));
+    for (const char* k : {"hub_buffers_held", "channel_bytes_buffered", "sessions_alive", "producers_alive", "rss_bytes"})
+        row(k, then.value(k, json()), now.value(k, json()), diff.value(k, json()));
+    std::fflush(stdout);
+
+    for (const auto& [k, v] : diff.at("census").items()) {
+        const std::int64_t d = v.is_number() ? v.get<std::int64_t>() : -1;
+        r.check("census-" + k, d == 0,
+                d == 0 ? "unchanged at " + now.at("census").value(k, json()).dump()
+                       : then.at("census").value(k, json()).dump() + " -> " + now.at("census").value(k, json()).dump() + " (" + (d > 0 ? "+" : "") + std::to_string(d) + ")");
+    }
+    for (const char* k : {"hub_buffers_held", "channel_bytes_buffered", "sessions_alive", "producers_alive"}) {
+        const std::int64_t d = diff.value(k, std::int64_t(-1));
+        r.check(k, d == 0, d == 0 ? "unchanged at " + now.value(k, json()).dump() : then.value(k, json()).dump() + " -> " + now.value(k, json()).dump() + " (" + (d > 0 ? "+" : "") + std::to_string(d) + ")");
+    }
+    const std::int64_t rss_diff = diff.value("rss_bytes", std::int64_t(0));
+    r.check("rss-growth", rss_diff < 5 * 1024 * 1024,
+            mib(then.value("rss_bytes", std::int64_t(0))) + " -> " + mib(now.value("rss_bytes", std::int64_t(0))) + " (" + (rss_diff >= 0 ? "+" : "") + mib(rss_diff) + " over " +
+                std::to_string(n) + " cycles; budget 5 MiB)");
+    if (since->contains("leaks")) {
+        const json& leaks = since->at("leaks");
+        const json created = leaks.value("created", json::array());
+        std::string list;
+        for (const auto& c : created) list += (list.empty() ? "" : ", ") + c.dump();
+        r.check("leaks-tracer", created.empty(),
+                "created since checkpoint and still alive: " + std::to_string(created.size()) + " (seen " + leaks.value("created_seen", json()).dump() + ", removed " +
+                    leaks.value("removed", json()).dump() + ", live " + leaks.value("live", json()).dump() + ")" + (list.empty() ? "" : ": " + list));
+    } else logf("soak: leaks tracer not active in the agent (GST_TRACERS=leaks); leaks check skipped");
+    // "no error counters": every producer the agent lists is error-free.
+    auto stats = op.http_get("/stats", &err);
+    std::string errors;
+    if (stats)
+        for (const auto& p : stats->value("producers", json::array())) {
+            const json e = p.value("error", json());
+            if (!e.is_null() && !(e.is_string() && e.get<std::string>().empty()) && !(e.is_number() && e.get<double>() == 0))
+                errors += p.value("name", "?") + ": " + e.dump() + "; ";
+        }
+    r.check("no-errors", stats && errors.empty(), stats ? (errors.empty() ? std::to_string(stats->value("producers", json::array()).size()) + " producer(s) listed, none in error" : errors) : "GET /stats failed: " + err);
+}
+
+// ------------------------------------------------------------------ netem
+// spec: docs/23-agent-core-architecture.md#slices-3a-3b-3c-and-their-gates (the `netem-<profile>` row)
+// spec: docs/25-browser-lab.md#the-harness (profile table; the media half is applied by docker/lab/netem.sh)
+
+/// Tolerances per docs/25 profile: what "frames keep arriving" means under that impairment.
+struct NetemTolerance {
+    const char* tier;           // the tier a client would hold on this link: active (4000 kbps, fixed until slice 6) or thumbnail (300 kbps)
+    int first_frame_ms;         // budget for the first encoded unit to arrive after enable
+    int window_ms;              // observation window
+    std::uint64_t min_encoded;  // encoded access units reaching the parser over the window ("frames keep arriving")
+    std::int64_t max_gap_ms;    // longest gap between encoded units tolerated inside the window
+    bool decode_continuity;     // clean links: also >= 50 decoded frames, stamp advances, no stamp gap > 1 frame
+    int request_ms;             // echo / heartbeat budgets
+};
+// `bad` rate-limits to 1.5 Mbit: the active tier (4000 kbps, docs/23 [media] active_kbps, adaptive bitrate is
+// slice 6) cannot fit, so the scenario holds the thumbnail tier there, as a client on that link would.
+// The offer negotiates no NACK/RTX/FEC, so under loss the decodable rate is keyframe-bound (gop_seconds=2):
+// lossy/bad assert arrival at the transport level and record decode health; the stamp is unreadable at
+// thumbnail resolution.
+const std::map<std::string, NetemTolerance> kNetemProfiles = {
+    {"lan", {"active", 8000, 5000, 100, 1000, true, 5000}},     {"wifi-ok", {"active", 8000, 5000, 100, 1000, true, 5000}},
+    {"4g", {"active", 8000, 5000, 100, 1000, true, 5000}},      {"lossy", {"active", 10000, 5000, 60, 2000, false, 8000}},
+    {"bad", {"thumbnail", 15000, 5000, 10, 3000, false, 10000}}, // thumbnail is 5 fps: 25 units per window before loss
+};
+
+/// The agent's view of our session's tracks from GET /stats: "track: bitrate/frames/dropped", plus the selected pair.
+std::string agent_track_stats(Operator& op, std::string* err) {
+    auto stats = op.http_get("/stats", err);
+    if (!stats) return "";
+    for (const auto& s : stats->value("sessions", json::array())) {
+        if (s.value("session_id", "") != op.session_id()) continue;
+        std::string out;
+        const json st = s.value("stats", json::object());
+        for (const auto& [cap, tracks] : st.items()) {
+            if (!tracks.is_array()) continue;
+            for (const auto& t : tracks)
+                out += t.value("track_id", "?") + ": enabled=" + (t.value("enabled", false) ? "yes" : "no") + " tier=" + t.value("tier", "?") + " bitrate=" +
+                       t.value("bitrate_bps", json()).dump() + " bps frames=" + t.value("frames", json()).dump() + " dropped=" + t.value("dropped", json()).dump() + "; ";
+        }
+        if (st.contains("selected_pair")) out += "selected_pair=" + st.at("selected_pair").dump() + "; ";
+        out += "buffered_bytes=" + s.value("buffered_bytes", json()).dump();
+        return out;
+    }
+    *err = "session " + op.sid8() + " not in GET /stats";
+    return "";
+}
+
+void scenario_netem(Operator& op) {
+    Report& r = op.report();
+    const std::string profile = op.scenario().substr(std::string("netem-").size());
+    const NetemTolerance tol = kNetemProfiles.at(profile);
+    connect_and_report(op);
+    for (const std::string& track : op.manifest_tracks()) {
+        auto before = op.track_snapshot(track);
+        const std::uint64_t enc0 = before ? before->encoded : 0;
+        const std::int64_t t0 = g_get_monotonic_time();
+        const bool ok = op.select(track, true, tol.tier);
+        const bool first = ok && op.wait_for(
+                                     [&] {
+                                         auto* t = op.sh().track(track);
+                                         return t && t->encoded > enc0;
+                                     },
+                                     tol.first_frame_ms);
+        r.check("first-arrival " + track, first,
+                first ? "first encoded unit " + ms_str(g_get_monotonic_time() - t0) + " after enable (" + tol.tier + ") under " + profile
+                      : (ok ? "nothing reached the parser within " + std::to_string(tol.first_frame_ms) + " ms" : "select-tracks failed"));
+        if (!first) continue;
+        op.watch_reset(track);
+        auto a = op.track_snapshot(track);
+        op.sleep_ms(tol.window_ms);
+        auto b = op.track_snapshot(track);
+        const std::int64_t t_end = g_get_monotonic_time();
+        if (!a || !b) {
+            r.check("frames-keep-arriving " + track, false, "track not received");
+            continue;
+        }
+        const std::uint64_t encoded = b->encoded - a->encoded, frames = b->frames - a->frames;
+        // Silence at the end of the window counts as a gap too.
+        const std::int64_t enc_gap_ms = std::max(b->max_encoded_gap_us, t_end - b->last_encoded_us) / 1000;
+        const std::int64_t dec_gap_ms = b->frames ? std::max(b->max_gap_us, t_end - b->last_frame_us) / 1000 : 0;
+        const bool keep = encoded >= tol.min_encoded && enc_gap_ms <= tol.max_gap_ms;
+        char fps[16];
+        std::snprintf(fps, sizeof fps, "%.1f", static_cast<double>(frames) * 1000.0 / tol.window_ms);
+        const std::string first_decoded = b->frames ? "first decoded " + ms_str(b->first_frame_us - t0) + " after enable, " : "no frame decoded, ";
+        const std::string decode = first_decoded + std::to_string(frames) + " decoded (" + fps + " fps, longest decode gap " + std::to_string(dec_gap_ms) + " ms), stamp counter " +
+                                   std::to_string(a->last_counter) + " -> " + std::to_string(b->last_counter) + (b->have_counter ? "" : " (unreadable at this resolution)") +
+                                   ", max stamp gap " + std::to_string(b->max_delta ? b->max_delta - 1 : 0) + " frame(s), " + std::to_string(b->bad_stamps) +
+                                   " undecodable stamps, keyframes " + std::to_string(b->keyframes - a->keyframes);
+        r.check("frames-keep-arriving " + track, keep,
+                std::to_string(encoded) + " encoded units in " + std::to_string(tol.window_ms) + " ms (min " + std::to_string(tol.min_encoded) + "), longest arrival gap " +
+                    std::to_string(enc_gap_ms) + " ms (max " + std::to_string(tol.max_gap_ms) + "); " + decode);
+        if (tol.decode_continuity) {
+            const bool advances = a->have_counter && b->have_counter && b->last_counter > a->last_counter;
+            const bool cont = frames >= 50 && advances && b->max_delta <= 2;
+            r.check("decode-continuity " + track, cont, decode + " (clean link: >= 50 decoded, stamp advances, no stamp gap > 1 frame)");
+        }
+    }
+    // Health-relevant stats, recorded: our webrtcbin's inbound-rtp and the agent's per-track view.
+    {
+        const auto rx = op.peer()->inbound_rtp_stats();
+        std::string detail;
+        for (const auto& line : rx) detail += "[" + line + "] ";
+        std::string err;
+        const std::string agent = op.introspect().empty() ? "" : agent_track_stats(op, &err);
+        if (!agent.empty()) detail += "agent: " + agent;
+        else if (!op.introspect().empty()) detail += "agent: " + err;
+        r.check("stats-recorded", !rx.empty(), rx.empty() ? "no inbound-rtp entry in get-stats" + (detail.empty() ? "" : "; " + detail) : detail);
+    }
+    const json payload{{"n", 42}, {"s", "hi"}, {"profile", profile}};
+    auto echo = op.request("fjarr.test", "echo", payload, tol.request_ms);
+    const bool echo_ok = echo && echo->payload.value("ok", false) && echo->payload.value("echo", json()) == payload;
+    r.check("echo", echo_ok, echo ? "result " + echo->payload.dump() : "no result within " + std::to_string(tol.request_ms) + " ms");
+    op.wait_for([&] { return op.sh().pongs > 0; }, tol.request_ms);
+    const std::string defect = op.pong_defect();
+    r.check("heartbeat", op.pongs() > 0 && defect.empty(),
+            op.pongs() > 0 ? (defect.empty() ? "best rtt " + std::to_string(static_cast<int>(op.best_rtt())) + " ms over " + std::to_string(op.pongs()) + " pong(s) under " + profile : defect)
+                           : "no pong within " + std::to_string(tol.request_ms) + " ms");
+    close_and_assert(op);
+}
+
 // -------------------------------------------------------------------- main
 
 using ScenarioFn = void (*)(Operator&);
 const std::map<std::string, ScenarioFn> kScenarios = {
     {"smoke", scenario_smoke},       {"toggle", scenario_toggle},   {"hotplug", scenario_hotplug},     {"silent-operator", scenario_silent_operator},
     {"no-answer", scenario_no_answer}, {"socket-drop", scenario_socket_drop}, {"ice-restart", scenario_ice_restart}, {"deadman", scenario_deadman},
-    {"relay-only", scenario_relay_only},
+    {"relay-only", scenario_relay_only}, {"soak", scenario_soak},
+    // netem-<profile>: one function, the profile is read from the scenario name (unknown profile → usage, exit 2).
+    {"netem-lan", scenario_netem},     {"netem-wifi-ok", scenario_netem}, {"netem-4g", scenario_netem},     {"netem-lossy", scenario_netem},
+    {"netem-bad", scenario_netem},
 };
 
 } // namespace
@@ -1739,10 +2090,6 @@ int main(int argc, char** argv) {
         return 2;
     }
     g_verbose = opts.verbose;
-    if (opts.scenario == "soak" || opts.scenario.rfind("netem-", 0) == 0) {
-        std::printf("FAIL %s: not in this slice (3c)\n", opts.scenario.c_str());
-        return 3;
-    }
     auto it = kScenarios.find(opts.scenario);
     if (it == kScenarios.end()) {
         std::fprintf(stderr, "unknown scenario %s\n", opts.scenario.c_str());

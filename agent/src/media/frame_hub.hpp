@@ -95,13 +95,14 @@ class FrameHub {
         bool keyframe;
     };
     struct Entry {
+        std::shared_ptr<const HubKey> key; // interned: Work carries a pointer, never a string copy
         glib::GstSamplePtr retained_keyframe;
         std::deque<RingItem> ring;
         std::vector<Sub> subs;
         HubEntryStats stats;
     };
     struct Work {
-        HubKey key;
+        std::shared_ptr<const HubKey> key;
         glib::GstSamplePtr sample;
         bool keyframe;
         std::uint64_t seq = 0;
@@ -110,6 +111,12 @@ class FrameHub {
     std::uint64_t next_seq_ = 1;
 
     void deliver(const Work& w);
+    struct Target {
+        std::shared_ptr<FrameSink> sink;
+        glib::GstBufferPtr buffer;
+        GstCaps* caps;
+    };
+    std::vector<Target> targets_; // delivery thread only; capacity kept across frames (docs/16 budget)
     void thread_main();
     static bool is_keyframe(GstSample* s);
 

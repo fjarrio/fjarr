@@ -1,0 +1,72 @@
+# Fjarr nightly — the memory ladder's slow rungs and the profiles (docs/15 "What CI runs",
+# docs/23 memory ladder): the 200-cycle soak, valgrind memcheck, heaptrack, the netem
+# scenarios. Runs on GitHub's hosted runner by default (software encoder only); set the
+# repository variable FJARR_NIGHTLY_RUNNER to a self-hosted runner's label to measure the
+# VA-API path on a machine with an Intel iGPU (docs/12 "Nightly CI and the self-hosted GPU runner").
+name: Nightly
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+    inputs:
+      soak_cycles:
+        description: soak cycles
+        default: "200"
+
+jobs:
+  nightly:
+    name: Soak, memcheck, heaptrack, netem (${{ vars.FJARR_NIGHTLY_RUNNER || 'ubuntu-24.04' }})
+    runs-on: ${{ vars.FJARR_NIGHTLY_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: environment (the runner's ids, GPU groups when present, TSan sysctl)
+        run: |
+          cp .env.example .env
+          sed -i "s/^USER_UID=.*/USER_UID=$(id -u)/; s/^USER_GID=.*/USER_GID=$(id -g)/; s#^DOCKER_GID=.*#DOCKER_GID=$(stat -c %g /var/run/docker.sock)#" .env
+          if [ -e /dev/dri/renderD128 ]; then
+            sed -i "s/^RENDER_GID=.*/RENDER_GID=$(stat -c %g /dev/dri/renderD128)/" .env
+            echo "GPU runner: /dev/dri present, media.encoder=auto will engage VA-API"
+            echo "FJARR_MEDIA_ENCODER=auto" >> "$GITHUB_ENV"
+          else
+            sudo mkdir -p /dev/dri
+            echo "no /dev/dri: software encoder"
+            echo "FJARR_MEDIA_ENCODER=software" >> "$GITHUB_ENV"
+          fi
+          sudo sysctl -w vm.mmap_rnd_bits=28 || true
+          grep -E "^(USER_UID|USER_GID|DOCKER_GID|RENDER_GID)=" .env
+      - name: build the dev image and the agent
+        run: |
+          docker compose build dev
+          docker compose up -d dev robot-sim
+          docker compose exec -T dev make doctor
+          docker compose exec -T dev make agent-build
+      - name: valgrind memcheck on the loop tests (docs/15 nightly row)
+        run: docker compose exec -T dev make agent-memcheck
+      - name: heaptrack on the streaming loop test (docs/16 hot-path budget)
+        run: docker compose exec -T dev make agent-heaptrack
+      - name: start the demo stack (fjarr-server, demo backend, the real agent)
+        run: |
+          docker compose --profile stack up -d --build --wait fjarr-server
+          docker compose --profile demo --profile stack up -d demo-backend demo-robot
+          sleep 8 && docker compose logs --no-color demo-robot | tail -10
+      - name: the ${{ inputs.soak_cycles || '200' }}-cycle soak (docs/16 census + RSS budget)
+        run: make opsim-soak OPSIM_CYCLES=${{ inputs.soak_cycles || '200' }}
+      - name: one opsim scenario under the leaks tracer (docs/23 ladder layer 3)
+        run: make agent-leaks SCENARIO=hotplug
+      - name: netem scenarios (docs/25 profiles on the agent's interface; `bad` joins when slice 6 brings loss recovery + adaptive bitrate)
+        run: |
+          for p in wifi-ok 4g lossy; do make opsim-netem NETEM_PROFILE=$p; done
+      - name: profiles and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-${{ github.run_number }}
+          path: |
+            build/memcheck/**
+            build/heaptrack/**
+          if-no-files-found: ignore
+      - name: stack logs on failure
+        if: failure()
+        run: docker compose --profile stack --profile demo logs --no-color --tail 200 fjarr-server demo-robot demo-backend

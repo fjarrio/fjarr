@@ -88,6 +88,16 @@ Caveat: the container can synthesize input on the **host** kernel.
   encoders cover dev work but never performance claims.
 - Machine-specific note (Meteor Lake NUCs and newer): only the iHD driver
   supports encode; `mesa-va-drivers` is present for completeness.
+- **The iGPU stuck at its floor clock** (VA-API sessions at 10–15 fps while
+  `gst-launch` alone manages 30, the software encoder streams 30, and the
+  robot's CPU is idle): the package power limit throttled the GPU and the
+  clock stayed at its minimum afterwards. Read
+  `/sys/class/drm/card*/gt/gt0/rps_act_freq_mhz` under load and
+  `throttle_reason_pl1`; on a laptop check the power source and profile.
+  A day of heavy builds and sanitizer runs did this once, helped along by
+  the sim's `glxgears` rendering unthrottled through llvmpipe on ~3.5 cores
+  (removed since). The software encoder path — what CI measures — is
+  unaffected; VA-API numbers taken in that state are not performance data.
 
 ## TURN sanity check
 
@@ -185,10 +195,13 @@ e2e tests assert against.
 ## Make targets
 
 `doctor` · `agent-configure/build/test` · `agent-test-asan/tsan` ·
-`agent-raii-gate` · `opsim` / `opsim-all` (the docs/23 operator simulator
-against the demo robot) ·
-`agent-leaks` · `agent-memcheck` · `agent-heaptrack` (docs/15 memory
-safety) · `signaling-run/test/clippy` ·
+`agent-raii-gate` · `agent-leaks-selftest` · `opsim` / `opsim-all` /
+`opsim-soak` (`OPSIM_CYCLES`) / `opsim-netem` (`NETEM_PROFILE`) (the
+docs/23 operator simulator against the demo robot) ·
+`agent-leaks` (`SCENARIO=`, recreates the robot with GStreamer's leaks
+tracer and prints what stayed alive) · `agent-memcheck` · `agent-heaptrack`
+(docs/15 memory safety, nightly) · `introspect` (`PIPELINE=`, `FORMAT=`:
+the endpoint from the terminal, docs/24) · `signaling-run/test/clippy` ·
 `web-dev/build/lint` · `sim-up` · `demo-up/down` · `stack-up` ·
 `website-dev/build` · `docs-lint` · `docs-links` · `fmt` · `lint`.
 `.vscode/tasks.json` wraps the same targets — terminal and IDE never diverge.

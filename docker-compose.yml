@@ -108,6 +108,8 @@ services:
       # auto = VA-API through /dev/dri (docs/23 encoder policy); set software on machines without a GPU.
       FJARR_MEDIA_ENCODER: ${FJARR_MEDIA_ENCODER:-auto}
       FJARR_LOG_LEVEL: ${FJARR_LOG_LEVEL:-info}
+      # `make agent-leaks` recreates the robot with GStreamer's leaks tracer (docs/23 memory ladder).
+      GST_TRACERS: ${FJARR_GST_TRACERS:-}
     working_dir: /workspace
     cap_add:
       - NET_ADMIN   # tc netem for the browser lab's media-path profiles (docs/25)

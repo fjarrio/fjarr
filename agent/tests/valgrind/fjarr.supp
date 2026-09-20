@@ -1,0 +1,100 @@
+# Valgrind suppressions Fjarr maintains itself (docs/23 memory ladder, `make agent-memcheck`).
+# Only GLib/GStreamer-internal patterns the distro's glib.supp and the vendored gstreamer.supp
+# miss belong here; each entry says what it is. A definite loss with a fjarr frame is never listed.
+
+# --- GLib main-loop bookkeeping: per-thread allocations GLib keeps for the life of the
+# thread's context (source attach records, the loop's own state). Reported as "definitely
+# lost" only because the thread exits after GLib has dropped its last reference to them.
+{
+   glib-main-loop-run-bookkeeping
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:calloc
+   fun:g_malloc0
+   obj:*/libglib-2.0.so*
+   obj:*/libglib-2.0.so*
+   fun:g_main_loop_run
+   ...
+}
+{
+   glib-main-loop-run-bookkeeping-2
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:calloc
+   obj:*/libglib-2.0.so*
+   obj:*/libglib-2.0.so*
+   obj:*/libglib-2.0.so*
+   obj:*/libglib-2.0.so*
+   fun:g_main_loop_run
+   ...
+}
+{
+   glib-source-attach-bookkeeping
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:calloc
+   obj:*/libglib-2.0.so*
+   obj:*/libglib-2.0.so*
+   obj:*/libglib-2.0.so*
+   obj:*/libglib-2.0.so*
+   fun:g_source_attach
+   ...
+}
+{
+   glib-thread-start-bookkeeping
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:calloc
+   obj:*/libglib-2.0.so*
+   obj:*/libglib-2.0.so*
+   obj:*/libglib-2.0.so*
+   obj:*/libglib-2.0.so*
+   obj:*/libglib-2.0.so*
+   obj:*/libglib-2.0.so*
+   fun:start_thread
+   fun:clone
+}
+# --- GIO unloading a module (the TLS/proxy backends) at exit, glibc's dlclose bookkeeping.
+{
+   gio-module-dlclose
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   fun:malloc
+   fun:_dl_close_worker.part.0
+   ...
+   fun:g_module_close
+   ...
+}
+# --- One allocation GLib makes in its ELF constructor and never frees (process lifetime).
+{
+   glib-constructor
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   fun:g_malloc
+   obj:*/libglib-2.0.so*
+   fun:call_init.part.0
+   ...
+}
+# --- The Duktape JavaScript engine (loaded by a GStreamer plugin's helper process) calls
+# realloc(p, 0), which valgrind flags as ambiguous; not our code, not our memory.
+{
+   duktape-realloc-zero
+   Memcheck:ReallocZero
+   fun:realloc
+   obj:*/libduktape.so*
+   ...
+}
+{
+   glib-main-context-iteration-bookkeeping
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:calloc
+   obj:*/libglib-2.0.so*
+   obj:*/libglib-2.0.so*
+   obj:*/libglib-2.0.so*
+   obj:*/libglib-2.0.so*
+   fun:g_main_context_iteration
+   ...
+}

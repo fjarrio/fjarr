@@ -4,6 +4,7 @@
  * page with the in-browser agent; `stack` talks to the compose stack;
  * `dashboard` drives the demo dashboard. Each test leaves `out/<test>/`.
  */
+import { spawn } from "node:child_process";
 import { lookup } from "node:dns/promises";
 import { test as base, chromium, expect, type Browser, type Page } from "@playwright/test";
 import type { SessionState } from "@fjarr/core";
@@ -141,6 +142,120 @@ export class Loopback {
   };
 }
 
+// ------------------------------------------------------- introspection
+
+/**
+ * The robot's docs/24 endpoint as the harness reaches it: direct HTTP when
+ * E2E_INTROSPECT_HTTP is set (an agent started in `dev`), else `curl` inside
+ * the robot container, because the endpoint is loopback-only. Shared by the
+ * `stack` fixture and `fjarr-lab introspect`.
+ */
+export const INTROSPECT_LOOPBACK = "http://127.0.0.1:7381";
+
+export interface IntrospectOptions {
+  method?: "GET" | "POST";
+  headers?: Record<string, string>;
+}
+
+const curlArgs = (opts: IntrospectOptions) => [...(opts.method === "POST" ? ["-X", "POST"] : []), ...Object.entries(opts.headers ?? {}).flatMap(([k, v]) => ["-H", `${k}: ${v}`])];
+
+export async function introspectText(path: string, opts: IntrospectOptions = {}): Promise<string> {
+  if (env.introspectHttp) {
+    const r = await fetch(env.introspectHttp + path, { method: opts.method ?? "GET", headers: opts.headers, signal: AbortSignal.timeout(5000) });
+    if (!r.ok) throw new Error(`${opts.method ?? "GET"} ${path} → HTTP ${r.status}`);
+    return r.text();
+  }
+  return new RobotContainer().exec("curl", "-fsS", ...curlArgs(opts), INTROSPECT_LOOPBACK + path);
+}
+
+export async function introspectBytes(path: string): Promise<Buffer> {
+  if (env.introspectHttp) {
+    const r = await fetch(env.introspectHttp + path, { signal: AbortSignal.timeout(10_000) });
+    if (!r.ok) throw new Error(`GET ${path} → HTTP ${r.status}`);
+    return Buffer.from(await r.arrayBuffer());
+  }
+  // `docker compose exec` is a text pipe: carry the archive across it as base64.
+  const b64 = await new RobotContainer().exec("sh", "-c", `curl -fsS '${INTROSPECT_LOOPBACK}${path}' | base64 -w0`);
+  return Buffer.from(b64.trim(), "base64");
+}
+
+async function readChunks(body: ReadableStream<Uint8Array>, onChunk: (text: string) => void): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) return;
+    onChunk(decoder.decode(value, { stream: true }));
+  }
+}
+
+export async function introspectStream(path: string, seconds: number, opts: IntrospectOptions = {}): Promise<string> {
+  if (env.introspectHttp) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), seconds * 1000);
+    let text = "";
+    try {
+      const r = await fetch(env.introspectHttp + path, { headers: opts.headers, signal: ctl.signal });
+      await readChunks(r.body!, (chunk) => (text += chunk));
+    } catch (e) {
+      if (!ctl.signal.aborted) throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+    return text;
+  }
+  try {
+    return await new RobotContainer().exec("curl", "-sN", "--max-time", String(seconds), ...curlArgs(opts), INTROSPECT_LOOPBACK + path);
+  } catch (e) {
+    // curl exits 28 when --max-time elapses: that is the planned end of the capture, the output is what it streamed.
+    const err = e as { code?: number | string; stdout?: string };
+    if (err.code === 28 && typeof err.stdout === "string") return err.stdout;
+    throw e;
+  }
+}
+
+/** Follow a streaming route line by line until `stop()` (the CLI's `events`). */
+export function introspectFollow(path: string, onLine: (line: string) => void, opts: IntrospectOptions = {}): { stop(): void; done: Promise<void> } {
+  const ctl = new AbortController();
+  const lines = (chunk: string, rest: { s: string }) => {
+    rest.s += chunk;
+    let i;
+    while ((i = rest.s.indexOf("\n")) >= 0) {
+      onLine(rest.s.slice(0, i).replace(/\r$/, ""));
+      rest.s = rest.s.slice(i + 1);
+    }
+  };
+  const rest = { s: "" };
+  let done: Promise<void>;
+  if (env.introspectHttp) {
+    done = (async () => {
+      try {
+        const r = await fetch(env.introspectHttp + path, { headers: opts.headers, signal: ctl.signal });
+        await readChunks(r.body!, (chunk) => lines(chunk, rest));
+      } catch (e) {
+        if (!ctl.signal.aborted) throw e;
+      }
+    })();
+  } else {
+    // Killing the `docker compose exec` client leaves the curl running inside the container (still an
+    // events client of the agent): tag the command line so stop() can pkill exactly that curl in there.
+    const tag = `X-Fjarr-Lab: follow-${process.pid}-${Date.now()}`;
+    const child = spawn("docker", ["compose", "exec", "-T", env.robotService, "curl", "-sN", "-H", tag, ...curlArgs(opts), INTROSPECT_LOOPBACK + path], { stdio: ["ignore", "pipe", "inherit"] });
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => lines(chunk, rest));
+    done = new Promise<void>((resolve, reject) => {
+      child.on("error", reject);
+      child.on("exit", (code) => (code === 0 || ctl.signal.aborted ? resolve() : reject(new Error(`curl exited with ${code}`))));
+    });
+    ctl.signal.addEventListener("abort", () => {
+      const kill = spawn("docker", ["compose", "exec", "-T", env.robotService, "pkill", "-f", tag], { stdio: "ignore" });
+      kill.on("exit", () => child.kill("SIGTERM"));
+      kill.on("error", () => child.kill("SIGTERM"));
+    });
+  }
+  return { stop: () => ctl.abort(), done };
+}
+
 // ------------------------------------------------------------------ stack
 
 export class Stack {
@@ -172,18 +287,26 @@ export class Stack {
     }
   }
 
-  /** The robot's introspection endpoint (docs/24): direct HTTP when E2E_INTROSPECT_HTTP is set, else a curl inside the robot container. */
+  /** The robot's introspection endpoint (docs/24): direct HTTP when E2E_INTROSPECT_HTTP is set, else a curl inside the robot container. `null` when nothing answers. */
   async introspect(path: string): Promise<unknown | null> {
-    if (env.introspectHttp) {
-      try {
-        const r = await fetch(env.introspectHttp + path, { signal: AbortSignal.timeout(3000) });
-        if (!r.ok) return null;
-        return path.endsWith(".txt") || path.endsWith(".dot") ? await r.text() : ((await r.json()) as unknown);
-      } catch {
-        return null;
-      }
+    try {
+      const text = await introspectText(path);
+      return path.endsWith(".txt") || path.endsWith(".dot") ? text : (JSON.parse(text) as unknown);
+    } catch {
+      return null;
     }
-    return this.robot.introspect(path);
+  }
+  /** A route's body as text (throws when it does not answer); `method: "POST"` for `/snapshot` and `/memory/checkpoint`. */
+  introspectText(path: string, opts?: IntrospectOptions): Promise<string> {
+    return introspectText(path, opts);
+  }
+  /** A binary route (`/diagnostics.tar.gz`) as bytes. */
+  introspectBytes(path: string): Promise<Buffer> {
+    return introspectBytes(path);
+  }
+  /** Everything a streaming route (`/events`) sends during `seconds` — start it, act, then await it. */
+  introspectStream(path: string, seconds: number, opts?: IntrospectOptions): Promise<string> {
+    return introspectStream(path, seconds, opts);
   }
 
   /** docs/15 "signaling socket killed": restart fjarr-server (every socket drops; agents and operators reconnect on their own). */

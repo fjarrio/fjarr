@@ -27,9 +27,11 @@ void FrameHub::push(const HubKey& key, glib::GstSamplePtr sample) {
     const bool kf = is_keyframe(sample.get());
     glib::GstSamplePtr for_delivery = glib::ref_sample(sample.get());
     std::uint64_t seq = 0;
+    std::shared_ptr<const HubKey> e_key;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         Entry& e = entries_[key];
+        if (!e.key) e.key = std::make_shared<const HubKey>(key); // interned once: no per-frame string copies (docs/16)
         seq = next_seq_++;
         e.stats.frames++;
         if (kf) {
@@ -41,11 +43,12 @@ void FrameHub::push(const HubKey& key, glib::GstSamplePtr sample) {
         e.ring.push_back(RingItem{std::move(sample), seq, kf});
         while (e.ring.size() > ring_size_) e.ring.pop_front();
         e.stats.ring = e.ring.size();
+        e_key = e.key;
     }
     std::size_t depth = 0;
     {
         std::lock_guard<std::mutex> lock(queue_mutex_);
-        queue_.push_back(Work{key, std::move(for_delivery), kf, seq, nullptr});
+        queue_.push_back(Work{e_key, std::move(for_delivery), kf, seq, nullptr});
         depth = queue_.size();
     }
     queue_cv_.notify_one();
@@ -71,18 +74,17 @@ void FrameHub::thread_main() {
 }
 
 void FrameHub::deliver(const Work& w) {
-    struct Target {
-        std::shared_ptr<FrameSink> sink;
-        glib::GstBufferPtr buffer;
-        GstCaps* caps;
-    };
-    std::vector<Target> targets;
+    // `targets_` is reused across deliveries (delivery thread only): the docs/16 hot-path budget
+    // allows one GstBuffer header per subscriber per frame and no other per-frame allocation —
+    // heaptrack caught this vector being allocated per frame in slice 3c.
+    auto& targets = targets_;
+    targets.clear();
     GstCaps* caps = gst_sample_get_caps(w.sample.get());
     GstBuffer* src = gst_sample_get_buffer(w.sample.get());
     if (!src) return;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        auto it = entries_.find(w.key);
+        auto it = entries_.find(*w.key);
         if (it == entries_.end()) return;
         Entry& e = it->second;
         for (Sub& s : e.subs) {
@@ -115,7 +117,7 @@ void FrameHub::deliver(const Work& w) {
     for (auto& t : targets) {
         const bool ok = t.sink->push(std::move(t.buffer), t.caps);
         std::lock_guard<std::mutex> lock(mutex_);
-        auto it = entries_.find(w.key);
+        auto it = entries_.find(*w.key);
         if (it == entries_.end()) continue;
         // By identity: subscribe/unsubscribe may have moved entries while the lock was dropped.
         for (Sub& s : it->second.subs) {
@@ -128,6 +130,7 @@ void FrameHub::deliver(const Work& w) {
             break;
         }
     }
+    targets.clear(); // capacity stays; the sinks (and their appsrc refs) must not outlive their sessions
 }
 
 void FrameHub::subscribe(const HubKey& key, std::shared_ptr<FrameSink> sink) {
@@ -142,8 +145,9 @@ void FrameHub::subscribe(const HubKey& key, std::shared_ptr<FrameSink> sink) {
         // Late joiner: the ring is the current GOP — keyframe first, then its deltas — and every
         // frame of it is decodable in order (docs/23). A ring that lost its keyframe to overflow
         // is not a catch-up; the joiner then waits for the requested keyframe.
+        if (!e.key) e.key = std::make_shared<const HubKey>(key);
         if (!e.ring.empty() && e.ring.front().keyframe)
-            for (const auto& item : e.ring) catch_up.push_back(Work{key, glib::ref_sample(item.sample.get()), item.keyframe, item.seq, sink});
+            for (const auto& item : e.ring) catch_up.push_back(Work{e.key, glib::ref_sample(item.sample.get()), item.keyframe, item.seq, sink});
     }
     if (demand_changed_ && count == 1) demand_changed_(key, count);
     if (!catch_up.empty()) {

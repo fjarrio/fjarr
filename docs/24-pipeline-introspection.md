@@ -53,8 +53,10 @@ in three renderings from the same walk:
   for each tier branch (roles: `queue`, `encode` — the encoder bin, whose
   children are `encoder`, `parser`, `caps` — and `sink`), and `session:<sid8>/<track_id>/<role>`
   (roles: `appsrc`, `queue`, `valve`, `payloader`) plus
-  `session:<sid8>/webrtc`, where `<sid8>` is the first 8 characters of the
-  UUIDv7 `session_id` (the full id is in the snapshot metadata). A test
+  `session:<sid8>/webrtc`, where `<sid8>` is the **last** 8 characters of
+  the UUIDv7 `session_id` — its random tail; the first 8 are the coarse
+  timestamp every session within about a minute shares (the full id is in
+  the snapshot metadata). A test
   asserts `session:0192f3a1/test-pattern/valve.drop == false`.
 - **Summary text** — a few hundred characters per pipeline in topological
   order: `videotestsrc(PLAYING) → vah264enc[bitrate=4M] → appsink … ;
@@ -82,8 +84,14 @@ three sessions produces well under 100 KB/s at peak and nothing when idle.
 **History (flight recorder).** The core keeps the last 64 snapshots per
 pipeline (configurable), so a viewer can scrub back through a
 negotiation or a hot-plug, and a diagnostics bundle contains the story,
-not just the end state. Closed sessions keep their last 8 snapshots for
-10 minutes.
+not just the end state. Snapshots are stored serialized (a parsed JSON
+tree costs several times its text), and the DOT body — the large one — is
+kept for a ring's 8 most recent snapshots only (`?seq` for an older one
+returns 404 for `.dot`, JSON and summary always answer). Closed sessions
+keep their last 8 snapshots for 10 minutes, DOT only for the last of them,
+and at most 8 closed pipelines are kept (oldest evicted first): retention
+is bounded in total, so a robot churning sessions never grows with them
+(docs/16 — a 200-cycle soak found the unbounded version at +70 MB).
 
 ## Surfaces
 
@@ -102,7 +110,7 @@ Unix socket alternative `introspect.socket = "/run/fjarr/introspect.sock"`):
 | `GET /events` | Server-Sent Events (`event: snapshot`, `id: <pipeline>@<seq>`, `data:` the metadata JSON, plus the body when `?body=json\|dot\|txt`; `retry: 1000`) — this is what "live" means |
 | `GET /stats` | the per-session `get-stats` sample, FrameHub counters, producer states |
 | `GET /sources` | configured video sources with negotiated caps and availability, and for a missing driver the catalog entry and install command ([docs/26](26-robot-install-and-drivers.md)) |
-| `GET /memory[?since=<checkpoint>]` / `POST /memory/checkpoint` (checkpoint = an opaque token, currently the census `seq`) | RSS, live GStreamer/GLib object census by type (elements, pads, samples, promises, sources), FrameHub buffers held, channel bytes buffered, sessions/pipelines alive — and the diff since a checkpoint (the soak-test oracle, [docs/23](23-agent-core-architecture.md#memory-and-lifetime-discipline-and-the-tooling-that-enforces-it)) |
+| `GET /memory[?since=<checkpoint>]` / `POST /memory/checkpoint` (checkpoint = an opaque token) | RSS, live GStreamer/GLib object census by type (elements, pads, samples, promises, sources), FrameHub buffers held, channel bytes buffered, sessions/pipelines alive — and the diff since a checkpoint (the soak-test oracle, [docs/23](23-agent-core-architecture.md#memory-and-lifetime-discipline-and-the-tooling-that-enforces-it)) |
 | `POST /snapshot?pipeline=<id>` | force a snapshot now |
 | `GET /log[?minutes=<n>]` | the in-memory log ring (last 10 minutes, `info` and above), newest last |
 | `GET /diagnostics.tar.gz` | the diagnostics bundle |
@@ -168,10 +176,13 @@ JSON schema lives with the protocol schemas and is versioned like them.
 
 `dot_dir` (config / `FJARR_DOT_DIR`) writes every snapshot as
 `<pipeline>-<seq>-<milestone>.dot` (+ `.json`, `.txt`) for offline work.
-`fjarr-agent --diagnostics [out.tar.gz]` writes a bundle: config (secrets
-redacted), the doctor report, `/pipelines` history, `/stats`, `/sources`,
-the last 10 minutes of the log, versions — what a support engineer asks
-for first, produced in one command.
+`fjarr-agent --diagnostics [out.tar.gz]` writes a bundle (from the running
+agent's endpoint, else an offline one): `README.txt`, `config.json`
+(secrets redacted), `check.txt` (the resolved encoder and the registered
+capabilities), `versions.json`, every snapshot the rings hold under
+`pipelines/`, `stats.json`, `sources.json`, `memory.json`, and `log.txt`
+(the last 10 minutes) — what a support engineer asks for first, produced
+in one command.
 
 ## Implementation notes (docs/23 hooks)
 
@@ -188,14 +199,17 @@ for first, produced in one command.
 - Element naming is a core rule from slice 3 on: every element the core
   creates gets a stable, meaningful name; capability-provided source bins
   are wrapped in a bin named after the track.
-- `/events` (slice 3c) is a libsoup-3 streaming response: the message is
-  paused with chunked encoding, every snapshot the store records appends
-  one SSE frame (`id: <pipeline>@<seq>`, `event: snapshot`, `data:` the
+- `/events` (slice 3c) is a libsoup-3 streaming response: chunked encoding
+  with body accumulation **off** (libsoup otherwise retains every written
+  chunk for the life of the response), every snapshot the store records
+  appends one SSE frame (`id: <pipeline>@<seq>`, `event: snapshot`, `data:` the
   metadata JSON, plus the body when `?body=json|dot|txt` — on one line,
   newlines escaped), a `: keep-alive` comment goes out every 15 s, and
   `Last-Event-ID` replays what the ring still holds after it. Clients that
-  stop reading are dropped when their write buffer exceeds 1 MiB; the
-  endpoint never blocks the core loop on a slow reader.
+  stop reading are dropped (their socket closed) when their write buffer
+  exceeds 1 MiB; the endpoint never blocks the core loop on a slow reader.
+  A `Last-Event-ID` replays every ring's snapshots newer than the one it
+  names.
 - The **log ring** (slice 3c): the agent's logger keeps its last 10
   minutes (bounded to 4 000 lines) of `info`-and-above in memory, so the
   diagnostics bundle carries "what happened just before" without the
@@ -219,9 +233,10 @@ for first, produced in one command.
   `introspect.schema.json` under the conformance gate — the lab validates
   a live session snapshot against it and asserts `…/valve.drop` follows
   `select-tracks` within a second.
-- **Slice 3c**: `/events`, `/stats`, `/memory` + checkpoints, `/log`,
-  `/diagnostics.tar.gz` and `fjarr-agent --diagnostics`, `make introspect`,
-  `fjarr-lab introspect` (the history ring and `?seq` landed in 3b).
+- **Slice 3c** ✔ (2026-09-20): `/events`, `/stats`, `/memory` +
+  checkpoints, `/log`, `/diagnostics.tar.gz` and `fjarr-agent
+  --diagnostics`, `make introspect`, `fjarr-lab introspect` (the history
+  ring and `?seq` landed in 3b).
 - **Slice 5**: `fjarr.introspect` capability, `<PipelineGraph>` + hooks,
   the demo dashboard Diagnostics tab; the same built component is served
   from the endpoint's `GET /` as a data file, so the viewer is built once.

@@ -33,6 +33,9 @@ class SessionManager {
     /// Lease refresh from an input-owning session's ping (docs/10).
     void on_ping(const SessionId& id);
     nlohmann::json describe() const;
+    /// GET /stats: every session's description with its last stats sample.
+    nlohmann::json stats() const;
+    std::size_t buffered_bytes() const;
 
   private:
     struct Lease {

@@ -5,6 +5,9 @@ namespace fjarr {
 
 /// Fjarr library version (semver).
 std::string version();
+/// The short form of a session id used by the agent's logs and the introspection grammar
+/// (docs/24: `session:<sid8>/…`): the last 8 characters of the UUIDv7 — its random tail.
+std::string short_session_id(const std::string& session_id);
 
 /// Runtime GStreamer version string.
 std::string gstreamer_version();

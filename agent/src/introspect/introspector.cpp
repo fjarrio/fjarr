@@ -149,7 +149,7 @@ Snapshot walk(GstBin* bin, SnapshotMeta meta) {
     g_value_unset(&citem);
     gst_iterator_free(ci);
     for (auto rit = kids.rbegin(); rit != kids.rend(); ++rit) walk_element(rit->get(), elements, links);
-    s.json = nlohmann::json{{"v", 1},
+    nlohmann::json json{{"v", 1},
                             {"pipeline_id", meta.pipeline_id},
                             {"kind", meta.kind},
                             {"generation", meta.generation},
@@ -159,13 +159,14 @@ Snapshot walk(GstBin* bin, SnapshotMeta meta) {
                             {"state", meta.state},
                             {"elements", elements},
                             {"links", links}};
-    if (!meta.session_id.empty()) s.json["session_id"] = meta.session_id;
-    if (!meta.robot_id.empty()) s.json["robot_id"] = meta.robot_id;
+    if (!meta.session_id.empty()) json["session_id"] = meta.session_id;
+    if (!meta.robot_id.empty()) json["robot_id"] = meta.robot_id;
     glib::GStrPtr dot(gst_debug_bin_to_dot_data(bin, GST_DEBUG_GRAPH_SHOW_ALL));
     s.dot = "// fjarr snapshot pipeline=" + meta.pipeline_id + " seq=" + std::to_string(meta.seq) + " trigger=" + meta.trigger +
             " ts=" + std::to_string(meta.ts) + (meta.session_id.empty() ? "" : " session=" + meta.session_id) + "\n" +
             (dot ? dot.get() : "");
-    s.txt = summarize(s.json);
+    s.txt = summarize(json);
+    s.json = json.dump();
     return s;
 }
 
@@ -232,11 +233,21 @@ void SnapshotStore::take(GstBin* bin, SnapshotMeta meta, bool force) {
 
 void SnapshotStore::take_now(Ring& ring, GstBin* bin, SnapshotMeta meta) {
     ring.last = std::chrono::steady_clock::now();
-    ring.retired = false;
+    // A retired ring stays retired: the session's deferred "closing" snapshot lands after the
+    // session-ended event retired it, and un-retiring here kept every closed session's ring
+    // for the life of the process (found by fjarr-opsim's soak).
     meta.seq = ++ring.seq;
     auto snap = std::make_shared<Snapshot>(walk(bin, meta));
     ring.items.push_back(snap);
     while (ring.items.size() > history_) ring.items.pop_front();
+    // DOT for the most recent DOT_KEPT snapshots only; JSON and the summary for the whole history.
+    for (std::size_t i = 0; i + DOT_KEPT < ring.items.size(); i++) {
+        if (ring.items[i]->dot.empty()) continue;
+        auto trimmed = std::make_shared<Snapshot>(*ring.items[i]);
+        trimmed->dot.clear();
+        trimmed->dot.shrink_to_fit();
+        ring.items[i] = trimmed;
+    }
     if (!dot_dir_.empty()) {
         std::string id = meta.pipeline_id;
         for (auto& c : id)
@@ -253,6 +264,32 @@ void SnapshotStore::retire(const std::string& pipeline_id) {
     it->second.retired = true;
     it->second.retired_at = std::chrono::steady_clock::now();
     while (it->second.items.size() > 8) it->second.items.pop_front();
+    // Retention is bounded in total, not only per ring: 200 sessions in ten minutes kept 70 MB
+    // (the soak's RSS budget caught it). At most MAX_RETIRED closed rings, oldest evicted first,
+    // and a retired ring keeps its DOT only for its last snapshot (JSON has everything the viewer
+    // and the tests read; the DOT is the large one).
+    for (std::size_t i = 0; i + 1 < it->second.items.size(); i++) {
+        auto trimmed = std::make_shared<Snapshot>(*it->second.items[i]);
+        trimmed->dot.clear();
+        trimmed->dot.shrink_to_fit();
+        it->second.items[i] = trimmed;
+    }
+    std::size_t retired = 0;
+    for (const auto& [_, r] : rings_) retired += r.retired ? 1 : 0;
+    while (retired > MAX_RETIRED) {
+        auto oldest = rings_.end();
+        for (auto r = rings_.begin(); r != rings_.end(); ++r)
+            if (r->second.retired && (oldest == rings_.end() || r->second.retired_at < oldest->second.retired_at)) oldest = r;
+        if (oldest == rings_.end()) break;
+        rings_.erase(oldest);
+        retired--;
+    }
+    it->second.pending_timer.cancel(); // a deferred snapshot of a retired ring still lands (below) but never revives it
+    if (it->second.pending) {
+        it->second.pending = false;
+        glib::GstObjectPtr<GstBin> b = std::move(it->second.pending_bin);
+        if (b) take_now(it->second, b.get(), it->second.pending_meta); // the "closing" snapshot, now rather than later
+    }
 }
 
 void SnapshotStore::expire_retired() {

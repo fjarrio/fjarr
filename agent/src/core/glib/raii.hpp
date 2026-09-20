@@ -305,21 +305,29 @@ class SourceGuard {
     SourceGuard() = default;
     /// Takes ownership of a new (unattached) source and attaches it.
     SourceGuard(GSource* source, GMainContext* ctx, std::function<bool()> fn) {
-        auto* boxed = new std::function<bool()>(std::move(fn));
+        // The census counts live sources, not guards: a one-shot that returns REMOVE leaves the
+        // census from the trampoline (the guard may outlive it in a map for minutes — the lab
+        // found `sources` climbing one per session), and cancel() decrements only if it has not.
+        state_ = std::make_shared<State>();
+        state_->fn = std::move(fn);
+        auto* boxed = new std::shared_ptr<State>(state_);
         handoff_release();
         g_source_set_callback(
             source,
             [](gpointer d) -> gboolean {
                 handoff_acquire();
+                State& st = **static_cast<std::shared_ptr<State>*>(d);
+                bool again = false;
                 // Last line of defence: an exception cannot unwind through GLib's dispatch (docs/23 threading model).
                 try {
-                    return (*static_cast<std::function<bool()>*>(d))() ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
+                    again = st.fn();
                 } catch (const std::exception& e) {
                     g_critical("fjarr: loop callback threw: %s", e.what());
-                    return G_SOURCE_REMOVE;
                 }
+                if (!again && st.counted.exchange(false)) ObjectCensus::instance().sources--;
+                return again ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
             },
-            boxed, [](gpointer d) { delete static_cast<std::function<bool()>*>(d); });
+            boxed, [](gpointer d) { delete static_cast<std::shared_ptr<State>*>(d); });
         g_source_attach(source, ctx);
         source_ = source; // attach took its own ref; we keep ours for destroy
         ObjectCensus::instance().sources++;
@@ -333,11 +341,13 @@ class SourceGuard {
         return g;
     }
     ~SourceGuard() { cancel(); }
+    bool active() const { return source_ != nullptr; }
     SourceGuard(SourceGuard&& o) noexcept { *this = std::move(o); }
     SourceGuard& operator=(SourceGuard&& o) noexcept {
         if (this != &o) {
             cancel();
             source_ = std::exchange(o.source_, nullptr);
+            state_ = std::move(o.state_);
         }
         return *this;
     }
@@ -348,12 +358,20 @@ class SourceGuard {
         if (!g_source_is_destroyed(source_)) g_source_destroy(source_);
         g_source_unref(source_);
         source_ = nullptr;
-        ObjectCensus::instance().sources--;
+        // Our own sources: counted until they fired for the last time or are cancelled, whichever
+        // comes first. Adopted ones (attached(): bus watches, persistent) are counted until cancelled.
+        if (!state_ || state_->counted.exchange(false)) ObjectCensus::instance().sources--;
+        state_.reset();
     }
     explicit operator bool() const noexcept { return source_ != nullptr && !g_source_is_destroyed(source_); }
 
   private:
+    struct State {
+        std::function<bool()> fn;
+        std::atomic<bool> counted{true};
+    };
     GSource* source_ = nullptr;
+    std::shared_ptr<State> state_;
 };
 
 /// Fire-and-forget: run `fn` once on `ctx` (the callback owns its closure).

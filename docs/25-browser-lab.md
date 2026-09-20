@@ -196,7 +196,7 @@ AI coding agent uses without writing a test:
 | `profile cpu <s>` / `profile trace <s>` | write a `.cpuprofile` / trace and print the top self-time functions |
 | `memory [--cycles N]` | heap/nodes/listeners now, or after N connect/disconnect cycles, with the delta |
 | `vitals` | LCP, CLS, INP, long tasks since navigation |
-| `introspect [pipeline]` | proxies the robot's introspection endpoint ([docs/24](24-pipeline-introspection.md)) |
+| `introspect [pipelines\|<id>[.txt\|.json\|.dot]\|stats\|memory\|log\|events]` | the robot's introspection endpoint ([docs/24](24-pipeline-introspection.md)), through `docker compose exec` into the robot container or `E2E_INTROSPECT_HTTP`: `pipelines` (default) lists them with each summary; `<id>` prints the summary (`.json`/`.dot` the raw body); `memory --checkpoint` / `--since cp-n` for the soak oracle; `log [--minutes n]`; `events [--body txt]` streams one line per snapshot until Ctrl-C |
 | `report` | writes `out/adhoc/summary.{json,txt}` from everything captured so far |
 
 Every command prints a one-screen text result and writes JSON next to it,

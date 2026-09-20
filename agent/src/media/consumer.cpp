@@ -42,8 +42,9 @@ struct ConsumerPipeline::SignalContext {
 
 ConsumerPipeline::ConsumerPipeline(std::string session_id, GMainContext* ctx, std::function<void(std::function<void()>)> post,
                                    ConsumerHooks hooks, int gop_seconds)
-    : session_id_(std::move(session_id)), sid8_(session_id_.substr(0, 8)), ctx_(ctx), post_(std::move(post)),
-      hooks_(std::move(hooks)), gop_seconds_(gop_seconds) {}
+    : session_id_(std::move(session_id)), sid8_(log::short_id(session_id_)), ctx_(ctx), post_(std::move(post)),
+      hooks_(std::move(hooks)) {
+    gop_seconds_ = gop_seconds;}
 
 ConsumerPipeline::~ConsumerPipeline() { stop(); }
 
@@ -467,41 +468,43 @@ std::shared_ptr<FrameSink> ConsumerPipeline::sink_for(const std::string& track_i
 }
 
 void ConsumerPipeline::get_stats(std::function<void(StatsSample)> cb) {
-    std::weak_ptr<bool> alive = alive_;
+    // Not webrtcbin's `get-stats`: in 1.28.2 its `_get_data_channel_transport_stats` takes the RTP
+    // session element through rtpbin's `get-session` and never releases it, one reference per
+    // call — a session that sampled stats for 18 s kept 18 references and ~18 MB after it closed
+    // (found by the 3c lab tests and a refcount trace). rtpbin's per-source counters carry what
+    // the per-second sample needs and are read synchronously on the loop, no promise, no thread.
+    StatsSample sample;
     std::map<std::uint32_t, std::string> by_ssrc;
     for (const auto& [_, t] : tracks_) by_ssrc[t->ssrc] = t->track_id;
-    GstPromise* promise = glib::make_promise([alive, cb, by_ssrc, post = post_](GstPromiseResult res, glib::GstStructurePtr reply) {
-        StatsSample sample;
-        if (res == GST_PROMISE_RESULT_REPLIED && reply) {
-            // `by_ssrc` was captured on the loop when the request was made: the promise thread reads no consumer state.
-            std::pair<StatsSample*, const std::map<std::uint32_t, std::string>*> ctx{&sample, &by_ssrc};
-            gst_structure_foreach(
-                reply.get(),
-                [](GQuark, const GValue* value, gpointer user) -> gboolean {
-                    auto* out = static_cast<std::pair<StatsSample*, const std::map<std::uint32_t, std::string>*>*>(user);
-                    if (!GST_VALUE_HOLDS_STRUCTURE(value)) return TRUE;
-                    const GstStructure* s = gst_value_get_structure(value);
-                    GstWebRTCStatsType type;
-                    if (!gst_structure_get(s, "type", GST_TYPE_WEBRTC_STATS_TYPE, &type, nullptr)) return TRUE;
-                    if (type == GST_WEBRTC_STATS_OUTBOUND_RTP) {
-                        guint ssrc = 0;
-                        guint64 bytes = 0, packets = 0;
-                        gst_structure_get(s, "ssrc", G_TYPE_UINT, &ssrc, nullptr);
-                        gst_structure_get(s, "bytes-sent", G_TYPE_UINT64, &bytes, nullptr);
-                        gst_structure_get(s, "packets-sent", G_TYPE_UINT64, &packets, nullptr);
-                        auto it = out->second->find(ssrc);
-                        if (it != out->second->end()) out->first->tracks.push_back({it->second, bytes, packets});
-                    }
-                    return TRUE;
-                },
-                &ctx);
+    glib::GstElementPtr rtpbin = glib::adopt_element(webrtc_ ? gst_bin_get_by_name(GST_BIN(webrtc_.get()), "rtpbin") : nullptr); // transfer full
+    for (guint sid = 0; rtpbin && sid < 16; sid++) {
+        GstElement* raw = nullptr;
+        g_signal_emit_by_name(rtpbin.get(), "get-session", sid, &raw); // transfer full
+        if (!raw) break;
+        glib::GstElementPtr session = glib::adopt_element(raw);
+        GstStructure* st = nullptr;
+        g_object_get(session.get(), "stats", &st, nullptr);
+        glib::GstStructurePtr stats(st);
+        const GValue* sources = stats ? gst_structure_get_value(stats.get(), "source-stats") : nullptr;
+        if (!sources || !G_VALUE_HOLDS(sources, G_TYPE_VALUE_ARRAY)) continue;
+        G_GNUC_BEGIN_IGNORE_DEPRECATIONS // GValueArray is deprecated in GLib; rtpsession's stats still use it
+        auto* arr = static_cast<GValueArray*>(g_value_get_boxed(sources));
+        for (guint i = 0; arr && i < arr->n_values; i++) {
+            const GValue* v = g_value_array_get_nth(arr, i);
+            if (!GST_VALUE_HOLDS_STRUCTURE(v)) continue;
+            const GstStructure* src = gst_value_get_structure(v);
+            gboolean internal = FALSE, sender = FALSE;
+            guint ssrc = 0;
+            guint64 octets = 0, packets = 0;
+            gst_structure_get(src, "internal", G_TYPE_BOOLEAN, &internal, "is-sender", G_TYPE_BOOLEAN, &sender, "ssrc", G_TYPE_UINT, &ssrc, nullptr);
+            if (!internal || !sender) continue;
+            gst_structure_get(src, "octets-sent", G_TYPE_UINT64, &octets, "packets-sent", G_TYPE_UINT64, &packets, nullptr);
+            auto it = by_ssrc.find(ssrc);
+            if (it != by_ssrc.end()) sample.tracks.push_back({it->second, octets, packets});
         }
-        auto shared = std::make_shared<StatsSample>(std::move(sample));
-        post([alive, cb, shared] {
-            if (!alive.expired()) cb(*shared);
-        });
-    });
-    g_signal_emit_by_name(webrtc_.get(), "get-stats", nullptr, promise);
+        G_GNUC_END_IGNORE_DEPRECATIONS
+    }
+    cb(std::move(sample));
 }
 
 std::string ConsumerPipeline::connection_state() const {

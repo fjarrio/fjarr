@@ -46,6 +46,9 @@ add_library(fjarr STATIC
   src/media/probe.cpp
   src/media/pad_counter.cpp
   src/introspect/introspector.cpp
+  src/introspect/memory.cpp
+  src/introspect/bundle.cpp
+  src/introspect/diagnostics.cpp
   src/introspect/server.cpp
   src/capabilities/test_capability.cpp
 )

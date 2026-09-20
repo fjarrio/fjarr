@@ -74,17 +74,73 @@ agent-raii-gate: ## Refuse raw GObject/GLib refcount and source calls outside th
 	@bad=$$(grep -rnE '\b(g_object_ref|gst_object_ref|g_object_unref|gst_object_unref|gst_sample_unref|gst_buffer_unref|gst_promise_unref|g_source_remove|g_signal_connect)\s*\(' agent/src agent/daemon demos/demo-robot --include='*.cpp' --include='*.hpp' | grep -v 'agent/src/core/glib/' | grep -v 'NOLINT' || true); \
 	if [ -n "$$bad" ]; then echo "raw refcount/source calls outside agent/src/core/glib/ (use the RAII kit):"; echo "$$bad"; exit 1; fi; echo "agent-raii-gate: clean"
 
+.PHONY: agent-leaks-selftest
+agent-leaks-selftest: ## The leaks-tracer bracketing must catch a deliberate leak (docs/23 ladder layer 3; a gate that cannot fire is no gate)
+	@if ./build/$(BUILD_PRESET)/agent/tests/fjarr-tests --gtest_filter='LeaksGate.*' --gtest_also_run_disabled_tests >/tmp/fjarr-leaks-selftest.log 2>&1; then \
+	  echo "agent-leaks-selftest: FAILED — the deliberate leak was not reported"; tail -20 /tmp/fjarr-leaks-selftest.log; exit 1; fi; \
+	grep -q "deliberately-leaked\|GstIdentity@" /tmp/fjarr-leaks-selftest.log && echo "agent-leaks-selftest: the bracketing reports the deliberate leak"
+
+FJARR_LEAKS_TRACER = leaks(filters="GstElement,GstPad,GstBuffer,GstSample,GstPromise")
+.PHONY: agent-leaks
+agent-leaks: ## Run one opsim scenario against the demo robot under the leaks tracer and print what stayed alive (SCENARIO=smoke; docs/23)
+	@echo "recreating demo-robot with GST_TRACERS (it stays on until the next 'docker compose up -d demo-robot' without FJARR_GST_TRACERS)"
+	FJARR_GST_TRACERS='$(FJARR_LEAKS_TRACER)' docker compose --profile demo up -d demo-robot
+	@for i in $$(seq 1 40); do docker compose exec -T demo-robot curl -sf localhost:7381/memory >/dev/null 2>&1 && break; sleep 0.5; done
+	@quiet() { for i in $$(seq 1 60); do docker compose exec -T demo-robot curl -sf localhost:7381/memory | python3 -c 'import sys,json; d=json.load(sys.stdin); sys.exit(0 if d["producers_alive"]==0 and d["sessions_alive"]==0 else 1)' && return 0; sleep 0.5; done; echo "agent-leaks: the robot did not go quiet (producers/sessions alive)"; return 1; }; \
+	quiet || exit 1; echo "agent-leaks: warm-up (first-session initialisation is not a leak)"; $(MAKE) --no-print-directory opsim OPSIM_SCENARIO=smoke >/dev/null || exit 1; quiet || exit 1; \
+	tok=$$(docker compose exec -T demo-robot curl -sf -X POST localhost:7381/memory/checkpoint | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["checkpoint"]); sys.exit(0 if d.get("leaks_tracer") else 3)') || { echo "agent-leaks: the leaks tracer is not active in the robot (GST_TRACERS not applied?)"; exit 1; }; \
+	$(MAKE) --no-print-directory opsim OPSIM_SCENARIO=$(or $(SCENARIO),smoke); rc=$$?; quiet || exit 1; \
+	docker compose exec -T demo-robot curl -sf "localhost:7381/memory?since=$$tok" | python3 -c 'import sys,json; d=json.load(sys.stdin); l=d["leaks"]; print("census diff:", json.dumps(d["diff"]["census"])); print("rss diff:", d["diff"]["rss_bytes"], "bytes"); print("leaks tracer: created-and-alive", len(l["created"]), "| alive now", l["alive"], "| alive at checkpoint", l["at_checkpoint"]); [print("  ", o) for o in l["created"]]; sys.exit(1 if l["created"] else 0)'; lr=$$?; \
+	[ $$rc -eq 0 ] || echo "agent-leaks: note — the scenario's own assertions returned $$rc under the tracer's overhead (timing checks are gated by opsim-all without it); the verdict here is about leaks"; \
+	[ $$lr -eq 0 ] && echo "agent-leaks ($(or $(SCENARIO),smoke)): clean" || { echo "agent-leaks ($(or $(SCENARIO),smoke)): FAILED — objects created by the scenario are still alive"; exit 1; }
+
+.PHONY: agent-memcheck
+agent-memcheck: ## valgrind memcheck on the loop tests (nightly, docs/15): the errors sanitizers structurally miss
+	@mkdir -p build/memcheck
+	G_SLICE=always-malloc G_DEBUG=gc-friendly GST_TRACERS= valgrind --leak-check=full --show-leak-kinds=definite --errors-for-leak-kinds=definite \
+	  --error-exitcode=9 --suppressions=/usr/share/glib-2.0/valgrind/glib.supp --suppressions=agent/tests/valgrind/gstreamer.supp \
+	  --suppressions=agent/tests/valgrind/fjarr.supp --gen-suppressions=all --log-file=build/memcheck/loop-tests.log \
+	  ./build/$(BUILD_PRESET)/agent/tests/fjarr-tests --gtest_filter='LoopMedia.*:FrameHub.*:Introspect.*:Session.*' >/dev/null; rc=$$?; \
+	grep -E "ERROR SUMMARY|definitely lost:|indirectly lost:" build/memcheck/loop-tests.log | tail -4; \
+	[ $$rc -eq 0 ] && echo "agent-memcheck: clean (build/memcheck/loop-tests.log)" || { echo "agent-memcheck: valgrind exit $$rc — see build/memcheck/loop-tests.log (each error carries a ready suppression block: only GLib/GStreamer-internal ones belong in agent/tests/valgrind/fjarr.supp)"; exit $$rc; }
+
+.PHONY: agent-heaptrack
+agent-heaptrack: ## heaptrack the streaming loop test and print the allocators in fjarr code (nightly, docs/16 hot-path budget)
+	@mkdir -p build/heaptrack && rm -f build/heaptrack/loop-media.gz build/heaptrack/loop-media.zst
+	GST_TRACERS= heaptrack -o build/heaptrack/loop-media ./build/$(BUILD_PRESET)/agent/tests/fjarr-tests --gtest_filter='LoopMedia.*' >/dev/null 2>&1 || true
+	@f=$$(ls build/heaptrack/loop-media.* 2>/dev/null | head -1); [ -n "$$f" ] || { echo "agent-heaptrack: no profile written"; exit 1; }; \
+	heaptrack_print "$$f" -a 25 -p 0 -l 0 -t 0 2>/dev/null | tee build/heaptrack/loop-media.txt | grep -B1 -A2 -E "fjarr::" | head -60; \
+	echo "agent-heaptrack: full report in build/heaptrack/loop-media.txt (budget: one GstBuffer header per subscriber per frame in FrameHub::deliver, nothing else per frame — docs/16)"
+
+.PHONY: introspect
+introspect: ## Ask the demo robot's introspection endpoint (docs/24): PIPELINE=<id> FORMAT=txt|json|dot, else every pipeline's summary
+	@if [ -n "$(PIPELINE)" ]; then docker compose exec -T demo-robot curl -sf "localhost:7381/pipelines/$(PIPELINE).$(or $(FORMAT),txt)"; echo; else \
+	  docker compose exec -T demo-robot curl -sf localhost:7381/pipelines | python3 -c 'import sys,json; [print(p["id"], p["kind"], p["state"], "seq", p["seq"], p["last_trigger"]) for p in json.load(sys.stdin)["pipelines"]]'; \
+	  for id in $$(docker compose exec -T demo-robot curl -sf localhost:7381/pipelines | python3 -c 'import sys,json; [print(p["id"]) for p in json.load(sys.stdin)["pipelines"]]'); do echo "--- $$id"; docker compose exec -T demo-robot curl -sf "localhost:7381/pipelines/$$id.txt"; done; fi
+
 OPSIM_SERVER ?= ws://fjarr-server:8080/ws
 OPSIM_ROBOT ?= demo-robot-01
 OPSIM_SCENARIO ?= smoke
 .PHONY: opsim
 OPSIM_IN ?= demo-robot
 opsim: ## Run one fjarr-opsim scenario against the demo robot, from inside its container (OPSIM_SCENARIO=smoke|toggle|…)
-	docker compose exec -T $(OPSIM_IN) ./build/$(BUILD_PRESET)/agent/tools/fjarr-opsim --server $(OPSIM_SERVER) --robot $(OPSIM_ROBOT) --grant-secret $${FJARR_GRANT_HS256_SECRET:-dev-only-grant-secret} --scenario $(OPSIM_SCENARIO) --introspect http://127.0.0.1:7381 --timeout 90
+	docker compose exec -T $(OPSIM_IN) ./build/$(BUILD_PRESET)/agent/tools/fjarr-opsim --server $(OPSIM_SERVER) --robot $(OPSIM_ROBOT) --grant-secret $${FJARR_GRANT_HS256_SECRET:-dev-only-grant-secret} --scenario $(OPSIM_SCENARIO) --introspect http://127.0.0.1:7381 --timeout 90 $(OPSIM_EXTRA)
 
 .PHONY: opsim-all
 opsim-all: ## Every CI opsim scenario (docs/23: all but soak and netem-*)
 	@for s in smoke toggle hotplug silent-operator no-answer socket-drop ice-restart deadman; do echo "== $$s"; $(MAKE) --no-print-directory opsim OPSIM_SCENARIO=$$s || exit 1; done
+
+OPSIM_CYCLES ?= 200
+.PHONY: opsim-soak
+opsim-soak: ## The soak scenario: OPSIM_CYCLES connect/stream/close cycles (default 200; CI 20), /memory census back to the warm-up baseline (docs/23, docs/15)
+	$(MAKE) --no-print-directory opsim OPSIM_SCENARIO=soak OPSIM_EXTRA="--cycles $(OPSIM_CYCLES) --timeout $$(( $(OPSIM_CYCLES) * 6 + 60 ))"
+
+NETEM_PROFILE ?= lossy
+# opsim shares the robot's network namespace: its media rides lo (eth0 is the browser lab's media path).
+NETEM_DEV ?= lo eth0
+.PHONY: opsim-netem
+opsim-netem: ## Apply a docs/25 profile (NETEM_PROFILE=lan|wifi-ok|4g|lossy|bad) on the demo robot (NETEM_DEV), run netem-<profile>, always clear the qdisc
+	@export NETEM_DEV="$(NETEM_DEV)"; trap 'docker/lab/netem.sh clear' EXIT; docker/lab/netem.sh apply $(NETEM_PROFILE) && $(MAKE) --no-print-directory opsim OPSIM_SCENARIO=netem-$(NETEM_PROFILE)
 
 # -------------------------------------------------------------- signaling --
 .PHONY: signaling-run

@@ -27,7 +27,7 @@ int main() {
     fjarr::Agent agent{config};
     agent.register_capability(std::make_unique<fjarr::TestCapability>());
     agent.on_session_event([](const fjarr::SessionEvent& ev) {
-        std::printf("demo-robot audit: session %s %s operator=%s %s\n", ev.session_id.substr(0, 8).c_str(), ev.type.c_str(),
+        std::printf("demo-robot audit: session %s %s operator=%s %s\n", fjarr::short_session_id(ev.session_id).c_str(), ev.type.c_str(),
                     ev.operator_info.label.c_str(), ev.reason.c_str());
     });
     agent.stop_on_signal(SIGTERM); // orderly: input released, sessions told agent-shutdown (docs/15)

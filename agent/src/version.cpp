@@ -8,6 +8,8 @@ namespace fjarr {
 
 std::string version() { return "0.0.1"; }
 
+std::string short_session_id(const std::string& session_id) { return session_id.size() > 8 ? session_id.substr(session_id.size() - 8) : session_id; }
+
 std::string gstreamer_version() {
     guint major = 0, minor = 0, micro = 0, nano = 0;
     gst_version(&major, &minor, &micro, &nano);

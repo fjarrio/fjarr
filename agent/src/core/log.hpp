@@ -1,10 +1,12 @@
 #pragma once
 // Structured logging: one line per event on stderr, text or JSON.
 // spec: docs/23-agent-core-architecture.md#observability
+#include <chrono>
 #include <initializer_list>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace fjarr::log {
 
@@ -19,6 +21,13 @@ using KV = std::pair<std::string_view, std::string>;
 
 void write(Level level, std::string_view component, std::string_view message,
            std::initializer_list<KV> fields = {});
+
+/// The in-memory log ring (docs/24): the last 10 minutes of `info` and above,
+/// bounded to 4 000 lines, for the diagnostics bundle and `GET /log`.
+/// Lines are returned oldest first, in the configured format (text or JSON).
+std::vector<std::string> recent(std::chrono::seconds max_age = std::chrono::minutes(10));
+/// Drop the ring (tests).
+void clear_ring();
 
 inline void trace(std::string_view c, std::string_view m, std::initializer_list<KV> f = {}) { write(Level::Trace, c, m, f); }
 inline void debug(std::string_view c, std::string_view m, std::initializer_list<KV> f = {}) { write(Level::Debug, c, m, f); }

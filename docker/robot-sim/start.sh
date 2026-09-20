@@ -26,7 +26,10 @@ openbox &
 # Moving content so captured video is never a static frame:
 xclock -update 1 -geometry 300x300+50+50 &
 xeyes -geometry 200x200+400+80 &
-glxgears -geometry 300x300+50+420 &
+# No glxgears: on Xvfb it renders unthrottled through llvmpipe, burning ~3.5 cores for ever and
+# pushing the laptop into package-power throttling — which pinned the iGPU (and the VA-API
+# encoder under test) to its floor. The clock's second hand and the heartbeat terminal keep the
+# desktop moving at 1 Hz, which is what capture tests need.
 xterm -geometry 100x12+400+340 -e \
   'while true; do date "+robot-sim heartbeat  %F %T"; sleep 1; done' &
 

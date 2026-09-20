@@ -1,5 +1,7 @@
 #include "session.hpp"
 
+#include <malloc.h>
+
 #include <algorithm>
 
 #include <fjarr/errors.hpp>
@@ -197,7 +199,7 @@ const char* Session::state_name(State s) {
 
 Session::Session(SessionDeps deps, SessionId id, OperatorInfo op, std::vector<protocol::CapabilityGrant> grants,
                  std::optional<protocol::TurnCredentials> turn, bool input_owner)
-    : deps_(std::move(deps)), id_(std::move(id)), sid8_(id_.substr(0, 8)), operator_(std::move(op)), grants_(std::move(grants)),
+    : deps_(std::move(deps)), id_(std::move(id)), sid8_(log::short_id(id_)), operator_(std::move(op)), grants_(std::move(grants)),
       turn_(std::move(turn)), input_owner_(input_owner) {
     glib::ObjectCensus::instance().sessions++;
     denied_ = std::make_unique<DeniedSender>();
@@ -627,6 +629,9 @@ void Session::sample_stats() {
             arr.push_back({{"track_id", t.track_id}, {"enabled", ct->enabled}, {"tier", ct->tier}, {"bitrate_bps", delta_bytes * 8},
                            {"frames", frames}, {"dropped", dropped}});
         }
+        last_stats_ = nlohmann::json::object();
+        for (auto& [cap, arr] : per_cap) last_stats_[cap] = arr;
+        last_stats_["selected_pair"] = sample.selected_pair;
         for (auto& [cap, arr] : per_cap) {
             bool any_enabled = false;
             for (const auto& t : arr) any_enabled = any_enabled || t.value("enabled", false);
@@ -772,6 +777,12 @@ nlohmann::json Session::describe() const {
                           {"manifest_version", manifest_version_}, {"input_owner", input_owner_}, {"dropped_envelopes", dropped_envelopes_}};
 }
 
+std::size_t Session::buffered_bytes() const {
+    std::size_t n = 0;
+    for (const auto& [_, s] : senders_) n += s->buffered_amount();
+    return n;
+}
+
 void Session::close(const std::string& reason, bool retry, bool from_server) {
     deps_.loop->assert_owner("Session::close");
     if (state_ == State::Closing || state_ == State::Closed) return;
@@ -859,6 +870,9 @@ void Session::finish_close(const std::string& reason, bool retry, bool from_serv
     set_state(State::Closed);
     if (deps_.emit) deps_.emit(SessionEvent{"ended", id_, operator_, reason, ""});
     if (deps_.on_closed) deps_.on_closed(id_);
+    // A session's pipeline is freed across several threads' arenas; glibc keeps those pages
+    // unless asked. The soak measures RSS (docs/16), so give them back at every session end.
+    malloc_trim(0);
 }
 
 void Session::flush_close() {

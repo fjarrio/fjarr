@@ -10,6 +10,7 @@ add_executable(fjarr-tests
   test_channels.cpp
   test_session.cpp
   test_loop_media.cpp
+  test_introspect.cpp
 )
 target_include_directories(fjarr-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 target_link_libraries(fjarr-tests PRIVATE fjarr::fjarr GTest::gtest PkgConfig::GST PkgConfig::SOUP)

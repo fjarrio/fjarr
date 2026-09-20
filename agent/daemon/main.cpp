@@ -11,6 +11,7 @@
 
 #include <gst/gst.h>
 
+#include <fjarr/diagnostics.hpp>
 #include <fjarr/fjarr.hpp>
 
 #ifdef FJARR_HAVE_SYSTEMD
@@ -20,9 +21,10 @@
 namespace {
 
 int usage() {
-    std::printf("fjarr-agent [--config /etc/fjarr/fjarr.toml] [--check] [--probe-source '<description|type>']\n"
+    std::printf("fjarr-agent [--config /etc/fjarr/fjarr.toml] [--check] [--probe-source '<description|type>'] [--diagnostics [out.tar.gz]]\n"
                 "  --check          the doctor: encoder, configured sources, endpoint (exit 0/1)\n"
                 "  --probe-source   bring one source up standalone and report caps + fps\n"
+                "  --diagnostics    write the support bundle (docs/24) from the running agent's endpoint, or an offline one\n"
                 "env: FJARR_ROBOT_ID FJARR_SERVER_URL FJARR_DEV_DEVICE_TOKEN FJARR_MEDIA_ENCODER FJARR_TEST_HOOKS … (docs/23)\n");
     return 2;
 }
@@ -45,11 +47,17 @@ int main(int argc, char** argv) {
     std::string config_path;
     bool check_only = false;
     std::string probe;
+    bool diagnostics = false;
+    std::string diagnostics_out = "fjarr-diagnostics.tar.gz";
     for (int i = 1; i < argc; i++) {
         const std::string a = argv[i];
         if (a == "--config" && i + 1 < argc) config_path = argv[++i];
         else if (a == "--check") check_only = true;
         else if (a == "--probe-source" && i + 1 < argc) probe = argv[++i];
+        else if (a == "--diagnostics") {
+            diagnostics = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-') diagnostics_out = argv[++i];
+        }
         else if (a == "--help" || a == "-h") return usage();
         else return usage();
     }
@@ -67,6 +75,11 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "fjarr-agent: %s\n", e.what());
         return 1;
     }
+    if (diagnostics) {
+        const fjarr::DiagnosticsResult r = fjarr::write_diagnostics(config, diagnostics_out);
+        std::printf("diagnostics: %s\n", r.message.c_str());
+        return r.ok ? 0 : 1;
+    }
     const bool hw = fjarr::hardware_encode_available();
     std::printf("hardware H.264 encode: %s (media.encoder = %s)\n", hw ? "available" : "UNAVAILABLE", config.media.encoder.c_str());
     if (check_only) {
@@ -78,7 +91,7 @@ int main(int argc, char** argv) {
     fjarr::Agent agent{config};
     if (config.capabilities["fjarr.test"].value("enabled", true)) agent.register_capability(std::make_unique<fjarr::TestCapability>());
     agent.on_session_event([](const fjarr::SessionEvent& ev) {
-        std::printf("audit: session %s %s operator=%s %s\n", ev.session_id.substr(0, 8).c_str(), ev.type.c_str(), ev.operator_info.label.c_str(),
+        std::printf("audit: session %s %s operator=%s %s\n", fjarr::short_session_id(ev.session_id).c_str(), ev.type.c_str(), ev.operator_info.label.c_str(),
                     ev.reason.c_str());
     });
 #ifdef FJARR_HAVE_SYSTEMD
