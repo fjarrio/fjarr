@@ -2151,12 +2151,12 @@ int main(int argc, char** argv) {
         std::ofstream f(opts.json_out);
         f << out.dump(2) << "\n";
     }
-    loop.stop();
     finished = true;
     std::fflush(stdout);
     std::fflush(stderr);
-    // The verdict is complete: exit without running GStreamer/libnice/libsoup static destructors —
-    // a glibc priority-protect assertion fired in that teardown on a hosted runner after a passing
-    // scenario (exit 134), which is not what the scenario measures.
+    // The verdict is complete: exit here, before the loop is stopped and before GStreamer/libnice/
+    // libsoup static destructors run — on a hosted runner that teardown aborted twice after a
+    // passing scenario (a glibc priority-protect assertion, then a std::system_error from the
+    // loop join), which is not what the scenario measures.
     _exit(code);
 }

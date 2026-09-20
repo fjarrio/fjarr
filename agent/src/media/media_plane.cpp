@@ -120,6 +120,7 @@ void MediaPlane::request_keyframe(const HubKey& key) {
     auto it = tracks_.find(key.track_id);
     if (it == tracks_.end() || !it->second.producer) return;
     Registered& r = it->second;
+    log::debug("media", "keyframe request", {{"track", key.track_id}, {"tier", key.tier}});
     const auto now = std::chrono::steady_clock::now();
     const auto last = r.last_keyframe.find(key.tier);
     const auto window = std::chrono::seconds(1); // ≥ 1 s apart per producer tier (docs/23)

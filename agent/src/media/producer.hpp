@@ -80,6 +80,7 @@ class Producer {
     glib::GstElementPtr tee_;
     glib::GstPadPtr source_pad_;
     glib::PadProbe stamp_probe_;
+    glib::PadProbe alloc_probe_; // stamped sources stay on system memory (see build())
     StampPainter painter_;
     glib::SourceGuard bus_watch_;
     std::map<std::string, std::unique_ptr<Tier>> tiers_;

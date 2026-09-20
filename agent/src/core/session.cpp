@@ -323,6 +323,9 @@ void Session::attach(std::vector<AttachedCapability> caps) {
     });
     hooks.on_negotiation_needed = guard([](Session&) {}); // we drive offers ourselves (caps gate / update_tracks)
     hooks.on_keyframe_request = guard([](Session& s, const std::string& track_id) {
+        // A PLI/FIR from the peer: worth a log line — a peer asking every second turns a CBR
+        // hardware encoder into a frame-skipping one (diagnosed with this line in slice 3c).
+        log::debug("session", "keyframe requested by peer", {{"session", s.sid8_}, {"track", track_id}});
         auto it = s.subscribed_tier_.find(track_id);
         if (it != s.subscribed_tier_.end()) s.deps_.plane->hub().request_keyframe(media::HubKey{track_id, it->second});
     });

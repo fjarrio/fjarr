@@ -54,6 +54,19 @@ bool Producer::build() {
         stamp_probe_ = glib::PadProbe(source_pad_.get(),
                                       static_cast<GstPadProbeType>(GST_PAD_PROBE_TYPE_BUFFER | GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM),
                                       StampPainter::probe, &painter_);
+        // The painter maps every frame for writing. A VA-API branch proposes its own buffer pool
+        // upstream through the ALLOCATION query (plain system-memory caps, VA-backed buffers), and
+        // a write-map of such a buffer is a GPU round trip per frame — the producer fell to 13 fps
+        // (found in slice 3c). Answer the query here so the source allocates ordinary memory; the
+        // encoder branch uploads, as it does for any camera.
+        glib::GstPadPtr tee_sink = glib::adopt_pad(gst_element_get_static_pad(tee_.get(), "sink"));
+        alloc_probe_ = glib::PadProbe(
+            tee_sink.get(), GST_PAD_PROBE_TYPE_QUERY_UPSTREAM,
+            [](GstPad*, GstPadProbeInfo* info, gpointer) -> GstPadProbeReturn {
+                GstQuery* q = GST_PAD_PROBE_INFO_QUERY(info);
+                return GST_QUERY_TYPE(q) == GST_QUERY_ALLOCATION ? GST_PAD_PROBE_HANDLED : GST_PAD_PROBE_OK;
+            },
+            nullptr, nullptr);
     }
     glib::GstBusPtr bus(gst_pipeline_get_bus(GST_PIPELINE(pipeline_.get())));
     GSource* watch = gst_bus_create_watch(bus.get());

@@ -75,16 +75,23 @@ match a fjarr frame; the nightly workflow against docs/12 and docs/15.
   disable in 2 of 3 runs while netem, the soak and the lab shared one robot;
   it did not reproduce on a quiet robot (twice). Watch it in CI; if it
   returns, the suspect is send-side buffering after the valve.
-- The final local verification ran on the software encoder: after a day of
-  builds and sanitizer runs the host's package power limit had throttled
-  the iGPU and its clock stayed at the 800 MHz floor, so VA-API sessions
-  streamed 10–15 fps and the lab's hot-plug continuity budget failed —
-  identically with the committed 3b agent, which located it in the machine
-  and not the slice (on the software encoder both builds measure a gap of
-  3–4 on this host today against CI's ≤ 2 for the same committed code, so
-  the lab browser's side moved too; CI arbitrates that test). The sim's unthrottled `glxgears` (3.5 cores, always)
-  was removed as a contributor; docs/12 has the diagnosis. The VA-API path
-  is re-measured when the GPU clocks normally (or on the GPU runner).
+- **What looked like the machine was a defect the machine exposed.** After
+  a day of builds and sanitizer runs the host's package power limit had
+  throttled the iGPU to its 800 MHz floor; VA-API sessions then streamed
+  10–15 fps (identically on the committed 3b agent) while the same encode
+  chain without the agent did 29 and the software path did 34. With the
+  clock excluded (`intel_gpu_top`: video engine idle, clock ramping) the
+  remaining difference was the frame-stamp painter write-mapping VA-backed
+  buffers that vapostproc had proposed upstream — a GPU round trip per
+  frame that a fast clock hides. Fixed in the producer (system memory for
+  stamped sources, docs/23); VA-API sessions are back at 28 fps at the
+  floor clock and `fjarr-opsim`'s wire-level hot-plug continuity holds.
+  The sim's unthrottled `glxgears` was removed and docs/12 keeps the
+  throttle diagnosis. The lab's hot-plug test now budgets Chromium's
+  presentation and asserts the wire exactly; on this host Chromium's
+  software decode of two VA-API-encoded streams still presents with gaps
+  (9–22 frames) that the software-encoded pair does not (3–4), so that
+  presentation number is the browser's, and CI's runner is its gate.
 - The nightly's VA-API measurement waits for the self-hosted runner
   ([docs/12](../12-development-environment.md#nightly-ci-and-the-self-hosted-gpu-runner)).
 - Upstream: the webrtcbin stats leak; the workaround stays until the

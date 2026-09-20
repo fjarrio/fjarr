@@ -1077,6 +1077,16 @@ the text above left open, or learned from the lab:
   `packets-sent` of the internal sender sources) synchronously on the
   loop instead — the soak's RSS budget is what caught it. Reported
   upstream; the workaround stays until the baseline carries the fix.
+- *A stamped source stays on system memory.* The frame-stamp painter maps
+  every raw frame for writing; a VA-API branch proposes its own buffer pool
+  upstream through the ALLOCATION query (system-memory caps, VA-backed
+  buffers), and a write-map of such a buffer is a GPU round trip per frame.
+  On a GPU at full clock the round trip hid inside the frame budget; at its
+  floor clock the producer fell to 13 fps while the same chain without the
+  painter did 29, which is how slice 3c found it. The producer answers the
+  allocation query at the tee for stamped (`fjarr.test`) sources so the
+  source allocates ordinary memory and the encoder branch uploads, as it
+  does for any camera. Real sources are never stamped.
 - *The log ring keeps `info` and above regardless of the configured level*,
   so a bundle from a `warn`-level robot still shows what happened.
 
