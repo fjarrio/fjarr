@@ -13,8 +13,8 @@ const tick = async (n = 6) => {
   for (let i = 0; i < n; i++) await act(() => vi.advanceTimersByTimeAsync(0));
 };
 
-function setup() {
-  const agent = new MockAgent({ now: () => Date.now() });
+function setup(agentOptions: Partial<ConstructorParameters<typeof MockAgent>[0]> = {}) {
+  const agent = new MockAgent({ now: () => Date.now(), ...agentOptions });
   const client: FjarrClient = createFjarrClient({
     serverUrl: "wss://fjarr.test/ws",
     grant: async () => "jwt",
@@ -158,11 +158,10 @@ describe("@fjarr/react review regressions", () => {
   });
 
   it("push-to-talk: a stop() (or unmount) while the permission prompt is up never leaves the mic live", async () => {
-    const { agent, client } = setup();
+    // The agent offers its push-to-talk uplink slot (docs/21#audio-uplink-negotiation).
+    const { agent, client } = setup({ uplinkMid: "7" });
     const session = client.sessions.open("robot-1");
     await tick();
-    // Give the mock agent an uplink transceiver so replaceTrack would succeed.
-    agent.pc.addUplinkTransceiver("7");
     const stopped: string[] = [];
     const track = { kind: "audio", id: "mic-1", stop: () => stopped.push("mic-1") };
     let resolveGum: ((s: unknown) => void) | null = null;
@@ -275,10 +274,9 @@ describe("@fjarr/react review pass 2", () => {
   });
 
   it("push-to-talk: overlapping start/stop/start never leaves two microphone streams", async () => {
-    const { agent, client } = setup();
+    const { agent, client } = setup({ uplinkMid: "7" });
     const session = client.sessions.open("robot-1");
     await tick();
-    agent.pc.addUplinkTransceiver("7");
     const stopped: string[] = [];
     const mkTrack = (id: string) => ({ kind: "audio", id, stop: () => stopped.push(id) });
     const prompts: Array<(s: unknown) => void> = [];

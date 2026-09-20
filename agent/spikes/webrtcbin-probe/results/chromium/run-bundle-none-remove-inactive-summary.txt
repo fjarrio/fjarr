@@ -1,0 +1,32 @@
+status: passed
+test: spike/chromium-answerer.spec.ts › chromium answerer: bundle=none remove=inactive
+config: --bundle=none --remove=inactive --answerer=stdio
+framesDecoded.afterAddTrack: {"video0":124,"video2":62}
+framesDecoded.afterRemoveOffer: {"video0":169,"video2":62}
+framesDecoded.afterValve: {"video0":277,"video2":62}
+probe exit code: 0 (0 = all steps ran, 1 = a prerequisite failed, 3 = watchdog)
+framesDecoded.final: {"video0":337,"video2":62}
+browser connectionState: connecting → connected → connecting → connected
+browser data channel: opened=true, received ["hello from A","ping A->B after remove"], sent 1
+browser ontrack: video0:video, video2:video; muted after removal: video2
+browser errors: none
+probe RESULT lines:
+  Q6-turn    PASS    turn-server prop readback=turn://user:s3cret@turn.example.org:3478?transport=tcp; add-turn-server(turn://...)=1 (turns://...)=1 (http://...)=0
+  Q2-caps    PASS    fixed caps (payload+ssrc) seen on payloader src pad before create-offer: application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)VP8, payload=(int)96, ssrc=(uint)22
+  Q1-offer   PASS    offer m-sections: m=0:video mid=video0 sendrecv ufrag=7/475H+LwufCvQJl5bD9OOBDA2n0w+eW port=9 m=1:application mid=application1 <none> ufrag=bVsf8s2dRU5BvAbrGdB9EBXKrDeVht8V port=9
+  Q2-mid     PASS    mid: before create-offer=(null) | after create-offer(before SLD)=(null) | after set-local=video0 | after answer applied=video0 (offer m=0 a=mid:video0)
+  Q1-ondc    PASS    B on-data-channel fired: yes; A connection-state=connected B=connected (connected+open within 15 s: yes)
+  Q1-msg     PASS    B received "hello from A" via on-message-string
+  Q1-bufamt  PASS    B received 2097152/2097152 bytes; buffered-amount after burst=1376256 max seen=1376256 end=0; notify::buffered-amount x132; on-buffered-amount-low x3
+  media-1    PASS    B track(mid=video0) framesDecoded=31 pads_added=1 on-new-transceiver=1
+  Q5-stats   PASS    types={candidate-pair codec local-candidate outbound-rtp peer-connection remote-candidate remote-inbound-rtp transport } outbound-rtp deltas over 1 s: ssrc=2237252798: 76 kbit/s, 29 pkt/s; 
+  Q3-onn     PASS    on-negotiation-needed after requesting sink_2: 1 firing(s); caps ready=1
+  Q3-mids    PASS    offer#2 m=0 mid=video0 (was video0), new video m=2 mid=video2 ; all: m=0:video mid=video0 sendrecv ufrag=7/475H+LwufCvQJl5bD9OOBDA2n0w+eW port=9 m=1:application mid=application1 <none> ufrag=bVsf8s2dRU5BvAbrGdB9EBXKrDeVht8V port=9 m=2:video mid=video2 sendrecv ufrag=4NdcdNpG8l5SH2Gfh7q+u5/J7a9bXnEy port=9
+  Q3-track2  PASS    B pad for m=2 is track(mid=video2) framesDecoded=32 pads_added=2 on-new-transceiver(B)=2
+  Q3-cont    PASS    track1 framesDecoded before=58 after=124 max inter-increment gap (100 ms stats polling) during renegotiation=121.428000 ms
+  Q3-remove  PASS    [direction=inactive] on-negotiation-needed=yes; offer#3 track2 dir=inactive answer dir=inactive; track2 framesDecoded over 1.5 s: +0; track1 over 1.5 s: +42; mids: m=0:video mid=video0 sendrecv ufrag=7/475H+LwufCvQJl5bD9OOBDA2n0w+eW port=9 m=1:application mid=application1 <none> ufrag=bVsf8s2dRU5BvAbrGdB9EBXKrDeVht8V port=9 m=2:video mid=video2 inactive ufrag=4NdcdNpG8l5SH2Gfh7q+u5/J7a9bXnEy port=9
+  Q3-rmdc    PASS    datachannel after removal: B->A arrived, A->B arrived
+  Q3-rmvalve PASS    after valve drop=true on track2: track1 framesDecoded over 1.5 s: +48; stats A packets-sent: ssrc1678269613=+0 ssrc2237252798=+45 | B packets-received: mid=video0=+48 mid=video2=+0 (before valve: A packets-sent: ssrc1678269613=+37 ssrc2237252798=+30 | B packets-received: mid=video0=+30 mid=video2=+0)
+  Q4-restart FAIL    offer ufrag before=7/475H+LwufCvQJl5bD9OOBDA2n0w+eW after=7/475H+LwufCvQJl5bD9OOBDA2n0w+eW (pwd changed=no); ice-connection-state changes during=0 now A=completed B=connected; track1 framesDecoded over 2 s: +60
+Q6: Chromium connectionState reached connected: true
+q6.bundleNone: {"connected":true,"dcOpened":true,"messages":2}

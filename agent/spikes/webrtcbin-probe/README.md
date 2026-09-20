@@ -1,4 +1,4 @@
-# Spike: webrtcbin loopback probe (1.24, re-run on 1.28)
+# Spike: webrtcbin loopback probe (1.24, re-run on 1.28, Chromium answerer)
 
 Timeboxed technical spike answering six questions about GStreamer `webrtcbin`
 behaviour that the agent architecture (docs/09, docs/21, docs/23) depends on.
@@ -6,8 +6,10 @@ A single process runs two `webrtcbin` instances — **A = "agent" (offerer)**
 and **B = "browser" (answerer)** — and exchanges SDP/ICE through GLib
 main-loop idle callbacks (no network signaling). Every question is answered
 with PASS/FAIL/UNCLEAR plus the exact API used, and the raw evidence is in
-`results/` (1.24) and `results/gst-1.28/` (the slice-2.9 re-run, see
-[below](#re-run-on-gstreamer-128)).
+`results/` (1.24), `results/gst-1.28/` (the slice-2.9 re-run, see
+[below](#re-run-on-gstreamer-128)) and `results/chromium/` (the slice-3a
+run of the same offerer against a real Chromium answerer, see
+[Chromium answerer](#chromium-answerer-slice-3a)).
 
 This directory is **not** referenced by the root build and is not a product
 of the spec workflow; it is throwaway evidence that feeds the architecture doc.
@@ -38,9 +40,12 @@ docker compose exec -T dev bash -c '
 
 Flags: `--bundle=none|balanced|max-bundle` (default `max-bundle`),
 `--remove=inactive|sendonly|release-pad` (default `inactive`, selects how
-track 2 is "removed" in Q3) and `--reuse-pads` (sets `reuse-source-pads=TRUE`
+track 2 is "removed" in Q3), `--reuse-pads` (sets `reuse-source-pads=TRUE`
 on both webrtcbins where the property exists, i.e. GStreamer ≥ 1.26; a
-no-op on 1.24). The program runs all questions sequentially,
+no-op on 1.24) and `--answerer=stdio` (no webrtcbin B: A's signaling goes
+over stdio as JSON lines to a real browser, driven by the Playwright test
+described under [Chromium answerer](#chromium-answerer-slice-3a); the
+default `--answerer=in-process` is the loopback). The program runs all questions sequentially,
 prints a `RESULT` line per check and a summary table, and exits 0 on
 completion (1 if a prerequisite such as the first connection fails, 3 on the
 120 s watchdog). Full outputs of the four configurations discussed below are
@@ -160,7 +165,90 @@ Decision taken from this (docs/23, ADR-0022): remove a track with the
 valve closed first and the transceiver set to `inactive`; every webrtcbin
 answerer Fjarr ships (`fjarr-opsim`, loop tests) sets
 `reuse-source-pads=TRUE` and needs GStreamer ≥ 1.26; the Chromium-answerer
-check happens in slice 3a.
+check happened in slice 3a, [below](#chromium-answerer-slice-3a).
+
+## Chromium answerer (slice 3a)
+
+The 1.24/1.28 verdicts above all have a webrtcbin on the answering side,
+and the two FAILs that shaped the architecture (`inactive` stall,
+`bundle-policy=none`) were both answerer-side. Slice 3a (docs/23) owed a
+half-day spike running the **same offerer against the browser lab's real
+Chromium** (docs/25) for Q1, Q3 and Q6. Run on 2026-09-19:
+
+* **Probe**: `--answerer=stdio` — webrtcbin B is not created; A writes
+  `{"type":"offer"|"ice"|"dc-send"|"done"}` JSON lines to stdout and reads
+  `{"type":"answer"|"ice"|"report"}` lines from stdin (nlohmann-json,
+  `GIOChannel` on fd 0 so everything stays on the one main loop). The
+  steps are unchanged; "B" is an `Answerer` interface whose in-process
+  implementation wraps the old Peer B (verified verdict-for-verdict against
+  `results/gst-1.28/`) and whose browser implementation is fed by the
+  page's reports: `rx_count()` is the browser's `inbound-rtp.framesDecoded`
+  per `mid` (polled every 100 ms) instead of buffers on B's src pad, the
+  B→A ping is a `dc-send` request the page executes, and the
+  renegotiation-gap number is the longest interval between two
+  `framesDecoded` increments (100 ms resolution, so ~115 ms is "no gap").
+* **Browser side**: `web/e2e/tests/spike/chromium-answerer.spec.ts`
+  (Playwright project `spike`) spawns the probe in `dev`, opens the lab page
+  in the `browser` container over CDP, creates a default
+  `RTCPeerConnection` (bundlePolicy `balanced`, no ICE servers) and relays
+  the lines both ways; every incoming track is sunk into a `<video>` so the
+  decoder runs. It keeps the probe's full stdout, the browser's reports and
+  a summary under `web/e2e/out/spike-chromium-answerer-<config>/`; the
+  three runs are copied to `results/chromium/` (`run-*.txt` is the probe
+  stdout, `*-summary.txt` the test's summary, `*-browser-reports.jsonl` the
+  page's events).
+* **Environment**: GStreamer 1.28.2 in `dev` (172.18.0.3), Chrome
+  153.0.8010.12 headless in `browser` (172.18.0.4), same compose network;
+  no STUN/TURN. Chromium offered plain host candidates (no mDNS
+  obfuscation) and ICE was connected within ~60 ms in every run; the
+  whole probe takes ~11 s per configuration.
+
+```bash
+docker compose --profile lab --profile stack up -d browser fjarr-server   # host
+docker compose exec -T dev bash -c 'cd /workspace/agent/spikes/webrtcbin-probe && cmake --build build'
+docker compose exec -T dev bash -c 'cd /workspace/web/e2e && pnpm exec playwright test --project spike'
+```
+
+| Configuration | DC opened in Chromium? | "hello from A" arrived? | 2 MiB burst | Track 2 added by renegotiation | Track 1 during add (max gap) | Removal: track 2 | Track 1 after the removal offer / after the valve (framesDecoded, 1.5 s) | DC both ways after removal | Connected? |
+|---|---|---|---|---|---|---|---|---|---|
+| `--bundle=max-bundle --remove=inactive` | yes (`ondatachannel` label=control id=1, open) | yes | 2 097 152/2 097 152 bytes | yes, `mid=video2` decoded 32 frames in < 1 s | flows, 118 ms (polling floor) | answer `a=inactive`, Chromium fires `track.onmute` for `video2`, decoded +0 | **+45 / +45** (30 fps, no stall) | B→A arrived, A→B arrived | yes |
+| `--bundle=max-bundle --remove=sendonly` | yes | yes | complete | yes, 33 frames | flows, 115 ms | answer `recvonly`, track 2 keeps decoding (+45) until the valve closes (+3, the queue draining) | **+45 / +45** | both arrived | yes |
+| `--bundle=none --remove=inactive` | **yes** (unlike the webrtcbin answerer) | yes | complete | yes, 32 frames | flows, 121 ms | as above (`onmute`, +0) | **+42 / +48** | both arrived | **yes** — three ICE transports (one ufrag and one host candidate per m-line), all connected; the transport for `video2` connected on the renegotiation (`connected → connecting → connected`) |
+
+What this settles:
+
+* **Q1 holds against a real browser** exactly as in the loopback: the
+  pre-offer data channel is `m=application` in the offer, Chromium fires
+  `ondatachannel` ~20 ms after `connectionState=connected`, strings and
+  the 64 × 32 KiB binary burst arrive (Chromium's `max-message-size` is
+  not a constraint at 32 KiB).
+* **Q3, the removal — the `inactive` stall is a webrtcbin-answerer
+  artefact and nothing else.** Against Chromium, direction `inactive` on
+  the offerer's transceiver plus a re-offer is the clean removal: Chromium
+  answers `a=inactive`, mutes the receiver's track, stops counting frames
+  for that `mid`, and the untouched track and the data channel do not
+  miss a beat — with A still pushing track-2 RTP into the bundled
+  transport for 2.5 s before the valve closes (the probe's order, which is
+  harsher than the docs/23 order of valve first). Chromium simply drops
+  those packets (`inbound-rtp` for `video2` stays at +0 while A's
+  `packets-sent` shows +37). `sendonly` is also harmless, as before, but
+  it is not a removal: Chromium keeps decoding until the valve closes.
+* **Q6, `bundle-policy=none` connects with Chromium** — the loopback FAIL
+  was the second webrtcbin's DTLS on the extra transport, not the
+  offerer. This does not change the decision: `max-bundle` is what
+  browsers negotiate anyway, one transport is what the reconnection
+  ladder assumes, and `none` costs one ICE/DTLS handshake per m-line
+  (visible here as the renegotiation's `connecting` dip).
+* Q4 is unchanged (the browser is irrelevant to it: the offerer's
+  ufrag/pwd never change through 1.28).
+* Not covered here: Q2/Q5 answerer-side internals (they need B's pads and
+  stats), audio/uplink transceivers, and TURN — the compose network gives
+  host candidates only.
+
+Decision check (docs/23 "remove a track: valve closed first, transceiver
+`inactive`, re-offer"): **holds against Chromium** in both bundle
+policies; the `reuse-source-pads=TRUE` requirement stays a rule for the
+webrtcbin answerers Fjarr ships, not for browsers.
 
 ## API sequences that worked (for the architecture doc)
 
@@ -171,12 +259,13 @@ All signal handlers marshal to one `GMainLoop` (`g_idle_add_full`); promises are
 3. **Offer/answer**: A `set-local-description(offer)` → B `set-remote-description(offer)` → flush B's queued remote candidates → B `create-answer` → B `set-local-description(answer)` → A `set-remote-description(answer)` → flush A's queued candidates. `on-ice-candidate(mline, cand)` → peer `add-ice-candidate(mline, cand)`; candidates arriving before the remote description are queued.
 4. **Manifest**: read `a=mid` per m-section from the offer SDP; transceiver `mid` property only after `stable`. Map B's `src_%u` pads via the pad `transceiver` property.
 5. **Add a track**: request + link a new sink pad → `on-negotiation-needed` → repeat 2–3. Other tracks keep flowing (gap ≤ 36 ms).
-6. **Mute a track**: `valve drop=true` on that branch; do not renegotiate. **Remove a track**: valve closed first, then `direction=inactive` and re-offer — a webrtcbin answerer must have `reuse-source-pads=TRUE` (≥ 1.26), see the [1.28 re-run](#re-run-on-gstreamer-128).
+6. **Mute a track**: `valve drop=true` on that branch; do not renegotiate. **Remove a track**: valve closed first, then `direction=inactive` and re-offer — a webrtcbin answerer must have `reuse-source-pads=TRUE` (≥ 1.26), see the [1.28 re-run](#re-run-on-gstreamer-128); Chromium needs nothing, see the [Chromium answerer](#chromium-answerer-slice-3a).
 7. **Bandwidth**: `get-stats` every second, diff `outbound-rtp.bytes-sent` per `ssrc`.
 8. **ICE restart**: not available on any release through 1.28; recreate the session.
 
 ## Files
 
-* `main.cpp` — the probe (~800 lines: RAII wrappers, marshaling, negotiation helper, Q1–Q6 steps, diagnostics).
-* `CMakeLists.txt` — standalone build, `gstreamer-1.0 gstreamer-webrtc-1.0 gstreamer-sdp-1.0`, `GST_USE_UNSTABLE_API`.
-* `results/` — full stdout of the four 1.24 configurations quoted above; `results/gst-1.28/` — the five slice-2.9 runs.
+* `main.cpp` — the probe (~1000 lines: RAII wrappers, marshaling, the `Answerer` interface with the in-process and stdio implementations, negotiation helper, Q1–Q6 steps, diagnostics).
+* `CMakeLists.txt` — standalone build, `gstreamer-1.0 gstreamer-webrtc-1.0 gstreamer-sdp-1.0` + `nlohmann_json` (stdio mode), `GST_USE_UNSTABLE_API`.
+* `results/` — full stdout of the four 1.24 configurations quoted above; `results/gst-1.28/` — the five slice-2.9 runs; `results/chromium/` — the three slice-3a runs against Chromium.
+* `../../../web/e2e/tests/spike/chromium-answerer.spec.ts` — the browser half of the Chromium run (Playwright project `spike`).

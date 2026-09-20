@@ -265,6 +265,8 @@ export function usePushToTalk(session: Session | undefined, options: PushToTalkO
     const run: Promise<void> = (async () => {
       let stream: MediaStream | null = null;
       try {
+        // Only secure contexts have mediaDevices (https, localhost): say so instead of a TypeError.
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error("microphone unavailable: getUserMedia needs a secure context (https or localhost)");
         stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, ...constraints } });
         if (gen !== generation.current || mic.current) throw new Error("released"); // stopped, or a newer start won
         const track = stream.getAudioTracks()[0];

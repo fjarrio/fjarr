@@ -17,3 +17,12 @@
   hand-rolling a fake in a test.
 - Gates: `make web-build` + `make web-lint` (tsc strict, sources + tests) +
   `make web-test` (vitest).
+- **Browser e2e** lives in `web/e2e` (`@fjarr/e2e`, docs/25): `make lab-up`
+  then `make e2e` (or `make e2e-loopback` without a server). Tests drive the
+  lab page through `window.__lab` (contract in `src/lab-page.d.ts`) against
+  `LoopbackAgent` from `@fjarr/core/testing/browser`; every run writes
+  `web/e2e/out/<test>/summary.txt` — read that before the trace. `pnpm
+  fjarr-lab …` is the ad-hoc view of the same browser. Any behaviour that
+  differs between the mock and a real browser gets a lab test *and* a unit
+  test that pins the mock to the browser.
+

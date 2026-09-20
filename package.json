@@ -12,6 +12,10 @@
     ]
   },
   "devDependencies": {
-    "ajv": "^8.17.0"
+    "ajv": "^8.17.0",
+    "@fjarr/e2e": "workspace:*"
+  },
+  "scripts": {
+    "fjarr-lab": "fjarr-lab"
   }
 }

@@ -19,6 +19,16 @@ export const MAX_ENVELOPE_BYTES = 16 * 1024;
 
 export type ChannelClass = "control" | "realtime" | "bulk" | "stream";
 
+/** One tapped message: envelopes come parsed, bulk/stream as sizes (docs/21#wire-tap). */
+export interface WireSample {
+  dir: "in" | "out";
+  channel: ChannelClass;
+  /** Bulk/stream: the channel's capability. */
+  cap?: string;
+  env?: Envelope;
+  bytes: number;
+}
+
 const encoder = new TextEncoder();
 
 export function parseChannelLabel(label: string): { cls: ChannelClass; cap?: string } | null {
@@ -48,6 +58,12 @@ export class ChannelSet {
   /** The whole set was torn down (peer gone): every waiter, attached or not, gives up. */
   readonly onReset = new Emitter<void>();
   readonly onStreamData = new Emitter<{ cap: string; data: ArrayBuffer }>();
+  /**
+   * Wire tap feed (docs/21#wire-tap): every envelope in or out with its
+   * parsed form, every bulk/stream message as a byte count. Costs nothing
+   * while nobody listens.
+   */
+  readonly onWire = new Emitter<WireSample>();
 
   attach(dc: DataChannelLike): void {
     const parsed = parseChannelLabel(dc.label);
@@ -60,12 +76,12 @@ export class ChannelSet {
           if (this.control === dc) this.control = null;
           this.onControlClose.emit();
         };
-        dc.onmessage = (ev) => this.routeEnvelope(ev.data);
+        dc.onmessage = (ev) => this.routeEnvelope("control", ev.data);
         if (dc.readyState === "open") this.onControlOpen.emit();
         break;
       case "realtime":
         this.realtime = dc;
-        dc.onmessage = (ev) => this.routeEnvelope(ev.data);
+        dc.onmessage = (ev) => this.routeEnvelope("realtime", ev.data);
         dc.onclose = () => {
           if (this.realtime === dc) this.realtime = null;
         };
@@ -82,7 +98,9 @@ export class ChannelSet {
         };
         dc.onbufferedamountlow = () => this.onBulkDrain.emit(cap);
         dc.onmessage = (ev) => {
-          if (ev.data instanceof ArrayBuffer) this.onBulkData.emit({ cap, data: ev.data });
+          if (!(ev.data instanceof ArrayBuffer)) return;
+          if (this.onWire.size > 0) this.onWire.emit({ dir: "in", channel: "bulk", cap, bytes: ev.data.byteLength });
+          this.onBulkData.emit({ cap, data: ev.data });
         };
         if (dc.readyState === "open") this.onBulkOpen.emit(cap);
         break;
@@ -95,17 +113,26 @@ export class ChannelSet {
           if (this.stream.get(cap) === dc) this.stream.delete(cap);
         };
         dc.onmessage = (ev) => {
-          if (ev.data instanceof ArrayBuffer) this.onStreamData.emit({ cap, data: ev.data });
+          if (!(ev.data instanceof ArrayBuffer)) return;
+          if (this.onWire.size > 0) this.onWire.emit({ dir: "in", channel: "stream", cap, bytes: ev.data.byteLength });
+          this.onStreamData.emit({ cap, data: ev.data });
         };
         break;
       }
     }
   }
 
-  private routeEnvelope(data: unknown): void {
+  private routeEnvelope(channel: "control" | "realtime", data: unknown): void {
     if (typeof data !== "string") return;
     const env = parseEnvelope(data);
-    if (env) this.onEnvelope.emit(env);
+    if (!env) return;
+    if (this.onWire.size > 0) this.onWire.emit({ dir: "in", channel, env, bytes: encoder.encode(data).byteLength });
+    this.onEnvelope.emit(env);
+  }
+
+  /** Bulk bytes went out on `cap`'s channel (the byte channel and bulk sender report here). */
+  noteBulkSent(cap: string, bytes: number): void {
+    if (this.onWire.size > 0) this.onWire.emit({ dir: "out", channel: "bulk", cap, bytes });
   }
 
   get controlOpen(): boolean {
@@ -113,20 +140,21 @@ export class ChannelSet {
   }
 
   sendControl(env: Envelope): boolean {
-    return this.sendText(this.control, env);
+    return this.sendText("control", this.control, env);
   }
 
   sendRealtime(env: Envelope): boolean {
-    return this.sendText(this.realtime, env);
+    return this.sendText("realtime", this.realtime, env);
   }
 
-  private sendText(dc: DataChannelLike | null, env: Envelope): boolean {
+  private sendText(channel: "control" | "realtime", dc: DataChannelLike | null, env: Envelope): boolean {
     if (!dc || dc.readyState !== "open") return false;
     const text = JSON.stringify(env);
     if (text.length > MAX_ENVELOPE_BYTES / 4 && encoder.encode(text).byteLength > MAX_ENVELOPE_BYTES) {
       throw new FjarrError("payload-invalid", `${env.cap}/${env.type}: envelope exceeds 16 KiB (docs/08)`);
     }
     dc.send(text);
+    if (this.onWire.size > 0) this.onWire.emit({ dir: "out", channel, env, bytes: encoder.encode(text).byteLength });
     return true;
   }
 
@@ -301,7 +329,11 @@ export function createByteChannel(set: ChannelSet, cap: string, onRelease: () =>
   const flush = () => {
     const d = dc();
     if (!d || d.readyState !== "open") return;
-    while (queue.length) d.send(queue.shift()!);
+    while (queue.length) {
+      const chunk = queue.shift()!;
+      d.send(chunk);
+      set.noteBulkSent(cap, chunk.byteLength);
+    }
     queued = 0;
   };
   offs.push(set.onBulkOpen.on((c) => c === cap && flush()));
@@ -314,6 +346,7 @@ export function createByteChannel(set: ChannelSet, cap: string, onRelease: () =>
       if (d && d.readyState === "open") {
         flush();
         d.send(bytes);
+        set.noteBulkSent(cap, bytes.byteLength);
         return;
       }
       if (queued + bytes.byteLength > PRE_OPEN_QUEUE_LIMIT) {
@@ -396,6 +429,7 @@ export function createBulkSender(set: ChannelSet, cap: string): BulkSender {
         }
         if (dc.readyState !== "open") throw new FjarrError("closed", `${cap}: bulk channel closed mid-transfer`);
         dc.send(frame);
+        set.noteBulkSent(cap, frame.byteLength);
         count++;
         bytes += frame.byteLength;
       }

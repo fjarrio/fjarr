@@ -28,6 +28,23 @@ stack-up: ## Start the standalone fjarr-server (production image)
 turn-up: ## Start coturn (use-auth-secret mode)
 	docker compose --profile turn up -d coturn
 
+# ------------------------------------------------------------ browser lab --
+.PHONY: lab-up
+lab-up: ## Start the lab browser (CDP at http://localhost:9222) beside fjarr-server (docs/25)
+	docker compose --profile lab --profile stack up -d --build browser fjarr-server
+
+.PHONY: lab-down
+lab-down: ## Stop the lab browser
+	docker compose --profile lab down browser
+
+.PHONY: e2e
+e2e: ## Browser e2e suites against the lab browser (run inside dev; `make lab-up` first)
+	pnpm --filter @fjarr/e2e exec playwright test
+
+.PHONY: e2e-loopback
+e2e-loopback: ## Only the loopback-agent suites (no fjarr-server needed)
+	pnpm --filter @fjarr/e2e exec playwright test --project loopback
+
 # ------------------------------------------------------------------ agent --
 BUILD_PRESET ?= release
 
@@ -63,15 +80,15 @@ web-dev: ## Demo dashboard dev server (http://localhost:5173)
 
 .PHONY: web-build
 web-build: ## Build @fjarr/core, @fjarr/react, demo dashboard
-	pnpm -r --filter './web/**' --filter fjarr-demo-dashboard build
+	pnpm -r --filter './web/packages/**' --filter fjarr-demo-dashboard build
 
 .PHONY: web-lint
-web-lint: ## Typecheck the JS/TS workspace (sources + tests)
+web-lint: ## Typecheck the JS/TS workspace (sources, tests, e2e)
 	pnpm -r --filter './web/**' --filter fjarr-demo-dashboard typecheck
 
 .PHONY: web-test
-web-test: ## Unit tests for @fjarr/core and @fjarr/react (vitest)
-	pnpm -r --filter './web/**' test
+web-test: ## Unit tests for @fjarr/core and @fjarr/react (vitest; browser e2e is `make e2e`)
+	pnpm -r --filter './web/packages/**' test
 
 # ---------------------------------------------------------------- website --
 .PHONY: website-dev

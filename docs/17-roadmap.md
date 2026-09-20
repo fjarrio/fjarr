@@ -55,8 +55,10 @@ GStreamer 1.28 ([ADR-0022](adr/0022-baseline-ubuntu-2604-gstreamer-128.md)),
 doctor re-verified, the webrtcbin spike re-run on 1.28 (track removal
 settled on `inactive`; answerers set `reuse-source-pads`) ·
 3 in three increments ([docs/23](23-agent-core-architecture.md#slices-3a-3b-3c-and-their-gates)):
-**3a** the [browser lab](25-browser-lab.md) (web only, may run in parallel
-with 2.9; includes the Chromium-answerer spike) · **3b** the agent core
+**3a ✔** the [browser lab](25-browser-lab.md) (2026-09-19: `browser`
+service, `@fjarr/e2e`, wire tap, `LoopbackAgent`, frame stamp,
+`fjarr-lab`, CI job; the Chromium-answerer spike report on ADR-0007) ·
+**3b** the agent core
 with the built-in `fjarr.test` capability, `fjarr-opsim`, the
 introspection walker and minimal endpoint ([docs/24](24-pipeline-introspection.md)),
 and the minimal demo wiring the gate needs · **3c** introspection

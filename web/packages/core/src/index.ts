@@ -38,6 +38,7 @@ export {
   type BulkSender,
   type ByteChannel,
   type ChannelClass,
+  type WireSample,
   type Publisher,
   type PublisherOptions,
 } from "./channels.js";
@@ -62,4 +63,5 @@ export {
 export { FocusRegistry, type FocusOptions, type FocusRegistration, type WindowLike } from "./focus.js";
 export { createSession, type AudioUplink, type Session, type SessionDeps, type SessionEvent, type SessionInfo, type SessionOptions, type SessionState, type TrackApi } from "./session.js";
 export { createFjarrClient, type FjarrClient, type FjarrClientConfig, type PersistenceAdapter, type SessionManager } from "./client.js";
+export type { WireEvent } from "./wire.js";
 export { FJARR_CORE_VERSION } from "./version.js";

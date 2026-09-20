@@ -117,6 +117,7 @@ reconnecting → (connected | failed) → closed`. Transitions:
 | any | `peer-gone` / `session-close` from server | closed (reason) | release tracks, keep subscriptions registered for a possible `open()` again |
 | connected / reconnecting | `session-close{retry:true}` (agent media restart — the ICE-restart fallback, since no `webrtcbin` release restarts ICE in place) | reconnecting | a counted round, started at once — the agent asked for a fresh session |
 | any | `error(grant-expired)` | reconnecting | refetch grant via provider, then retry immediately — the first refresh per attempt is free (no backoff, not counted); a second consecutive `grant-expired` is an ordinary backed-off round, so a host minting rejected tokens can never hot-loop; never a generic failure |
+| reconnecting | `error(robot-offline)` | reconnecting | the robot is re-registering after the same outage (server or agent restart): a counted, backed-off round. On a *first* connect the same error is fatal (`failed`, reason `robot-offline`) — the robot simply is not there |
 | any | `error(session-unknown)` | closed (reason) | the server no longer knows our session (a message crossed `peer-gone` on the wire): an orderly close, not a failure |
 
 The attempt budget (default 5 rounds) is renewed by a connection that stayed
@@ -404,6 +405,16 @@ with
 sizes). Off by default and never enabled by `@fjarr/react`: envelopes carry
 keystrokes and clipboard text (docs/10). The browser lab and `fjarr-lab
 wire` are its consumers ([docs/25](25-browser-lab.md)).
+
+### Audio uplink, as negotiated {#audio-uplink-negotiation}
+
+The agent offers its push-to-talk transceiver `recvonly`; a browser creates
+the matching transceiver at `setRemoteDescription` with direction
+`recvonly`, so the core sets it to `sendonly` before `createAnswer` — or
+`replaceTrack()` later moves no media at all (found in the browser lab,
+slice 3a). `getUserMedia` only exists in secure contexts (https,
+localhost): `usePushToTalk` reports that as its `error` instead of a
+`TypeError`.
 
 ## Testing (docs/15)
 

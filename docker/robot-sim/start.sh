@@ -6,8 +6,10 @@ set -u
 : "${SIM_RESOLUTION:=1920x1080x24}"
 
 # The /tmp/.X11-unix volume is shared with the dev container; make sure a
-# stale socket from a previous run doesn't block Xvfb.
-rm -f "/tmp/.X11-unix/X${DISPLAY#:}" 2>/dev/null || true
+# stale socket from a previous run doesn't block Xvfb. The lock file lives
+# in the container's own /tmp and survives an unclean stop (host reboot,
+# docker restart): "Server is already active for display 99" otherwise.
+rm -f "/tmp/.X11-unix/X${DISPLAY#:}" "/tmp/.X${DISPLAY#:}-lock" 2>/dev/null || true
 mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 
 echo "robot-sim: starting Xvfb ${DISPLAY} at ${SIM_RESOLUTION}"

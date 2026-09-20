@@ -5,10 +5,14 @@
 #   demo       the three-demo showcase: fjarr-server sidecar + TS demo-backend
 #              + demo-robot + demo-dashboard (customer deployment topology)
 #   turn       coturn relay in use-auth-secret mode
+#   lab        headless Chromium with CDP for the browser lab (docs/25)
 #
 # Overrides (conscious privilege grants, opt in explicitly):
 #   docker-compose.host-x11.yml   capture your real host desktop
 #   docker-compose.uinput.yml     /dev/uinput injection experiments
+# Standing grant (dev-only, docs/12): `dev` mounts the host docker socket so
+# the browser lab can drive this stack from inside (netem, pause, restart).
+# `make doctor` checks that DOCKER_GID in .env matches the socket's group.
 name: fjarr
 
 services:
@@ -20,10 +24,14 @@ services:
         USER_GID: ${USER_GID:-1000}
         RENDER_GID: ${RENDER_GID:-110}
         VIDEO_GID: ${VIDEO_GID:-44}
+        DOCKER_GID: ${DOCKER_GID:-999}
     image: fjarr-dev
     volumes:
       - .:/workspace:cached
       - x11sock:/tmp/.X11-unix
+      # docker-outside-of-docker: the browser lab drives the stack from dev
+      # (netem on demo-robot, fault switches) — docs/25.
+      - /var/run/docker.sock:/var/run/docker.sock
       - cargo-registry:/home/dev/.cargo/registry
       - pnpm-store:/home/dev/.local/share/pnpm
       - ccache:/home/dev/.cache/ccache
@@ -32,6 +40,11 @@ services:
       CCACHE_DIR: /home/dev/.cache/ccache
     devices:
       - /dev/dri:/dev/dri # Intel VA-API; comment out on machines without a GPU
+    networks:
+      default:
+        # The lab browser loads pages served from here (docs/25). Not "dev":
+        # Chrome's HSTS preload list forces https on that name.
+        aliases: [lab-host]
     working_dir: /workspace
     command: sleep infinity
 
@@ -114,6 +127,34 @@ services:
       - "5173:5173"
     depends_on:
       - demo-backend
+
+  # ----------------------------------------------------------------- lab --
+  # The browser lab (docs/25): one headless Chromium with the DevTools
+  # protocol exposed, fake media devices, driven over CDP from `dev`
+  # (@fjarr/e2e, fjarr-lab) and observable from the host at :9222/json.
+  # Image tag = the @playwright/test version pinned in web/e2e/package.json.
+  browser:
+    profiles: [lab]
+    image: mcr.microsoft.com/playwright:v1.63.0-noble
+    init: true
+    shm_size: 1g
+    environment:
+      LAB_CHROMIUM_FLAGS: ${LAB_CHROMIUM_FLAGS:-}
+      # Origins treated as secure contexts (getUserMedia): see docker/lab/run-chromium.sh
+      LAB_INSECURE_ORIGINS: ${LAB_INSECURE_ORIGINS:-}
+    volumes:
+      - ./docker/lab/run-chromium.sh:/usr/local/bin/run-chromium:ro
+    command: ["run-chromium"]
+    ports:
+      - "127.0.0.1:9222:9222" # a browser with --no-sandbox and open CDP: never on a LAN interface
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # CI serves the lab pages from the runner
+    healthcheck:
+      # Through the container's own address: proves the network-facing path, not loopback.
+      test: ["CMD-SHELL", "curl -fsS http://$$(hostname -i):9222/json/version >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   # ---------------------------------------------------------------- turn --
   coturn:

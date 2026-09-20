@@ -49,6 +49,47 @@ jobs:
       - run: pnpm --filter fjarr-demo-dashboard build
       - run: pnpm --filter fjarr-demo-backend typecheck
 
+  e2e:
+    name: Browser lab (loopback + fjarr-server, real Chromium over CDP)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter '@fjarr/core' --filter '@fjarr/react' build
+      - run: pnpm --filter '@fjarr/e2e' typecheck
+      - name: start the lab browser and fjarr-server (docs/25 topology)
+        run: |
+          cp .env.example .env
+          docker compose --profile lab --profile stack up -d --build --wait browser fjarr-server
+      - name: run the e2e suites (loopback + stack)
+        env:
+          # The runner serves the lab page; the browser container reaches it via host-gateway.
+          E2E_BROWSER: http://localhost:9222
+          E2E_PAGE_ORIGIN: http://host.docker.internal:5174
+          E2E_SERVER_WS: ws://fjarr-server:8080/ws
+          E2E_SERVER_HTTP: http://localhost:8080
+          CI: "true"
+        # pnpm 10 forwards `--` literally: call playwright through `exec` to pass flags
+        run: pnpm --filter '@fjarr/e2e' exec playwright test --project loopback --project stack
+      - name: lab artifacts (summaries, captures, traces)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-lab
+          path: |
+            web/e2e/out/**/summary.*
+            web/e2e/out/**/*.jsonl
+            web/e2e/out/test-results/**
+          if-no-files-found: ignore
+      - name: stack logs on failure
+        if: failure()
+        run: docker compose --profile lab --profile stack logs --no-color --tail 200 browser fjarr-server
+
   rust:
     name: Signaling (test + clippy + fmt)
     runs-on: ubuntu-24.04

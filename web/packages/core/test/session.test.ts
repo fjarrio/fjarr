@@ -54,7 +54,7 @@ describe("session state machine (docs/21)", () => {
     expect(s.info.getSnapshot().sessionId).toBe("s-1");
     expect(s.turn?.username).toBe("1789503600:s-1");
     expect(h.agent.pc.config.iceServers).toEqual([{ urls: ["turn:turn.test:3478"], username: "1789503600:s-1", credential: "secret" }]);
-    expect(h.agent.pc.remote?.sdp).toBe("v=0\r\noffer");
+    expect(h.agent.pc.remote?.sdp).toMatch(/^v=0\r\noffer/); // the mock appends the manifest's m-sections
     expect(h.agent.signaling.some((m) => m.type === "answer" && m.sdp === "v=0\r\nanswer")).toBe(true);
     expect([...s.tracks.list().keys()]).toEqual(["cam-front", "cam-rear"]);
     expect(h.client.sessions.open("robot-1")).toBe(s); // idempotent

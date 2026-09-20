@@ -911,7 +911,9 @@ as answerer for the spike's Q1/Q3/Q6, whose report attaches to ADR-0007.
 *Gate:* the slice-2 `<VideoTile>`/`<VideoGrid>`/push-to-talk suites pass
 in real Chromium against `LoopbackAgent`; the client ladder's signaling
 rungs run under the CDP `offline` profile; the Chromium-answerer spike
-report exists.
+report exists. **Met 2026-09-19** (`make e2e`: the `loopback` and `stack`
+projects; the ladder over real fjarr-server sockets found four defects the
+mock could not — [docs/25](25-browser-lab.md#implementation-notes-slice-3a)).
 
 **3b — agent core, `fjarr.test`, `fjarr-opsim`**: everything in this
 document through "Testing", the docs/09 headers, the introspection walker

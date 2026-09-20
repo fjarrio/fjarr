@@ -1,0 +1,146 @@
+[  0.006] GStreamer GStreamer 1.28.2, webrtcbin bundle-policy=max-bundle reuse-source-pads=false answerer=stdio (browser)
+[  0.013] answerer: browser over stdio (no webrtcbin B in this process)
+[  0.013] Q6: webrtcbin props: latency=200 ms, bundle-policy=max-bundle, ice-transport-policy=all
+[  0.013] RESULT Q6-turn  PASS    turn-server prop readback=turn://user:s3cret@turn.example.org:3478?transport=tcp; add-turn-server(turn://...)=1 (turns://...)=1 (http://...)=0
+[  0.013] GstWebRTCDataChannel props: label(gchararray,rw) ordered(gboolean,rw) max-packet-lifetime(gint,rw) max-retransmits(gint,rw) protocol(gchararray,rw) negotiated(gboolean,rw) id(gint,rw) priority(GstWebRTCPriorityType,rw) ready-state(GstWebRTCDataChannelState,ro) buffered-amount(guint64,ro) buffered-amount-low-threshold(guint64,rw) 
+[  0.013] GstWebRTCDataChannel signals: close on-open on-close on-error on-message-data on-message-string on-buffered-amount-low send-data send-string 
+[  0.013] GstWebRTCRTPTransceiver props: name(gchararray,rw) parent(GstObject,rw) sender(GstWebRTCRTPSender,rw) receiver(GstWebRTCRTPReceiver,rw) direction(GstWebRTCRTPTransceiverDirection,rw) mlineindex(guint,rw) mid(gchararray,ro) current-direction(GstWebRTCRTPTransceiverDirection,ro) kind(GstWebRTCKind,ro) codec-preferences(GstCaps,rw) 
+[  0.013] A: create-data-channel in NULL state -> (nil) (CRITICAL above = webrtcbin must be >= READY)
+[  0.014] A: on-new-transceiver mline=4294967295 mid=(null) dir=sendrecv
+[  0.014] A: requested sink_0, link=0
+[  0.015] A: create-data-channel after PLAYING -> 0x5e872bf9b420
+[  0.016] caps-gate: fixed RTP caps on payloader src: application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)VP8, payload=(int)96, ssrc=(uint)4241815780, timestamp-offset=(uint)2368808722, seqnum-offset=(uint)9961, a-framerate=(string)30
+[  0.016] A: on-negotiation-needed #1
+[  0.035] RESULT Q2-caps  PASS    fixed caps (payload+ssrc) seen on payloader src pad before create-offer: application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)VP8, payload=(int)96, ssrc=(uint)42
+[  0.035] Q2: mid before create-offer = (null) (negotiation-needed so far: 1)
+[  0.035] negotiate: create-offer on A (options=NULL)
+[  0.048] negotiate: offer created: m=0:video mid=video0 sendrecv ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=9 m=1:application mid=application1 <none> ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=0
+[  0.049] A: signaling-state -> have-local-offer
+[  0.049] A: ice-gathering-state -> gathering
+{"sdp":"v=0\r\no=- 5191248798514647539 0 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\na=ice-options:trickle\r\na=group:BUNDLE video0 application1\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\nc=IN IP4 0.0.0.0\r\na=setup:actpass\r\na=ice-ufrag:uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS\r\na=ice-pwd:pPiqObcrsHpqpYTSmHFzvTf7eaWAm1n9\r\na=rtcp-mux\r\na=rtcp-rsize\r\na=sendrecv\r\na=rtpmap:96 VP8/90000\r\na=rtcp-fb:96 nack pli\r\na=rtcp-fb:96 ccm fir\r\na=rtcp-fb:96 transport-cc\r\na=framerate:30\r\na=ssrc:4241815780 msid:user3401846415@host-70a8a400 webrtctransceiver0\r\na=ssrc:4241815780 cname:user3401846415@host-70a8a400\r\na=mid:video0\r\na=fingerprint:sha-256 6E:5A:11:E8:60:92:DF:54:E8:9D:10:0E:81:64:FB:D9:DF:63:EB:85:25:B8:FD:53:A1:D5:AF:FB:C8:86:63:11\r\na=rtcp-mux-only\r\nm=application 0 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=setup:actpass\r\na=ice-ufrag:uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS\r\na=ice-pwd:pPiqObcrsHpqpYTSmHFzvTf7eaWAm1n9\r\na=bundle-only\r\na=mid:application1\r\na=sctp-port:5000\r\na=fingerprint:sha-256 6E:5A:11:E8:60:92:DF:54:E8:9D:10:0E:81:64:FB:D9:DF:63:EB:85:25:B8:FD:53:A1:D5:AF:FB:C8:86:63:11\r\n","type":"offer"}
+{"candidate":"candidate:1 1 UDP 2015363327 172.18.0.3 52414 typ host","sdp_mline_index":0,"type":"ice"}
+{"candidate":"candidate:2 1 TCP 1015021823 172.18.0.3 9 typ host tcptype active","sdp_mline_index":0,"type":"ice"}
+{"candidate":"candidate:3 1 TCP 1010827519 172.18.0.3 46435 typ host tcptype passive","sdp_mline_index":0,"type":"ice"}
+[  0.068] browser: signaling-state {"state":"have-remote-offer","t":405}
+[  0.069] browser: track {"currentDirection":null,"direction":"recvonly","id":"webrtctransceiver0","kind":"video","mid":"video0","muted":true,"t":405}
+[  0.070] browser: transceivers {"count":1,"mids":["video0:recvonly/-"],"t":406}
+[  0.115] browser: signaling-state {"state":"stable","t":412}
+[  0.117] stdio: answer received (871 bytes)
+[  0.117] stdio: answer: m=0:video mid=video0 recvonly ufrag=xSUy port=9 m=1:application mid=application1 <none> ufrag=xSUy port=9
+[  0.118] browser: ice-connection-state {"state":"checking","t":412}
+[  0.118] A: signaling-state -> stable
+[  0.118] negotiate: done, signaling-state A=stable
+[  0.118] A: ice-connection-state -> checking
+[  0.118] A: connection-state -> connecting
+[  0.118] RESULT Q1-offer PASS    offer m-sections: m=0:video mid=video0 sendrecv ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=9 m=1:application mid=application1 <none> ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=0
+[  0.118] RESULT Q2-mid   PASS    mid: before create-offer=(null) | after create-offer(before SLD)=(null) | after set-local=video0 | after answer applied=video0 (offer m=0 a=mid:video0)
+[  0.119] browser: connection-state {"state":"connecting","t":412}
+[  0.120] browser: ice-connection-state {"state":"connected","t":413}
+[  0.121] browser: end-of-candidates {"t":413}
+[  0.180] A: ice-connection-state -> connected
+[  0.180] A: ice-connection-state -> completed
+[  0.184] A: connection-state -> connected
+[  0.187] caps-gate: fixed RTP caps on payloader src: application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)VP8, payload=(int)96, seqnum-offset=(uint)9961, timestamp-offset=(uint)2368808722, ssrc=(uint)4241815780, a-framerate=(string)30
+[  0.188] A: datachannel on-open ready-state=open
+[  0.188] A: on-buffered-amount-low
+[  0.205] browser: connection-state {"state":"connected","t":523}
+[  0.206] browser: track-unmute {"mid":"video0","t":526}
+[  0.207] browser: datachannel {"id":1,"label":"control","ordered":true,"protocol":"","readyState":"open","t":528}
+[  0.208] browser: dc-open {"label":"control","readyState":"open","t":528}
+[  0.219] RESULT Q1-ondc  PASS    B on-data-channel fired: yes; A connection-state=connected B=connected (connected+open within 15 s: yes)
+[  0.219] A: send_string_full -> 1 
+[  0.219] A: on-buffered-amount-low
+[  0.229] browser: dc-message {"data":"hello from A","t":558}
+[  0.239] RESULT Q1-msg   PASS    B received "hello from A" via on-message-string
+[  0.239] A: default buffered-amount-low-threshold=4096, on-buffered-amount-low fired 2 times before any burst
+[  0.240] A: buffered-amount right after burst = 1376256 (max-message-size=65536)
+[  0.249] A: ice-gathering-state -> complete
+{"candidate":"","sdp_mline_index":0,"type":"ice"}
+[  0.262] A: on-buffered-amount-low
+[  0.300] RESULT Q1-bufamt PASS    B received 2097152/2097152 bytes; buffered-amount after burst=1376256 max seen=1376256 end=0; notify::buffered-amount x131; on-buffered-amount-low x3
+[  1.083] RESULT media-1  PASS    B track(mid=video0) framesDecoded=32 pads_added=1 on-new-transceiver=1
+[  2.088] Q5: sample outbound-rtp: outbound-rtp, type=(GstWebRTCStatsType)outbound-rtp, timestamp=(double)2931199.8909999998, id=(string)rtp-outbound-stream-stats_4241815780, ssrc=(uint)4241815780, codec-id=(string)codec-stats-sink_0, transport-id=(string)transport-stats_webrtcdtlstransport0, kind=(string)video, bytes-sent=(guint64)18213, packets-sent=(guint64)63, fir-count=(uint)0, pli-count=(uint)0, nack-count=(uint)0, remote-id=(string)rtp-remote-inbound-stream-stats_4241815780, gst-rtpsource-stats=(structure)"application/x-rtp-source-stats\,\ ssrc\=\(uint\)4241815780\,\ internal\=\(boolean\)true\,\ validated\=\(boolean\)tru
+[  2.088] RESULT Q5-stats PASS    types={candidate-pair codec local-candidate outbound-rtp peer-connection remote-candidate remote-inbound-rtp transport } outbound-rtp deltas over 1 s: ssrc=4241815780: 79 kbit/s, 30 pkt/s; 
+[  2.088] A: on-new-transceiver mline=4294967295 mid=(null) dir=sendrecv
+[  2.088] A: requested sink_2, link=0
+[  2.091] caps-gate: fixed RTP caps on payloader src: application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)VP8, payload=(int)97, ssrc=(uint)1424615436, timestamp-offset=(uint)595477146, seqnum-offset=(uint)26201, a-framerate=(string)30
+[  2.091] A: on-negotiation-needed #2
+[  2.108] RESULT Q3-onn   PASS    on-negotiation-needed after requesting sink_2: 1 firing(s); caps ready=1
+[  2.109] negotiate: create-offer on A (options=NULL)
+[  2.109] negotiate: offer created: m=0:video mid=video0 sendrecv ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=9 m=1:application mid=application1 <none> ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=0 m=2:video mid=video2 sendrecv ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=0
+[  2.109] A: signaling-state -> have-local-offer
+{"sdp":"v=0\r\no=- 5191248798514647539 1 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\na=ice-options:trickle\r\na=group:BUNDLE video0 application1 video2\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\nc=IN IP4 0.0.0.0\r\na=setup:actpass\r\na=ice-ufrag:uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS\r\na=ice-pwd:pPiqObcrsHpqpYTSmHFzvTf7eaWAm1n9\r\na=rtcp-mux\r\na=rtcp-rsize\r\na=sendrecv\r\na=rtpmap:96 VP8/90000\r\na=rtcp-fb:96 nack pli\r\na=rtcp-fb:96 ccm fir\r\na=rtcp-fb:96 transport-cc\r\na=framerate:30\r\na=ssrc:4241815780 msid:user3401846415@host-70a8a400 webrtctransceiver0\r\na=ssrc:4241815780 cname:user3401846415@host-70a8a400\r\na=mid:video0\r\na=fingerprint:sha-256 6E:5A:11:E8:60:92:DF:54:E8:9D:10:0E:81:64:FB:D9:DF:63:EB:85:25:B8:FD:53:A1:D5:AF:FB:C8:86:63:11\r\nm=application 0 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=setup:actpass\r\na=ice-ufrag:uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS\r\na=ice-pwd:pPiqObcrsHpqpYTSmHFzvTf7eaWAm1n9\r\na=bundle-only\r\na=mid:application1\r\na=sctp-port:5000\r\na=fingerprint:sha-256 6E:5A:11:E8:60:92:DF:54:E8:9D:10:0E:81:64:FB:D9:DF:63:EB:85:25:B8:FD:53:A1:D5:AF:FB:C8:86:63:11\r\nm=video 0 UDP/TLS/RTP/SAVPF 97\r\nc=IN IP4 0.0.0.0\r\na=setup:actpass\r\na=ice-ufrag:uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS\r\na=ice-pwd:pPiqObcrsHpqpYTSmHFzvTf7eaWAm1n9\r\na=bundle-only\r\na=rtcp-mux\r\na=rtcp-rsize\r\na=sendrecv\r\na=rtpmap:97 VP8/90000\r\na=rtcp-fb:97 nack pli\r\na=rtcp-fb:97 ccm fir\r\na=rtcp-fb:97 transport-cc\r\na=framerate:30\r\na=ssrc:1424615436 msid:user3401846415@host-70a8a400 webrtctransceiver1\r\na=ssrc:1424615436 cname:user3401846415@host-70a8a400\r\na=mid:video2\r\na=fingerprint:sha-256 6E:5A:11:E8:60:92:DF:54:E8:9D:10:0E:81:64:FB:D9:DF:63:EB:85:25:B8:FD:53:A1:D5:AF:FB:C8:86:63:11\r\na=rtcp-mux-only\r\n","type":"offer"}
+[  2.158] browser: signaling-state {"state":"have-remote-offer","t":2455}
+[  2.159] browser: track {"currentDirection":null,"direction":"recvonly","id":"webrtctransceiver1","kind":"video","mid":"video2","muted":true,"t":2455}
+[  2.160] browser: transceivers {"count":2,"mids":["video0:recvonly/recvonly","video2:recvonly/-"],"t":2455}
+[  2.161] browser: signaling-state {"state":"stable","t":2458}
+[  2.162] stdio: answer received (1412 bytes)
+[  2.162] stdio: answer: m=0:video mid=video0 recvonly ufrag=xSUy port=56579 m=1:application mid=application1 <none> ufrag=xSUy port=9 m=2:video mid=video2 recvonly ufrag=xSUy port=9
+[  2.164] A: signaling-state -> stable
+[  2.164] negotiate: done, signaling-state A=stable
+[  2.164] RESULT Q3-mids  PASS    offer#2 m=0 mid=video0 (was video0), new video m=2 mid=video2 ; all: m=0:video mid=video0 sendrecv ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=9 m=1:application mid=application1 <none> ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=0 m=2:video mid=video2 sendrecv ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=0
+[  2.166] caps-gate: fixed RTP caps on payloader src: application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)VP8, payload=(int)97, seqnum-offset=(uint)26201, timestamp-offset=(uint)595477146, ssrc=(uint)1424615436, a-framerate=(string)30
+[  2.206] browser: track-unmute {"mid":"video2","t":2503}
+[  3.167] RESULT Q3-track2 PASS    B pad for m=2 is track(mid=video2) framesDecoded=32 pads_added=2 on-new-transceiver(B)=2
+[  4.171] RESULT Q3-cont  PASS    track1 framesDecoded before=59 after=122 max inter-increment gap (100 ms stats polling) during renegotiation=118.032000 ms
+[  4.171] A: track2 transceiver mlineindex=2 mid=video2 dir=sendrecv current-direction=sendonly -> direction=inactive
+[  4.171] A: on-negotiation-needed #3
+[  4.191] Q3-remove: on-negotiation-needed after direction=inactive: yes
+[  4.191] negotiate: create-offer on A (options=NULL)
+[  4.191] negotiate: offer created: m=0:video mid=video0 sendrecv ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=9 m=1:application mid=application1 <none> ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=0 m=2:video mid=video2 inactive ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=0
+[  4.192] A: signaling-state -> have-local-offer
+{"sdp":"v=0\r\no=- 5191248798514647539 2 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\na=ice-options:trickle\r\na=group:BUNDLE video0 application1 video2\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\nc=IN IP4 0.0.0.0\r\na=setup:actpass\r\na=ice-ufrag:uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS\r\na=ice-pwd:pPiqObcrsHpqpYTSmHFzvTf7eaWAm1n9\r\na=rtcp-mux\r\na=rtcp-rsize\r\na=sendrecv\r\na=rtpmap:96 VP8/90000\r\na=rtcp-fb:96 nack pli\r\na=rtcp-fb:96 ccm fir\r\na=rtcp-fb:96 transport-cc\r\na=framerate:30\r\na=ssrc:4241815780 msid:user3401846415@host-70a8a400 webrtctransceiver0\r\na=ssrc:4241815780 cname:user3401846415@host-70a8a400\r\na=mid:video0\r\na=fingerprint:sha-256 6E:5A:11:E8:60:92:DF:54:E8:9D:10:0E:81:64:FB:D9:DF:63:EB:85:25:B8:FD:53:A1:D5:AF:FB:C8:86:63:11\r\nm=application 0 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=setup:actpass\r\na=ice-ufrag:uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS\r\na=ice-pwd:pPiqObcrsHpqpYTSmHFzvTf7eaWAm1n9\r\na=bundle-only\r\na=mid:application1\r\na=sctp-port:5000\r\na=fingerprint:sha-256 6E:5A:11:E8:60:92:DF:54:E8:9D:10:0E:81:64:FB:D9:DF:63:EB:85:25:B8:FD:53:A1:D5:AF:FB:C8:86:63:11\r\nm=video 0 UDP/TLS/RTP/SAVPF 97\r\nc=IN IP4 0.0.0.0\r\na=setup:actpass\r\na=ice-ufrag:uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS\r\na=ice-pwd:pPiqObcrsHpqpYTSmHFzvTf7eaWAm1n9\r\na=bundle-only\r\na=rtcp-mux\r\na=rtcp-rsize\r\na=inactive\r\na=rtpmap:97 VP8/90000\r\na=rtcp-fb:97 nack pli\r\na=rtcp-fb:97 ccm fir\r\na=rtcp-fb:97 transport-cc\r\na=framerate:30\r\na=ssrc:1424615436 msid:user3401846415@host-70a8a400 webrtctransceiver1\r\na=ssrc:1424615436 cname:user3401846415@host-70a8a400\r\na=mid:video2\r\na=fingerprint:sha-256 6E:5A:11:E8:60:92:DF:54:E8:9D:10:0E:81:64:FB:D9:DF:63:EB:85:25:B8:FD:53:A1:D5:AF:FB:C8:86:63:11\r\n","type":"offer"}
+[  4.250] browser: signaling-state {"state":"have-remote-offer","t":4556}
+[  4.251] browser: track-mute {"mid":"video2","t":4556}
+[  4.253] browser: transceivers {"count":2,"mids":["video0:recvonly/recvonly","video2:recvonly/recvonly"],"t":4556}
+[  4.254] browser: signaling-state {"state":"stable","t":4559}
+[  4.254] stdio: answer received (1412 bytes)
+[  4.254] stdio: answer: m=0:video mid=video0 recvonly ufrag=xSUy port=56579 m=1:application mid=application1 <none> ufrag=xSUy port=9 m=2:video mid=video2 inactive ufrag=xSUy port=9
+[  4.255] A: signaling-state -> stable
+[  4.255] negotiate: done, signaling-state A=stable
+[  5.761] RESULT Q3-remove PASS    [direction=inactive] on-negotiation-needed=yes; offer#3 track2 dir=inactive answer dir=inactive; track2 framesDecoded over 1.5 s: +0; track1 over 1.5 s: +45; mids: m=0:video mid=video0 sendrecv ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=9 m=1:application mid=application1 <none> ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=0 m=2:video mid=video2 inactive ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=0
+[  5.761] Q3-remove: A sink pads blocking? sink_0=0 sink_2=0
+[  6.766] Q3-remove: kernel UDP counters over 1 s: InDatagrams=+5 OutDatagrams=+67 InErrors=+0 RcvbufErrors=+0 SndbufErrors=+0 NoPorts=+0 
+[  6.766] Q3-remove: rtpsession stats over 1 s (track2 source still pushing): A packets-sent: ssrc1424615436=+37 ssrc4241815780=+30 | B packets-received: mid=video0=+30 mid=video2=+0
+[  6.766] Q3-remove: transport pad counters over 1 s: A:rtpfunnel:src=+67 A:rtpfunnel:sink_0=+30 A:rtpfunnel:sink_2=+37 A:nicesrc:src=+5 A:dtlssrtpdec:rtcp_src=+5 A:dtlssrtpdec:sink=+5 A:nicesink:sink=+67 A:dtlssrtpenc:src=+67 A:dtlssrtpenc:rtp_sink_0=+67 
+{"data":"ping B->A after remove","type":"dc-send"}
+[  6.770] browser: dc-message {"data":"ping A->B after remove","t":7106}
+[  6.773] A: datachannel on-message-string "ping B->A after remove"
+[  6.779] browser: dc-sent {"data":"ping B->A after remove","t":7112}
+[  7.770] RESULT Q3-rmdc  PASS    datachannel after removal: B->A arrived, A->B arrived
+[  7.793] caps-gate: fixed RTP caps on payloader src: application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)VP8, payload=(int)97, seqnum-offset=(uint)26201, timestamp-offset=(uint)595477146, ssrc=(uint)1424615436, a-framerate=(string)30
+[  9.276] Q3-rmvalve: kernel UDP counters over 1.5 s: InDatagrams=+8 OutDatagrams=+45 InErrors=+0 RcvbufErrors=+0 SndbufErrors=+0 NoPorts=+0 
+[  9.276] RESULT Q3-rmvalve PASS    after valve drop=true on track2: track1 framesDecoded over 1.5 s: +45; stats A packets-sent: ssrc1424615436=+0 ssrc4241815780=+45 | B packets-received: mid=video0=+45 mid=video2=+0 (before valve: A packets-sent: ssrc1424615436=+37 ssrc4241815780=+30 | B packets-received: mid=video0=+30 mid=video2=+0)
+[  9.276] negotiate: create-offer on A (options=options, ice-restart=(boolean)true, iceRestart=(boolean)true;)
+[  9.276] negotiate: offer created: m=0:video mid=video0 sendrecv ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=9 m=1:application mid=application1 <none> ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=0 m=2:video mid=video2 inactive ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=0
+[  9.276] A: signaling-state -> have-local-offer
+{"sdp":"v=0\r\no=- 5191248798514647539 3 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\na=ice-options:trickle\r\na=group:BUNDLE video0 application1 video2\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\nc=IN IP4 0.0.0.0\r\na=setup:actpass\r\na=ice-ufrag:uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS\r\na=ice-pwd:pPiqObcrsHpqpYTSmHFzvTf7eaWAm1n9\r\na=rtcp-mux\r\na=rtcp-rsize\r\na=sendrecv\r\na=rtpmap:96 VP8/90000\r\na=rtcp-fb:96 nack pli\r\na=rtcp-fb:96 ccm fir\r\na=rtcp-fb:96 transport-cc\r\na=framerate:30\r\na=ssrc:4241815780 msid:user3401846415@host-70a8a400 webrtctransceiver0\r\na=ssrc:4241815780 cname:user3401846415@host-70a8a400\r\na=mid:video0\r\na=fingerprint:sha-256 6E:5A:11:E8:60:92:DF:54:E8:9D:10:0E:81:64:FB:D9:DF:63:EB:85:25:B8:FD:53:A1:D5:AF:FB:C8:86:63:11\r\nm=application 0 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=setup:actpass\r\na=ice-ufrag:uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS\r\na=ice-pwd:pPiqObcrsHpqpYTSmHFzvTf7eaWAm1n9\r\na=bundle-only\r\na=mid:application1\r\na=sctp-port:5000\r\na=fingerprint:sha-256 6E:5A:11:E8:60:92:DF:54:E8:9D:10:0E:81:64:FB:D9:DF:63:EB:85:25:B8:FD:53:A1:D5:AF:FB:C8:86:63:11\r\nm=video 0 UDP/TLS/RTP/SAVPF 97\r\nc=IN IP4 0.0.0.0\r\na=setup:actpass\r\na=ice-ufrag:uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS\r\na=ice-pwd:pPiqObcrsHpqpYTSmHFzvTf7eaWAm1n9\r\na=bundle-only\r\na=rtcp-mux\r\na=rtcp-rsize\r\na=inactive\r\na=rtpmap:97 VP8/90000\r\na=rtcp-fb:97 nack pli\r\na=rtcp-fb:97 ccm fir\r\na=rtcp-fb:97 transport-cc\r\na=framerate:30\r\na=ssrc:1424615436 msid:user3401846415@host-70a8a400 webrtctransceiver1\r\na=ssrc:1424615436 cname:user3401846415@host-70a8a400\r\na=mid:video2\r\na=fingerprint:sha-256 6E:5A:11:E8:60:92:DF:54:E8:9D:10:0E:81:64:FB:D9:DF:63:EB:85:25:B8:FD:53:A1:D5:AF:FB:C8:86:63:11\r\n","type":"offer"}
+[  9.317] browser: signaling-state {"state":"have-remote-offer","t":9621}
+[  9.318] browser: transceivers {"count":2,"mids":["video0:recvonly/recvonly","video2:recvonly/inactive"],"t":9621}
+[  9.319] browser: signaling-state {"state":"stable","t":9624}
+[  9.320] stdio: answer received (1412 bytes)
+[  9.320] stdio: answer: m=0:video mid=video0 recvonly ufrag=xSUy port=56579 m=1:application mid=application1 <none> ufrag=xSUy port=9 m=2:video mid=video2 inactive ufrag=xSUy port=9
+[  9.321] A: signaling-state -> stable
+[  9.321] negotiate: done, signaling-state A=stable
+[ 11.328] RESULT Q4-restart FAIL    offer ufrag before=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS after=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS (pwd changed=no); ice-connection-state changes during=0 now A=completed B=connected; track1 framesDecoded over 2 s: +63
+
+===== SUMMARY (bundle-policy=max-bundle, answerer=browser(stdio)) =====
+ID        VERDICT  NOTE
+Q6-turn   PASS     turn-server prop readback=turn://user:s3cret@turn.example.org:3478?transport=tcp; add-turn-server(turn://...)=1 (turns://...)=1 (http://...)=0
+Q2-caps   PASS     fixed caps (payload+ssrc) seen on payloader src pad before create-offer: application/x-rtp, media=(string)video, clock-rate=(int)90000, encoding-name=(string)VP8, payload=(int)96, ssrc=(uint)42
+Q1-offer  PASS     offer m-sections: m=0:video mid=video0 sendrecv ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=9 m=1:application mid=application1 <none> ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=0
+Q2-mid    PASS     mid: before create-offer=(null) | after create-offer(before SLD)=(null) | after set-local=video0 | after answer applied=video0 (offer m=0 a=mid:video0)
+Q1-ondc   PASS     B on-data-channel fired: yes; A connection-state=connected B=connected (connected+open within 15 s: yes)
+Q1-msg    PASS     B received "hello from A" via on-message-string
+Q1-bufamt PASS     B received 2097152/2097152 bytes; buffered-amount after burst=1376256 max seen=1376256 end=0; notify::buffered-amount x131; on-buffered-amount-low x3
+media-1   PASS     B track(mid=video0) framesDecoded=32 pads_added=1 on-new-transceiver=1
+Q5-stats  PASS     types={candidate-pair codec local-candidate outbound-rtp peer-connection remote-candidate remote-inbound-rtp transport } outbound-rtp deltas over 1 s: ssrc=4241815780: 79 kbit/s, 30 pkt/s; 
+Q3-onn    PASS     on-negotiation-needed after requesting sink_2: 1 firing(s); caps ready=1
+Q3-mids   PASS     offer#2 m=0 mid=video0 (was video0), new video m=2 mid=video2 ; all: m=0:video mid=video0 sendrecv ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=9 m=1:application mid=application1 <none> ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=0 m=2:video mid=video2 sendrecv ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=0
+Q3-track2 PASS     B pad for m=2 is track(mid=video2) framesDecoded=32 pads_added=2 on-new-transceiver(B)=2
+Q3-cont   PASS     track1 framesDecoded before=59 after=122 max inter-increment gap (100 ms stats polling) during renegotiation=118.032000 ms
+Q3-remove PASS     [direction=inactive] on-negotiation-needed=yes; offer#3 track2 dir=inactive answer dir=inactive; track2 framesDecoded over 1.5 s: +0; track1 over 1.5 s: +45; mids: m=0:video mid=video0 sendrecv ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=9 m=1:application mid=application1 <none> ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=0 m=2:video mid=video2 inactive ufrag=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS port=0
+Q3-rmdc   PASS     datachannel after removal: B->A arrived, A->B arrived
+Q3-rmvalve PASS     after valve drop=true on track2: track1 framesDecoded over 1.5 s: +45; stats A packets-sent: ssrc1424615436=+0 ssrc4241815780=+45 | B packets-received: mid=video0=+45 mid=video2=+0 (before valve: A packets-sent: ssrc1424615436=+37 ssrc4241815780=+30 | B packets-received: mid=video0=+30 mid=video2=+0)
+Q4-restart FAIL     offer ufrag before=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS after=uEWpu0Entqd7aSyHJlYoa0DEbHZ7l0XS (pwd changed=no); ice-connection-state changes during=0 now A=completed B=connected; track1 framesDecoded over 2 s: +63
+{"code":0,"type":"done"}

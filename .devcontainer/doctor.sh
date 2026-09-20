@@ -99,6 +99,19 @@ command -v markdownlint-cli2 >/dev/null 2>&1 && pass "markdownlint-cli2" \
 command -v lychee >/dev/null 2>&1 && pass "lychee $(lychee --version 2>/dev/null | head -1)" \
   || warn "lychee missing (docs link check unavailable)"
 
+# --- browser lab (docs/25) -------------------------------------------------
+command -v tc >/dev/null 2>&1 && pass "tc (netem media-path profiles)" \
+  || warn "tc missing (iproute2): the lab's media-path network profiles cannot be applied"
+if [ -S /var/run/docker.sock ]; then
+  if docker version --format '{{.Server.Version}}' >/dev/null 2>&1; then
+    pass "docker socket usable from dev (server $(docker version --format '{{.Server.Version}}' 2>/dev/null))"
+  else
+    warn "docker socket mounted but not usable: set DOCKER_GID in .env to \`stat -c %g /var/run/docker.sock\` on the host and rebuild dev (docs/12)"
+  fi
+else
+  warn "docker socket not mounted: the browser lab cannot drive the stack from dev (docs/25)"
+fi
+
 echo
 echo "doctor: ${FAILS} failure(s), ${WARNS} warning(s)"
 [ "$FAILS" -eq 0 ]

@@ -30,8 +30,12 @@ import {
 } from "@fjarr/react";
 import { RobotStatusProvider, useRobotStatus } from "./robot-status.tsx";
 
-const BACKEND = import.meta.env.VITE_DEMO_BACKEND ?? "http://localhost:9090";
-const SIGNALING = import.meta.env.VITE_FJARR_SERVER ?? "ws://localhost:8080/ws";
+// Dev only: the browser lab (docs/25) opens this page from inside the compose
+// network, where "localhost" is the lab browser itself — it passes the
+// service URLs as query parameters instead.
+const params = import.meta.env.DEV ? new URLSearchParams(window.location.search) : null;
+const BACKEND = params?.get("fjarr_backend") ?? import.meta.env.VITE_DEMO_BACKEND ?? "http://localhost:9090";
+const SIGNALING = params?.get("fjarr_server") ?? import.meta.env.VITE_FJARR_SERVER ?? "ws://localhost:8080/ws";
 
 interface Robot {
   id: string;
@@ -62,6 +66,8 @@ const client = createFjarrClient({
 });
 // Dev only: don't leak sessions across Vite hot reloads of this module.
 import.meta.hot?.dispose(() => client.destroy());
+// Dev only: the browser lab and `fjarr-lab eval/stats/memory` reach the client here (docs/25).
+if (import.meta.env.DEV) (window as unknown as { __fjarr?: unknown }).__fjarr = { client };
 
 export function App() {
   return (

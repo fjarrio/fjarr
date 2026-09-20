@@ -25,11 +25,13 @@ import {
   type TurnCredentials,
 } from "./protocol.js";
 import { EnvelopeRouter, type EnvelopeHandler, type RequestOptions, type TelemetryStore } from "./router.js";
+import { parseMediaSections } from "./sdp.js";
 import { StatsSampler, type SessionHealth, type SessionStats } from "./stats.js";
 import { createStore, type ReadonlyStore } from "./store.js";
 import { Heartbeat, TimeSync, type TimeSyncEstimate } from "./timesync.js";
 import { TrackRegistry, type AcquireOptions, type TrackHandle, type TrackSnapshot } from "./tracks.js";
 import type { SignalingSocket, SocketFactory } from "./transport.js";
+import type { WireEvent } from "./wire.js";
 import type { MonitorInfo } from "./protocol.js";
 
 export type SessionState = "idle" | "connecting" | "connected" | "reconnecting" | "failed" | "closed";
@@ -81,6 +83,8 @@ export interface SessionDeps {
   random: () => number;
   emit: (event: SessionEvent) => void;
   options: SessionOptions;
+  /** Opt-in DataChannel observer (docs/21#wire-tap); absent = no tap, no cost. */
+  wireTap?: (event: WireEvent) => void;
 }
 
 export interface TrackApi {
@@ -175,6 +179,8 @@ export class SessionImpl implements Session {
   /** One free (uncounted, unbacked-off) grant refresh per attempt; a second consecutive grant-expired is a real round. */
   private freeRoundUsed = false;
   private uplinkActive = false;
+  /** mids the current offer marks as audio uplinks (remote `recvonly`); the push-to-talk slots. */
+  private uplinkMids = new Set<string>();
 
   constructor(private readonly deps: SessionDeps) {
     this.robotId = deps.robotId;
@@ -217,6 +223,27 @@ export class SessionImpl implements Session {
       const st = this.getState();
       if (st === "connected" || st === "reconnecting") this.newRound("control-channel-closed");
     });
+    const tap = deps.wireTap;
+    if (tap) {
+      this.channels.onWire.on((w) => {
+        const env = w.env;
+        tap({
+          robotId: this.robotId,
+          sessionId: this.sessionId,
+          dir: w.dir,
+          channel: w.channel,
+          cap: env?.cap ?? w.cap ?? "",
+          type: env?.type ?? "",
+          kind: env?.kind ?? "binary",
+          eventId: env?.event_id ?? "",
+          bytes: w.bytes,
+          ts: deps.now(),
+          get payload() {
+            return env?.payload;
+          },
+        });
+      });
+    }
     this.channels.onEnvelope.on((env) => {
       if (env.cap === "fjarr.desktop" && env.type === "monitors" && env.kind === "event") {
         const p = env.payload as MonitorsEventPayload;
@@ -442,8 +469,15 @@ export class SessionImpl implements Session {
         this.teardownAll();
         this.setInfo({ state: "closed", reason: "session-unknown", sessionId: null });
         break;
-      case "auth-failed":
       case "robot-offline":
+        // First connect: the robot is not there — fail fast with the reason.
+        // In a reconnect round the robot is usually re-registering after the
+        // same outage (server or agent restart): a counted, backed-off round
+        // (docs/21 state table; found by the browser lab's server-restart fault).
+        if (this.round > 0) this.newRound("robot-offline");
+        else this.fail(error, code);
+        break;
+      case "auth-failed":
       case "capability-denied":
       case "capability-unknown":
       case "payload-invalid":
@@ -472,6 +506,21 @@ export class SessionImpl implements Session {
       });
       if (gen !== this.generation || this.pc !== pc) return;
     }
+    // Answer direction per audio m-section, decided from the OFFER, not from
+    // local defaults (docs/21#audio-uplink-negotiation): the agent's
+    // pre-allocated uplink is offered `recvonly` and must be answered
+    // `sendonly` or replaceTrack() later moves no media; a downlink
+    // (`sendonly`) is answered `recvonly` even if the slot was an uplink
+    // before (transceiver pool, docs/23); anything else is left alone.
+    const remote = new Map<string, "sendrecv" | "sendonly" | "recvonly" | "inactive">();
+    for (const m of parseMediaSections(msg.sdp)) if (m.kind === "audio" && m.mid !== null) remote.set(m.mid, m.direction);
+    this.uplinkMids = new Set([...remote].filter(([, d]) => d === "recvonly").map(([mid]) => mid));
+    for (const t of pc.getTransceivers()) {
+      if (t.mid === null) continue;
+      const want = remote.get(t.mid);
+      if (want === "recvonly" && t.direction !== "sendonly") t.direction = "sendonly";
+      else if (want === "sendonly" && t.direction !== "recvonly") t.direction = "recvonly";
+    }
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     if (gen !== this.generation || this.pc !== pc) return;
@@ -482,8 +531,16 @@ export class SessionImpl implements Session {
   }
 
   private createPeer(): PeerConnectionLike {
-    const iceServers = [...(this.deps.options.extraIceServers ?? [])];
-    if (this.turnCreds) iceServers.push({ urls: this.turnCreds.urls, username: this.turnCreds.username, credential: this.turnCreds.credential });
+    const candidates = [...(this.deps.options.extraIceServers ?? [])];
+    if (this.turnCreds) candidates.push({ urls: this.turnCreds.urls, username: this.turnCreds.username, credential: this.turnCreds.credential });
+    // A malformed entry (an empty URL from a misconfigured server) would make
+    // `new RTCPeerConnection` throw and the session unusable: drop it, say so, go on.
+    const iceServers = candidates.flatMap((server) => {
+      const urls = server.urls.filter((u) => typeof u === "string" && u.trim().length > 0);
+      if (urls.length === server.urls.length) return [server];
+      this.deps.emit({ type: "warning", robotId: this.robotId, message: `ignored ${server.urls.length - urls.length} empty ICE server URL(s)` });
+      return urls.length > 0 ? [{ ...server, urls }] : [];
+    });
     if (iceServers.length === 0) {
       this.deps.emit({ type: "warning", robotId: this.robotId, message: "no ICE servers (hello-ack carried no TURN and extraIceServers is empty): only LAN peers will connect" });
     }
@@ -651,6 +708,7 @@ export class SessionImpl implements Session {
     this.registry.detachMedia();
     this.remoteDescribed = false;
     this.iceQueue = [];
+    this.uplinkMids = new Set();
     const pc = this.pc;
     this.pc = null;
     if (pc) {
@@ -799,7 +857,7 @@ export class SessionImpl implements Session {
       replaceTrack: async (track) => {
         const pc = this.pc;
         if (!pc) return false;
-        const t = pc.getTransceivers().find((x) => x.receiver.track?.kind === "audio" && (x.mid === null || this.registry.byMid(x.mid) === undefined));
+        const t = pc.getTransceivers().find((x) => x.mid !== null && this.uplinkMids.has(x.mid));
         if (!t) return false;
         await t.sender.replaceTrack(track);
         const active = track !== null;

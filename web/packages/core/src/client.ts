@@ -9,6 +9,7 @@ import { createSession, type Session, type SessionEvent, type SessionImpl, type 
 import { createStore, Emitter, type ReadonlyStore } from "./store.js";
 import { webSocketFactory, type SocketFactory } from "./transport.js";
 import { FJARR_CORE_VERSION } from "./version.js";
+import type { WireEvent } from "./wire.js";
 
 export interface PersistenceAdapter {
   get(key: string): string | null | Promise<string | null>;
@@ -23,6 +24,12 @@ export interface FjarrClientConfig {
   clientInfo?: Record<string, unknown>;
   /** Opt-in: the library never touches localStorage itself. */
   persistence?: PersistenceAdapter;
+  /**
+   * Opt-in DataChannel observer: `client.on("wire", …)` then receives every
+   * envelope in/out and bulk/stream sizes (docs/21#wire-tap). Never enabled
+   * by @fjarr/react — envelopes carry keystrokes and clipboard text (docs/10).
+   */
+  wireTap?: boolean;
   sessionDefaults?: SessionOptions;
   // Test seams (docs/15): scripted transport and peer connection.
   socketFactory?: SocketFactory;
@@ -50,6 +57,8 @@ export interface FjarrClient {
   readonly sessions: SessionManager;
   readonly focus: FocusRegistry;
   on(type: "session-event", handler: (event: SessionEvent) => void): () => void;
+  /** Only fires when the client was created with `wireTap: true`. */
+  on(type: "wire", handler: (event: WireEvent) => void): () => void;
   /** Last robot opened, if a persistence adapter was configured. */
   lastRobotId(): Promise<string | null>;
   destroy(): void;
@@ -59,6 +68,7 @@ const LAST_ROBOT_KEY = "fjarr:last-robot";
 
 export function createFjarrClient(config: FjarrClientConfig): FjarrClient {
   const events = new Emitter<SessionEvent>();
+  const wire = new Emitter<WireEvent>();
   const sessions = new Map<string, SessionImpl>();
   const store = createStore<ReadonlyMap<string, Session>>(new Map());
   const publish = () => store.set(new Map(sessions));
@@ -80,6 +90,7 @@ export function createFjarrClient(config: FjarrClientConfig): FjarrClient {
           random: config.random ?? Math.random,
           emit: (e) => events.emit(e),
           options: { ...config.sessionDefaults, ...options },
+          wireTap: config.wireTap ? (e) => wire.emit(e) : undefined,
         });
         sessions.set(robotId, s);
         publish();
@@ -105,7 +116,8 @@ export function createFjarrClient(config: FjarrClientConfig): FjarrClient {
   return {
     sessions: manager,
     focus: new FocusRegistry(),
-    on: (_type, handler) => events.on(handler),
+    on: ((type: "session-event" | "wire", handler: (e: never) => void) =>
+      type === "wire" ? wire.on(handler as (e: WireEvent) => void) : events.on(handler as (e: SessionEvent) => void)) as FjarrClient["on"],
     async lastRobotId() {
       if (!config.persistence) return null;
       try {
@@ -117,6 +129,7 @@ export function createFjarrClient(config: FjarrClientConfig): FjarrClient {
     destroy() {
       for (const id of Array.from(sessions.keys())) manager.close(id, "client-destroyed");
       events.clear();
+      wire.clear();
     },
   };
 }

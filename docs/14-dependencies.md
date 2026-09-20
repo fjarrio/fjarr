@@ -62,8 +62,8 @@ groups with comments.
 | happy-dom | ^20 | DOM for `@fjarr/react` hook tests | MIT | dev-only |
 | @testing-library/react | ^16 | hook/component tests | MIT | dev-only |
 | d3-graphviz + @hpcc-js/wasm | ^5 / ^2 | DOT rendering in `<PipelineGraph>` and the on-robot viewer (docs/24) | BSD-3 / Apache-2.0 | yes (`@fjarr/react` optional entry; viewer bundled with the agent) |
-| @playwright/test (+ pinned Chromium image) | ^1.5x | browser lab harness and e2e (docs/25) | Apache-2.0 | dev-only |
-| web-vitals | ^4 | LCP/CLS/INP in the lab | Apache-2.0 | dev-only |
+| `@playwright/test` (+ pinned Chromium image) | 1.63.0 (pinned) | browser lab harness and e2e (docs/25; rows below) | Apache-2.0 | dev-only |
+| Vite + `@vitejs/plugin-react` | ^8 / ^5 | serves the lab page (`web/e2e/app`) | MIT | dev-only |
 
 ## Demos, website, tooling — never shipped
 
@@ -76,6 +76,10 @@ groups with comments.
 | ajv | ^8 | protocol schema conformance gate (`make protocol-check`) |
 | CMake/Ninja/ccache, clang-21 suite | 26.04 | C++ build/lint |
 | valgrind, heaptrack | 3.26 / 1.5 | nightly memcheck and allocation profiling of the agent (docs/15 memory safety; GPL tools, dev-only, never linked) |
+| `@playwright/test` (`@fjarr/e2e`, never published) | 1.63.0 (pinned; the `browser` image tag follows it) | browser lab harness and `fjarr-lab` (Apache-2.0) |
+| `mcr.microsoft.com/playwright:v1.63.0-noble` (container) | 1.63.0 | the lab's headless Chromium with CDP (docs/25) |
+| `docker-cli`, `docker-compose-v2` (dev image) | 26.04 | docker-outside-of-docker: the lab drives the compose stack from `dev` (Apache-2.0) |
+| `iproute2` (`tc`, dev image) | 26.04 | netem media-path profiles inside the robot container (GPL-2.0 tool, dev-only, never linked) |
 | coturn (container) | 4.6 | dev/self-host TURN (BSD-3) |
 | Xvfb/openbox/x11vnc/noVNC (robot-sim) | 26.04 | fake robot desktop |
 | Docker + Compose v2 | ≥ 24 | the environment itself |

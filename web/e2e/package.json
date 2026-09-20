@@ -1,0 +1,31 @@
+{
+  "name": "@fjarr/e2e",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Browser lab (docs/25): Playwright + CDP harness, the fjarr-lab CLI and the e2e suites against the loopback agent, fjarr-server and the demo stack",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "bin": {
+    "fjarr-lab": "./bin/fjarr-lab.mjs"
+  },
+  "scripts": {
+    "test": "playwright test",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "app": "vite --config app/vite.config.ts --host 0.0.0.0 --port 5174 --strictPort"
+  },
+  "dependencies": {
+    "@fjarr/core": "workspace:*",
+    "@fjarr/react": "workspace:*",
+    "@playwright/test": "1.63.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.9.0",
+    "vite": "^8.0.0"
+  }
+}

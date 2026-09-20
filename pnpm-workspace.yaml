@@ -1,5 +1,6 @@
 packages:
   - web/packages/*
+  - web/e2e
   - demos/demo-backend
   - demos/demo-dashboard
   - website

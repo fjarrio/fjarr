@@ -109,11 +109,16 @@ slow again).
 
 ## Browser lab
 
-`make lab-up` starts the `browser` service beside the demo profile;
-`make e2e` runs the Playwright/CDP suite from `dev`; `pnpm fjarr-lab
-<command>` drives the same browser ad hoc (`open`, `net lossy`, `wire
---follow`, `profile cpu 10`, `memory --cycles 20`…). Artifacts land in
-`web/e2e/out/`. Details: [docs/25](25-browser-lab.md).
+`make lab-up` starts the `browser` service (headless Chromium, CDP at
+<http://127.0.0.1:9222/json> from the host) beside `fjarr-server`;
+`make e2e` runs the Playwright/CDP suites from `dev` (`make e2e-loopback`
+needs no server); `pnpm fjarr-lab <command>` drives the same browser ad
+hoc (`open`, `net lossy`, `wire --follow`, `profile cpu 10`,
+`memory --cycles 20`…). Artifacts land in `web/e2e/out/`. The `dev` image
+carries the docker CLI with the host socket mounted so the lab can apply
+netem, pause or restart stack containers from inside — set `DOCKER_GID`
+in `.env` to the group owning `/var/run/docker.sock`. Details and the
+environment variables: [docs/25](25-browser-lab.md#implementation-notes-slice-3a).
 
 ## Pipeline introspection
 

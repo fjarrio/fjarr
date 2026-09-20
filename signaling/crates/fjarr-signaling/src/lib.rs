@@ -68,14 +68,11 @@ impl Config {
             std::env::var("FJARR_TURN_URLS"),
             std::env::var("FJARR_TURN_SECRET"),
         ) {
-            config.turn = Some(TurnConfig {
-                urls: urls.split(',').map(|u| u.trim().to_string()).collect(),
-                secret,
-                ttl_secs: std::env::var("FJARR_TURN_TTL")
-                    .ok()
-                    .and_then(|t| t.parse().ok())
-                    .unwrap_or(600),
-            });
+            let ttl_secs = std::env::var("FJARR_TURN_TTL")
+                .ok()
+                .and_then(|t| t.parse().ok())
+                .unwrap_or(600);
+            config.turn = turn_from_env_values(&urls, &secret, ttl_secs);
         }
         if let (Ok(url), Ok(secret)) = (
             std::env::var("FJARR_WEBHOOK_URL"),
@@ -85,6 +82,28 @@ impl Config {
         }
         config
     }
+}
+
+/// TURN from `FJARR_TURN_URLS` / `FJARR_TURN_SECRET`: an empty or
+/// whitespace-only list (compose passes `FJARR_TURN_URLS=""` when unset)
+/// means *no TURN* — never credentials with an empty URL, which make a
+/// browser's `new RTCPeerConnection` throw and the session unusable
+/// (found by the browser lab, docs/25).
+fn turn_from_env_values(urls: &str, secret: &str, ttl_secs: u64) -> Option<TurnConfig> {
+    let urls: Vec<String> = urls
+        .split(',')
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+        .map(str::to_string)
+        .collect();
+    if urls.is_empty() || secret.trim().is_empty() {
+        return None;
+    }
+    Some(TurnConfig {
+        urls,
+        secret: secret.to_string(),
+        ttl_secs,
+    })
 }
 
 pub(crate) struct ServiceState {
@@ -106,4 +125,19 @@ pub fn router(config: Config) -> Router {
 
 async fn healthz() -> &'static str {
     "ok"
+}
+
+#[cfg(test)]
+mod env_tests {
+    use super::turn_from_env_values;
+
+    #[test]
+    fn empty_turn_url_list_means_no_turn() {
+        assert!(turn_from_env_values("", "s", 600).is_none());
+        assert!(turn_from_env_values(" , ", "s", 600).is_none());
+        assert!(turn_from_env_values("turn:a:3478", "", 600).is_none());
+        let t = turn_from_env_values(" turn:a:3478 ,, turns:b:5349 ", "s", 30).unwrap();
+        assert_eq!(t.urls, vec!["turn:a:3478", "turns:b:5349"]);
+        assert_eq!(t.ttl_secs, 30);
+    }
 }

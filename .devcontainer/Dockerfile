@@ -9,6 +9,8 @@ ARG USER_UID=1000
 ARG USER_GID=1000
 # GID of the host's `render` group so /dev/dri is usable without --privileged.
 ARG RENDER_GID=110
+# GID owning /var/run/docker.sock on the host (`stat -c %g /var/run/docker.sock`)
+ARG DOCKER_GID=999
 ARG VIDEO_GID=44
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -44,6 +46,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nlohmann-json3-dev libtomlplusplus-dev libsystemd-dev \
     # --- agent signaling client (ADR-0017) --------------------------------
     libsoup-3.0-dev glib-networking \
+    # --- browser lab: drive the compose stack from inside dev (docs/25) ----
+    #     docker-outside-of-docker: CLI + compose plugin only; the host socket
+    #     is mounted by docker-compose.yml (robot-side netem, fault switches).
+    docker-cli docker-compose-v2 \
+    #     tc netem for the media-path network profiles (runs in the robot container, which is this image in the demo)
+    iproute2 \
     # --- pipeline DOT graph debugging (camera-streamer lesson) ---------------------
     graphviz \
     && rm -rf /var/lib/apt/lists/*
@@ -72,7 +80,8 @@ RUN userdel -r ubuntu 2>/dev/null || true \
     # host GPU access: render + video groups by host GID
     && (getent group "${RENDER_GID}" || groupadd -g "${RENDER_GID}" hostrender) \
     && (getent group "${VIDEO_GID}"  || groupadd -g "${VIDEO_GID}"  hostvideo) \
-    && usermod -aG "${RENDER_GID}","${VIDEO_GID}" "${USER_NAME}"
+    && (getent group "${DOCKER_GID}" || groupadd -g "${DOCKER_GID}" hostdocker) \
+    && usermod -aG "${RENDER_GID}","${VIDEO_GID}","${DOCKER_GID}" "${USER_NAME}"
 
 USER ${USER_NAME}
 ENV HOME=/home/${USER_NAME} \

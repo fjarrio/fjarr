@@ -4,10 +4,13 @@ description: CDP-driven Chromium in the dev stack — end-to-end tests of the wh
 ---
 
 > **Status: review** — specified alongside slice 3
-> ([docs/23](23-agent-core-architecture.md)); built as the first task of
-> slice 3 so the slice-3 gate and everything after it run on it. It is the
-> browser-side half of the testing strategy ([docs/15](15-testing-strategy.md))
-> and of agent-first development ([docs/20](20-agentic-development.md)).
+> ([docs/23](23-agent-core-architecture.md)); **built in slice 3a**
+> (2026-09-19: the `browser` service, `@fjarr/e2e`, the wire tap,
+> `LoopbackAgent`, the frame stamp, `fjarr-lab`, the CI job — see
+> [implementation notes](#implementation-notes-slice-3a)) so the slice-3
+> gate and everything after it run on it. It is the browser-side half of
+> the testing strategy ([docs/15](15-testing-strategy.md)) and of
+> agent-first development ([docs/20](20-agentic-development.md)).
 
 ## Why
 
@@ -32,11 +35,11 @@ public API does not, and it has one hard limit that shapes this design:
 | Signaling traffic | `Network.webSocketFrameSent/Received` | every docs/08 signaling message with timing, decoded by the harness |
 | DataChannel traffic | **not visible to CDP** (SCTP inside DTLS) | `@fjarr/core` exposes an **opt-in wire tap** (`createFjarrClient({ wireTap: true })`, then `client.on("wire", …)`; shape in [docs/21](21-web-client-architecture.md#wire-tap)) — never on by default, since envelopes carry keystrokes and clipboard text |
 | WebRTC internals (ICE pairs, RTP stats, codecs) | `RTCPeerConnection.getStats()` through the library's stats store (`session.stats`) | `chrome://webrtc-internals` is not scriptable; the same data is |
-| Network conditions on HTTP/WebSocket | `Network.emulateNetworkConditions` (latency, throughput, offline) | **does not touch WebRTC media or DataChannels** (UDP bypasses the browser's network stack emulation) |
+| Network conditions on HTTP/WebSocket | `Network.emulateNetworkConditions` (latency, throughput, offline) | **does not touch WebRTC media or DataChannels** (UDP bypasses the browser's network stack emulation); `offline` blocks *new* connections — an established WebSocket stays up (verified on Chrome 153), so a ladder test enters rung 3 by other means (below) |
 | Network conditions on the media path | `tc netem` in the `demo-robot` container (loss, delay, jitter, rate) — docs/15 | applied robot-side; `NET_ADMIN` in the demo profile; profiles below |
 | CPU profile | `Profiler.start/stop` (`.cpuprofile`) and `Tracing` with `devtools.timeline` + `v8.cpu_profiler` categories | opens in DevTools / Perfetto |
 | Memory | `HeapProfiler.collectGarbage` + `Performance.getMetrics` (`JSHeapUsedSize`, `Nodes`, `JSEventListeners`) per cycle; `HeapProfiler.takeHeapSnapshot` on demand | the leak oracle for connect/disconnect and mount/unmount soaks |
-| Responsiveness | `PerformanceObserver` in-page (long tasks, event timing → INP), `web-vitals` for LCP/CLS/INP; `Tracing` for frame drops | budgets in docs/16 |
+| Responsiveness | `PerformanceObserver` in-page (long tasks, event timing → INP, LCP, layout shift — no library); `Tracing` for frame drops | budgets in docs/16 |
 | Media timing | `requestVideoFrameCallback` + the machine-readable frame stamp (below) | glass-to-glass and time-to-first-frame |
 | Media devices without hardware | Chromium flags `--use-fake-device-for-media-stream --use-fake-ui-for-media-stream` | push-to-talk and autoplay tests |
 
@@ -54,22 +57,25 @@ docker compose --profile demo --profile lab up
 ```
 
 The `browser` service is the Playwright image pinned to the harness's
-`@playwright/test` version (`mcr.microsoft.com/playwright:v<x.y.z>-noble`) started with `--remote-debugging-address=0.0.0.0
---remote-debugging-port=9222`, fake media devices, and
-`--disable-features=…` only where a test needs it. The harness connects with
-`chromium.connectOverCDP("http://browser:9222")` from the `dev` container,
-so the same browser serves scripted tests and ad-hoc sessions, and its
-process is observable from the host at `http://localhost:9222/json`.
+`@playwright/test` version (`mcr.microsoft.com/playwright:v<x.y.z>-noble`)
+started by `docker/lab/run-chromium.sh`: headless Chromium with its
+DevTools port exposed on the compose network, fake media devices, extra
+flags through `LAB_CHROMIUM_FLAGS` only where a test needs them. The
+harness connects with `chromium.connectOverCDP(…)` from the `dev`
+container, so the same browser serves scripted tests and ad-hoc sessions,
+and its process is observable from the host at
+`http://127.0.0.1:9222/json` (the mechanics: [implementation notes](#implementation-notes-slice-3a)).
 
 ## The harness
 
 `web/e2e/` (a workspace package, `@fjarr/e2e`, never published): Playwright
 Test with fixtures:
 
-- `stack` — asserts the demo profile is up (or starts it), waits for
-  `fjarr-server /healthz` and the agent's introspection endpoint
-  ([docs/24](24-pipeline-introspection.md)); exposes `robot.introspect()`
-  and `robot.netem(profile)`.
+- `stack` — checks `fjarr-server /healthz` and the robot container
+  (skips the test when they are down, fails in CI), exposes
+  `robot.introspect()` ([docs/24](24-pipeline-introspection.md)),
+  `robot.netem(profile)`, `robot.freeze()/thaw()/restart()` and
+  `restartServer()`.
 - `dashboard` — a page on the demo dashboard with the grant flow done;
   `connect(robotId)`, `waitForState("connected")`, `tracks()`.
 - `cdp` — a CDP session for the page with helpers: `network.emulate(profile)`,
@@ -85,7 +91,8 @@ signaling and wire captures as JSON lines, profiles, metrics, screenshots,
 and a `summary.json` + `summary.txt` — the text form is what an AI agent
 reads first, the JSON is what CI compares against budgets.
 
-**Network profiles** (both halves, applied together by `lab.network(profile)`):
+**Network profiles** (the browser half through `cdp.network.emulate`, the
+media half through `robot.netem`; `fjarr-lab net` applies both):
 
 | Profile | Browser (CDP: latency / down / up) | Media path (netem on demo-robot) |
 |---|---|---|
@@ -209,6 +216,89 @@ so a transcript of a debugging session is also its evidence.
   a human or an agent is at the keyboard.
 - **Third parties**: the lab is part of the repo, so a customer extending
   the product (a new source, a capability view) gets the same rig.
+
+## Implementation notes (slice 3a) {#implementation-notes-slice-3a}
+
+What was built, and the facts about real browsers that shaped it (each
+verified in the lab, 2026-09-19):
+
+**The `browser` service** (`docker-compose.yml`, profile `lab`) is the
+Playwright image pinned to `@fjarr/e2e`'s `@playwright/test` version,
+started by `docker/lab/run-chromium.sh`: full Chromium in `--headless=new`,
+fake media devices, `--remote-allow-origins=*`. Chrome binds its DevTools
+listener to loopback regardless of `--remote-debugging-address` (Chrome
+153, both the full binary and the headless shell), so the script runs a
+tiny Node TCP forwarder `0.0.0.0:9222 → 127.0.0.1:9223`; the healthcheck
+probes the container's own address, not loopback. Chrome also refuses
+DevTools HTTP requests whose `Host` header is a name, so the harness
+resolves `browser` to its IP before `connectOverCDP` (from the host use
+`http://127.0.0.1:9222/json`). Plain-http origins on the compose network
+are not secure contexts (no `getUserMedia`): the script passes
+`--unsafely-treat-insecure-origin-as-secure` for the lab page and the demo
+dashboard (`LAB_INSECURE_ORIGINS`). The lab page is served by Vite from
+`web/e2e/app` on `:5174` and reached as `http://lab-host:5174` — a network
+alias of `dev`, because Chrome's HSTS preload list forces https on the
+name `dev`; Vite's `allowedHosts` accepts any host for this page.
+
+**`@fjarr/e2e`** (`web/e2e/`): Playwright projects `loopback` (no server),
+`stack` (needs `fjarr-server`; the demo profile for the dashboard smoke)
+and `spike` (the Chromium-answerer probe). `browser` is a worker fixture
+that connects over CDP; every test gets `out`, `cdp`, `loopback`, `stack`,
+`dashboard`. Environment (defaults are the compose network as seen from
+`dev`; CI overrides the page origin because the runner serves the page):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `E2E_BROWSER` | `http://browser:9222` | CDP endpoint (resolved to an IP) |
+| `E2E_PAGE_ORIGIN` | `http://lab-host:5174` | what the *browser* navigates to for the lab page |
+| `E2E_SERVER_WS` / `E2E_SERVER_HTTP` | `ws://fjarr-server:8080/ws` / `http://fjarr-server:8080` | fjarr-server as the browser / the harness reach it |
+| `E2E_DASHBOARD_URL` | `http://demo-dashboard:5173` | the demo dashboard (dev mode exposes `window.__fjarr` and takes `?fjarr_backend=&fjarr_server=` overrides) |
+| `E2E_ROBOT_SERVICE` | `demo-robot` | compose service carrying the media path (`tc` runs in it as root) |
+| `E2E_DASHBOARD_HTTP` | `E2E_DASHBOARD_URL` | the dashboard as the *harness* probes it, when that differs (CI) |
+| `E2E_OUT` | `web/e2e/out/` | artifact root; each test's directory is recreated per run |
+| `FJARR_GRANT_HS256_SECRET`, `FJARR_DEV_DEVICE_TOKEN` | the `.env` dev values | the harness mints grants and registers loopback robots with these |
+
+**The lab page** (`web/e2e/app`) exposes `window.__lab` (contract:
+`web/e2e/src/lab-page.d.ts`): `setup({mode, robotId, …})`,
+`open/close/state/info/waitForState`, `mount("tile"|"grid"|"ptt")`,
+`tracks()`, `videos()`, `stats()`, `stamps.watch/summary`, `wire.drain()`,
+`agent.*` (the loopback agent's faults and stimuli), `ptt.*`, `vitals()`.
+It creates its client with `wireTap: true` and pushes every wire event to
+the harness. `LoopbackAgent` runs in two modes: **in-page** (a fake socket
+pair, no server) and **server** (it registers with fjarr-server as a
+robot with the dev-token scheme; the client connects with a grant the
+harness mints), so the client's rungs run over real sockets.
+
+**Entering the ladder.** Because CDP `offline` leaves an established
+socket alone, the `stack` suite enters rung 3 with the agent's
+`session-close{retry:true}` while offline (every round after that is a
+real, failing connection attempt, counted and backed off), and covers the
+docs/15 "signaling socket killed" row by restarting `fjarr-server`
+(`docker compose restart`, through the docker CLI the `dev` image now
+carries — docker-outside-of-docker, socket mounted, group `DOCKER_GID`).
+The same door gives `RobotContainer` its `netem`, `pause`/`unpause`
+(SIGSTOP), `restart` and loopback-only `introspect` (a `curl` inside the
+robot container).
+
+**`fjarr-lab`** (`pnpm fjarr-lab …` from the repo root, runs on Node's
+built-in TypeScript transform) implements `open/pages/close/eval/
+screenshot/net/netem/signaling/wire/stats/profile cpu|trace/memory/
+vitals/introspect/report`. CDP emulation lives with the DevTools session,
+so `net <profile>` holds the browser half while it runs (`--hold <s>` or
+Ctrl-C); the netem half persists. Vitals come from in-page
+`PerformanceObserver`s (LCP, CLS, worst interaction as the INP
+approximation, long tasks) — no dependency.
+
+**What the lab found in its first week** (all fixed in slice 3a, each
+with a unit test): the core answered the agent's `recvonly` audio uplink
+with `recvonly`, so push-to-talk moved no media in a real browser
+([docs/21](21-web-client-architecture.md#audio-uplink-negotiation));
+`fjarr-server` turned `FJARR_TURN_URLS=""` into TURN credentials with an
+empty URL, which makes `new RTCPeerConnection` throw; the client now drops
+such entries with a warning instead of dying; `usePushToTalk` reported a
+`TypeError` outside secure contexts; and `robot-offline` during a
+reconnect round is now a counted round rather than a fatal error
+([docs/21](21-web-client-architecture.md#state-machine)).
 
 ## Slice mapping
 

@@ -51,8 +51,9 @@ once accepted (superseded, never edited). Start with the
 
 Gate artifacts and retrospective code reviews live in `docs/reviews/`:
 the [M1 extension-API fit review](reviews/m1-api-fit-review.md), the
-[slice-2 web core + React review](reviews/slice-2-review.md) and the
-[slice-3 planning review](reviews/slice-3-planning-review.md).
+[slice-2 web core + React review](reviews/slice-2-review.md), the
+[slice-3 planning review](reviews/slice-3-planning-review.md) and the
+[slice-3a browser lab review](reviews/slice-3a-review.md).
 
 ## Reading paths
 

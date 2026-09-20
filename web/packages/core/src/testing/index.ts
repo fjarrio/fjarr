@@ -186,7 +186,7 @@ export class FakeDataChannel implements DataChannelLike {
 
 class FakeReceiver implements RtpReceiverLike {
   jitterBufferTarget: number | null = null;
-  constructor(readonly track: FakeTrack) {}
+  constructor(public track: FakeTrack) {}
 }
 
 class FakeSender implements RtpSenderLike {
@@ -225,12 +225,15 @@ export class FakePeerConnection implements PeerConnectionLike {
   ontrack: PeerConnectionLike["ontrack"] = null;
   ondatachannel: PeerConnectionLike["ondatachannel"] = null;
   onconnectionstatechange: (() => void) | null = null;
+  /** Test hook: runs inside setRemoteDescription, where browsers create offered transceivers. */
+  onRemoteDescription: ((pc: FakePeerConnection, d: { type: "offer" | "answer"; sdp: string }) => void) | null = null;
 
   constructor(readonly config: PeerConnectionConfig) {}
 
   async setRemoteDescription(d: { type: "offer" | "answer"; sdp: string }): Promise<void> {
     this.remote = d;
     this.remoteDescriptions++;
+    this.onRemoteDescription?.(this, d);
   }
   async createAnswer(): Promise<{ type?: string; sdp?: string }> {
     return { type: "answer", sdp: "v=0\r\nanswer" };
@@ -258,18 +261,26 @@ export class FakePeerConnection implements PeerConnectionLike {
     this.connectionState = state;
     this.onconnectionstatechange?.();
   }
-  /** Agent-side track arrives on transceiver `mid`. */
+  /** Agent-side track arrives on transceiver `mid` (reusing a transceiver created at setRemoteDescription, as browsers do). */
   addRemoteTrack(mid: string, kind: "video" | "audio" = "video", id?: string): FakeTrack {
     const track = new FakeTrack(kind, id);
-    const t = new FakeTransceiver(mid, track);
-    this.transceivers.push(t);
+    let t = this.transceivers.find((x) => x.mid === mid);
+    if (t) t.receiver.track = track;
+    else {
+      t = new FakeTransceiver(mid, track);
+      this.transceivers.push(t);
+    }
     this.ontrack?.({ track, transceiver: t });
     return track;
   }
-  /** A pre-allocated audio transceiver with no manifest track (uplink slot). */
-  addUplinkTransceiver(mid: string): FakeTransceiver {
+  /**
+   * A pre-allocated audio transceiver with no manifest track (uplink slot).
+   * Browsers create it at setRemoteDescription with direction `recvonly`;
+   * the core answers `sendonly` (docs/21#audio-tracks).
+   */
+  addUplinkTransceiver(mid: string, direction = "recvonly"): FakeTransceiver {
     const t = new FakeTransceiver(mid, new FakeTrack("audio"));
-    t.direction = "sendrecv";
+    t.direction = direction;
     this.transceivers.push(t);
     return t;
   }
@@ -332,7 +343,8 @@ export class MockAgent {
   auto: boolean;
   grantExpiredOnce = false;
   private sessionCounter = 0;
-  private readonly options: MockAgentOptions;
+  /** Mutable between offers so tests can change what the next offer carries (uplink slot, TURN). */
+  readonly options: MockAgentOptions;
   /** Ignore `ice-restart` (a broken relay path) so the client's rung-3 fallback is exercised. */
   ignoreIceRestart = false;
   /** Behave like an agent on GStreamer 1.24: answer `ice-restart` with `session-close{retry:true}` (docs/08#reconnection). */
@@ -383,6 +395,16 @@ export class MockAgent {
 
   readonly peerConnectionFactory: PeerConnectionFactory = (config) => {
     const pc = new FakePeerConnection(config);
+    // Browsers create one transceiver per m-section at setRemoteDescription,
+    // direction `recvonly`: the pre-allocated uplink and every audio downlink.
+    pc.onRemoteDescription = (p, d) => {
+      if (d.type !== "offer") return;
+      const uplinkMid = this.options.uplinkMid;
+      if (uplinkMid && !p.transceivers.some((t) => t.mid === uplinkMid)) p.addUplinkTransceiver(uplinkMid);
+      for (const t of this.tracks) {
+        if (t.kind === "audio" && t.mid && !p.transceivers.some((x) => x.mid === t.mid)) p.addUplinkTransceiver(t.mid);
+      }
+    };
     this.pcs.push(pc);
     return pc;
   };
@@ -447,7 +469,6 @@ export class MockAgent {
       const realtime = pc.openDataChannel("fjarr:realtime");
       realtime.onSend = (d) => this.onEnvelope(realtime, d);
       for (const cap of this.options.bulkCaps ?? []) pc.openDataChannel(`fjarr:bulk:${cap}`);
-      if (this.options.uplinkMid) pc.addUplinkTransceiver(this.options.uplinkMid);
     };
     if (this.channelsBeforeConnected) openChannels();
     if (pc.connectionState !== "connected") pc.setConnectionState("connected");
@@ -486,7 +507,15 @@ export class MockAgent {
   }
 
   private offer(sessionId: string, sdp: string): object {
-    return this.sig({ type: "offer", session_id: sessionId, sdp, tracks: this.tracks, manifest_version: this.manifestVersion });
+    return this.sig({ type: "offer", session_id: sessionId, sdp: this.withMediaSections(sdp), tracks: this.tracks, manifest_version: this.manifestVersion });
+  }
+
+  /** Append one m-section per manifest track (`sendonly`) and the uplink slot (`recvonly`), as a real offer carries. */
+  private withMediaSections(sdp: string): string {
+    const lines = [sdp];
+    for (const t of this.tracks) if (t.mid) lines.push(`m=${t.kind} 9 UDP/TLS/RTP/SAVPF ${t.pt}`, `a=mid:${t.mid}`, "a=sendonly");
+    if (this.options.uplinkMid) lines.push("m=audio 9 UDP/TLS/RTP/SAVPF 111", `a=mid:${this.options.uplinkMid}`, "a=recvonly");
+    return lines.join("\r\n");
   }
 
   // ---------------------------------------------------------- stimuli
@@ -506,7 +535,7 @@ export class MockAgent {
     this.tracks = tracks;
     this.manifestVersion = Math.max(this.manifestVersion, manifestVersion);
     const sessionId = this.currentSessionId();
-    this.socket.receive(this.sig({ type: "offer", session_id: sessionId, sdp: "v=0\r\nrenegotiation", tracks, manifest_version: manifestVersion }));
+    this.socket.receive(this.sig({ type: "offer", session_id: sessionId, sdp: this.withMediaSections("v=0\r\nrenegotiation"), tracks, manifest_version: manifestVersion }));
   }
 
   /** Hot-plug: the `monitors` event that precedes a renegotiation. */

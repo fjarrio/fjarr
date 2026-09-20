@@ -2,11 +2,25 @@
 // (A = "agent"/offerer, B = "browser"/answerer) driven entirely from one
 // GMainLoop. Answers the questions Q1..Q6 listed in README.md and prints a
 // summary table. Standalone spike — not part of libfjarr.
+//
+// --answerer=stdio (slice 3a): B is not created; A's signaling goes over
+// stdio as JSON lines to a real browser driven by web/e2e/tests/spike/
+// chromium-answerer.spec.ts. Wire format (one JSON object per line):
+//   probe -> stdout : {"type":"offer","sdp"}  {"type":"ice","candidate","sdp_mline_index"}
+//                     {"type":"dc-send","data"}  {"type":"done","code"}
+//   stdin -> probe  : {"type":"answer","sdp"}  {"type":"ice","candidate","sdp_mline_index"}
+//                     {"type":"report","event",...}  (events: connection-state,
+//                     ice-connection-state, datachannel, dc-open, dc-message,
+//                     dc-bytes, track, track-mute, transceivers, stats)
+// Log lines never start with '{', so the peer can tell them apart.
 
 #include <gst/gst.h>
 extern bool g_reuse_pads;
+extern bool g_stdio;
 #include <gst/sdp/sdp.h>
 #include <gst/webrtc/webrtc.h>
+
+#include <nlohmann/json.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -47,6 +61,8 @@ void record(const std::string& id, const char* verdict, const std::string& note)
   logf("RESULT %-8s %-7s %s", id.c_str(), verdict, note.c_str());
 }
 void record(const std::string& id, bool pass, const std::string& note) { record(id, pass ? "PASS" : "FAIL", note); }
+// stdio answerer mode: one JSON object per stdout line (log lines never start with '{').
+void emit_json(const nlohmann::json& j) { std::printf("%s\n", j.dump().c_str()); std::fflush(stdout); }
 
 std::string enum_nick(GType t, gint v) {
   auto* k = static_cast<GEnumClass*>(g_type_class_ref(t));
@@ -166,7 +182,7 @@ struct Peer {
   std::string name;
   GObj<GstElement> pipeline;
   GstElement* webrtc{};
-  Peer* remote{};
+  std::function<void(guint, const std::string&)> send_candidate;   // where our on-ice-candidate goes (set after construction)
   bool remote_desc_set = false;
   std::vector<std::pair<guint, std::string>> pending_cands;
   std::atomic<int> negotiation_needed{0}, new_transceiver{0}, pads_added{0}, dc_open{0}, ice_state_changes{0};
@@ -190,7 +206,7 @@ struct Peer {
         logf("%s: on-negotiation-needed #%d", p->name.c_str(), n); }), this);
     g_signal_connect(webrtc, "on-ice-candidate", G_CALLBACK(+[](GstElement*, guint mline, gchar* c, gpointer d) {
         auto* p = static_cast<Peer*>(d); std::string cand(c);
-        post([p, mline, cand] { p->remote->add_candidate(mline, cand); }); }), this);
+        post([p, mline, cand] { if (p->send_candidate) p->send_candidate(mline, cand); }); }), this);
     g_signal_connect(webrtc, "on-new-transceiver", G_CALLBACK(+[](GstElement*, GstWebRTCRTPTransceiver* t, gpointer d) {
         auto* p = static_cast<Peer*>(d); ++p->new_transceiver;
         logf("%s: on-new-transceiver mline=%u mid=%s dir=%s", p->name.c_str(), uint_prop(t, "mlineindex"), str_prop(t, "mid").c_str(),
@@ -295,6 +311,147 @@ struct Peer {
   std::string ice_state() { return enum_nick(GST_TYPE_WEBRTC_ICE_CONNECTION_STATE, enum_prop(webrtc, "ice-connection-state")); }
 };
 
+GstElement* ctx_A_webrtc();
+void offerer_add_candidate(guint mline, const std::string& c);
+void finish(int code);
+
+// ------------------------------------------------------------ Answerer ----
+// What the Q-steps need from "B": either the in-process webrtcbin (Peer) or
+// a real browser on the other end of stdio. rx_count() is "buffers seen on
+// B's src pad" for the Peer and "framesDecoded (inbound-rtp)" for the browser.
+struct Answerer {
+  virtual ~Answerer() = default;
+  virtual std::string kind() = 0;
+  virtual std::string rx_unit() = 0;
+  virtual std::string conn_state() = 0;
+  virtual std::string ice_state() = 0;
+  virtual bool has_dc() = 0;                              // on-data-channel / ondatachannel fired
+  virtual bool dc_open() = 0;
+  virtual std::vector<std::string> dc_messages() = 0;     // strings received from A
+  virtual uint64_t dc_bytes() = 0;                        // binary bytes received from A
+  virtual uint64_t rx_count(guint mline) = 0;
+  virtual std::string rx_pad(guint mline) = 0;
+  virtual int tracks_added() = 0;
+  virtual int transceivers() = 0;
+  virtual void watch(guint mline, bool on) = 0;           // start/stop the max-gap measurement
+  virtual double max_gap_ms(guint mline) = 0;
+  virtual void send_dc(const std::string& s) = 0;         // B -> A
+  virtual void add_remote_candidate(guint mline, const std::string& c) = 0;   // from A
+  // Apply A's offer, produce the answer (nullptr on failure).
+  virtual void answer(const GstWebRTCSessionDescription* offer, std::function<void(Sdp)> done) = 0;
+  // packets-received per inbound stream, keyed "ssrc<N>" (Peer) or "mid=<mid>" (browser).
+  virtual void inbound_packets(std::function<void(std::map<std::string, uint64_t>)> cb) = 0;
+};
+
+Sdp sdp_from_text(GstWebRTCSDPType type, const std::string& text) {
+  GstSDPMessage* msg = nullptr;
+  if (gst_sdp_message_new_from_text(text.c_str(), &msg) != GST_SDP_OK) return nullptr;
+  return Sdp(gst_webrtc_session_description_new(type, msg));
+}
+std::string mid_of_mline(guint mline) {
+  GstWebRTCSessionDescription* d = nullptr; g_object_get(ctx_A_webrtc(), "local-description", &d, nullptr);
+  Sdp ld(d);
+  return ld ? media_attr(ld.get(), mline, "mid") : "<no local description>";
+}
+
+// The browser answerer: JSON lines over stdio, see the header comment.
+struct BrowserAnswerer : Answerer {
+  struct Rx { uint64_t frames{0}, packets{0}; int64_t last_inc_us{0}, max_gap_us{0}; bool watch{false}; };
+  std::string state = "new", ice = "new";
+  bool dc_seen = false; int dc_opens = 0, tracks = 0, ntrans = 0;
+  std::vector<std::string> messages; uint64_t bytes = 0;
+  std::map<std::string, Rx> rx;                          // by mid
+  std::function<void(Sdp)> pending_answer; int answer_gen = 0;
+  GIOChannel* in{};
+
+  BrowserAnswerer() {
+    in = g_io_channel_unix_new(0);
+    g_io_channel_set_encoding(in, nullptr, nullptr);
+    g_io_channel_set_flags(in, G_IO_FLAG_NONBLOCK, nullptr);
+    g_io_add_watch(in, static_cast<GIOCondition>(G_IO_IN | G_IO_HUP | G_IO_ERR), [](GIOChannel* ch, GIOCondition, gpointer d) -> gboolean {
+        auto* self = static_cast<BrowserAnswerer*>(d);
+        for (;;) {
+          gchar* str = nullptr; gsize len = 0; GError* err = nullptr;
+          GIOStatus st = g_io_channel_read_line(ch, &str, &len, nullptr, &err);
+          if (st == G_IO_STATUS_NORMAL) { std::string line(str, len); g_free(str); self->on_line(line); continue; }
+          if (st == G_IO_STATUS_AGAIN) return G_SOURCE_CONTINUE;
+          if (err) g_error_free(err);
+          logf("stdio: stdin closed (%s) — browser side went away", st == G_IO_STATUS_EOF ? "EOF" : "error");
+          record("STDIO", "FAIL", "stdin closed before the run finished");
+          finish(1);
+          return G_SOURCE_REMOVE;
+        } }, this);
+  }
+  void on_line(const std::string& line) {
+    auto j = nlohmann::json::parse(line, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) { logf("stdio: ignoring non-JSON line: %.120s", line.c_str()); return; }
+    std::string type = j.value("type", "");
+    if (type == "answer") {
+      Sdp an = sdp_from_text(GST_WEBRTC_SDP_TYPE_ANSWER, j.value("sdp", ""));
+      logf("stdio: answer received (%zu bytes)%s", j.value("sdp", "").size(), an ? "" : " — SDP PARSE FAILED");
+      if (an) logf("stdio: answer:%s", sdp_summary(an.get()).c_str());
+      if (pending_answer) { auto d = std::move(pending_answer); pending_answer = nullptr; ++answer_gen; d(std::move(an)); }
+    } else if (type == "ice") {
+      if (!j.contains("candidate") || j["candidate"].is_null()) return;
+      offerer_add_candidate(j.value("sdp_mline_index", 0u), j["candidate"].get<std::string>());
+    } else if (type == "report") {
+      std::string ev = j.value("event", "");
+      if (ev == "stats") { on_stats(j); return; }
+      if (ev == "connection-state") state = j.value("state", "?");
+      else if (ev == "ice-connection-state") ice = j.value("state", "?");
+      else if (ev == "datachannel") dc_seen = true;
+      else if (ev == "dc-open") ++dc_opens;
+      else if (ev == "dc-message") { messages.push_back(j.value("data", "")); }
+      else if (ev == "dc-bytes") { bytes += j.value("bytes", 0ull); return; }   // 64 of these: don't log each
+      else if (ev == "track") { ++tracks; rx[j.value("mid", "?")]; }
+      else if (ev == "transceivers") ntrans = j.value("count", 0);
+      nlohmann::json rest = j; rest.erase("type"); rest.erase("event");
+      logf("browser: %s %s", ev.c_str(), rest.dump().c_str());
+    } else logf("stdio: unknown message type %s", type.c_str());
+  }
+  void on_stats(const nlohmann::json& j) {
+    int64_t now = g_get_monotonic_time();
+    for (const auto& s : j.value("inbound", nlohmann::json::array())) {
+      if (!s.is_object() || !s.contains("mid")) continue;
+      Rx& r = rx[s["mid"].get<std::string>()];
+      uint64_t frames = s.value("framesDecoded", 0ull);
+      if (frames > r.frames) {
+        if (r.watch && r.last_inc_us) { int64_t gap = now - r.last_inc_us; if (gap > r.max_gap_us) r.max_gap_us = gap; }
+        r.last_inc_us = now;
+      }
+      r.frames = frames; r.packets = s.value("packetsReceived", 0ull);
+    }
+    if (j.contains("connectionState")) state = j["connectionState"].get<std::string>();
+  }
+  std::string kind() override { return "browser(stdio)"; }
+  std::string rx_unit() override { return "framesDecoded"; }
+  std::string conn_state() override { return state; }
+  std::string ice_state() override { return ice; }
+  bool has_dc() override { return dc_seen; }
+  bool dc_open() override { return dc_opens > 0; }
+  std::vector<std::string> dc_messages() override { return messages; }
+  uint64_t dc_bytes() override { return bytes; }
+  uint64_t rx_count(guint mline) override { auto it = rx.find(mid_of_mline(mline)); return it == rx.end() ? 0 : it->second.frames; }
+  std::string rx_pad(guint mline) override { std::string mid = mid_of_mline(mline); return rx.count(mid) ? "track(mid=" + mid + ")" : "<no inbound-rtp for mid " + mid + ">"; }
+  int tracks_added() override { return tracks; }
+  int transceivers() override { return ntrans; }
+  void watch(guint mline, bool on) override { Rx& r = rx[mid_of_mline(mline)]; r.watch = on; if (on) { r.max_gap_us = 0; r.last_inc_us = 0; } }
+  double max_gap_ms(guint mline) override { auto it = rx.find(mid_of_mline(mline)); return it == rx.end() ? 0 : it->second.max_gap_us / 1000.0; }
+  void send_dc(const std::string& s) override { emit_json({{"type", "dc-send"}, {"data", s}}); }
+  void add_remote_candidate(guint mline, const std::string& c) override { emit_json({{"type", "ice"}, {"candidate", c}, {"sdp_mline_index", mline}}); }
+  void answer(const GstWebRTCSessionDescription* offer, std::function<void(Sdp)> done) override {
+    pending_answer = std::move(done);
+    int gen = answer_gen;
+    emit_json({{"type", "offer"}, {"sdp", sdp_text(offer)}});
+    after(15000, [this, gen] {
+      if (answer_gen == gen && pending_answer) { logf("stdio: no answer within 15 s"); auto d = std::move(pending_answer); pending_answer = nullptr; ++answer_gen; d(nullptr); }
+    });
+  }
+  void inbound_packets(std::function<void(std::map<std::string, uint64_t>)> cb) override {
+    std::map<std::string, uint64_t> m; for (auto& [mid, r] : rx) m["mid=" + mid] = r.packets; cb(m);
+  }
+};
+
 // Diagnostic: count buffers on every pad of selected elements inside a webrtcbin
 // (nicesrc/nicesink/dtls/funnel) to localize where packets stop.
 struct PadCounter { std::string key; std::atomic<uint64_t> n{0}; };
@@ -371,9 +528,9 @@ std::unique_ptr<TxTrack> add_video_track(Peer& a, const char* pattern, guint pt)
 
 // ------------------------------------------------------------ negotiate ----
 struct Hooks { std::function<void(const GstWebRTCSessionDescription*)> on_offer_created, on_local_set; };
-// Full offer/answer round trip A -> B -> A over the main loop. `options` is
+// Full offer/answer round trip A -> answerer -> A over the main loop. `options` is
 // passed to create-offer (ownership stays with the caller).
-void negotiate(Peer& a, Peer& b, GstStructure* options, Hooks hooks, std::function<void(Sdp, Sdp)> done) {
+void negotiate(Peer& a, Answerer& b, GstStructure* options, Hooks hooks, std::function<void(Sdp, Sdp)> done) {
   auto d = std::make_shared<std::function<void(Sdp, Sdp)>>(std::move(done));
   auto h = std::make_shared<Hooks>(std::move(hooks));
   logf("negotiate: create-offer on %s (options=%s)", a.name.c_str(), options ? GStr(gst_structure_to_string(options)).get() : "NULL");
@@ -386,28 +543,18 @@ void negotiate(Peer& a, Peer& b, GstStructure* options, Hooks hooks, std::functi
     if (h->on_offer_created) h->on_offer_created(o);
     emit_async(a.webrtc, "set-local-description", o, [&a, &b, d, h, offer](Reply) {
       if (h->on_local_set) h->on_local_set(offer->get());
-      emit_async(b.webrtc, "set-remote-description", offer->get(), [&a, &b, d, offer](Reply) {
-        b.flush_candidates();
-        emit_async(b.webrtc, "create-answer", nullptr, [&a, &b, d, offer](Reply r) {
-          GstWebRTCSessionDescription* an = nullptr;
-          if (r) gst_structure_get(r.get(), "answer", GST_TYPE_WEBRTC_SESSION_DESCRIPTION, &an, nullptr);
-          if (!an) { logf("negotiate: create-answer FAILED: %s", reply_error(r).c_str()); (*d)(std::move(*offer), nullptr); return; }
-          auto answer = std::make_shared<Sdp>(an);
-          logf("negotiate: answer created:%s", sdp_summary(an).c_str());
-          emit_async(b.webrtc, "set-local-description", an, [&a, d, offer, answer](Reply) {
-            emit_async(a.webrtc, "set-remote-description", answer->get(), [&a, d, offer, answer](Reply) {
-              a.flush_candidates();
-              logf("negotiate: done, signaling-state A=%s", enum_nick(GST_TYPE_WEBRTC_SIGNALING_STATE, enum_prop(a.webrtc, "signaling-state")).c_str());
-              (*d)(std::move(*offer), std::move(*answer));
-            });
-          });
+      b.answer(offer->get(), [&a, d, offer](Sdp an) {
+        if (!an) { (*d)(std::move(*offer), nullptr); return; }
+        auto answer = std::make_shared<Sdp>(std::move(an));
+        emit_async(a.webrtc, "set-remote-description", answer->get(), [&a, d, offer, answer](Reply) {
+          a.flush_candidates();
+          logf("negotiate: done, signaling-state A=%s", enum_nick(GST_TYPE_WEBRTC_SIGNALING_STATE, enum_prop(a.webrtc, "signaling-state")).c_str());
+          (*d)(std::move(*offer), std::move(*answer));
         });
       });
     });
   });
 }
-
-GstElement* ctx_A_webrtc(); GstElement* ctx_B_webrtc();
 
 // ---------------------------------------------------------------- stats ----
 struct StatsSnap { std::set<std::string> types; std::map<guint, std::pair<guint64, guint64>> outbound, inbound; std::string sample; double t{}; };
@@ -439,21 +586,65 @@ StatsSnap parse_stats(const Reply& r) {
   return s;
 }
 
-// packets-sent (A, outbound-rtp) / packets-received (B, inbound-rtp) per ssrc over `ms`.
+// The in-process webrtcbin answerer (the original loopback), wrapping Peer B.
+struct PeerAnswerer : Answerer {
+  Peer& b;
+  explicit PeerAnswerer(Peer& peer) : b(peer) {}
+  std::string kind() override { return "webrtcbin(in-process)"; }
+  std::string rx_unit() override { return "buffers"; }
+  std::string conn_state() override { return b.conn_state(); }
+  std::string ice_state() override { return b.ice_state(); }
+  bool has_dc() override { return b.dc.load() != nullptr; }
+  bool dc_open() override { return b.dc_open > 0; }
+  std::vector<std::string> dc_messages() override { return b.dc_messages; }
+  uint64_t dc_bytes() override { return b.dc_bytes; }
+  uint64_t rx_count(guint mline) override { return b.rx_count(mline); }
+  std::string rx_pad(guint mline) override { return b.rx_pad(mline); }
+  int tracks_added() override { return b.pads_added; }
+  int transceivers() override { return b.new_transceiver; }
+  void watch(guint mline, bool on) override { if (auto* t = b.track(mline)) { t->watch = on; if (on) t->max_gap_us = 0; } }
+  double max_gap_ms(guint mline) override { auto* t = b.track(mline); return t ? t->max_gap_us / 1000.0 : 0; }
+  void send_dc(const std::string& s) override { if (b.dc.load()) gst_webrtc_data_channel_send_string_full(b.dc.load(), s.c_str(), nullptr); }
+  void add_remote_candidate(guint mline, const std::string& c) override { b.add_candidate(mline, c); }
+  void answer(const GstWebRTCSessionDescription* offer, std::function<void(Sdp)> done) override {
+    auto d = std::make_shared<std::function<void(Sdp)>>(std::move(done));
+    emit_async(b.webrtc, "set-remote-description", const_cast<GstWebRTCSessionDescription*>(offer), [this, d](Reply) {
+      b.flush_candidates();
+      emit_async(b.webrtc, "create-answer", nullptr, [this, d](Reply r) {
+        GstWebRTCSessionDescription* an = nullptr;
+        if (r) gst_structure_get(r.get(), "answer", GST_TYPE_WEBRTC_SESSION_DESCRIPTION, &an, nullptr);
+        if (!an) { logf("negotiate: create-answer FAILED: %s", reply_error(r).c_str()); (*d)(nullptr); return; }
+        auto answer = std::make_shared<Sdp>(an);
+        logf("negotiate: answer created:%s", sdp_summary(an).c_str());
+        emit_async(b.webrtc, "set-local-description", an, [d, answer](Reply) { (*d)(std::move(*answer)); });
+      });
+    });
+  }
+  void inbound_packets(std::function<void(std::map<std::string, uint64_t>)> cb) override {
+    emit_async(b.webrtc, "get-stats", nullptr, [cb](Reply r) {
+      StatsSnap s = parse_stats(r); std::map<std::string, uint64_t> m;
+      for (auto& [ssrc, v] : s.inbound) m["ssrc" + std::to_string(ssrc)] = v.second;
+      cb(m);
+    });
+  }
+};
+
+Answerer& ctx_answerer();
+
+// packets-sent (A, outbound-rtp) / packets-received (answerer, inbound-rtp) per stream over `ms`.
 void stats_delta(int ms, std::function<void(std::string)> cb) {
   emit_async(ctx_A_webrtc(), "get-stats", nullptr, [ms, cb](Reply ra) {
     auto a1 = std::make_shared<StatsSnap>(parse_stats(ra));
-    emit_async(ctx_B_webrtc(), "get-stats", nullptr, [ms, cb, a1](Reply rb) {
-      auto b1 = std::make_shared<StatsSnap>(parse_stats(rb));
+    ctx_answerer().inbound_packets([ms, cb, a1](std::map<std::string, uint64_t> b1m) {
+      auto b1 = std::make_shared<std::map<std::string, uint64_t>>(std::move(b1m));
       after(ms, [cb, a1, b1] {
         emit_async(ctx_A_webrtc(), "get-stats", nullptr, [cb, a1, b1](Reply ra) {
           auto a2 = std::make_shared<StatsSnap>(parse_stats(ra));
-          emit_async(ctx_B_webrtc(), "get-stats", nullptr, [cb, a1, b1, a2](Reply rb) {
-            StatsSnap b2 = parse_stats(rb);
+          ctx_answerer().inbound_packets([cb, a1, b1, a2](std::map<std::string, uint64_t> b2) {
             std::string out = "A packets-sent:";
             for (auto& [ssrc, v] : a2->outbound) out += " ssrc" + std::to_string(ssrc) + "=+" + std::to_string(v.second - a1->outbound[ssrc].second);
             out += " | B packets-received:";
-            for (auto& [ssrc, v] : b2.inbound) out += " ssrc" + std::to_string(ssrc) + "=+" + std::to_string(v.second - b1->inbound[ssrc].second);
+            for (auto& [k, v] : b2) out += " " + k + "=+" + std::to_string(v - (*b1)[k]);
             cb(out);
           });
         });
@@ -490,7 +681,8 @@ RemoveMode remove_mode = RemoveMode::Inactive;
 
 // ------------------------------------------------------------- sequence ----
 struct Ctx {
-  std::unique_ptr<Peer> A, B;
+  std::unique_ptr<Peer> A, B;                // B is null with --answerer=stdio
+  std::unique_ptr<Answerer> ans;             // PeerAnswerer(B) or BrowserAnswerer
   std::unique_ptr<TxTrack> track1, track2;
   GObj<GstWebRTCDataChannel> dc;            // A's channel
   std::atomic<int> ba_notify{0}, ba_low{0}; std::atomic<guint64> ba_max{0};
@@ -501,13 +693,16 @@ struct Ctx {
 };
 Ctx ctx;
 GstElement* ctx_A_webrtc() { return ctx.A->webrtc; }
-GstElement* ctx_B_webrtc() { return ctx.B->webrtc; }
+Answerer& ctx_answerer() { return *ctx.ans; }
+void offerer_add_candidate(guint mline, const std::string& c) { if (ctx.A) ctx.A->add_candidate(mline, c); }
 
 void finish(int code) {
-  std::printf("\n===== SUMMARY (bundle-policy=%s) =====\n", enum_nick(GST_TYPE_WEBRTC_BUNDLE_POLICY, enum_prop(ctx.A->webrtc, "bundle-policy")).c_str());
+  std::printf("\n===== SUMMARY (bundle-policy=%s, answerer=%s) =====\n", enum_nick(GST_TYPE_WEBRTC_BUNDLE_POLICY, enum_prop(ctx.A->webrtc, "bundle-policy")).c_str(),
+              ctx.ans ? ctx.ans->kind().c_str() : "?");
   std::printf("%-9s %-8s %s\n", "ID", "VERDICT", "NOTE");
   for (auto& r : results) std::printf("%-9s %-8s %s\n", r.id.c_str(), r.verdict.c_str(), r.note.c_str());
   std::fflush(stdout);
+  if (g_stdio) emit_json({{"type", "done"}, {"code", code}});
   ctx.A.reset(); ctx.B.reset();
   g_main_loop_quit(loop);
   ctx.dc.reset();
@@ -517,13 +712,21 @@ using Step = std::function<void(std::function<void()>)>;
 std::vector<Step> steps;
 void run_steps(size_t i) { if (i >= steps.size()) { finish(0); return; } steps[i]([i] { run_steps(i + 1); }); }
 
-bool connected() { return ctx.A->conn_state() == "connected" && ctx.B->conn_state() == "connected"; }
+bool connected() { return ctx.A->conn_state() == "connected" && ctx.ans->conn_state() == "connected"; }
 
 void build_steps(GstWebRTCBundlePolicy bp) {
   // ---- setup
   steps.push_back([bp](auto next) {
-    ctx.A = std::make_unique<Peer>("A", bp); ctx.B = std::make_unique<Peer>("B", bp);
-    ctx.A->remote = ctx.B.get(); ctx.B->remote = ctx.A.get();
+    ctx.A = std::make_unique<Peer>("A", bp);
+    if (g_stdio) {
+      ctx.ans = std::make_unique<BrowserAnswerer>();
+      logf("answerer: browser over stdio (no webrtcbin B in this process)");
+    } else {
+      ctx.B = std::make_unique<Peer>("B", bp);
+      ctx.B->send_candidate = [](guint m, const std::string& c) { ctx.A->add_candidate(m, c); };
+      ctx.ans = std::make_unique<PeerAnswerer>(*ctx.B);
+    }
+    ctx.A->send_candidate = [](guint m, const std::string& c) { ctx.ans->add_remote_candidate(m, c); };
     logf("Q6: webrtcbin props: latency=%d ms, bundle-policy=%s, ice-transport-policy=%s", enum_prop(ctx.A->webrtc, "latency"),
          enum_nick(GST_TYPE_WEBRTC_BUNDLE_POLICY, enum_prop(ctx.A->webrtc, "bundle-policy")).c_str(),
          enum_nick(GST_TYPE_WEBRTC_ICE_TRANSPORT_POLICY, enum_prop(ctx.A->webrtc, "ice-transport-policy")).c_str());
@@ -546,7 +749,7 @@ void build_steps(GstWebRTCBundlePolicy bp) {
     g_signal_emit_by_name(ctx.A->webrtc, "create-data-channel", "control", nullptr, &ch);
     logf("A: create-data-channel in NULL state -> %p (CRITICAL above = webrtcbin must be >= READY)", (void*)ch);
     ctx.track1 = add_video_track(*ctx.A, "ball", 96);
-    gst_element_set_state(ctx.B->pipeline.get(), GST_STATE_PLAYING);
+    if (ctx.B) gst_element_set_state(ctx.B->pipeline.get(), GST_STATE_PLAYING);
     gst_element_set_state(ctx.A->pipeline.get(), GST_STATE_PLAYING);
     if (!ch) {
       g_signal_emit_by_name(ctx.A->webrtc, "create-data-channel", "control", nullptr, &ch);
@@ -573,7 +776,7 @@ void build_steps(GstWebRTCBundlePolicy bp) {
       Hooks h;
       h.on_offer_created = [mid_after_create](const GstWebRTCSessionDescription*) { auto t = ctx.A->transceiver(0); *mid_after_create = str_prop(t.get(), "mid"); };
       h.on_local_set = [mid_after_local](const GstWebRTCSessionDescription*) { auto t = ctx.A->transceiver(0); *mid_after_local = str_prop(t.get(), "mid"); };
-      negotiate(*ctx.A, *ctx.B, nullptr, std::move(h), [next, mid_pre, mid_after_create, mid_after_local](Sdp offer, Sdp answer) {
+      negotiate(*ctx.A, *ctx.ans, nullptr, std::move(h), [next, mid_pre, mid_after_create, mid_after_local](Sdp offer, Sdp answer) {
         if (!offer || !answer) { record("Q1-offer", false, "negotiation failed"); finish(1); }
         std::string sdp = sdp_text(offer.get());
         record("Q1-offer", sdp.find("m=application") != std::string::npos, "offer m-sections:" + sdp_summary(offer.get()));
@@ -590,16 +793,17 @@ void build_steps(GstWebRTCBundlePolicy bp) {
   });
   // ---- wait connected + data channel open, send message
   steps.push_back([](auto next) {
-    wait_until([] { return connected() && ctx.B->dc.load() && ctx.A->dc_open > 0; }, 15000, [next](bool ok) {
-      record("Q1-ondc", ctx.B->dc.load() != nullptr, "B on-data-channel fired: " + std::string(ctx.B->dc.load() ? "yes" : "no") +
-             "; A connection-state=" + ctx.A->conn_state() + " B=" + ctx.B->conn_state() + " (connected+open within 15 s: " + (ok ? "yes" : "NO") + ")");
+    wait_until([] { return connected() && ctx.ans->has_dc() && ctx.A->dc_open > 0; }, 15000, [next](bool ok) {
+      record("Q1-ondc", ctx.ans->has_dc(), "B on-data-channel fired: " + std::string(ctx.ans->has_dc() ? "yes" : "no") +
+             "; A connection-state=" + ctx.A->conn_state() + " B=" + ctx.ans->conn_state() + " (connected+open within 15 s: " + (ok ? "yes" : "NO") + ")");
       if (!ok) { finish(1); }
       GError* err = nullptr;
       gboolean sent = gst_webrtc_data_channel_send_string_full(ctx.dc.get(), "hello from A", &err);
       logf("A: send_string_full -> %d %s", sent, err ? err->message : "");
       if (err) g_error_free(err);
-      wait_until([] { return !ctx.B->dc_messages.empty(); }, 3000, [next](bool ok) {
-        record("Q1-msg", ok && ctx.B->dc_messages[0] == "hello from A", ok ? "B received \"" + ctx.B->dc_messages[0] + "\" via on-message-string" : "no message within 3 s");
+      wait_until([] { return !ctx.ans->dc_messages().empty(); }, 3000, [next](bool ok) {
+        auto msgs = ctx.ans->dc_messages();
+        record("Q1-msg", ok && msgs[0] == "hello from A", ok ? "B received \"" + msgs[0] + "\" via on-message-string" : "no message within 3 s");
         // buffered-amount: threshold + burst of binary messages
         g_object_set(ctx.dc.get(), "buffered-amount-low-threshold", (guint64)4096, nullptr);
         guint64 thr = 0;
@@ -618,10 +822,10 @@ void build_steps(GstWebRTCBundlePolicy bp) {
         }
         guint64 ba_now = 0; g_object_get(ctx.dc.get(), "buffered-amount", &ba_now, nullptr);
         logf("A: buffered-amount right after burst = %" G_GUINT64_FORMAT " (max-message-size=%" G_GUINT64_FORMAT ")", ba_now, mms);
-        wait_until([n, chunk] { return ctx.B->dc_bytes >= (guint64)n * chunk; }, 10000, [next, ba_now, n, chunk](bool ok) {
+        wait_until([n, chunk] { return ctx.ans->dc_bytes() >= (guint64)n * chunk; }, 10000, [next, ba_now, n, chunk](bool ok) {
           guint64 ba_end = 0; g_object_get(ctx.dc.get(), "buffered-amount", &ba_end, nullptr);
           record("Q1-bufamt", ok && ctx.ba_notify > 0 && ctx.ba_low > 0 && ctx.ba_max > 0,
-                 "B received " + std::to_string(ctx.B->dc_bytes.load()) + "/" + std::to_string((guint64)n * chunk) + " bytes; buffered-amount after burst=" +
+                 "B received " + std::to_string(ctx.ans->dc_bytes()) + "/" + std::to_string((guint64)n * chunk) + " bytes; buffered-amount after burst=" +
                  std::to_string(ba_now) + " max seen=" + std::to_string(ctx.ba_max.load()) + " end=" + std::to_string(ba_end) +
                  "; notify::buffered-amount x" + std::to_string(ctx.ba_notify.load()) + "; on-buffered-amount-low x" + std::to_string(ctx.ba_low.load()));
           next();
@@ -631,9 +835,9 @@ void build_steps(GstWebRTCBundlePolicy bp) {
   });
   // ---- media flowing + Q5 stats
   steps.push_back([](auto next) {
-    wait_until([] { return ctx.B->rx_count(0) > 30; }, 10000, [next](bool ok) {
-      record("media-1", ok, "B " + ctx.B->rx_pad(0) + " buffers=" + std::to_string(ctx.B->rx_count(0)) + " pads_added=" + std::to_string(ctx.B->pads_added.load()) +
-             " on-new-transceiver=" + std::to_string(ctx.B->new_transceiver.load()));
+    wait_until([] { return ctx.ans->rx_count(0) > 30; }, 10000, [next](bool ok) {
+      record("media-1", ok, "B " + ctx.ans->rx_pad(0) + " " + ctx.ans->rx_unit() + "=" + std::to_string(ctx.ans->rx_count(0)) + " pads_added=" + std::to_string(ctx.ans->tracks_added()) +
+             " on-new-transceiver=" + std::to_string(ctx.ans->transceivers()));
       if (!ok) finish(1);
       emit_async(ctx.A->webrtc, "get-stats", nullptr, [next](Reply r) {
         ctx.stats1 = parse_stats(r);
@@ -659,16 +863,15 @@ void build_steps(GstWebRTCBundlePolicy bp) {
   });
   // ---- Q3: add second track, renegotiate
   steps.push_back([](auto next) {
-    auto* t1 = ctx.B->track(0);
-    t1->max_gap_us = 0; t1->watch = true;
-    ctx.t1_before_reneg = t1->count;
+    ctx.ans->watch(0, true);
+    ctx.t1_before_reneg = ctx.ans->rx_count(0);
     int nn_before = ctx.A->negotiation_needed;
     ctx.track2 = add_video_track(*ctx.A, "smpte", 97);
     wait_until([nn_before] { return ctx.A->negotiation_needed > nn_before && ctx.track2->caps_ready.load(); }, 5000, [next, nn_before](bool ok) {
       record("Q3-onn", ctx.A->negotiation_needed > nn_before, "on-negotiation-needed after requesting " + std::string(GST_PAD_NAME(ctx.track2->sinkpad)) + ": " +
              std::to_string(ctx.A->negotiation_needed.load() - nn_before) + " firing(s); caps ready=" + std::to_string(ctx.track2->caps_ready.load()));
       (void)ok;
-      negotiate(*ctx.A, *ctx.B, nullptr, {}, [next](Sdp offer, Sdp answer) {
+      negotiate(*ctx.A, *ctx.ans, nullptr, {}, [next](Sdp offer, Sdp answer) {
         if (!offer || !answer) { record("Q3-mids", false, "renegotiation failed"); next(); return; }
         guint n = gst_sdp_message_medias_len(offer->sdp);
         // find the m-section for pt 97 (track 2)
@@ -678,14 +881,14 @@ void build_steps(GstWebRTCBundlePolicy bp) {
         record("Q3-mids", mid0 == ctx.mid0_after_offer1 && m2 >= 0 && mid2 != mid0,
                "offer#2 m=0 mid=" + mid0 + " (was " + ctx.mid0_after_offer1 + "), new video m=" + std::to_string(m2) + " mid=" + mid2 + " ; all:" + sdp_summary(offer.get()));
         ctx.track2_mline = m2 >= 0 ? (guint)m2 : 99;
-        wait_until([] { return ctx.B->rx_count(ctx.track2_mline) > 30; }, 8000, [next](bool ok) {
-          record("Q3-track2", ok, "B pad for m=" + std::to_string(ctx.track2_mline) + " is " + ctx.B->rx_pad(ctx.track2_mline) + " buffers=" + std::to_string(ctx.B->rx_count(ctx.track2_mline)) + " pads_added=" + std::to_string(ctx.B->pads_added.load()) +
-                 " on-new-transceiver(B)=" + std::to_string(ctx.B->new_transceiver.load()));
+        wait_until([] { return ctx.ans->rx_count(ctx.track2_mline) > 30; }, 8000, [next](bool ok) {
+          record("Q3-track2", ok, "B pad for m=" + std::to_string(ctx.track2_mline) + " is " + ctx.ans->rx_pad(ctx.track2_mline) + " " + ctx.ans->rx_unit() + "=" + std::to_string(ctx.ans->rx_count(ctx.track2_mline)) + " pads_added=" + std::to_string(ctx.ans->tracks_added()) +
+                 " on-new-transceiver(B)=" + std::to_string(ctx.ans->transceivers()));
           after(1000, [next] {
-            auto* t1 = ctx.B->track(0); t1->watch = false;
-            uint64_t after_c = t1->count; double gap_ms = t1->max_gap_us / 1000.0;
+            ctx.ans->watch(0, false);
+            uint64_t after_c = ctx.ans->rx_count(0); double gap_ms = ctx.ans->max_gap_ms(0);
             record("Q3-cont", after_c > ctx.t1_before_reneg && gap_ms < 200.0,
-                   "track1 buffers before=" + std::to_string(ctx.t1_before_reneg) + " after=" + std::to_string(after_c) + " max inter-buffer gap during renegotiation=" +
+                   "track1 " + ctx.ans->rx_unit() + " before=" + std::to_string(ctx.t1_before_reneg) + " after=" + std::to_string(after_c) + " max inter-" + (g_stdio ? "increment gap (100 ms stats polling)" : "buffer gap") + " during renegotiation=" +
                    std::to_string(gap_ms) + " ms");
             next();
           });
@@ -721,23 +924,23 @@ void build_steps(GstWebRTCBundlePolicy bp) {
     }
     wait_until([nn_before] { return ctx.A->negotiation_needed > nn_before; }, 2000, [next, mode, mline2](bool onn) {
       logf("Q3-remove: on-negotiation-needed after %s: %s", mode, onn ? "yes" : "NO");
-      negotiate(*ctx.A, *ctx.B, nullptr, {}, [next, mode, onn, mline2](Sdp offer_in, Sdp answer) {
+      negotiate(*ctx.A, *ctx.ans, nullptr, {}, [next, mode, onn, mline2](Sdp offer_in, Sdp answer) {
         if (!offer_in || !answer) { record("Q3-remove", false, "renegotiation failed"); next(); return; }
         auto offer = std::make_shared<Sdp>(std::move(offer_in));
         std::string dir = media_dir(offer->get(), mline2), adir = media_dir(answer.get(), mline2);
-        uint64_t c0 = ctx.B->rx_count(ctx.track2_mline), t1a = ctx.B->rx_count(0);
+        uint64_t c0 = ctx.ans->rx_count(ctx.track2_mline), t1a = ctx.ans->rx_count(0);
         after(1500, [next, mode, onn, dir, adir, c0, t1a, offer] {
-          uint64_t c1 = ctx.B->rx_count(ctx.track2_mline), t1b = ctx.B->rx_count(0);
+          uint64_t c1 = ctx.ans->rx_count(ctx.track2_mline), t1b = ctx.ans->rx_count(0);
           bool t2_stopped = c1 == c0, t1_flows = t1b > t1a + 15;
           const char* want_dir = remove_mode == RemoveMode::SendOnly ? "sendonly" : "inactive";
           record("Q3-remove", dir == want_dir && (remove_mode == RemoveMode::SendOnly || t2_stopped) && t1_flows,
                  std::string("[") + mode + "] on-negotiation-needed=" + (onn ? "yes" : "no") + "; offer#3 track2 dir=" + dir + " answer dir=" + adir +
-                 "; track2 buffers over 1.5 s: +" + std::to_string(c1 - c0) + "; track1 over 1.5 s: +" + std::to_string(t1b - t1a) + "; mids:" + sdp_summary(offer->get()));
+                 "; track2 " + ctx.ans->rx_unit() + " over 1.5 s: +" + std::to_string(c1 - c0) + "; track1 over 1.5 s: +" + std::to_string(t1b - t1a) + "; mids:" + sdp_summary(offer->get()));
           if (ctx.track2->sinkpad)
             logf("Q3-remove: A sink pads blocking? %s=%d %s=%d", GST_PAD_NAME(ctx.track1->sinkpad), gst_pad_is_blocking(ctx.track1->sinkpad),
                  GST_PAD_NAME(ctx.track2->sinkpad), gst_pad_is_blocking(ctx.track2->sinkpad));
           // Localize: rtpsession stats on both sides, buffer counters on the nice/dtls pads, kernel UDP counters.
-          if (counters.empty()) { install_counters(*ctx.A); install_counters(*ctx.B); }
+          if (counters.empty()) { install_counters(*ctx.A); if (ctx.B) install_counters(*ctx.B); }
           auto snap = std::make_shared<std::map<std::string, uint64_t>>(snapshot_counters());
           auto udp = std::make_shared<std::map<std::string, long long>>(udp_counters());
           stats_delta(1000, [next, snap, udp](std::string d1) {
@@ -745,20 +948,20 @@ void build_steps(GstWebRTCBundlePolicy bp) {
             logf("Q3-remove: rtpsession stats over 1 s (track2 source still pushing): %s", d1.c_str());
             logf("Q3-remove: transport pad counters over 1 s: %s", counters_delta(*snap).c_str());
             // Bidirectional liveness probe over the data channel (shares the bundled ICE/DTLS transport).
-            size_t a_msgs = ctx.A->dc_messages.size(), b_msgs = ctx.B->dc_messages.size();
-            if (ctx.B->dc.load()) gst_webrtc_data_channel_send_string_full(ctx.B->dc.load(), "ping B->A after remove", nullptr);
+            size_t a_msgs = ctx.A->dc_messages.size(), b_msgs = ctx.ans->dc_messages().size();
+            ctx.ans->send_dc("ping B->A after remove");
             gst_webrtc_data_channel_send_string_full(ctx.dc.get(), "ping A->B after remove", nullptr);
             after(1000, [next, a_msgs, b_msgs, d1] {
-              bool a_ok = ctx.A->dc_messages.size() > a_msgs, b_ok = ctx.B->dc_messages.size() > b_msgs;
+              bool a_ok = ctx.A->dc_messages.size() > a_msgs, b_ok = ctx.ans->dc_messages().size() > b_msgs;
               record("Q3-rmdc", a_ok && b_ok, std::string("datachannel after removal: B->A ") + (a_ok ? "arrived" : "LOST") + ", A->B " + (b_ok ? "arrived" : "LOST"));
               // Recovery attempt: stop pushing into the removed track's sink pad via the valve.
               g_object_set(ctx.track2->valve, "drop", TRUE, nullptr);
-              uint64_t t1c = ctx.B->rx_count(0);
+              uint64_t t1c = ctx.ans->rx_count(0);
               auto udp2 = std::make_shared<std::map<std::string, long long>>(udp_counters());
               stats_delta(1500, [next, t1c, d1, udp2](std::string d2) {
-                uint64_t t1d = ctx.B->rx_count(0);
+                uint64_t t1d = ctx.ans->rx_count(0);
                 logf("Q3-rmvalve: kernel UDP counters over 1.5 s: %s", udp_delta(*udp2).c_str());
-                record("Q3-rmvalve", t1d > t1c + 15, "after valve drop=true on track2: track1 buffers over 1.5 s: +" + std::to_string(t1d - t1c) + "; stats " + d2 +
+                record("Q3-rmvalve", t1d > t1c + 15, "after valve drop=true on track2: track1 " + ctx.ans->rx_unit() + " over 1.5 s: +" + std::to_string(t1d - t1c) + "; stats " + d2 +
                        " (before valve: " + d1 + ")");
                 next();
               });
@@ -773,18 +976,18 @@ void build_steps(GstWebRTCBundlePolicy bp) {
     Sdp cur = ctx.A->local_description();
     ctx.ufrag0_before_restart = media_attr(cur.get(), 0, "ice-ufrag"); ctx.pwd0_before_restart = media_attr(cur.get(), 0, "ice-pwd");
     int ice_changes_before = ctx.A->ice_state_changes;
-    uint64_t t1a = ctx.B->rx_count(0);
+    uint64_t t1a = ctx.ans->rx_count(0);
     GstStructure* opts = gst_structure_new("options", "ice-restart", G_TYPE_BOOLEAN, TRUE, "iceRestart", G_TYPE_BOOLEAN, TRUE, nullptr);
-    negotiate(*ctx.A, *ctx.B, opts, {}, [next, ice_changes_before, t1a](Sdp offer, Sdp answer) {
+    negotiate(*ctx.A, *ctx.ans, opts, {}, [next, ice_changes_before, t1a](Sdp offer, Sdp answer) {
       if (!offer || !answer) { record("Q4-restart", "UNCLEAR", "create-offer/answer with ice-restart failed: see log"); next(); return; }
       std::string uf = media_attr(offer.get(), 0, "ice-ufrag"), pw = media_attr(offer.get(), 0, "ice-pwd");
       bool changed = uf != ctx.ufrag0_before_restart && pw != ctx.pwd0_before_restart;
       after(2000, [next, changed, uf, pw, ice_changes_before, t1a] {
-        uint64_t t1b = ctx.B->rx_count(0);
+        uint64_t t1b = ctx.ans->rx_count(0);
         record("Q4-restart", changed ? "PASS" : "FAIL",
                "offer ufrag before=" + ctx.ufrag0_before_restart + " after=" + uf + " (pwd changed=" + std::string(pw != ctx.pwd0_before_restart ? "yes" : "no") +
                "); ice-connection-state changes during=" + std::to_string(ctx.A->ice_state_changes - ice_changes_before) + " now A=" + ctx.A->ice_state() +
-               " B=" + ctx.B->ice_state() + "; track1 buffers over 2 s: +" + std::to_string(t1b - t1a));
+               " B=" + ctx.ans->ice_state() + "; track1 " + ctx.ans->rx_unit() + " over 2 s: +" + std::to_string(t1b - t1a));
         next();
       });
     });
@@ -795,6 +998,7 @@ void build_steps(GstWebRTCBundlePolicy bp) {
 }  // namespace
 
 bool g_reuse_pads = false;
+bool g_stdio = false;
 
 int main(int argc, char** argv) {
   gst_init(&argc, &argv);
@@ -807,9 +1011,12 @@ int main(int argc, char** argv) {
     else if (!std::strcmp(argv[i], "--remove=sendonly")) remove_mode = RemoveMode::SendOnly;
     else if (!std::strcmp(argv[i], "--remove=release-pad")) remove_mode = RemoveMode::ReleasePad;
     else if (!std::strcmp(argv[i], "--reuse-pads")) g_reuse_pads = true;
-    else { std::fprintf(stderr, "usage: %s [--bundle=none|balanced|max-bundle] [--remove=inactive|sendonly|release-pad] [--reuse-pads]\n", argv[0]); return 2; }
+    else if (!std::strcmp(argv[i], "--answerer=stdio")) g_stdio = true;
+    else if (!std::strcmp(argv[i], "--answerer=in-process")) g_stdio = false;
+    else { std::fprintf(stderr, "usage: %s [--bundle=none|balanced|max-bundle] [--remove=inactive|sendonly|release-pad] [--reuse-pads] [--answerer=in-process|stdio]\n", argv[0]); return 2; }
   }
-  logf("GStreamer %s, webrtcbin bundle-policy=%s reuse-source-pads=%s", gst_version_string(), enum_nick(GST_TYPE_WEBRTC_BUNDLE_POLICY, bp).c_str(), g_reuse_pads ? "true" : "false");
+  logf("GStreamer %s, webrtcbin bundle-policy=%s reuse-source-pads=%s answerer=%s", gst_version_string(), enum_nick(GST_TYPE_WEBRTC_BUNDLE_POLICY, bp).c_str(), g_reuse_pads ? "true" : "false",
+       g_stdio ? "stdio (browser)" : "in-process webrtcbin");
   loop = g_main_loop_new(nullptr, FALSE);
   build_steps(bp);
   g_timeout_add(120000, [](gpointer) -> gboolean { record("WATCHDOG", "FAIL", "120 s global timeout"); finish(3); return G_SOURCE_REMOVE; }, nullptr);

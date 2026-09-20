@@ -26,6 +26,26 @@ EOS and is gone once the answerer sets `reuse-source-pads`. Whether
 `webrtcsink` (newer gst-plugins-rs) restarts ICE is a question for the
 spike this ADR waits on.
 
+**Chromium-answerer spike (2026-09-19, slice 3a, [report](../../agent/spikes/webrtcbin-probe/README.md#chromium-answerer-slice-3a)):**
+the same `webrtcbin` offerer run against the browser lab's real Chromium
+(153, [docs/25](../25-browser-lab.md)) for Q1/Q3/Q6, three configurations,
+host candidates across the compose network. Every FAIL that had a
+webrtcbin on the answering side disappears with a browser there: the
+pre-offer DataChannel opens and carries strings and a 2 MiB burst; a
+track added by renegotiation decodes without the untouched track missing
+a frame; removing it with `direction=inactive` + re-offer makes Chromium
+mute that receiver and drop its late RTP while the other track keeps
+30 fps and the DataChannel works both ways — with the offerer still
+pushing the removed track's packets for 2.5 s before the valve closed,
+i.e. a harsher order than [docs/23](../23-agent-core-architecture.md)'s;
+and `bundle-policy=none` connects (three ICE transports) where the
+loopback never did. The docs/23 track-removal decision (valve closed
+first, transceiver `inactive`, re-offer) **holds against a real browser**;
+`reuse-source-pads=TRUE` remains a requirement only for the webrtcbin
+answerers Fjarr ships. `max-bundle` stays the policy (one transport is
+what the reconnection ladder assumes, and browsers bundle anyway). ICE
+restart is unchanged, and the `webrtcsink` question above is still open.
+
 ## Options considered
 
 - **webrtcbin + FrameHub (camera-streamer pattern)** + hand-wired TWCC/GCC bitrate
