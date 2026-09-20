@@ -65,6 +65,10 @@ jobs:
       - name: start the lab browser, fjarr-server and the demo stack (docs/25 topology; the real agent on the software encoder)
         run: |
           cp .env.example .env
+          # The dev image's user must own the checkout (the runner user is not uid 1000) and
+          # share the docker socket's group, or nothing inside the container can build or exec.
+          sed -i "s/^USER_UID=.*/USER_UID=$(id -u)/; s/^USER_GID=.*/USER_GID=$(id -g)/; s#^DOCKER_GID=.*#DOCKER_GID=$(stat -c %g /var/run/docker.sock)#" .env
+          grep -E "^(USER_UID|USER_GID|DOCKER_GID)=" .env
           # dev and demo-robot map /dev/dri (VA-API); a hosted runner has none. An empty
           # directory maps no device and the demo robot stays on the software encoder.
           sudo mkdir -p /dev/dri
