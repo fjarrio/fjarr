@@ -134,7 +134,13 @@ opsim: ## Run one fjarr-opsim scenario against the demo robot, from inside its c
 
 .PHONY: opsim-all
 opsim-all: ## Every CI opsim scenario (docs/23: all but soak and netem-*)
-	@for s in smoke toggle hotplug silent-operator no-answer socket-drop ice-restart deadman; do echo "== $$s"; $(MAKE) --no-print-directory opsim OPSIM_SCENARIO=$$s || exit 1; done
+	@for s in smoke toggle hotplug silent-operator no-answer socket-drop ice-restart deadman; do echo "== $$s"; \
+	  $(MAKE) --no-print-directory opsim OPSIM_SCENARIO=$$s; rc=$$?; \
+	  if [ $$rc -ge 128 ]; then \
+	    echo "opsim-all: $$s died of signal $$((rc - 128)) in the simulator's own peer teardown (the upstream DTLS race, docs/23 slice 5b notes) — one retry"; \
+	    $(MAKE) --no-print-directory opsim OPSIM_SCENARIO=$$s; rc=$$?; \
+	  fi; \
+	  [ $$rc -eq 0 ] || exit 1; done
 
 OPSIM_CYCLES ?= 200
 .PHONY: opsim-soak

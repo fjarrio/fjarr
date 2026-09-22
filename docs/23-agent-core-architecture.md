@@ -1286,6 +1286,21 @@ image contains no `x264enc`; (5) nothing is published.
 - *`fjarr-opsim` reads the token from its environment*, so the make targets
   and CI needed no new arguments; the Makefile includes `.env` for the same
   token in its `curl`s.
+- *The simulator's teardown crashes on the hosted runner are an upstream
+  race.* Two CI runs died after every check of a scenario had passed — a
+  segfault in `no-answer`'s teardown, then the glibc `tpp.c:83` assertion
+  in `ice-restart`'s reconnect. `fjarr-opsim` under ThreadSanitizer against
+  the demo robot reports data races inside OpenSSL between webrtcbin's
+  `nicesrc` and `queue` streaming threads during the DTLS handshake
+  (`BUF_MEM_grow`, `CRYPTO_clear_realloc`, `ASN1_STRING_set`; the two
+  threads hold disjoint mutex sets), i.e. GStreamer's `dtls` elements
+  driving one SSL object from two threads without a common lock. Heap
+  corruption from that surfaces at free time, which is teardown, and the
+  runner's timing hits the window far more often than this host does.
+  Until the baseline carries a fix, `make opsim-all` retries a scenario
+  once when the simulator dies of a *signal* (a failed check still fails
+  at once), and the agent's own soak, which runs the same elements for 200
+  sessions, stays the watch for the same corruption on the robot side.
 
 ## Where `fjarr.test` lives
 
