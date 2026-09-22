@@ -46,6 +46,8 @@ struct AgentConfig {
         std::string socket;
         std::string token;
         int history = 64;
+        /// The viewer's static files, served at `/` (docs/24#the-viewer); empty = the text index only.
+        std::string viewer_dir;
     } introspect;
 
     /// `[capabilities."<name>"]` tables, validated against each capability's schema.

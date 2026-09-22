@@ -147,10 +147,14 @@ the network. The endpoint serves the directory named by
 `introspect.viewer_dir` (config / `FJARR_INTROSPECT_VIEWER_DIR`; empty by
 default) at `/`: `index.html` at the root, assets under their built
 paths, correct media types for html/js/css/wasm, long cache headers only
-for Vite's hashed asset names, path traversal refused, a missing file a
-404, and every API route above shadowing a file of the same name. Without
-the key, `GET /` stays the text index plus one line naming the key and
-the package that provides the files. The `fjarr-agent` package (M2.5,
+for Vite's hashed asset names, path traversal and symlinks out of the
+directory refused, a missing file a 404, and every API route above
+shadowing a file of the same name. The token gates the API routes only:
+the page and its assets are served without it (a browser navigates
+without a header; the viewer asks for the token and sends it to the API),
+and they reveal nothing about the robot. Without the key, `GET /` stays
+the text index plus one line naming the key and the package that provides
+the files. The `fjarr-agent` package (M2.5,
 [docs/26](26-robot-install-and-drivers.md)) installs them under
 `/usr/share/fjarr/viewer` and its shipped `fjarr.toml` points the key
 there; an embedder who never sets it loses nothing. The `fjarr-agent`
@@ -161,10 +165,14 @@ container, which a browser on the host cannot reach. The demo profile
 therefore binds it on the container's interface with a fixed dev token
 (`FJARR_INTROSPECT_TOKEN`, from `.env.example`) and publishes the port on
 the host's loopback only; the compose file mounts the viewer's build
-output at the share directory. `make introspect` opens
-`http://localhost:7381/`; the viewer asks for the token once and keeps it
-for the tab, the lab sends it as a header — which is also the only place
-the token path (docs/10) is exercised by tests.
+output (`web/apps/introspect-viewer/dist`, from `make web-build`) at the
+share directory. `make introspect` opens `http://localhost:7381/`; the
+viewer asks for the token once and keeps it for the tab (session
+storage), the lab, the make targets and `fjarr-opsim` send it as a header
+(`--introspect-token`, else `FJARR_INTROSPECT_TOKEN` from the
+environment) — which is also where the token path (docs/10) is exercised
+by tests. A viewer dev server points at another agent with
+`?endpoint=http://127.0.0.1:7381`.
 
 ### From the dashboard: the `fjarr.introspect` capability
 
@@ -282,9 +290,11 @@ in one command.
   `fjarr.introspect` capability, the pipeline feeds, `<PipelineGraph>` +
   hooks, the demo dashboard Diagnostics tab behind the developer role
   ([review](reviews/slice-5a-review.md)).
-- **Slice 5b**: the viewer app served from `introspect.viewer_dir`,
-  `make introspect` opening it against the demo robot (token path), the
-  CI-built `fjarr-agent` image carrying it ([docs/23](23-agent-core-architecture.md#slices-3a-3b-3c-and-their-gates)).
+- **Slice 5b** ✔ (2026-09-21): the viewer app served from
+  `introspect.viewer_dir`, `make introspect` opening it against the demo
+  robot (token path), the CI-built `fjarr-agent` image carrying it
+  ([docs/23](23-agent-core-architecture.md#slices-3a-3b-3c-and-their-gates),
+  [review](reviews/slice-5b-review.md)).
 - **M7**: fleet-wide retention and search in Fjarr Cloud.
 
 ## Acceptance

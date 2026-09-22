@@ -213,18 +213,21 @@ leaves nothing behind, but it does need `NET_ADMIN`).
 
 ## Pipeline introspection
 
-With the demo profile up, `make introspect` (no arguments, slice 5b) opens
-the agent's live pipeline viewer at `http://localhost:7381/`
-([docs/24](24-pipeline-introspection.md#the-viewer)). The endpoint is
-loopback-only inside the robot container, so the demo profile binds it on
-the container's interface with the dev token `FJARR_INTROSPECT_TOKEN`
-(`.env.example`) and publishes it on the host's loopback only; the viewer
-asks for the token once. `make introspect PIPELINE=<id>` and
-`curl localhost:7381/pipelines/<id>.txt` inside the container print a
-one-screen summary — the first thing to look at when media misbehaves,
-and what `/verify` and the e2e tests assert against.
+With the demo profile up, `make introspect` (no arguments) opens the
+agent's live pipeline viewer at `http://localhost:7381/`
+([docs/24](24-pipeline-introspection.md#the-viewer)) and prints the token
+to paste. The endpoint is loopback-only inside the robot container, so
+the demo profile binds it on the container's interface with the dev token
+`FJARR_INTROSPECT_TOKEN` (`.env.example`; the Makefile reads `.env` for
+it) and publishes it on the host's loopback only; the viewer asks for the
+token once per tab. `make introspect PIPELINE=<id> [FORMAT=json|dot]`
+prints one pipeline, `make introspect SUMMARIES=1` every pipeline's
+summary, and from the host
+`curl -H "Authorization: Bearer $FJARR_INTROSPECT_TOKEN" localhost:7381/pipelines`
+is the raw API — the first thing to look at when media misbehaves, and
+what `/verify` and the e2e tests assert against.
 
-### Running the demo robot from the agent image (slice 5b)
+### Running the demo robot from the agent image
 
 The demo robot runs in the dev image with the workspace mounted, so an
 agent change is `make agent-build` and a container restart, never an
@@ -234,9 +237,10 @@ viewer, a build stage the library and daemon, the runtime stage is Ubuntu
 26.04 with the runtime GStreamer and VA-API packages, no compilers, a
 non-root user, the viewer under `/usr/share/fjarr/viewer`, a healthcheck
 on the endpoint, and a build that fails if `x264enc` is present — the
-doctor's rule applied to the artifact). A `demo` stage layers the demo
-robot binary on the runtime image, the topology an embedding customer
-uses. To run the demo from it:
+doctor's rule applied to the artifact; `.dockerignore` keeps `build/`,
+`node_modules/` and `inspiration/` out of the context). A `demo` stage
+layers the demo robot binary on the runtime image, the topology an
+embedding customer uses. To run the demo from it:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.image.yml --profile demo up -d --build demo-robot

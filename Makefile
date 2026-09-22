@@ -85,12 +85,12 @@ FJARR_LEAKS_TRACER = leaks(filters="GstElement,GstPad,GstBuffer,GstSample,GstPro
 agent-leaks: ## Run one opsim scenario against the demo robot under the leaks tracer and print what stayed alive (SCENARIO=smoke; docs/23)
 	@echo "recreating demo-robot with GST_TRACERS (it stays on until the next 'docker compose up -d demo-robot' without FJARR_GST_TRACERS)"
 	FJARR_GST_TRACERS='$(FJARR_LEAKS_TRACER)' docker compose --profile demo up -d demo-robot
-	@for i in $$(seq 1 40); do docker compose exec -T demo-robot curl -sf localhost:7381/memory >/dev/null 2>&1 && break; sleep 0.5; done
-	@quiet() { for i in $$(seq 1 60); do docker compose exec -T demo-robot curl -sf localhost:7381/memory | python3 -c 'import sys,json; d=json.load(sys.stdin); sys.exit(0 if d["producers_alive"]==0 and d["sessions_alive"]==0 else 1)' && return 0; sleep 0.5; done; echo "agent-leaks: the robot did not go quiet (producers/sessions alive)"; return 1; }; \
+	@for i in $$(seq 1 40); do $(ROBOT_CURL) localhost:7381/memory >/dev/null 2>&1 && break; sleep 0.5; done
+	@quiet() { for i in $$(seq 1 60); do $(ROBOT_CURL) localhost:7381/memory | python3 -c 'import sys,json; d=json.load(sys.stdin); sys.exit(0 if d["producers_alive"]==0 and d["sessions_alive"]==0 else 1)' && return 0; sleep 0.5; done; echo "agent-leaks: the robot did not go quiet (producers/sessions alive)"; return 1; }; \
 	quiet || exit 1; echo "agent-leaks: warm-up (first-session initialisation is not a leak)"; $(MAKE) --no-print-directory opsim OPSIM_SCENARIO=smoke >/dev/null || exit 1; quiet || exit 1; \
-	tok=$$(docker compose exec -T demo-robot curl -sf -X POST localhost:7381/memory/checkpoint | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["checkpoint"]); sys.exit(0 if d.get("leaks_tracer") else 3)') || { echo "agent-leaks: the leaks tracer is not active in the robot (GST_TRACERS not applied?)"; exit 1; }; \
+	tok=$$($(ROBOT_CURL) -X POST localhost:7381/memory/checkpoint | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["checkpoint"]); sys.exit(0 if d.get("leaks_tracer") else 3)') || { echo "agent-leaks: the leaks tracer is not active in the robot (GST_TRACERS not applied?)"; exit 1; }; \
 	$(MAKE) --no-print-directory opsim OPSIM_SCENARIO=$(or $(SCENARIO),smoke); rc=$$?; quiet || exit 1; \
-	docker compose exec -T demo-robot curl -sf "localhost:7381/memory?since=$$tok" | python3 -c 'import sys,json; d=json.load(sys.stdin); l=d["leaks"]; print("census diff:", json.dumps(d["diff"]["census"])); print("rss diff:", d["diff"]["rss_bytes"], "bytes"); print("leaks tracer: created-and-alive", len(l["created"]), "| alive now", l["alive"], "| alive at checkpoint", l["at_checkpoint"]); [print("  ", o) for o in l["created"]]; sys.exit(1 if l["created"] else 0)'; lr=$$?; \
+	$(ROBOT_CURL) "localhost:7381/memory?since=$$tok" | python3 -c 'import sys,json; d=json.load(sys.stdin); l=d["leaks"]; print("census diff:", json.dumps(d["diff"]["census"])); print("rss diff:", d["diff"]["rss_bytes"], "bytes"); print("leaks tracer: created-and-alive", len(l["created"]), "| alive now", l["alive"], "| alive at checkpoint", l["at_checkpoint"]); [print("  ", o) for o in l["created"]]; sys.exit(1 if l["created"] else 0)'; lr=$$?; \
 	[ $$rc -eq 0 ] || echo "agent-leaks: note — the scenario's own assertions returned $$rc under the tracer's overhead (timing checks are gated by opsim-all without it); the verdict here is about leaks"; \
 	[ $$lr -eq 0 ] && echo "agent-leaks ($(or $(SCENARIO),smoke)): clean" || { echo "agent-leaks ($(or $(SCENARIO),smoke)): FAILED — objects created by the scenario are still alive"; exit 1; }
 
@@ -112,11 +112,17 @@ agent-heaptrack: ## heaptrack the streaming loop test and print the allocators i
 	heaptrack_print "$$f" -a 25 -p 0 -l 0 -t 0 2>/dev/null | tee build/heaptrack/loop-media.txt | grep -B1 -A2 -E "fjarr::" | head -60; \
 	echo "agent-heaptrack: full report in build/heaptrack/loop-media.txt (budget: one GstBuffer header per subscriber per frame in FrameHub::deliver, nothing else per frame — docs/16)"
 
+# The demo robot's endpoint (docs/24): reached inside its container with the demo's token (.env).
+-include .env
+INTROSPECT_TOKEN ?= $(or $(FJARR_INTROSPECT_TOKEN),dev-only-introspect-token)
+ROBOT_CURL = docker compose exec -T demo-robot curl -sf -H "Authorization: Bearer $(INTROSPECT_TOKEN)"
+
 .PHONY: introspect
-introspect: ## Ask the demo robot's introspection endpoint (docs/24): PIPELINE=<id> FORMAT=txt|json|dot, else every pipeline's summary
-	@if [ -n "$(PIPELINE)" ]; then docker compose exec -T demo-robot curl -sf "localhost:7381/pipelines/$(PIPELINE).$(or $(FORMAT),txt)"; echo; else \
-	  docker compose exec -T demo-robot curl -sf localhost:7381/pipelines | python3 -c 'import sys,json; [print(p["id"], p["kind"], p["state"], "seq", p["seq"], p["last_trigger"]) for p in json.load(sys.stdin)["pipelines"]]'; \
-	  for id in $$(docker compose exec -T demo-robot curl -sf localhost:7381/pipelines | python3 -c 'import sys,json; [print(p["id"]) for p in json.load(sys.stdin)["pipelines"]]'); do echo "--- $$id"; docker compose exec -T demo-robot curl -sf "localhost:7381/pipelines/$$id.txt"; done; fi
+introspect: ## Open the demo robot's pipeline viewer (http://localhost:7381/, docs/24); PIPELINE=<id> FORMAT=txt|json|dot prints one summary, SUMMARIES=1 every pipeline's
+	@if [ -n "$(PIPELINE)" ]; then $(ROBOT_CURL) "localhost:7381/pipelines/$(PIPELINE).$(or $(FORMAT),txt)"; echo; elif [ -z "$(SUMMARIES)" ]; then \
+	  echo "viewer: http://localhost:7381/  (token: $(INTROSPECT_TOKEN))"; (xdg-open http://localhost:7381/ >/dev/null 2>&1 || open http://localhost:7381/ >/dev/null 2>&1 || true); else \
+	  $(ROBOT_CURL) localhost:7381/pipelines | python3 -c 'import sys,json; [print(p["id"], p["kind"], p["state"], "seq", p["seq"], p["last_trigger"]) for p in json.load(sys.stdin)["pipelines"]]'; \
+	  for id in $$($(ROBOT_CURL) localhost:7381/pipelines | python3 -c 'import sys,json; [print(p["id"]) for p in json.load(sys.stdin)["pipelines"]]'); do echo "--- $$id"; $(ROBOT_CURL) "localhost:7381/pipelines/$$id.txt"; done; fi
 
 OPSIM_SERVER ?= ws://fjarr-server:8080/ws
 OPSIM_ROBOT ?= demo-robot-01
@@ -161,8 +167,8 @@ web-dev: ## Demo dashboard dev server (http://localhost:5173)
 	pnpm --filter fjarr-demo-dashboard dev
 
 .PHONY: web-build
-web-build: ## Build @fjarr/core, @fjarr/react, demo dashboard
-	pnpm -r --filter './web/packages/**' --filter fjarr-demo-dashboard build
+web-build: ## Build @fjarr/core, @fjarr/react, the introspection viewer, demo dashboard
+	pnpm -r --filter './web/packages/**' --filter './web/apps/**' --filter fjarr-demo-dashboard build
 
 .PHONY: web-lint
 web-lint: ## Typecheck the JS/TS workspace (sources, tests, e2e)

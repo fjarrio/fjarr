@@ -2,7 +2,8 @@
 // The local introspection endpoint (libsoup-3 server on the core context).
 // Routes: /pipelines, /pipelines/<id>.{json,txt,dot}[?seq], /pipelines/<id>/history, /sources,
 // /stats, /memory[?since], POST /memory/checkpoint, /log[?minutes], /events (SSE),
-// /diagnostics.tar.gz, POST /snapshot.
+// /diagnostics.tar.gz, POST /snapshot — and, outside those, the viewer's static files from
+// `introspect.viewer_dir` (docs/24#the-viewer).
 // spec: docs/24-pipeline-introspection.md#on-the-robot-the-local-introspection-endpoint
 #include <functional>
 #include <memory>

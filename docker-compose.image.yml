@@ -1,0 +1,17 @@
+# Run the demo robot from the fjarr-agent image instead of the dev image (docs/12, slice 5b):
+#   docker compose -f docker-compose.yml -f docker-compose.image.yml --profile demo up -d --build demo-robot
+# CI runs the lab smoke against this variant on every push; locally the dev image + mount stays
+# the default so an agent change is a build and a restart, not an image rebuild.
+services:
+  demo-robot:
+    image: fjarr-agent-demo
+    build:
+      context: .
+      dockerfile: docker/agent/Dockerfile
+      target: demo
+    # No workspace mount, no bash wrapper: the image's entrypoint is the demo robot binary.
+    volumes: !reset []
+    working_dir: /
+    command: !reset []
+    group_add:
+      - "${RENDER_GID:-110}" # /dev/dri for VA-API as the unprivileged image user

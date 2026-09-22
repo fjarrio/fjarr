@@ -66,6 +66,7 @@ struct Options {
     std::string json_out;
     std::string ice_policy = "all";
     std::string introspect; // http://127.0.0.1:7381
+    std::string introspect_token; // --introspect-token, else $FJARR_INTROSPECT_TOKEN (the demo exposes the endpoint with one, docs/24)
     int timeout_s = 60;
     int cycles = 200; // soak: connect/stream/close cycles
     bool verbose = false;
@@ -75,7 +76,7 @@ void usage() {
     std::fprintf(stderr,
                  "usage: fjarr-opsim --server ws://host:8080/ws --robot <id> --grant-secret <secret> --scenario <name>\n"
                  "                   [--json out.json] [--timeout 60] [--ice-policy all|relay] [--cycles 200]\n"
-                 "                   [--introspect http://127.0.0.1:7381] [--verbose]\n"
+                 "                   [--introspect http://127.0.0.1:7381] [--introspect-token <t>] [--verbose]\n"
                  "scenarios: smoke toggle hotplug silent-operator no-answer socket-drop ice-restart deadman relay-only\n"
                  "           soak (--cycles N, needs --introspect)\n"
                  "           netem-{lan,wifi-ok,4g,lossy,bad} (the profile is applied externally: docker/lab/netem.sh)\n"
@@ -108,6 +109,8 @@ bool parse_args(int argc, char** argv, Options& o) {
             if (!need(o.ice_policy)) return false;
         } else if (a == "--introspect") {
             if (!need(o.introspect)) return false;
+        } else if (a == "--introspect-token") {
+            if (!need(o.introspect_token)) return false;
         } else if (a == "--timeout") {
             if (!need(v)) return false;
             o.timeout_s = std::atoi(v.c_str());
@@ -1247,6 +1250,7 @@ class Operator {
             if (err) *err = "bad url " + url;
             return std::nullopt;
         }
+        add_token(msg.get());
         GError* e = nullptr;
         glib::GBytesPtr body(soup_session_send_and_read(http_.get(), msg.get(), nullptr, &e));
         if (!body) {
@@ -1269,6 +1273,10 @@ class Operator {
         return j;
     }
 
+    void add_token(SoupMessage* msg) const {
+        if (!opts_.introspect_token.empty())
+            soup_message_headers_append(soup_message_get_request_headers(msg), "Authorization", ("Bearer " + opts_.introspect_token).c_str());
+    }
     /// POST <introspect><path> (no request body); the parsed JSON response on HTTP 200, nullopt otherwise.
     std::optional<json> http_post_json(const std::string& path, std::string* err = nullptr) {
         if (opts_.introspect.empty()) {
@@ -1282,6 +1290,7 @@ class Operator {
             if (err) *err = "bad url " + url;
             return std::nullopt;
         }
+        add_token(msg.get());
         GError* e = nullptr;
         glib::GBytesPtr body(soup_session_send_and_read(http_.get(), msg.get(), nullptr, &e));
         glib::GErrorPtr g(e);
@@ -2091,6 +2100,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     g_verbose = opts.verbose;
+    if (opts.introspect_token.empty() && std::getenv("FJARR_INTROSPECT_TOKEN")) opts.introspect_token = std::getenv("FJARR_INTROSPECT_TOKEN");
     auto it = kScenarios.find(opts.scenario);
     if (it == kScenarios.end()) {
         std::fprintf(stderr, "unknown scenario %s\n", opts.scenario.c_str());

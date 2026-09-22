@@ -122,7 +122,7 @@ struct Agent::Impl {
                            {"introspect",
                             {{"enabled", config.introspect.enabled}, {"bind", config.introspect.bind}, {"port", config.introspect.port},
                              {"socket", config.introspect.socket}, {"token", config.introspect.token.empty() ? "" : "<redacted>"},
-                             {"history", config.introspect.history}}},
+                             {"history", config.introspect.history}, {"viewer_dir", config.introspect.viewer_dir}}},
                            {"capabilities", config.capabilities}};
         nlohmann::json versions{{"fjarr", version()}, {"gstreamer", gstreamer_version()}};
         // No smoke pipeline here (it would block the loop): the resolved encoder is the check's answer.

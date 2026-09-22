@@ -1,6 +1,9 @@
 #include "server.hpp"
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <regex>
 
 #include <libsoup/soup.h>
 
@@ -154,10 +157,78 @@ struct Server::Impl {
         }
     }
 
+    /// The API routes (docs/24 table); everything else is the viewer's static files.
+    static bool is_api(const std::string& p) {
+        return p == "/pipelines" || p.rfind("/pipelines/", 0) == 0 || p == "/sources" || p == "/stats" || p == "/memory" ||
+               p.rfind("/memory/", 0) == 0 || p == "/snapshot" || p == "/log" || p == "/events" || p == "/diagnostics.tar.gz";
+    }
+
+    static const char* content_type_for(const std::string& name) {
+        const auto dot = name.rfind('.');
+        const std::string ext = dot == std::string::npos ? "" : name.substr(dot + 1);
+        if (ext == "html") return "text/html; charset=utf-8";
+        if (ext == "js" || ext == "mjs") return "text/javascript; charset=utf-8";
+        if (ext == "css") return "text/css; charset=utf-8";
+        if (ext == "wasm") return "application/wasm";
+        if (ext == "json" || ext == "map") return "application/json";
+        if (ext == "svg") return "image/svg+xml";
+        if (ext == "png") return "image/png";
+        if (ext == "ico") return "image/x-icon";
+        if (ext == "woff2") return "font/woff2";
+        if (ext == "txt") return "text/plain; charset=utf-8";
+        return "application/octet-stream";
+    }
+
+    /// `GET /` and the viewer's files (docs/24#the-viewer): never gated by the token (the browser
+    /// navigates without a header; the viewer asks for the token and sends it to the API), the API
+    /// routes shadow files of the same name, traversal and symlinks out of the directory are refused,
+    /// long cache headers only for Vite's hashed asset names.
+    static void serve_static(Impl* self, SoupServerMessage* msg, const std::string& p, const std::string& method) {
+        if (method != "GET" && method != "HEAD") {
+            respond(msg, 405, "application/json", R"({"error":"method"})");
+            return;
+        }
+        if (self->config.viewer_dir.empty()) {
+            if (p == "/") {
+                respond(msg, 200, "text/plain; charset=utf-8",
+                        "fjarr introspection endpoint (docs/24)\n"
+                        "/pipelines  /pipelines/<id>.{json,txt,dot}[?seq=n]  /pipelines/<id>/history  /sources  /stats\n"
+                        "/memory[?since=<checkpoint>]  POST /memory/checkpoint  /log[?minutes=n]  /events[?body=json|dot|txt]\n"
+                        "/diagnostics.tar.gz  POST /snapshot?pipeline=<id>\n"
+                        "viewer: not served — set introspect.viewer_dir (FJARR_INTROSPECT_VIEWER_DIR) to the viewer's build "
+                        "directory; the fjarr-agent package installs it under /usr/share/fjarr/viewer (docs/24)\n");
+                return;
+            }
+            respond(msg, 404, "application/json", R"({"error":"not found"})");
+            return;
+        }
+        namespace fs = std::filesystem;
+        const std::string rel = p == "/" ? "index.html" : p.substr(1);
+        std::error_code ec;
+        const fs::path root = fs::weakly_canonical(fs::path(self->config.viewer_dir), ec);
+        const fs::path file = ec ? fs::path() : fs::weakly_canonical(root / rel, ec);
+        const std::string prefix = root.native() + "/";
+        if (ec || rel.empty() || rel.find("..") != std::string::npos || rel.find('\\') != std::string::npos ||
+            file.native().rfind(prefix, 0) != 0 || !fs::is_regular_file(file, ec)) {
+            respond(msg, 404, "application/json", R"({"error":"not found"})");
+            return;
+        }
+        std::ifstream in(file, std::ios::binary);
+        std::string body((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        static const std::regex hashed(R"(^assets/.*-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$)");
+        soup_message_headers_append(soup_server_message_get_response_headers(msg), "Cache-Control",
+                                    std::regex_match(rel, hashed) ? "public, max-age=31536000, immutable" : "no-cache");
+        respond(msg, 200, content_type_for(rel), body);
+    }
+
     static void handle(SoupServer*, SoupServerMessage* msg, const char* path, GHashTable* query, gpointer user) {
         auto* self = static_cast<Impl*>(user);
         const std::string p = path ? path : "/";
         const std::string method = soup_server_message_get_method(msg);
+        if (!is_api(p)) {
+            serve_static(self, msg, p, method);
+            return;
+        }
         if (!self->config.token.empty()) {
             const char* auth = soup_message_headers_get_one(soup_server_message_get_request_headers(msg), "Authorization");
             if (!auth || std::string(auth) != "Bearer " + self->config.token) {
@@ -263,14 +334,6 @@ struct Server::Impl {
             }
             else if (fmt == "txt") respond(msg, 200, "text/plain; charset=utf-8", snap->txt + "\n");
             else respond(msg, 200, "application/json", snap->json);
-            return;
-        }
-        if (p == "/") {
-            respond(msg, 200, "text/plain; charset=utf-8",
-                    "fjarr introspection endpoint (docs/24)\n"
-                    "/pipelines  /pipelines/<id>.{json,txt,dot}[?seq=n]  /pipelines/<id>/history  /sources  /stats\n"
-                    "/memory[?since=<checkpoint>]  POST /memory/checkpoint  /log[?minutes=n]  /events[?body=json|dot|txt]\n"
-                    "/diagnostics.tar.gz  POST /snapshot?pipeline=<id>\n(the viewer arrives in slice 5)\n");
             return;
         }
         respond(msg, 404, "application/json", R"({"error":"not found"})");

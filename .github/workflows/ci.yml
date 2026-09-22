@@ -86,6 +86,8 @@ jobs:
           E2E_SERVER_WS: ws://fjarr-server:8080/ws
           E2E_SERVER_HTTP: http://localhost:8080
           E2E_DASHBOARD_HTTP: http://localhost:5173
+          E2E_INTROSPECT_HTTP: http://localhost:7381
+          E2E_VIEWER_URL: http://demo-robot:7381/
           CI: "true"
         # pnpm 10 forwards `--` literally: call playwright through `exec` to pass flags
         run: pnpm --filter '@fjarr/e2e' exec playwright test --project loopback --project stack
@@ -98,6 +100,23 @@ jobs:
         run: make opsim-all
       - name: "20-cycle soak (docs/15: the census returns to baseline every commit; 200 nightly)"
         run: make opsim-soak OPSIM_CYCLES=20
+      - name: the fjarr-agent image (docs/12, slice 5b — built and smoke-tested every push, published in M2.5)
+        env:
+          E2E_BROWSER: http://localhost:9222
+          E2E_PAGE_ORIGIN: http://host.docker.internal:5174
+          E2E_SERVER_WS: ws://fjarr-server:8080/ws
+          E2E_SERVER_HTTP: http://localhost:8080
+          E2E_DASHBOARD_HTTP: http://localhost:5173
+          E2E_INTROSPECT_HTTP: http://localhost:7381
+          E2E_VIEWER_URL: http://demo-robot:7381/
+          CI: "true"
+        run: |
+          docker build -f docker/agent/Dockerfile --target runtime -t fjarr-agent .
+          docker run --rm --entrypoint sh fjarr-agent -c '! gst-inspect-1.0 x264enc >/dev/null 2>&1 && fjarr-agent --help | grep -q ^fjarr-agent && ! ldd /usr/local/bin/fjarr-agent | grep -q "not found"'
+          # The demo robot from the image (the embedder's topology): the same lab smoke as the dev-image robot.
+          FJARR_MEDIA_ENCODER=software docker compose -f docker-compose.yml -f docker-compose.image.yml --profile demo up -d --build demo-robot
+          sleep 8 && docker compose logs --no-color demo-robot | tail -20
+          pnpm --filter '@fjarr/e2e' exec playwright test tests/stack/viewer.spec.ts tests/stack/introspect.spec.ts tests/stack/dashboard.spec.ts
       - name: lab artifacts (summaries, captures, traces)
         if: always()
         uses: actions/upload-artifact@v4

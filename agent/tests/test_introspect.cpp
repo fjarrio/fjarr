@@ -5,6 +5,9 @@
 #include <thread>
 
 #include <gst/gst.h>
+#include <filesystem>
+#include <fstream>
+
 #include <gtest/gtest.h>
 #include <libsoup/soup.h>
 
@@ -27,8 +30,14 @@ struct Http {
         unsigned status = 0;
         std::string body;
     };
-    Reply call(const char* method, const std::string& url) {
+    struct Header {
+        const char* name;
+        std::string value;
+    };
+    std::string last_content_type, last_cache_control;
+    Reply call(const char* method, const std::string& url, std::vector<Header> headers = {}) {
         glib::GObjectPtr<SoupMessage> msg(soup_message_new(method, url.c_str()));
+        for (const auto& h : headers) soup_message_headers_append(soup_message_get_request_headers(msg.get()), h.name, h.value.c_str());
         GError* err = nullptr;
         glib::GBytesPtr bytes(soup_session_send_and_read(session.get(), msg.get(), nullptr, &err));
         if (err) {
@@ -38,6 +47,10 @@ struct Http {
         }
         gsize n = 0;
         const auto* d = static_cast<const char*>(g_bytes_get_data(bytes.get(), &n));
+        const char* ct = soup_message_headers_get_one(soup_message_get_response_headers(msg.get()), "Content-Type");
+        const char* cc = soup_message_headers_get_one(soup_message_get_response_headers(msg.get()), "Cache-Control");
+        last_content_type = ct ? ct : "";
+        last_cache_control = cc ? cc : "";
         return {soup_message_get_status(msg.get()), std::string(d ? d : "", n)};
     }
     /// Read an SSE stream until `until` appears or the deadline passes.
@@ -194,6 +207,80 @@ TEST(Introspect, endpointServesMemoryLogStatsEventsAndTheBundle) {
 
     loop.call_sync([&] { server.reset(); });
     loop.stop();
+}
+
+// docs/24#the-viewer, slice 5b: the viewer's files at `/`, the API shadowing them, traversal refused,
+// the token gating the API only.
+TEST(Introspect, servesTheViewerDirectoryUnderTheApiAndTheTokenGatesOnlyTheApi) {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / ("fjarr-viewer-" + std::to_string(::getpid()));
+    fs::create_directories(dir / "assets");
+    auto write = [&](const fs::path& p, const std::string& body) {
+        std::ofstream f(p);
+        f << body;
+    };
+    write(dir / "index.html", "<html><body>fjarr viewer</body></html>");
+    write(dir / "assets" / "app-Ab12Cd34.js", "console.log('app')");
+    write(dir / "plain.css", "body{}");
+    write(dir / "pipelines", "a file the API route shadows");
+    fs::create_symlink("/etc/hostname", dir / "escape"); // a symlink out of the directory
+
+    fjarr::CoreLoop loop;
+    loop.start();
+    SnapshotStore store(8);
+    MemoryCensus census;
+    fjarr::AgentConfig::IntrospectSection cfg;
+    cfg.port = 0;
+    cfg.token = "t0k";
+    cfg.viewer_dir = dir.string();
+    Providers providers;
+    providers.memory = &census;
+    std::unique_ptr<Server> server;
+    loop.call_sync([&] {
+        server = std::make_unique<Server>(cfg, store, std::move(providers));
+        server->start();
+    });
+    const std::string base = "http://127.0.0.1:" + std::to_string(server->port());
+    Http http;
+
+    auto index = http.call("GET", base + "/"); // no token: the viewer is public, its data is not
+    EXPECT_EQ(index.status, 200u);
+    EXPECT_NE(index.body.find("fjarr viewer"), std::string::npos);
+    EXPECT_EQ(http.last_content_type.rfind("text/html", 0), 0u) << http.last_content_type;
+    auto js = http.call("GET", base + "/assets/app-Ab12Cd34.js");
+    EXPECT_EQ(js.status, 200u);
+    EXPECT_EQ(http.last_content_type.rfind("text/javascript", 0), 0u);
+    EXPECT_NE(http.last_cache_control.find("immutable"), std::string::npos) << "a hashed asset is cached forever";
+    http.call("GET", base + "/plain.css");
+    EXPECT_EQ(http.last_cache_control, "no-cache");
+    EXPECT_EQ(http.call("GET", base + "/nope.js").status, 404u);
+    EXPECT_EQ(http.call("GET", base + "/escape").status, 404u) << "a symlink out of the directory";
+    auto trav = http.call("GET", base + "/assets/..%2F..%2F..%2Fetc%2Fpasswd");
+    EXPECT_EQ(trav.body.find("root:"), std::string::npos) << "traversal must never leave the directory";
+    EXPECT_EQ(http.call("POST", base + "/index.html").status, 405u);
+    // the API shadows a file of the same name, and needs the token
+    EXPECT_EQ(http.call("GET", base + "/pipelines").status, 401u);
+    auto list = http.call("GET", base + "/pipelines", {{"Authorization", "Bearer t0k"}});
+    EXPECT_EQ(list.status, 200u);
+    EXPECT_NE(list.body.find("\"pipelines\""), std::string::npos) << list.body;
+    loop.call_sync([&] { server.reset(); });
+
+    // without the directory, `/` is the text index naming the key
+    cfg.viewer_dir.clear();
+    cfg.token.clear();
+    Providers p2;
+    p2.memory = &census;
+    loop.call_sync([&] {
+        server = std::make_unique<Server>(cfg, store, std::move(p2));
+        server->start();
+    });
+    auto text = http.call("GET", "http://127.0.0.1:" + std::to_string(server->port()) + "/");
+    EXPECT_EQ(text.status, 200u);
+    EXPECT_NE(text.body.find("viewer_dir"), std::string::npos);
+    EXPECT_EQ(http.call("GET", "http://127.0.0.1:" + std::to_string(server->port()) + "/index.html").status, 404u);
+    loop.call_sync([&] { server.reset(); });
+    loop.stop();
+    fs::remove_all(dir);
 }
 
 // The gate's self-check (docs/23 ladder layer 3): run with --gtest_also_run_disabled_tests and it

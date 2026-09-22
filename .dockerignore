@@ -1,0 +1,11 @@
+# Build context hygiene for docker/agent/Dockerfile (repo-root context, docs/12): sources only.
+.git
+build/
+node_modules/
+**/node_modules/
+**/dist/
+web/e2e/out/
+inspiration/
+website/.astro/
+.env
+*.log

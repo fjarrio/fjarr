@@ -92,6 +92,12 @@ Test with fixtures:
   branch appearing, history scrubbing; an operator grant answered
   `capability-denied`; the demo dashboard's Diagnostics tab rendering the
   session graph with d3-graphviz for the developer role only.
+- `tests/stack/viewer.spec.ts` (slice 5b): the viewer the endpoint serves
+  — the page without a token, the API refused without and served with it,
+  traversal refused; in the lab browser the token entered once, the
+  connected robot's session graph rendered (SVG nodes counted) and its
+  summary tab. CI runs it a second time against the demo robot from the
+  `fjarr-agent` image.
 - `cdp` — a CDP session for the page with helpers: `network.emulate(profile)`,
   `signaling.capture()` (WebSocket frames → docs/08 messages),
   `wire.capture()` (the library's DataChannel tap), `profile.cpu(ms)`,
@@ -271,7 +277,9 @@ that connects over CDP; every test gets `out`, `cdp`, `loopback`, `stack`,
 | `E2E_DASHBOARD_HTTP` | `E2E_DASHBOARD_URL` | the dashboard as the *harness* probes it, when that differs (CI) |
 | `E2E_OUT` | `web/e2e/out/` | artifact root; each test's directory is recreated per run |
 | `FJARR_GRANT_HS256_SECRET`, `FJARR_DEV_DEVICE_TOKEN` | the `.env` dev values | the harness mints grants and registers loopback robots with these |
-| `E2E_INTROSPECT_TOKEN` | `FJARR_INTROSPECT_TOKEN`, else none | sent as `Authorization: Bearer` to the endpoint when it is exposed beyond loopback (the demo profile from slice 5b, docs/24) |
+| `E2E_INTROSPECT_HTTP` | `http://demo-robot:7381` (CI: the runner's `localhost:7381`) | the endpoint as the harness reaches it; empty = `curl` inside the robot container |
+| `E2E_INTROSPECT_TOKEN` | `FJARR_INTROSPECT_TOKEN`, else the compose default | sent as `Authorization: Bearer` to the endpoint (the demo exposes it with a token, docs/24) |
+| `E2E_VIEWER_URL` | `http://demo-robot:7381/` | the served viewer as the *browser* reaches it |
 
 **The lab page** (`web/e2e/app`) exposes `window.__lab` (contract:
 `web/e2e/src/lab-page.d.ts`): `setup({mode, robotId, …})`,

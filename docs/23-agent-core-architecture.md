@@ -1261,6 +1261,31 @@ the root, traversal refused, a missing file a 404, API routes shadowing
 files, a robot without the directory still answers the text index; (4)
 CI builds the image, the image-based demo passes the lab smoke, the
 image contains no `x264enc`; (5) nothing is published.
+**Met 2026-09-21** ([review](reviews/slice-5b-review.md)).
+
+**Implementation notes (slice 5b)** — the served viewer and the image as built:
+
+- *The endpoint decides static-or-API before the token.* `is_api()` names
+  the docs/24 routes; everything else is `serve_static()`: the file under
+  `viewer_dir` resolved with `weakly_canonical` and required to stay under
+  the directory (a symlink out of it is a 404, `..` never reaches the
+  filesystem), read whole, typed by extension, `Cache-Control: immutable`
+  only for `assets/*-<hash>.<ext>`. `GET /` without a directory is the text
+  index naming the key. The API shadows files by construction.
+- *The HTTP feed did not seed "latest" from the list* — the viewer's first
+  real run showed a session pipeline with no graph: its snapshots predated
+  the SSE stream, and only the session feed's replay had hidden the gap.
+  `setList()` now seeds every pipeline's snapshot store from its row on
+  both feeds, and the contract suite reopens a feed on existing state.
+- *The image builds from the repo root* with a `.dockerignore`: a node
+  stage builds the viewer (the lockfile's whole importer set is copied as
+  manifests so `--frozen-lockfile` holds), a build stage configures CMake
+  directly (the presets want ccache), the runtime stage asserts the absence
+  of `x264enc` at build time. The compose override uses `!reset` to drop
+  the dev image's mount and bash wrapper.
+- *`fjarr-opsim` reads the token from its environment*, so the make targets
+  and CI needed no new arguments; the Makefile includes `.env` for the same
+  token in its `curl`s.
 
 ## Where `fjarr.test` lives
 

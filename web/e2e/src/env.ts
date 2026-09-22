@@ -23,10 +23,15 @@ export const env = {
   deviceToken: process.env.FJARR_DEV_DEVICE_TOKEN ?? "dev-only-device-token",
   /** The real robot's id (the C++ agent in `demo-robot`, or a locally started fjarr-agent). */
   robotId: process.env.E2E_ROBOT_ID ?? "demo-robot-01",
-  /** The agent's docs/24 endpoint when reachable directly (an agent started in `dev`); otherwise fetched inside the robot container. */
-  introspectHttp: process.env.E2E_INTROSPECT_HTTP ?? "",
-  /** `introspect.token` when the endpoint is exposed beyond loopback (the demo profile does, docs/24). */
-  introspectToken: process.env.E2E_INTROSPECT_TOKEN ?? process.env.FJARR_INTROSPECT_TOKEN ?? "",
+  /**
+   * The agent's docs/24 endpoint as the harness reaches it: the demo profile exposes it on the compose
+   * network (slice 5b), CI on the runner's loopback. Empty = `curl` inside the robot container.
+   */
+  introspectHttp: process.env.E2E_INTROSPECT_HTTP ?? "http://demo-robot:7381",
+  /** `introspect.token` — the demo's dev token (docs/24), the compose default. */
+  introspectToken: process.env.E2E_INTROSPECT_TOKEN ?? process.env.FJARR_INTROSPECT_TOKEN ?? "dev-only-introspect-token",
+  /** The viewer served by that endpoint, as the BROWSER reaches it. */
+  viewerUrl: process.env.E2E_VIEWER_URL ?? "http://demo-robot:7381/",
   /** Compose service that carries the media path (netem, fault switches). */
   robotService: process.env.E2E_ROBOT_SERVICE ?? "demo-robot",
   /** Where every run's artifacts go (`out/<test>/`). */

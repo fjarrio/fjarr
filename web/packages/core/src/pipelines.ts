@@ -95,8 +95,18 @@ class FeedState {
     return s;
   }
 
+  /** The list from the agent — and each row seeds its pipeline's snapshot store, so a pipeline that
+   *  was already there when the feed started has a "latest" to fetch bodies for (the HTTP stream
+   *  only carries snapshots taken after it opened). */
   setList(list: PipelineInfo[]): void {
     this.pipelines.set([...list].sort((a, b) => a.id.localeCompare(b.id)));
+    for (const p of list) {
+      if (p.seq <= 0) continue;
+      const s = this.snapshot(p.id);
+      const cur = s.getSnapshot();
+      if (cur && cur.seq >= p.seq) continue;
+      s.set({ pipelineId: p.id, kind: p.kind, sessionId: p.sessionId, seq: p.seq, trigger: p.lastTrigger, state: p.state, ts: p.ts, generation: cur?.generation ?? 0 });
+    }
   }
 
   /** A snapshot arrived: newest-wins per pipeline, and the list row follows. */

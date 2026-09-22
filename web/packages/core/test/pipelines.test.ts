@@ -49,6 +49,8 @@ interface Drive {
   feed: PipelineFeed;
   emit(m: SnapshotMeta, b: Bodies): void;
   drop(): Promise<void>;
+  /** A second feed on the same agent state: what a viewer opened later sees. */
+  reopen(): Promise<PipelineFeed>;
   close(): Promise<void>;
 }
 
@@ -141,6 +143,12 @@ async function sessionDrive(): Promise<Drive> {
       agent.dropSocket();
       await waitFor(() => session.getState() === "connected" && subscribed, "re-subscribed after the drop", 10_000);
     },
+    async reopen() {
+      subscribed = false;
+      const f = sessionPipelineFeed(session);
+      await waitFor(() => subscribed, "re-subscribe");
+      return f;
+    },
     async close() {
       feed.close();
       client.destroy();
@@ -201,6 +209,11 @@ async function httpDrive(): Promise<Drive> {
       for (const c of clients) c.destroy();
       clients.clear();
       await waitFor(() => clients.size === 1, "SSE reconnected", 5000);
+    },
+    async reopen() {
+      const f = httpPipelineFeed(base, { token: TOKEN, retryMs: 50 });
+      await waitFor(() => f.status.getSnapshot().live, "second SSE open");
+      return f;
     },
     async close() {
       feed.close();
@@ -263,6 +276,13 @@ for (const [name, make] of [
       await waitFor(() => feed.snapshot("producer:pat:active").getSnapshot()?.seq === 7, "seq 7 after the drop", 10_000);
       expect(await feed.body("producer:pat:active", 7, "dot")).toBe("digraph { n7 }");
       await waitFor(() => feed.status.getSnapshot().live, "live again");
+
+      // a viewer opened later: the pipelines already there have a latest to show and bodies to fetch
+      const later = await drive.reopen();
+      await waitFor(() => later.snapshot("producer:pat:active").getSnapshot()?.seq === 7, "the pre-existing pipeline's latest, from the list");
+      expect(later.snapshot("session:abc").getSnapshot()?.seq).toBe(1);
+      expect(await later.body("producer:pat:active", 7, "dot")).toBe("digraph { n7 }");
+      later.close();
 
       feed.close();
       expect(feed.status.getSnapshot().live).toBe(false);

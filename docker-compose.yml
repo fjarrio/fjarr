@@ -97,6 +97,8 @@ services:
     volumes:
       - .:/workspace:cached
       - x11sock:/tmp/.X11-unix
+      # The viewer's build output (`make web-build`) where the fjarr-agent package will install it (docs/24, docs/26).
+      - ./web/apps/introspect-viewer/dist:/usr/share/fjarr/viewer:ro
     environment:
       DISPLAY: ":99"
       FJARR_SERVER_URL: ws://fjarr-server:8080/ws
@@ -110,6 +112,14 @@ services:
       FJARR_LOG_LEVEL: ${FJARR_LOG_LEVEL:-info}
       # `make agent-leaks` recreates the robot with GStreamer's leaks tracer (docs/23 memory ladder).
       GST_TRACERS: ${FJARR_GST_TRACERS:-}
+      # The introspection endpoint (docs/24) is loopback-only by default; the demo binds it on the
+      # container's interface with a dev token so `make introspect` and the lab browser reach the
+      # viewer at http://localhost:7381/ (published on the host's loopback only, below).
+      FJARR_INTROSPECT_BIND: "0.0.0.0"
+      FJARR_INTROSPECT_TOKEN: ${FJARR_INTROSPECT_TOKEN:-dev-only-introspect-token}
+      FJARR_INTROSPECT_VIEWER_DIR: /usr/share/fjarr/viewer
+    ports:
+      - "127.0.0.1:7381:7381"
     working_dir: /workspace
     cap_add:
       - NET_ADMIN   # tc netem for the browser lab's media-path profiles (docs/25)

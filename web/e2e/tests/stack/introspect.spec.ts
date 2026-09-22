@@ -48,8 +48,13 @@ test.describe("fjarr.introspect (slice 5a)", () => {
     await loopback.waitForStreaming("test-pattern", 15_000);
     await expect.poll(async () => (await loopback.lab((lab) => lab.feed.pipelines())).some((p) => p.kind === "producer"), { timeout: 5000 }).toBe(true); // the producer pipeline is visible too
     await loopback.page.waitForFunction(([id, seq]) => (window.__lab.feed.snapshot(id!)?.seq ?? 0) > (seq as number), [pid, first.seq] as const, { timeout: 5000 });
-    const enabled = (await loopback.lab((lab, id) => lab.feed.snapshot(id), pid))!;
-    expect(valveOf(await loopback.lab((lab, a) => lab.feed.body(a.id, a.seq, "json"), { id: pid, seq: enabled.seq }))).toBe(false);
+    // The first snapshot after streaming may predate the valve opening (a state change lands first): poll the newest.
+    await expect
+      .poll(async () => {
+        const s = (await loopback.lab((lab, id) => lab.feed.snapshot(id), pid))!;
+        return valveOf(await loopback.lab((lab, a) => lab.feed.body(a.id, a.seq, "json"), { id: pid, seq: s.seq }));
+      }, { timeout: 5000, message: "valve.drop is false while streaming" })
+      .toBe(false);
     await loopback.lab((lab) => lab.request("fjarr.test", "select-tracks", { tracks: [{ track_id: "test-pattern", enabled: false, tier: "active" }] }));
     await expect
       .poll(async () => {

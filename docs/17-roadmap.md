@@ -81,9 +81,11 @@ half (2026-09-21, [docs/23](23-agent-core-architecture.md#slices-3a-3b-3c-and-th
 docs/08 blob frames on both tiers, `fjarr.introspect`, the pipeline
 feeds, `<PipelineGraph>` + the dashboard Diagnostics tab, the demo
 backend's operator/developer roles —
-[review](reviews/slice-5a-review.md)) · **5b** demo wiring, delivery half
-(the viewer served from `introspect.viewer_dir`, `make introspect`
-opening it, the CI-built `fjarr-agent` image — unpublished until M2.5) ·
+[review](reviews/slice-5a-review.md)) · **5b ✔** demo wiring, delivery half
+(2026-09-21: the viewer served from `introspect.viewer_dir`, `make
+introspect` opening it with the demo's token, the CI-built `fjarr-agent`
+image running the demo robot under the lab smoke — unpublished until M2.5;
+[review](reviews/slice-5b-review.md)) ·
 6 ADR-0007 spike + adaptive bitrate · 7 fault injection + latency harness
 on the frame stamp.
 

@@ -102,6 +102,7 @@ AgentConfig AgentConfig::from_toml(const std::string& text) {
     i64 = c.introspect.port; read(intro, "port", i64); c.introspect.port = static_cast<int>(i64);
     read(intro, "socket", c.introspect.socket);
     read(intro, "token", c.introspect.token);
+    read(intro, "viewer_dir", c.introspect.viewer_dir);
     i64 = c.introspect.history; read(intro, "history", i64); c.introspect.history = static_cast<int>(i64);
 
     if (const toml::table* caps = tbl["capabilities"].as_table()) {
@@ -150,6 +151,7 @@ void AgentConfig::apply_env() {
     env_int("FJARR_INTROSPECT_PORT", introspect.port);
     env_str("FJARR_INTROSPECT_SOCKET", introspect.socket);
     env_str("FJARR_INTROSPECT_TOKEN", introspect.token);
+    env_str("FJARR_INTROSPECT_VIEWER_DIR", introspect.viewer_dir);
     env_int("FJARR_INTROSPECT_HISTORY", introspect.history);
     // Test capability hooks (the demo and CI): FJARR_TEST_HOOKS=1
     if (const char* v = env("FJARR_TEST_HOOKS")) {
