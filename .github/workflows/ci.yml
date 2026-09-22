@@ -60,7 +60,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter '@fjarr/core' --filter '@fjarr/react' build
+      # The viewer's build output is what the demo robot serves from introspect.viewer_dir (docs/24).
+      - run: pnpm -r --filter '@fjarr/introspect-viewer...' build
       - run: pnpm --filter '@fjarr/e2e' typecheck
       - name: start the lab browser, fjarr-server and the demo stack (docs/25 topology; the real agent on the software encoder)
         run: |
