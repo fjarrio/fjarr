@@ -1,5 +1,7 @@
 #include "producer.hpp"
 
+#include <algorithm>
+
 #include <gst/video/video.h>
 
 #include "core/log.hpp"
@@ -195,6 +197,7 @@ bool Producer::start_tier(const std::string& tier) {
         error_ = "cannot link tee to tier";
         return false;
     }
+    t->kbps = profile.kbps;
     tiers_[tier] = std::move(t);
     if (!playing_) {
         if (gst_element_set_state(pipeline_.get(), GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
@@ -207,6 +210,33 @@ bool Producer::start_tier(const std::string& tier) {
                                             {"size", std::to_string(profile.width) + "x" + std::to_string(profile.height)},
                                             {"fps", std::to_string(profile.fps)}});
     return true;
+}
+
+bool Producer::set_bitrate(const std::string& tier, int kbps) {
+    auto it = tiers_.find(tier);
+    if (it == tiers_.end() || !it->second->encode || kbps <= 0) return false;
+    Tier& t = *it->second;
+    const auto band = band_kbps(tier);
+    kbps = std::min(std::max(kbps, std::min(band.first, config_.active_floor_kbps)), band.second); // the plane decides band or floor
+    if (kbps == t.kbps) return false;
+    glib::GstElementPtr enc = glib::adopt_element(gst_bin_get_by_name(GST_BIN(t.encode.get()), (name() + ":" + tier + "/encoder").c_str()));
+    if (!enc) return false;
+    // vah264enc takes kbps; openh264enc takes bps (docs/23 encoder adapter). Both accept the change while PLAYING.
+    if (config_.encoder.kind == EncoderKind::VaApi) g_object_set(enc.get(), "bitrate", static_cast<guint>(kbps), nullptr);
+    else g_object_set(enc.get(), "bitrate", static_cast<guint>(kbps) * 1000u, nullptr);
+    log::debug("producer", "bitrate", {{"producer", name()}, {"tier", tier}, {"kbps", std::to_string(kbps)}, {"was", std::to_string(t.kbps)}});
+    t.kbps = kbps;
+    return true;
+}
+
+int Producer::current_kbps(const std::string& tier) const {
+    auto it = tiers_.find(tier);
+    return it == tiers_.end() ? 0 : it->second->kbps;
+}
+
+std::pair<int, int> Producer::band_kbps(const std::string& tier) const {
+    if (tier == "thumbnail") return {std::min(config_.active_floor_kbps, config_.thumbnail_kbps), config_.thumbnail_kbps};
+    return {std::max(config_.active_floor_kbps, config_.active_kbps / 2), config_.active_kbps};
 }
 
 void Producer::stop_tier(const std::string& tier) {

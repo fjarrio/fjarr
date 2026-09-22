@@ -36,7 +36,7 @@ public API does not, and it has one hard limit that shapes this design:
 | DataChannel traffic | **not visible to CDP** (SCTP inside DTLS) | `@fjarr/core` exposes an **opt-in wire tap** (`createFjarrClient({ wireTap: true })`, then `client.on("wire", …)`; shape in [docs/21](21-web-client-architecture.md#wire-tap)) — never on by default, since envelopes carry keystrokes and clipboard text |
 | WebRTC internals (ICE pairs, RTP stats, codecs) | `RTCPeerConnection.getStats()` through the library's stats store (`session.stats`) | `chrome://webrtc-internals` is not scriptable; the same data is |
 | Network conditions on HTTP/WebSocket | `Network.emulateNetworkConditions` (latency, throughput, offline) | **does not touch WebRTC media or DataChannels** (UDP bypasses the browser's network stack emulation); `offline` blocks *new* connections — an established WebSocket stays up (verified on Chrome 153), so a ladder test enters rung 3 by other means (below) |
-| Network conditions on the media path | `tc netem` in the `demo-robot` container (loss, delay, jitter, rate) — docs/15 | applied robot-side; `NET_ADMIN` in the demo profile; profiles below |
+| Network conditions on the media path | `tc netem` in the `demo-robot` container (loss, delay, jitter, rate) — docs/15; `RobotContainer.netem(profile[, iface])` keeps the introspection port out of the impairment, `netemToward(profile, ip)` impairs the robot's egress toward one viewer only (slice 6a) | applied robot-side; `NET_ADMIN` in the demo profile; profiles below |
 | CPU profile | `Profiler.start/stop` (`.cpuprofile`) and `Tracing` with `devtools.timeline` + `v8.cpu_profiler` categories | opens in DevTools / Perfetto |
 | Memory | `HeapProfiler.collectGarbage` + `Performance.getMetrics` (`JSHeapUsedSize`, `Nodes`, `JSEventListeners`) per cycle; `HeapProfiler.takeHeapSnapshot` on demand | the leak oracle for connect/disconnect and mount/unmount soaks |
 | Responsiveness | `PerformanceObserver` in-page (long tasks, event timing → INP, LCP, layout shift — no library); `Tracing` for frame drops | budgets in docs/16 |
@@ -92,6 +92,14 @@ Test with fixtures:
   branch appearing, history scrubbing; an operator grant answered
   `capability-denied`; the demo dashboard's Diagnostics tab rendering the
   session graph with d3-graphviz for the developer role only.
+- `tests/stack/ratecontrol.spec.ts` (slice 6a): the offer's feedback lines
+  and Chromium's answer, TWCC feedback in the agent's stats; a lone viewer
+  under `bad` (estimate and encoder reaction, decoding at the thumbnail
+  tier, promotion and recovery once cleared); `lossy` repaired by
+  retransmission with rare keyframe requests; three viewers with one
+  behind `bad` toward it alone (the simulator's `congested-viewer` in
+  `dev`), the clean two untouched. Measured through the introspection
+  port, which the impairment exempts.
 - `tests/stack/viewer.spec.ts` (slice 5b): the viewer the endpoint serves
   — the page without a token, the API refused without and served with it,
   traversal refused; in the lab browser the token entered once, the

@@ -58,7 +58,7 @@ export {
   type Publisher,
   type PublisherOptions,
 } from "./channels.js";
-export { TrackRegistry, type AcquireOptions, type AcquirePatch, type FoldedDemand, type LatencyMode, type TrackEntry, type TrackHandle, type TrackSnapshot, type TrackStatus } from "./tracks.js";
+export { TrackRegistry, type AcquireOptions, type AcquirePatch, type AgentTrackStats, type FoldedDemand, type LatencyMode, type TrackEntry, type TrackHandle, type TrackSnapshot, type TrackStatus } from "./tracks.js";
 export { Heartbeat, TimeSync, TIME_SYNC_WINDOW, type HeartbeatOptions, type TimeSyncEstimate } from "./timesync.js";
 export {
   HealthTracker,

@@ -129,8 +129,10 @@ OPSIM_ROBOT ?= demo-robot-01
 OPSIM_SCENARIO ?= smoke
 .PHONY: opsim
 OPSIM_IN ?= demo-robot
+# The endpoint as opsim reaches it: loopback inside the robot container; the demo's exposed port (with its token) from anywhere else.
+OPSIM_INTROSPECT ?= http://127.0.0.1:7381
 opsim: ## Run one fjarr-opsim scenario against the demo robot, from inside its container (OPSIM_SCENARIO=smoke|toggle|…)
-	docker compose exec -T $(OPSIM_IN) ./build/$(BUILD_PRESET)/agent/tools/fjarr-opsim --server $(OPSIM_SERVER) --robot $(OPSIM_ROBOT) --grant-secret $${FJARR_GRANT_HS256_SECRET:-dev-only-grant-secret} --scenario $(OPSIM_SCENARIO) --introspect http://127.0.0.1:7381 --timeout 90 $(OPSIM_EXTRA)
+	docker compose exec -T $(OPSIM_IN) ./build/$(BUILD_PRESET)/agent/tools/fjarr-opsim --server $(OPSIM_SERVER) --robot $(OPSIM_ROBOT) --grant-secret $${FJARR_GRANT_HS256_SECRET:-dev-only-grant-secret} --scenario $(OPSIM_SCENARIO) --introspect $(OPSIM_INTROSPECT) --timeout 90 $(OPSIM_EXTRA)
 
 .PHONY: opsim-all
 opsim-all: ## Every CI opsim scenario (docs/23: all but soak and netem-*)
@@ -149,10 +151,10 @@ opsim-soak: ## The soak scenario: OPSIM_CYCLES connect/stream/close cycles (defa
 
 NETEM_PROFILE ?= lossy
 # opsim shares the robot's network namespace: its media rides lo (eth0 is the browser lab's media path).
-NETEM_DEV ?= lo eth0
+NETEM_DEV ?= eth0
 .PHONY: opsim-netem
-opsim-netem: ## Apply a docs/25 profile (NETEM_PROFILE=lan|wifi-ok|4g|lossy|bad) on the demo robot (NETEM_DEV), run netem-<profile>, always clear the qdisc
-	@export NETEM_DEV="$(NETEM_DEV)"; trap 'docker/lab/netem.sh clear' EXIT; docker/lab/netem.sh apply $(NETEM_PROFILE) && $(MAKE) --no-print-directory opsim OPSIM_SCENARIO=netem-$(NETEM_PROFILE)
+opsim-netem: ## Apply a docs/25 profile (NETEM_PROFILE=lan|wifi-ok|4g|lossy|bad) on the demo robot's egress (NETEM_DEV), run netem-<profile> from dev, always clear the qdisc
+	@export NETEM_DEV="$(NETEM_DEV)"; trap 'docker/lab/netem.sh clear' EXIT; docker/lab/netem.sh apply $(NETEM_PROFILE) && $(MAKE) --no-print-directory opsim OPSIM_SCENARIO=netem-$(NETEM_PROFILE) OPSIM_IN=dev OPSIM_INTROSPECT=http://demo-robot:7381 OPSIM_EXTRA="--introspect-token $(INTROSPECT_TOKEN) $(OPSIM_EXTRA)"
 
 # -------------------------------------------------------------- signaling --
 .PHONY: signaling-run

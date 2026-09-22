@@ -77,7 +77,7 @@ void usage() {
                  "usage: fjarr-opsim --server ws://host:8080/ws --robot <id> --grant-secret <secret> --scenario <name>\n"
                  "                   [--json out.json] [--timeout 60] [--ice-policy all|relay] [--cycles 200]\n"
                  "                   [--introspect http://127.0.0.1:7381] [--introspect-token <t>] [--verbose]\n"
-                 "scenarios: smoke toggle hotplug silent-operator no-answer socket-drop ice-restart deadman relay-only\n"
+                 "scenarios: smoke toggle hotplug silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer\n"
                  "           soak (--cycles N, needs --introspect)\n"
                  "           netem-{lan,wifi-ok,4g,lossy,bad} (the profile is applied externally: docker/lab/netem.sh)\n"
                  "exit: 0 all assertions pass, 1 any fail, 2 usage, 3 timeout\n");
@@ -555,6 +555,16 @@ class Peer {
             for (auto& [m, c] : pending_) g_signal_emit_by_name(webrtc_.get(), "add-ice-candidate", m, c.c_str());
             if (!pending_.empty()) vlogf("peer: flushed %zu queued remote candidates", pending_.size());
             pending_.clear();
+        }
+        // A viewer like a browser (docs/08#rtp-feedback): retransmission requests on every receiver;
+        // transport-wide feedback follows from the offer's extension when webrtcbin keeps it.
+        {
+            GArray* arr = nullptr;
+            g_signal_emit_by_name(webrtc_.get(), "get-transceivers", &arr);
+            if (arr) {
+                for (guint i = 0; i < arr->len; i++) g_object_set(g_array_index(arr, GstWebRTCRTPTransceiver*, i), "do-nack", TRUE, nullptr);
+                g_array_unref(arr);
+            }
         }
         auto reply = emit_wait("create-answer", nullptr);
         GstWebRTCSessionDescription* an = nullptr;
@@ -1183,8 +1193,8 @@ class Operator {
     }
 
     /// select-tracks for one track; true when the agent answered ok.
-    bool select(const std::string& track_id, bool enabled, const std::string& tier = "active") {
-        auto r = request("fjarr.test", "select-tracks", json{{"tracks", json::array({{{"track_id", track_id}, {"enabled", enabled}, {"tier", tier}}})}});
+    bool select(const std::string& track_id, bool enabled, const std::string& tier = "active", int timeout_ms = 5000) {
+        auto r = request("fjarr.test", "select-tracks", json{{"tracks", json::array({{{"track_id", track_id}, {"enabled", enabled}, {"tier", tier}}})}}, timeout_ms);
         if (!r) {
             logf("select-tracks %s enabled=%d: no result", track_id.c_str(), enabled);
             return false;
@@ -1972,16 +1982,25 @@ struct NetemTolerance {
     std::int64_t max_gap_ms;    // longest gap between encoded units tolerated inside the window
     bool decode_continuity;     // clean links: also >= 50 decoded frames, stamp advances, no stamp gap > 1 frame
     int request_ms;             // echo / heartbeat budgets
+    bool assert_rate;           // slice 6a: assert the agent's rate control (active with >= 2 Mbps, or <= 2 Mbps on `bad`); false = record only (a webrtcbin receiver over-reports loss under jitter)
 };
-// `bad` rate-limits to 1.5 Mbit: the active tier (4000 kbps, docs/23 [media] active_kbps, adaptive bitrate is
-// slice 6) cannot fit, so the scenario holds the thumbnail tier there, as a client on that link would.
-// The offer negotiates no NACK/RTX/FEC, so under loss the decodable rate is keyframe-bound (gop_seconds=2):
-// lossy/bad assert arrival at the transport level and record decode health; the stamp is unreadable at
+// `bad` rate-limits to 1.5 Mbit: the scenario asks for the thumbnail tier there, as a client on that
+// link would (and as the agent would demote it to, slice 6a). Since slice 6a the offer negotiates
+// NACK/RTX, so loss is repaired by retransmission; lossy/bad still assert arrival at the transport
+// level and record decode health (15 % loss on a 5 fps stream needs a repair round trip per frame); the stamp is unreadable at
 // thumbnail resolution.
 const std::map<std::string, NetemTolerance> kNetemProfiles = {
-    {"lan", {"active", 8000, 5000, 100, 1000, true, 5000}},     {"wifi-ok", {"active", 8000, 5000, 100, 1000, true, 5000}},
-    {"4g", {"active", 8000, 5000, 100, 1000, true, 5000}},      {"lossy", {"active", 10000, 5000, 60, 2000, false, 8000}},
-    {"bad", {"thumbnail", 15000, 5000, 10, 3000, false, 10000}}, // thumbnail is 5 fps: 25 units per window before loss
+    {"lan", {"active", 8000, 5000, 100, 1000, true, 5000, true}},     {"wifi-ok", {"active", 8000, 5000, 100, 1000, true, 5000, true}},
+    {"4g", {"active", 8000, 5000, 100, 1000, true, 5000, true}},
+    // lossy: a webrtcbin *receiver* under media-path jitter reports packets that arrive after its feedback as lost
+    // (20–50 % per window at 5 % real loss; Chromium reports ~5 % under the same profile, tests/stack/ratecontrol.spec.ts),
+    // so the agent's estimate is recorded here and asserted with the browser. The viewer is demoted, so fewer units arrive.
+    {"lossy", {"active", 10000, 5000, 20, 2000, false, 8000, false}},
+    // bad: 5 fps at the thumbnail tier, and 15 % packet loss on multi-packet frames costs most whole
+    // access units (0.85^5 ≈ 44 % survive a 5-packet frame; a retransmission may be lost too).
+    // Measured 7–10 units per window on this host, with the encoder pinned at the pre-slice-6a fixed
+    // 300 kbps as well: the profile, not rate control. The gap bound below is what guards a stall.
+    {"bad", {"thumbnail", 15000, 5000, 5, 3000, false, 10000, true}},
 };
 
 /// The agent's view of our session's tracks from GET /stats: "track: bitrate/frames/dropped", plus the selected pair.
@@ -2004,6 +2023,78 @@ std::string agent_track_stats(Operator& op, std::string* err) {
     }
     *err = "session " + op.sid8() + " not in GET /stats";
     return "";
+}
+
+/// The agent's latest `bandwidth-stats` entry for a track (docs/08#track-control), from an inbox
+/// whose lock the caller already holds (a wait_for predicate).
+std::optional<json> latest_bandwidth_locked(const Shared& sh, const std::string& track) {
+    for (auto it = sh.inbox.rbegin(); it != sh.inbox.rend(); ++it) {
+        if (it->type != "bandwidth-stats") continue;
+        for (const auto& t : it->payload.value("tracks", json::array()))
+            if (t.value("track_id", "") == track) return std::optional<json>(t);
+    }
+    return std::nullopt;
+}
+/// The same, from outside a predicate: a zero-wait predicate takes the lock (never nest it in another wait_for).
+std::optional<json> latest_bandwidth(Operator& op, const std::string& track) {
+    std::optional<json> found;
+    op.wait_for(
+        [&] {
+            found = latest_bandwidth_locked(op.sh(), track);
+            return true;
+        },
+        0);
+    return found;
+}
+
+// The viewer behind a bad link among good ones (docs/23 slice 6a gate 2; docs/23#rate-control-and-tier-switching).
+// Expects the impairment on `lo` (this process shares the robot's network namespace; the browser
+// viewers use eth0) applied *before* it starts and cleared while it waits: the agent must demote this
+// viewer alone, keep it decoding at the thumbnail tier, and promote it back once the link clears.
+void scenario_congested_viewer(Operator& op) {
+    Report& r = op.report();
+    connect_and_report(op);
+    const std::int64_t t0 = g_get_monotonic_time();
+    // The reply comes back over the impaired link (15 % loss, 100 ± 40 ms, behind whatever video is
+    // already queued): a control request needs a real budget here, and one retry.
+    bool ok = op.select("test-pattern", true, "active", 15000);
+    if (!ok) ok = op.select("test-pattern", true, "active", 15000);
+    r.check("enabled", ok, ok ? "select-tracks test-pattern active" : "select-tracks got no result within 15 s, twice");
+    if (!ok) return;
+    auto tier_now = [&] {
+        auto bw = latest_bandwidth(op, "test-pattern");
+        return bw ? bw->value("effective_tier", "?") + " (estimate " + std::to_string(bw->value("estimate_bps", 0LL) / 1000) + " kbps)" : std::string("no bandwidth-stats yet");
+    };
+    // A session that starts *already* behind a bad link waits for transport-wide feedback to carry
+    // bitrates at all (3–4 s here) before the estimator has anything to judge, then 2 s below the
+    // band, then the 1 s stats sample: 8–9 s on this host. The browser gate measures the reaction of
+    // an established session (docs/23 slice 6a gate 1); this one asserts that it happens at all.
+    const bool demoted = op.wait_for(
+        [&] {
+            auto bw = latest_bandwidth_locked(op.sh(), "test-pattern");
+            return bw && bw->value("effective_tier", "") == "thumbnail";
+        },
+        25000);
+    const std::int64_t t_demoted = g_get_monotonic_time();
+    r.check("demoted", demoted,
+            demoted ? "effective_tier=thumbnail " + ms_str(t_demoted - t0) + " after enable (docs/23: TWCC warm-up, then 2 s below the band, then the 1 s sample)" : "not demoted within 25 s: " + tier_now());
+    if (!demoted) return;
+    const std::uint64_t f0 = op.frames("test-pattern");
+    const bool flows = op.wait_frames("test-pattern", f0, 3, 10000);
+    r.check("decodes-while-demoted", flows, flows ? "frames keep arriving at the thumbnail tier" : "no 3 frames within 10 s at the thumbnail tier");
+    logf("waiting for the impairment to be cleared and the tier restored (up to 60 s)");
+    const bool promoted = op.wait_for(
+        [&] {
+            auto bw = latest_bandwidth_locked(op.sh(), "test-pattern");
+            return bw && bw->value("effective_tier", "") == "active";
+        },
+        60000);
+    const std::int64_t t_promoted = g_get_monotonic_time();
+    r.check("promoted", promoted, promoted ? "effective_tier=active " + ms_str(t_promoted - t_demoted) + " after the demotion (the harness cleared the link in between)" : "not promoted within 60 s: " + tier_now());
+    if (!promoted) return;
+    const std::uint64_t f1 = op.frames("test-pattern");
+    const bool active_flows = op.wait_frames("test-pattern", f1, 20, 8000);
+    r.check("decodes-when-restored", active_flows, active_flows ? "20 frames within 8 s at the active tier" : "fewer than 20 frames in 8 s after the promotion");
 }
 
 void scenario_netem(Operator& op) {
@@ -2051,10 +2142,22 @@ void scenario_netem(Operator& op) {
                 std::to_string(encoded) + " encoded units in " + std::to_string(tol.window_ms) + " ms (min " + std::to_string(tol.min_encoded) + "), longest arrival gap " +
                     std::to_string(enc_gap_ms) + " ms (max " + std::to_string(tol.max_gap_ms) + "); " + decode);
         if (tol.decode_continuity) {
-            const bool advances = a->have_counter && b->have_counter && b->last_counter > a->last_counter;
+            const bool advances = b->have_counter && (!a->have_counter || b->last_counter > a->last_counter); // the first snapshot may predate the first readable stamp
             const bool cont = frames >= 50 && advances && b->max_delta <= 2;
             r.check("decode-continuity " + track, cont, decode + " (clean link: >= 50 decoded, stamp advances, no stamp gap > 1 frame)");
         }
+    }
+    // Rate control (docs/23 slice 6a gate 5): on a link that carries the active tier the agent's
+    // estimate stays there and nothing is demoted; on `bad` the estimate is below 2 Mbps.
+    for (const std::string& track : op.manifest_tracks()) {
+        auto bw = latest_bandwidth(op, track);
+        const std::string tier = bw ? bw->value("effective_tier", "?") : "?";
+        const long long est = bw ? bw->value("estimate_bps", 0LL) : 0;
+        const bool expect_active = std::string(tol.tier) == "active";
+        const bool ok = bw && (expect_active ? (tier == "active" && est >= 2'000'000) : est <= 2'000'000);
+        const std::string seen = (bw ? "effective_tier=" + tier + ", estimate " + std::to_string(est / 1000) + " kbps" : "no bandwidth-stats received") + " under " + profile;
+        if (tol.assert_rate) r.check("rate-control " + track, ok, seen + (expect_active ? " (expected: active, >= 2 Mbps)" : " (expected: <= 2 Mbps)"));
+        else r.check("rate-control-recorded " + track, bw.has_value(), seen + " (recorded: a webrtcbin receiver under jitter over-reports loss; the browser lab asserts this profile)");
     }
     // Health-relevant stats, recorded: our webrtcbin's inbound-rtp and the agent's per-track view.
     {
@@ -2085,6 +2188,7 @@ using ScenarioFn = void (*)(Operator&);
 const std::map<std::string, ScenarioFn> kScenarios = {
     {"smoke", scenario_smoke},       {"toggle", scenario_toggle},   {"hotplug", scenario_hotplug},     {"silent-operator", scenario_silent_operator},
     {"no-answer", scenario_no_answer}, {"socket-drop", scenario_socket_drop}, {"ice-restart", scenario_ice_restart}, {"deadman", scenario_deadman},
+    {"congested-viewer", scenario_congested_viewer},
     {"relay-only", scenario_relay_only}, {"soak", scenario_soak},
     // netem-<profile>: one function, the profile is read from the scenario name (unknown profile → usage, exit 2).
     {"netem-lan", scenario_netem},     {"netem-wifi-ok", scenario_netem}, {"netem-4g", scenario_netem},     {"netem-lossy", scenario_netem},

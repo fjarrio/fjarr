@@ -1,11 +1,17 @@
 #include "consumer.hpp"
 
+#include <limits>
+
 #include <gst/sdp/sdp.h>
 #include <gst/video/video.h>
 
 #include "core/log.hpp"
 
 namespace fjarr::media {
+
+// docs/08#rtp-feedback: the transport-wide congestion control header extension, id 3 (Chromium's default id).
+static constexpr const char* TWCC_EXTMAP_FIELD = "extmap-3";
+static constexpr const char* TWCC_EXTMAP_URI = "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01";
 
 // The hub subscriber: pushes rebased buffers into this track's appsrc from the hub thread.
 struct ConsumerPipeline::AppSrcSink final : public FrameSink {
@@ -243,16 +249,52 @@ ConsumerTrack* ConsumerPipeline::add_track(const TrackSpec& spec, const std::str
         // The SSRC goes into the preferences too: without it webrtcbin signals a fresh random
         // `a=ssrc` on every re-offer and Chromium recreates the receiver (decoder reset, a GOP
         // of frames lost on an untouched track during hot-plug — found by the lab).
+        // docs/08#rtp-feedback: the offer carries congestion feedback (transport-cc + the
+        // transport-wide sequence extension), retransmission (nack; `do-nack` makes webrtcbin
+        // add the rtx payload and rtprtxsend) and the keyframe requests (nack pli, ccm fir).
         glib::GstCapsPtr pref(gst_caps_new_simple("application/x-rtp", "media", G_TYPE_STRING, "video", "encoding-name", G_TYPE_STRING,
                                                   "H264", "payload", G_TYPE_INT, t->pt, "clock-rate", G_TYPE_INT, 90000,
-                                                  "packetization-mode", G_TYPE_STRING, "1", "ssrc", G_TYPE_UINT, t->ssrc, nullptr));
-        g_object_set(trans, "codec-preferences", pref.get(), "direction", GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDONLY, nullptr);
+                                                  "packetization-mode", G_TYPE_STRING, "1", "ssrc", G_TYPE_UINT, t->ssrc,
+                                                  "rtcp-fb-transport-cc", G_TYPE_BOOLEAN, TRUE, "rtcp-fb-nack", G_TYPE_BOOLEAN, TRUE,
+                                                  "rtcp-fb-nack-pli", G_TYPE_BOOLEAN, TRUE, "rtcp-fb-ccm-fir", G_TYPE_BOOLEAN, TRUE,
+                                                  TWCC_EXTMAP_FIELD, G_TYPE_STRING, TWCC_EXTMAP_URI, nullptr));
+        g_object_set(trans, "codec-preferences", pref.get(), "direction", GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDONLY, "do-nack", TRUE, nullptr);
     }
     if (!build_branch(*t)) return nullptr;
     ConsumerTrack* raw = t.get();
     tracks_[spec.track_id] = std::move(t);
     return raw;
 }
+
+namespace {
+/// A GstStructure as JSON (numbers, booleans, strings; anything else as its string form).
+nlohmann::json structure_json(const GstStructure* st) {
+    nlohmann::json out = nlohmann::json::object();
+    if (!st) return out;
+    gst_structure_foreach(
+        st,
+        [](GQuark field, const GValue* v, gpointer d) -> gboolean {
+            auto& j = *static_cast<nlohmann::json*>(d);
+            const char* name = g_quark_to_string(field);
+            if (G_VALUE_HOLDS_BOOLEAN(v)) j[name] = static_cast<bool>(g_value_get_boolean(v));
+            else if (G_VALUE_HOLDS_INT(v)) j[name] = g_value_get_int(v);
+            else if (G_VALUE_HOLDS_UINT(v)) j[name] = g_value_get_uint(v);
+            else if (G_VALUE_HOLDS_INT64(v)) j[name] = g_value_get_int64(v);
+            else if (G_VALUE_HOLDS_UINT64(v)) j[name] = g_value_get_uint64(v);
+            else if (G_VALUE_HOLDS_DOUBLE(v)) j[name] = g_value_get_double(v);
+            else if (G_VALUE_HOLDS_FLOAT(v)) j[name] = g_value_get_float(v);
+            else if (G_VALUE_HOLDS_STRING(v)) j[name] = g_value_get_string(v) ? g_value_get_string(v) : "";
+            else {
+                gchar* s = gst_value_serialize(v);
+                j[name] = s ? s : "";
+                g_free(s);
+            }
+            return TRUE;
+        },
+        &out);
+    return out;
+}
+} // namespace
 
 bool ConsumerPipeline::build_branch(ConsumerTrack& t) {
     // `appsrc ! queue(leaky) ! valve ! rtph264pay ! webrtcbin.sink_%u` under session:<sid8>/<track>/<role>.
@@ -499,12 +541,72 @@ void ConsumerPipeline::get_stats(std::function<void(StatsSample)> cb) {
             gst_structure_get(src, "internal", G_TYPE_BOOLEAN, &internal, "is-sender", G_TYPE_BOOLEAN, &sender, "ssrc", G_TYPE_UINT, &ssrc, nullptr);
             if (!internal || !sender) continue;
             gst_structure_get(src, "octets-sent", G_TYPE_UINT64, &octets, "packets-sent", G_TYPE_UINT64, &packets, nullptr);
+            guint nacks = 0, plis = 0, firs = 0;
+            gst_structure_get(src, "recv-nack-count", G_TYPE_UINT, &nacks, "recv-pli-count", G_TYPE_UINT, &plis, "recv-fir-count", G_TYPE_UINT, &firs, nullptr);
             auto it = by_ssrc.find(ssrc);
-            if (it != by_ssrc.end()) sample.tracks.push_back({it->second, octets, packets});
+            if (it != by_ssrc.end()) sample.tracks.push_back({it->second, octets, packets, nacks, static_cast<std::uint64_t>(plis) + firs});
         }
         G_GNUC_END_IGNORE_DEPRECATIONS
+        if (sid == 0) { // max-bundle: one transport, one TWCC feedback stream (docs/23#rate-control-and-tier-switching)
+            GstStructure* twcc = nullptr;
+            g_object_get(session.get(), "twcc-stats", &twcc, nullptr);
+            glib::GstStructurePtr guard(twcc);
+            sample.twcc = structure_json(twcc);
+        }
+    }
+    // Retransmission counters live on the rtprtxsend webrtcbin inserts per transport (docs/08#rtp-feedback).
+    if (webrtc_) {
+        GstIterator* it = gst_bin_iterate_recurse(GST_BIN(webrtc_.get()));
+        GValue item = G_VALUE_INIT;
+        while (it && gst_iterator_next(it, &item) == GST_ITERATOR_OK) {
+            auto* el = GST_ELEMENT(g_value_get_object(&item));
+            GstElementFactory* f = el ? gst_element_get_factory(el) : nullptr;
+            if (f && std::string(GST_OBJECT_NAME(f)) == "rtprtxsend") {
+                guint req = 0, pk = 0;
+                g_object_get(el, "num-rtx-requests", &req, "num-rtx-packets", &pk, nullptr);
+                sample.rtx_requests += req;
+                sample.rtx_packets += pk;
+            }
+            g_value_reset(&item);
+        }
+        g_value_unset(&item);
+        if (it) gst_iterator_free(it);
     }
     cb(std::move(sample));
+}
+
+TwccSample ConsumerPipeline::twcc_sample() const {
+    TwccSample s;
+    glib::GstElementPtr rtpbin = glib::adopt_element(webrtc_ ? gst_bin_get_by_name(GST_BIN(webrtc_.get()), "rtpbin") : nullptr);
+    if (!rtpbin) return s;
+    GstElement* raw = nullptr;
+    g_signal_emit_by_name(rtpbin.get(), "get-session", 0u, &raw); // transfer full; max-bundle: session 0 is the transport
+    if (!raw) return s;
+    glib::GstElementPtr session = glib::adopt_element(raw);
+    GstStructure* st = nullptr;
+    g_object_get(session.get(), "twcc-stats", &st, nullptr);
+    glib::GstStructurePtr guard(st);
+    if (!st) return s;
+    guint sent = 0, recv = 0, psent = 0, precv = 0;
+    gdouble loss = 0;
+    gint64 dod = 0;
+    gst_structure_get(st, "bitrate-sent", G_TYPE_UINT, &sent, "bitrate-recv", G_TYPE_UINT, &recv, "packets-sent", G_TYPE_UINT, &psent,
+                      "packets-recv", G_TYPE_UINT, &precv, nullptr);
+    if (!gst_structure_get_double(st, "packet-loss-pct", &loss)) {
+        gint li = 0;
+        if (gst_structure_get_int(st, "packet-loss-pct", &li)) loss = li;
+    }
+    gst_structure_get_int64(st, "avg-delta-of-delta", &dod);
+    s.bitrate_sent = sent;
+    s.bitrate_recv = recv;
+    s.loss_pct = loss;
+    s.avg_delta_of_delta_ns = dod == std::numeric_limits<gint64>::min() ? 0 : dod; // "no data yet" is INT64_MIN
+    if (sent == 0 && recv == 0) psent = 0; // before the first feedback: nothing to learn from
+    // A window with nothing acknowledged is evidence too (a shaper's queue can hold everything for
+    // seconds); "no feedback at all" is the *same* window read twice, which the session's tick detects.
+    s.packets = static_cast<int>(psent);
+    s.packets_recv = static_cast<int>(precv);
+    return s;
 }
 
 std::string ConsumerPipeline::connection_state() const {

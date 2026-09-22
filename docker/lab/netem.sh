@@ -54,14 +54,12 @@ tc_in_robot() {
 # shellcheck disable=SC2086 # $2 is a tc word list on purpose
 apply_dev() {
     local dev=$1 args=$2
-    if [ "$dev" = lo ]; then
-        tc_in_robot qdisc replace dev "$dev" root handle 1: prio bands 3 priomap 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
-        tc_in_robot qdisc replace dev "$dev" parent 1:2 handle 20: netem $args
-        tc_in_robot filter replace dev "$dev" parent 1: protocol ip prio 1 handle 800::1 u32 match ip dport "$INTROSPECT_PORT" 0xffff flowid 1:1
-        tc_in_robot filter replace dev "$dev" parent 1: protocol ip prio 1 handle 800::2 u32 match ip sport "$INTROSPECT_PORT" 0xffff flowid 1:1
-    else
-        tc_in_robot qdisc replace dev "$dev" root netem $args
-    fi
+    # The impairment sits on a prio band the introspection port is filtered out of, on every device:
+    # opsim and the harness keep reading /stats through a bad link (docs/25).
+    tc_in_robot qdisc replace dev "$dev" root handle 1: prio bands 3 priomap 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+    tc_in_robot qdisc replace dev "$dev" parent 1:2 handle 20: netem $args
+    tc_in_robot filter replace dev "$dev" parent 1: protocol ip prio 1 handle 800::1 u32 match ip dport "$INTROSPECT_PORT" 0xffff flowid 1:1
+    tc_in_robot filter replace dev "$dev" parent 1: protocol ip prio 1 handle 800::2 u32 match ip sport "$INTROSPECT_PORT" 0xffff flowid 1:1
 }
 
 # Before deleting, print what the netem qdisc saw (packets through it and dropped

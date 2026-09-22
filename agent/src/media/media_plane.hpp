@@ -59,6 +59,17 @@ class MediaPlane {
     std::vector<Producer*> producers() const;
     Producer* producer(const std::string& track_id) const;
 
+    // Rate control (docs/23#rate-control-and-tier-switching). A session reports, per subscribed
+    // (track, tier), the share of its peer's estimate this track may use; every 500 ms each running
+    // tier encoder is set to the minimum over its subscribers, clamped to the tier's band. A
+    // subscriber is identified by an opaque pointer (its hub sink) and forgotten on unsubscribe.
+    void report_allotment(const std::string& track_id, const std::string& tier, const void* subscriber, double bps);
+    void forget_allotment(const void* subscriber);
+    /// Can this track serve `tier` for a demoted viewer? (a lower tier exists; passthrough without a substream says no)
+    bool tier_possible(const std::string& track_id, const std::string& tier) const;
+    /// The band a tier adapts within, for the session's demotion rule.
+    std::pair<int, int> band_kbps(const std::string& track_id, const std::string& tier) const;
+
     /// Plane rebuild escalation: the caller closes sessions and calls rebuild().
     void on_rebuild_needed(std::function<void(const std::string& reason)> fn) { rebuild_needed_ = std::move(fn); }
     void rebuild();
@@ -81,6 +92,7 @@ class MediaPlane {
     };
     bool ensure_producer(Registered& r);
     void restart_producer(const std::string& track_id, const std::string& error);
+    void apply_targets();
 
     CoreLoop& loop_;
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true); // guards every post that could outlive the plane
@@ -92,6 +104,12 @@ class MediaPlane {
     std::function<void(const std::string&)> rebuild_needed_;
     std::function<void(const std::string&, const std::string&)> producer_event_;
     std::vector<std::chrono::steady_clock::time_point> rebuilds_;
+    struct Allotment {
+        double bps = 0;
+        std::chrono::steady_clock::time_point at{};
+    };
+    std::map<std::pair<std::string, std::string>, std::map<const void*, Allotment>> allotments_; // (track, tier) → subscriber → share
+    glib::SourceGuard rate_timer_;
 };
 
 } // namespace fjarr::media

@@ -5,6 +5,7 @@
  */
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type {
+  AgentTrackStats,
   Envelope,
   EnvelopeHandler,
   FjarrClient,
@@ -146,6 +147,13 @@ export function useCommand<R extends ResultPayload = ResultPayload>(session: Ses
 
 export function useTracks(session?: Session): TrackSnapshot {
   return useStore(useSession(session).tracks.store);
+}
+
+/** The agent's view of one track (docs/08 `bandwidth-stats`): effective tier, link estimate, repairs. Re-renders once per second for this track only. */
+export function useTrackAgentStats(session: Session | undefined, trackId: string): AgentTrackStats | undefined {
+  const s = useSession(session);
+  const store = s.tracks.agent;
+  return useSyncExternalStore(store.subscribe, () => store.getSnapshot().get(trackId), () => store.getSnapshot().get(trackId));
 }
 
 export function useTrackEntry(session: Session | undefined, trackId: string): TrackEntry | undefined {

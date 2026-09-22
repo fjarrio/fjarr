@@ -9,6 +9,8 @@ add_executable(fjarr-tests
   test_frame_hub.cpp
   test_channels.cpp
   test_blob.cpp
+  test_rate_estimator.cpp
+  test_tier_policy.cpp
   test_introspect_capability.cpp
   test_session.cpp
   test_loop_media.cpp

@@ -34,7 +34,8 @@ struct AgentConfig {
     struct MediaSection {
         std::string encoder = "auto"; // auto | vaapi | software — never a silent fallback
         int gop_seconds = 2;
-        int active_kbps = 4000;
+        int active_kbps = 4000;       // the active tier's target; the encoder adapts in [active_kbps/2, active_kbps] (docs/23 rate control)
+        int active_floor_kbps = 250;  // a lone viewer may take the encoder down to here (docs/16)
         int thumbnail_kbps = 300;
         int tier_grace_ms = 10000;
     } media;

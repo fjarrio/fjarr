@@ -48,6 +48,23 @@ export interface TrackEntry {
   readonly removed: boolean;
 }
 
+/**
+ * The agent's per-second view of one track (docs/08 `bandwidth-stats`): the tier it actually
+ * sends against the tier asked for, its estimate of this peer's link, and the repair counters
+ * (docs/23#rate-control-and-tier-switching). Kept beside the entries, not in them, so a
+ * per-second tick never re-renders every track consumer.
+ */
+export interface AgentTrackStats {
+  tier: TrackTier;
+  effectiveTier: TrackTier;
+  estimateBps: number;
+  adaptive: boolean;
+  bitrateBps: number;
+  nacks: number;
+  keyframeRequests: number;
+  atMs: number;
+}
+
 export interface TrackSnapshot {
   readonly version: number;
   readonly manifestVersion: number | null;
@@ -83,6 +100,7 @@ export class TrackRegistry {
   private readonly consumers = new Map<string, Map<number, Required<Pick<AcquireOptions, "tier" | "visible">> & AcquireOptions>>();
   private readonly lastSent = new Map<string, string>();
   private readonly flushAttempts = new Map<string, number>();
+  private readonly agentStore = createStore<ReadonlyMap<string, AgentTrackStats>>(new Map());
   private readonly dirty = new Set<string>();
   private lastMonitorsKey = "";
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -101,6 +119,43 @@ export class TrackRegistry {
   }
 
   /** Monitors: the latest `monitors` event wins until the next manifest. */
+  /** The agent's per-track stats, newest-wins per track (docs/08 `bandwidth-stats`). */
+  get agent(): ReadonlyStore<ReadonlyMap<string, AgentTrackStats>> {
+    return this.agentStore;
+  }
+
+  /** A `bandwidth-stats` event's payload (docs/08#track-control). */
+  noteAgentStats(payload: unknown, now: number): void {
+    const tracks = (payload as { tracks?: unknown[] } | undefined)?.tracks;
+    if (!Array.isArray(tracks)) return;
+    const next = new Map(this.agentStore.getSnapshot());
+    for (const t of tracks) {
+      const r = t as Record<string, unknown>;
+      if (typeof r.track_id !== "string") continue;
+      const tier = r.tier === "thumbnail" ? "thumbnail" : "active";
+      next.set(r.track_id, {
+        tier,
+        effectiveTier: r.effective_tier === "thumbnail" ? "thumbnail" : r.effective_tier === "active" ? "active" : tier,
+        estimateBps: typeof r.estimate_bps === "number" ? r.estimate_bps : 0,
+        adaptive: r.adaptive !== false,
+        bitrateBps: typeof r.bitrate_bps === "number" ? r.bitrate_bps : 0,
+        nacks: typeof r.nacks === "number" ? r.nacks : 0,
+        keyframeRequests: typeof r.keyframe_requests === "number" ? r.keyframe_requests : 0,
+        atMs: now,
+      });
+    }
+    this.agentStore.set(next);
+  }
+
+  /** Health reasons the browser's own stats cannot see: a tier the robot reduced, a track that cannot adapt. */
+  agentReasons(): string[] {
+    const out: string[] = [];
+    for (const [id, s] of this.agentStore.getSnapshot()) {
+      if (s.effectiveTier !== s.tier) out.push(`${id}: tier reduced by the robot: link ${Math.round(s.estimateBps / 1000)} kbps`);
+    }
+    return out;
+  }
+
   get monitors(): ReadonlyStore<MonitorInfo[]> {
     return this.monitorsImpl;
   }

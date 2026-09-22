@@ -98,9 +98,13 @@ struct Agent::Impl {
             }
             for (auto* p : plane->producers()) {
                 nlohmann::json tiers = nlohmann::json::array();
+                nlohmann::json kbps = nlohmann::json::object();
                 for (const char* t : {"active", "thumbnail"})
-                    if (p->has_tier(t)) tiers.push_back(t);
-                producers.push_back({{"name", p->name()}, {"playing", p->playing()}, {"tiers", tiers}, {"error", p->error()}});
+                    if (p->has_tier(t)) {
+                        tiers.push_back(t);
+                        kbps[t] = p->current_kbps(t); // the rate-controlled target (docs/23#rate-control-and-tier-switching)
+                    }
+                producers.push_back({{"name", p->name()}, {"playing", p->playing()}, {"tiers", tiers}, {"kbps", kbps}, {"error", p->error()}});
             }
         }
         return nlohmann::json{{"robot_id", config.agent.robot_id}, {"sessions", sessions ? sessions->stats() : nlohmann::json::array()},
@@ -118,7 +122,7 @@ struct Agent::Impl {
                              {"allow_unsupervised", a.allow_unsupervised}}},
                            {"media",
                             {{"encoder", config.media.encoder}, {"gop_seconds", config.media.gop_seconds}, {"active_kbps", config.media.active_kbps},
-                             {"thumbnail_kbps", config.media.thumbnail_kbps}, {"tier_grace_ms", config.media.tier_grace_ms}}},
+                             {"active_floor_kbps", config.media.active_floor_kbps}, {"thumbnail_kbps", config.media.thumbnail_kbps}, {"tier_grace_ms", config.media.tier_grace_ms}}},
                            {"introspect",
                             {{"enabled", config.introspect.enabled}, {"bind", config.introspect.bind}, {"port", config.introspect.port},
                              {"socket", config.introspect.socket}, {"token", config.introspect.token.empty() ? "" : "<redacted>"},

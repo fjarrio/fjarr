@@ -20,6 +20,7 @@
 #include <fjarr/session_context.hpp>
 
 #include "core/glib/raii.hpp"
+#include "rate_estimator.hpp"
 #include "core/protocol.hpp"
 #include "frame_hub.hpp"
 #include "pad_counter.hpp"
@@ -44,7 +45,9 @@ struct ConsumerTrack {
     std::string mid;  // from the offer SDP
     unsigned mline = 0;
     bool enabled = false;
-    std::string tier = "active";
+    std::string tier = "active";          // what is sent (the effective tier)
+    std::string demanded_tier = "active"; // what the client asked for (docs/23 rate control may send lower)
+    double allotment_bps = 0;             // this viewer's share of its estimate for the track
     bool pooled = false; // removed from the manifest, transceiver kept inactive
     glib::GstElementPtr appsrc, queue, valve, payloader;
     glib::GstPadPtr sink_pad; // webrtcbin.sink_%u
@@ -57,6 +60,8 @@ struct ConsumerTrack {
     unsigned long frames_dropped = 0;
     unsigned long last_frames = 0, last_dropped = 0;
     std::uint64_t last_bytes_sent = 0;
+    std::uint64_t last_nacks = 0;
+    std::uint64_t last_keyframe_requests = 0;
 };
 
 struct StatsSample {
@@ -64,9 +69,16 @@ struct StatsSample {
         std::string track_id;
         std::uint64_t bytes_sent = 0;
         std::uint64_t packets_sent = 0;
+        std::uint64_t nacks = 0;             // NACKs received from this peer for the track (docs/08#rtp-feedback)
+        std::uint64_t keyframe_requests = 0; // PLI + FIR received
     };
     std::vector<Track> tracks;
     std::string selected_pair; // reserved (docs/24): not read from webrtcbin's get-stats, see get_stats()
+    /// rtpsession's `twcc-stats` for the bundle transport (the per-peer estimator's input, docs/23#rate-control-and-tier-switching);
+    /// an empty object until the peer sends transport-wide feedback.
+    nlohmann::json twcc = nlohmann::json::object();
+    std::uint64_t rtx_requests = 0; // retransmission events served (rtprtxsend, whole transport)
+    std::uint64_t rtx_packets = 0;
 };
 
 /// Everything the wrapper reports upward runs on the core loop.
@@ -119,6 +131,8 @@ class ConsumerPipeline {
     /// Per-track bytes/packets sent, read synchronously from rtpbin's session sources on the loop
     /// (never webrtcbin's `get-stats`: it leaks an RTP session reference per call in 1.28.2).
     void get_stats(std::function<void(StatsSample)> cb);
+    /// The bundle transport's latest `twcc-stats` window, read synchronously on the loop (the 200 ms rate tick).
+    TwccSample twcc_sample() const;
     GstPipeline* pipeline() const { return GST_PIPELINE(pipeline_.get()); }
     GstElement* webrtc() const { return webrtc_.get(); }
     const std::vector<glib::GObjectPtr<GstWebRTCDataChannel>>& channels() const { return channels_; }

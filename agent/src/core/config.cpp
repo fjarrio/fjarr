@@ -93,6 +93,7 @@ AgentConfig AgentConfig::from_toml(const std::string& text) {
     std::int64_t i64 = 0;
     i64 = c.media.gop_seconds; read(media, "gop_seconds", i64); c.media.gop_seconds = static_cast<int>(i64);
     i64 = c.media.active_kbps; read(media, "active_kbps", i64); c.media.active_kbps = static_cast<int>(i64);
+    i64 = c.media.active_floor_kbps; read(media, "active_floor_kbps", i64); c.media.active_floor_kbps = static_cast<int>(i64);
     i64 = c.media.thumbnail_kbps; read(media, "thumbnail_kbps", i64); c.media.thumbnail_kbps = static_cast<int>(i64);
     i64 = c.media.tier_grace_ms; read(media, "tier_grace_ms", i64); c.media.tier_grace_ms = static_cast<int>(i64);
 
@@ -144,6 +145,7 @@ void AgentConfig::apply_env() {
     env_str("FJARR_MEDIA_ENCODER", media.encoder);
     env_int("FJARR_MEDIA_GOP_SECONDS", media.gop_seconds);
     env_int("FJARR_MEDIA_ACTIVE_KBPS", media.active_kbps);
+    env_int("FJARR_MEDIA_ACTIVE_FLOOR_KBPS", media.active_floor_kbps);
     env_int("FJARR_MEDIA_THUMBNAIL_KBPS", media.thumbnail_kbps);
     env_int("FJARR_MEDIA_TIER_GRACE_MS", media.tier_grace_ms);
     env_bool("FJARR_INTROSPECT_ENABLED", introspect.enabled);

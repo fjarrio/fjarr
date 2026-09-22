@@ -29,7 +29,7 @@ import { parseMediaSections } from "./sdp.js";
 import { StatsSampler, type SessionHealth, type SessionStats } from "./stats.js";
 import { createStore, type ReadonlyStore } from "./store.js";
 import { Heartbeat, TimeSync, type TimeSyncEstimate } from "./timesync.js";
-import { TrackRegistry, type AcquireOptions, type TrackHandle, type TrackSnapshot } from "./tracks.js";
+import { TrackRegistry, type AcquireOptions, type TrackHandle, type TrackSnapshot, type AgentTrackStats } from "./tracks.js";
 import type { SignalingSocket, SocketFactory } from "./transport.js";
 import type { WireEvent } from "./wire.js";
 import type { MonitorInfo } from "./protocol.js";
@@ -90,6 +90,8 @@ export interface SessionDeps {
 export interface TrackApi {
   readonly store: ReadonlyStore<TrackSnapshot>;
   readonly monitors: ReadonlyStore<MonitorInfo[]>;
+  /** The agent's per-track stats (docs/08 `bandwidth-stats`): effective tier, link estimate, repairs. */
+  readonly agent: ReadonlyStore<ReadonlyMap<string, AgentTrackStats>>;
   acquire(trackId: string, options?: AcquireOptions): TrackHandle;
   /** MediaStream for a live track (attachable in any same-origin document). */
   stream(trackId: string): { getTracks(): MediaStreamTrackLike[] } | null;
@@ -213,6 +215,7 @@ export class SessionImpl implements Session {
       { byMid: (mid) => this.registry.byMid(mid), byTrackIdentifier: (id) => this.registry.byTrackIdentifier(id) },
       {
         intervalMs: deps.options.statsIntervalMs,
+        extraReasons: () => this.registry.agentReasons(),
         now: deps.now,
         // Tracks the health score expects frames from: demanded AND bound
         // (RTCTrackEvent received). Unbound tracks are still starting up.
@@ -256,6 +259,9 @@ export class SessionImpl implements Session {
         const p = env.payload as MonitorsEventPayload;
         if (Array.isArray(p?.monitors)) this.registry.setMonitors(p.monitors);
       }
+      // The agent's per-track view (docs/08 bandwidth-stats) is core state, not a consumer's subscription:
+      // it must not keep a session alive under the idle policy.
+      if (env.type === "bandwidth-stats" && env.kind === "event") this.registry.noteAgentStats(env.payload, deps.now());
       this.router.handleIncoming(env);
     });
   }
@@ -841,6 +847,7 @@ export class SessionImpl implements Session {
     return {
       store: registry.store,
       monitors: registry.monitors,
+      agent: registry.agent,
       acquire: (trackId, options) => {
         const h = registry.acquire(trackId, options);
         this.touchIdle();

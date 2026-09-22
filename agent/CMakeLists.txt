@@ -46,6 +46,8 @@ add_library(fjarr STATIC
   src/media/consumer.cpp
   src/media/media_plane.cpp
   src/media/probe.cpp
+  src/media/rate_estimator.cpp
+  src/media/tier_policy.cpp
   src/media/pad_counter.cpp
   src/introspect/introspector.cpp
   src/introspect/memory.cpp

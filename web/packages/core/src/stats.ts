@@ -393,6 +393,8 @@ export interface StatsSamplerOptions {
   intervalMs?: number;
   now?: () => number;
   enabledTracks(): ReadonlySet<string>;
+  /** Reasons the browser's stats cannot see (a tier the robot reduced, docs/21): each makes the level at least "degraded". */
+  extraReasons?: () => string[];
 }
 
 /** One per session: no timers in React, no re-created intervals. */
@@ -457,7 +459,9 @@ export class StatsSampler {
     for (const id of Object.keys(stats.tracks)) this.seen.add(id);
     const expected = new Set<string>();
     for (const id of this.options.enabledTracks()) if (this.seen.has(id)) expected.add(id);
-    this.healthStore.set(this.health.push(rateSample(stats, expected)));
+    const rated = rateSample(stats, expected);
+    const extra = this.options.extraReasons?.() ?? [];
+    this.healthStore.set(this.health.push(extra.length ? { level: rated.level === "poor" ? "poor" : "degraded", reasons: [...rated.reasons, ...extra] } : rated));
     return stats;
   }
 

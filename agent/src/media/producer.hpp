@@ -23,6 +23,7 @@ struct ProducerConfig {
     EncoderChoice encoder{EncoderKind::Software, "software"};
     int gop_seconds = 2;
     int active_kbps = 4000;
+    int active_floor_kbps = 250;
     int thumbnail_kbps = 300;
 };
 
@@ -46,6 +47,13 @@ class Producer {
     void stop();
     /// Force a keyframe on a tier's encoder.
     void request_keyframe(const std::string& tier);
+    /// Rate control (docs/23#rate-control-and-tier-switching): the tier encoder's target, changed
+    /// while playing. Returns true when the encoder's property changed.
+    bool set_bitrate(const std::string& tier, int kbps);
+    /// The tier's current target (its profile's until rate control moved it); 0 for a tier not running.
+    int current_kbps(const std::string& tier) const;
+    /// The band rate control may move a tier within: [low, target] (docs/23).
+    std::pair<int, int> band_kbps(const std::string& tier) const;
     GstPipeline* pipeline() const { return GST_PIPELINE(pipeline_.get()); }
     const std::string& error() const { return error_; }
     /// True when the last bus error originated inside the source bin: a device or network problem, the source's to recover from, never a plane rebuild.
@@ -64,6 +72,7 @@ class Producer {
         glib::GstPadPtr tee_pad;
         HubKey key;
         FrameHub* hub = nullptr;
+        int kbps = 0; // current encoder target
     };
     TierProfile profile_for(const std::string& tier) const;
     static GstFlowReturn on_new_sample(GstAppSink* sink, gpointer user);

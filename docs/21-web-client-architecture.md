@@ -263,10 +263,14 @@ Per track: `enabled = any consumer visible`, `tier = max over visible
 consumers`, `preference = sharpness if any visible consumer asks for it`.
 The agent may send a *lower* tier than asked while this peer's link is
 below the tier's band ([docs/23](23-agent-core-architecture.md#rate-control-and-tier-switching));
-the track entry then carries `effectiveTier` beside `tier` (from
-`bandwidth-stats`), `adaptive: false` marks a passthrough track that
-cannot adapt, and the demand model never changes what it asks for because
-of it — the agent's override is the agent's.
+`session.tracks.agent` (a store of the agent's per-second view per
+track from `bandwidth-stats`: `tier`, `effectiveTier`, `estimateBps`,
+`adaptive`, `bitrateBps`, `nacks`, `keyframeRequests`) then shows
+`effectiveTier` below `tier`; it is kept beside the entries, not in
+them, so the per-second tick re-renders only `useTrackAgentStats(session,
+trackId)` consumers. `adaptive: false` marks a passthrough track that
+cannot adapt. The demand model never changes what it asks for because of
+it — the agent's override is the agent's.
 Changes are debounced (~250 ms) and coalesced into one `select-tracks`
 request **per track-owning capability** (`fjarr.camera` for camera tracks,
 `fjarr.desktop` for monitors — [docs/06](06-capabilities.md#fjarrcamera--camera-video-m1-reference-implementation));

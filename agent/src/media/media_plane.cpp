@@ -69,6 +69,7 @@ bool MediaPlane::ensure_producer(Registered& r) {
     pc.encoder = encoder_;
     pc.gop_seconds = config_.gop_seconds;
     pc.active_kbps = config_.active_kbps;
+    pc.active_floor_kbps = config_.active_floor_kbps;
     pc.thumbnail_kbps = config_.thumbnail_kbps;
     auto p = std::make_unique<Producer>(r.reg.spec.track_id, r.reg.spec.source, r.reg.stamp, pc, hub_, loop_.context());
     const std::string id = r.reg.spec.track_id;
@@ -113,6 +114,63 @@ void MediaPlane::on_demand(const HubKey& key, int subscribers) {
         it2->second.grace_timers.erase(tier);
         return false;
     });
+}
+
+void MediaPlane::report_allotment(const std::string& track_id, const std::string& tier, const void* subscriber, double bps) {
+    loop_.assert_owner("MediaPlane::report_allotment");
+    allotments_[{track_id, tier}][subscriber] = Allotment{bps, std::chrono::steady_clock::now()};
+    if (!rate_timer_.active()) {
+        rate_timer_ = loop_.add_timeout(std::chrono::milliseconds(500), [this] {
+            apply_targets();
+            if (allotments_.empty()) return false; // nobody reports: the timer ends
+            return true;
+        });
+    }
+}
+
+void MediaPlane::forget_allotment(const void* subscriber) {
+    for (auto it = allotments_.begin(); it != allotments_.end();) {
+        it->second.erase(subscriber);
+        it = it->second.empty() ? allotments_.erase(it) : std::next(it);
+    }
+}
+
+bool MediaPlane::tier_possible(const std::string& track_id, const std::string& tier) const {
+    return tracks_.count(track_id) > 0 && (tier == "active" || tier == "thumbnail");
+}
+
+std::pair<int, int> MediaPlane::band_kbps(const std::string& track_id, const std::string& tier) const {
+    auto it = tracks_.find(track_id);
+    if (it != tracks_.end() && it->second.producer) return it->second.producer->band_kbps(tier);
+    if (tier == "thumbnail") return {std::min(config_.active_floor_kbps, config_.thumbnail_kbps), config_.thumbnail_kbps};
+    return {std::max(config_.active_floor_kbps, config_.active_kbps / 2), config_.active_kbps};
+}
+
+void MediaPlane::apply_targets() {
+    // docs/23: a tier encoder follows the *minimum* estimate among its current subscribers, inside
+    // the tier's band; stale reports (a session that stopped reporting) drop out after 3 s.
+    const auto now = std::chrono::steady_clock::now();
+    for (auto it = allotments_.begin(); it != allotments_.end();) {
+        auto& [key, subs] = *it;
+        for (auto s = subs.begin(); s != subs.end();) s = now - s->second.at > std::chrono::seconds(3) ? subs.erase(s) : std::next(s);
+        if (subs.empty()) {
+            it = allotments_.erase(it);
+            continue;
+        }
+        auto t = tracks_.find(key.first);
+        if (t != tracks_.end() && t->second.producer && t->second.producer->has_tier(key.second)) {
+            double min_bps = 0;
+            for (const auto& [_, a] : subs) min_bps = min_bps == 0 ? a.bps : std::min(min_bps, a.bps);
+            const auto band = t->second.producer->band_kbps(key.second);
+            // docs/23: the band protects the *other* viewers of a shared encoder; a lone viewer gets
+            // the whole range down to the floor (a tier switch takes 2 s — a lone viewer on a slow
+            // link must not overload it meanwhile).
+            const double low = subs.size() == 1 ? std::min<double>(band.first, config_.active_floor_kbps) : band.first;
+            const int kbps = static_cast<int>(std::min<double>(band.second, std::max<double>(low, min_bps / 1000.0)));
+            t->second.producer->set_bitrate(key.second, kbps);
+        }
+        ++it;
+    }
 }
 
 void MediaPlane::request_keyframe(const HubKey& key) {

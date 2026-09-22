@@ -558,6 +558,10 @@ void Session::maybe_connected() {
         sample_stats();
         return true;
     });
+    rate_timer_ = deps_.loop->add_timeout(milliseconds(200), [this] {
+        rate_tick();
+        return true;
+    });
     if (deps_.emit) deps_.emit(SessionEvent{"started", id_, operator_, "", ""});
 }
 
@@ -670,17 +674,23 @@ void Session::handle_select_tracks(const Envelope& env, const AttachedCapability
     if (deps_.snapshot && consumer_ && consumer_->pipeline()) deps_.snapshot(GST_BIN(consumer_->pipeline()), "select-tracks");
 }
 
-void Session::apply_demand(const std::string& track_id, bool enabled, const std::string& tier) {
+void Session::apply_demand(const std::string& track_id, bool enabled, const std::string& demanded) {
     auto* ct = consumer_ ? consumer_->track(track_id) : nullptr;
     if (!ct) return;
     auto sink = consumer_->sink_for(track_id);
     auto sub = subscribed_tier_.find(track_id);
+    // The client's demand and the agent's override (docs/23 rate control) resolve to what is sent.
+    auto& policy = tier_policy_[track_id];
+    policy.set_demanded(demanded);
+    ct->demanded_tier = demanded;
+    const std::string tier = policy.effective();
     if (!enabled) {
         consumer_->set_enabled(track_id, false);
         if (sub != subscribed_tier_.end()) {
             deps_.plane->hub().unsubscribe(media::HubKey{track_id, sub->second}, sink);
             subscribed_tier_.erase(sub);
         }
+        deps_.plane->forget_allotment(sink.get());
         return;
     }
     if (sub != subscribed_tier_.end() && sub->second != tier) {
@@ -704,9 +714,60 @@ void Session::unsubscribe_all() {
     for (auto& [id, tier] : subscribed_tier_) {
         if (!consumer_) break;
         auto sink = consumer_->sink_for(id);
-        if (sink) deps_.plane->hub().unsubscribe(media::HubKey{id, tier}, sink);
+        if (sink) {
+            deps_.plane->hub().unsubscribe(media::HubKey{id, tier}, sink);
+            deps_.plane->forget_allotment(sink.get());
+        }
     }
     subscribed_tier_.clear();
+    rate_timer_.cancel();
+}
+
+void Session::rate_tick() {
+    if (!consumer_ || state_ != State::Connected) return;
+    // The ceiling is what this peer's enabled tracks could take at their targets; the floor is the config's.
+    double sum_targets = 0;
+    std::vector<media::ConsumerTrack*> enabled;
+    for (auto& [id, _] : tracks_) {
+        auto* ct = consumer_->track(id);
+        if (!ct || !ct->enabled || !subscribed_tier_.count(id)) continue;
+        enabled.push_back(ct);
+        sum_targets += deps_.plane->band_kbps(id, ct->tier).second * 1000.0;
+    }
+    const media::RateLimits limits{deps_.config->media.active_floor_kbps * 1000.0, std::max(sum_targets, deps_.config->media.active_kbps * 1000.0) * 1.2};
+    if (!estimator_) estimator_.emplace(limits, std::max(sum_targets, limits.floor_bps));
+    else estimator_->set_limits(limits);
+    const auto now = steady_clock::now();
+    media::TwccSample twcc = consumer_->twcc_sample();
+    // rtpsession keeps the last window until the next feedback arrives: the same numbers again mean
+    // no new feedback, not a window with these numbers (a receiver without feedback would otherwise
+    // read as a lossless link and be driven to the ceiling).
+    const bool same = twcc.packets == last_twcc_.packets && twcc.packets_recv == last_twcc_.packets_recv && twcc.bitrate_sent == last_twcc_.bitrate_sent &&
+                      twcc.bitrate_recv == last_twcc_.bitrate_recv && twcc.avg_delta_of_delta_ns == last_twcc_.avg_delta_of_delta_ns;
+    last_twcc_ = twcc;
+    if (same) twcc.packets = 0;
+    estimator_->update(twcc, now);
+    if (enabled.empty() || sum_targets <= 0) return;
+    // Share the peer's estimate across its tracks in proportion to their tier targets; report
+    // each share to the plane (the encoder follows the minimum over its viewers) and tick the
+    // per-track tier policy with the *active* band as the reference.
+    for (auto* ct : enabled) {
+        const double target = deps_.plane->band_kbps(ct->track_id, ct->tier).second * 1000.0;
+        ct->allotment_bps = estimator_->estimate_bps() * target / sum_targets;
+        auto sink = consumer_->sink_for(ct->track_id);
+        deps_.plane->report_allotment(ct->track_id, ct->tier, sink.get(), ct->allotment_bps);
+        const double active_low = deps_.plane->band_kbps(ct->track_id, "active").first * 1000.0;
+        // A demoted viewer's share is computed against the thumbnail target: judge promotion on what
+        // the active tier would need instead.
+        const double judged = ct->tier == "active" ? ct->allotment_bps : estimator_->estimate_bps() * (deps_.plane->band_kbps(ct->track_id, "active").second * 1000.0) / (sum_targets - target + deps_.plane->band_kbps(ct->track_id, "active").second * 1000.0);
+        auto& policy = tier_policy_[ct->track_id];
+        if (auto changed = policy.update(judged, active_low, deps_.plane->tier_possible(ct->track_id, "thumbnail"), now)) {
+            log::info("session", policy.demoted() ? "tier reduced for this viewer" : "tier restored for this viewer",
+                      {{"session", sid8_}, {"track", ct->track_id}, {"tier", *changed}, {"estimate_bps", std::to_string(static_cast<long long>(estimator_->estimate_bps()))}});
+            apply_demand(ct->track_id, true, ct->demanded_tier); // resolves to the new effective tier
+            if (deps_.snapshot && consumer_->pipeline()) deps_.snapshot(GST_BIN(consumer_->pipeline()), "tier-changed");
+        }
+    }
 }
 
 void Session::sample_stats() {
@@ -725,14 +786,25 @@ void Session::sample_stats() {
             const unsigned long dropped = stats.dropped - ct->last_dropped;
             ct->last_frames = stats.delivered;
             ct->last_dropped = stats.dropped;
+            const std::uint64_t nacks = t.nacks >= ct->last_nacks ? t.nacks - ct->last_nacks : 0;
+            const std::uint64_t kfr = t.keyframe_requests >= ct->last_keyframe_requests ? t.keyframe_requests - ct->last_keyframe_requests : 0;
+            ct->last_nacks = t.nacks;
+            ct->last_keyframe_requests = t.keyframe_requests;
             auto& arr = per_cap[it->second.first];
             if (!arr.is_array()) arr = nlohmann::json::array();
-            arr.push_back({{"track_id", t.track_id}, {"enabled", ct->enabled}, {"tier", ct->tier}, {"bitrate_bps", delta_bytes * 8},
-                           {"frames", frames}, {"dropped", dropped}});
+            arr.push_back({{"track_id", t.track_id}, {"enabled", ct->enabled}, {"tier", ct->demanded_tier}, {"effective_tier", ct->tier},
+                           {"estimate_bps", static_cast<std::uint64_t>(ct->allotment_bps)}, {"adaptive", true},
+                           {"bitrate_bps", delta_bytes * 8}, {"frames", frames}, {"dropped", dropped}, {"nacks", nacks}, {"keyframe_requests", kfr}});
         }
         last_stats_ = nlohmann::json::object();
         for (auto& [cap, arr] : per_cap) last_stats_[cap] = arr;
         last_stats_["selected_pair"] = sample.selected_pair;
+        if (estimator_)
+            last_stats_["rate"] = nlohmann::json{{"estimate_bps", static_cast<std::uint64_t>(estimator_->estimate_bps())}, {"state", estimator_->state()},
+                                                 {"decreases", estimator_->decreases()}, {"last_good_bps", static_cast<std::uint64_t>(estimator_->last_good_bps())},
+                                                 {"loss_pct", estimator_->loss_pct()}, {"carried_ratio", estimator_->carried_ratio()}};
+        last_stats_["twcc"] = sample.twcc; // docs/23#rate-control-and-tier-switching: the estimator's input, visible in /stats
+        last_stats_["rtx"] = nlohmann::json{{"requests", sample.rtx_requests}, {"packets", sample.rtx_packets}};
         for (auto& [cap, arr] : per_cap) {
             bool any_enabled = false;
             for (const auto& t : arr) any_enabled = any_enabled || t.value("enabled", false);

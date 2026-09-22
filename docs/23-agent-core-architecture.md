@@ -987,7 +987,8 @@ expects the agent to end in:
 | `deadman` | `drive` at 20 Hz, then stop | `deadman{state:"expired"}` within 600 ms of the last `drive` |
 | `relay-only` | `--ice-policy relay` on both sides | media flows through coturn (relay candidates in both stats) |
 | `soak` | N connect/stream/close cycles (`--cycles`, default 200; CI runs 20 per commit, 200 nightly and at the 3c gate) | `/memory` census equal to the baseline checkpointed after a warm-up of 40 cycles (a fifth of a shorter run) — the bounded snapshot history and log ring fill during it — RSS growth < 5 MB after it, no `error` counters |
-| `netem-<profile>` | applies a docs/25 profile on the agent container (`make opsim-netem NETEM_PROFILE=…`, on `lo` and `eth0`: opsim shares the robot's network namespace), runs the smoke assertions with per-profile tolerances | frames keep arriving; health-relevant stats recorded. `wifi-ok`/`4g`/`lossy` run nightly; `bad` (15 % loss, 1.5 Mbit) needs loss recovery and adaptive bitrate (slice 6) and is expected to fail until then |
+| `netem-<profile>` | applies a docs/25 profile on the robot's egress (`make opsim-netem NETEM_PROFILE=…`: netem on `eth0`, the introspection port exempt; opsim runs in `dev`, so the impairment is one-directional like a browser's downlink — impairing `lo` for an opsim inside the robot shaped both directions through one queue and let feedback-path jitter read as loss, slice 6a), runs the smoke assertions with per-profile tolerances | frames keep arriving; health-relevant stats recorded. `wifi-ok`/`4g`/`lossy` run nightly; `bad` (15 % loss, 1.5 Mbit) needs loss recovery and adaptive bitrate (slice 6) and is expected to fail until then |
+| `congested-viewer` | streams the test pattern at the active tier; expects `bad` applied toward it before it starts and cleared while it waits (driven by `tests/stack/ratecontrol.spec.ts` from `dev` with `netemToward`, slice 6a gate 2) | demoted to the thumbnail tier within 25 s (a session that starts *behind* the bad link first waits 3–4 s for TWCC to carry bitrates; the browser gate measures an established session's reaction), frames keep arriving while demoted, promoted back within 60 s of the demotion, 20 frames within 8 s at the active tier |
 
 Output: a one-screen verdict per assertion (`PASS`/`FAIL name: detail`)
 and, with `--json`, the same as data plus the captured signaling and
@@ -1371,21 +1372,81 @@ cadence and content of `twcc-stats` with a browser receiver, and whether
 the `RateEstimator` per (peer, track), the producer's banded target
 through `EncoderAdapter::set_bitrate`, tier demotion and promotion with
 their hysteresis, the `bandwidth-stats` fields, the `rate` node in the
-session snapshot, the web client's `effectiveTier` on the track entry and
-the health reason. *Gate, in the lab under the docs/25 profiles:* (1)
-`4g` applied to a streaming session: the track's `bitrate_bps` falls
-below the profile's rate within 2 s and the stream keeps decoding
-(stamps advance, no freeze over 1 s); `4g` removed: `bitrate_bps` is back
-within 10 % of the target within 10 s (docs/16); (2) three viewers, one
-behind `bad`: within 3 s that viewer reports `effective_tier =
-thumbnail` and still decodes, the other two keep ≥ 90 % of their bitrate
-and their frame rate throughout; the bad link removed: promoted back
-within 15 s; (3) `lossy` (5 % loss): `nacks` > 0 per interval,
-`keyframe_requests` per minute below 5 and freezes below 2 per minute,
-against a control run with NACK disabled that shows the difference;
-(4) a lone viewer under `bad` reaches the floor and recovers; (5) opsim
-`netem-*` scenarios assert the same from the wire; (6) every earlier gate
-green, the soak included (estimator objects must not move the census).
+`/stats`, the web client's `tracks.agent` store with `effectiveTier` and
+the health reason. *Gate, in the lab under the docs/25 profiles
+(`tests/stack/ratecontrol.spec.ts`), read through the introspection port
+the impairment exempts — the per-second stats events themselves ride the
+impaired link and arrive seconds late:* (1) `bad` (15 % loss, 100 ± 40 ms,
+1.5 Mbit; `4g`'s 8 Mbit does not constrain a 4 Mbps track) applied to a
+lone streaming viewer: the agent's estimate is below 2 Mbps within 2.5 s
+and the encoder's output below 1.7 Mbps within 6 s (the software
+encoder's output converges over a GOP), the viewer is demoted and keeps
+decoding (3 or more frames in 6 s at the 5 fps thumbnail tier — 15 %
+random loss costs a repair round trip per frame), and once the link
+clears it is promoted back within 15 s and the encoder is back above 90 %
+of its target within 25 s; (2) three viewers, one behind `bad` on the
+robot's egress toward it alone (`fjarr-opsim congested-viewer` in the
+`dev` container, `netemToward`): that viewer reports `effective_tier =
+thumbnail`, keeps receiving frames, and is promoted back once the link
+clears, while the two browser viewers keep the active tier and ≥ 90 % of
+their bitrate throughout; (3) `lossy` (5 % loss) on a 30 fps track over
+20 s: `nacks` > 0, `keyframe_requests` ≤ 2, the bitrate above 1.5 Mbps
+(no cut on random loss); (4) covered by (1): the lone viewer takes the
+whole range; (5) the opsim `netem-*` scenarios assert `rate-control` per
+track from the wire (active with an estimate ≥ 2 Mbps on links that carry
+it, ≤ 2 Mbps on `bad`); (6) every earlier gate green, the soak included.
+**Met 2026-09-22** ([review](reviews/slice-6a-review.md)).
+
+**Implementation notes (slice 6a)** — repair and rate control as built:
+
+- *The offer's feedback lines are codec preferences.* `rtcp-fb-*` fields
+  and the TWCC `extmap-3` on the transceiver's caps, `do-nack` on the
+  transceiver; webrtcbin adds the `rtx` payload and `rtprtxsend` itself
+  and the payloader picks the extension writer from the negotiated caps.
+  Chromium accepts all of it unchanged. The webrtcbin *answerer*
+  (`fjarr-opsim`) needs `do-nack` on its own transceivers to be a fair
+  viewer, and does send transport-wide feedback.
+- *`twcc-stats` is one window*: `packets-sent`/`-recv`, `bitrate-sent`/
+  `-recv`, `packet-loss-pct`, `avg-delta-of-delta` (ns). Windows are
+  5–30 packets; a window with `packets-recv` 0 is an unacknowledged one —
+  a receiver without feedback would otherwise read as a lossless link and
+  be driven to the ceiling. A *lost feedback packet* makes the next window
+  report everything it did not cover as lost (50–70 % in one window), so
+  a loss cut needs the throughput collapse in three windows in a row: a
+  shaper collapses every window, a lost feedback packet one.
+- *Three defects the first trace found in the estimator*: persistent
+  random loss spiralled it to the floor (a cut per window, and sending
+  less never reduces random loss); one lost packet in a seven-packet
+  window read as 14 % loss; and the growth cap at 1.5× what arrived kept a
+  demoted viewer, which receives 300 kbps, from ever reaching the
+  promotion line. The rules above are the answer, and the rolling-second
+  loss, the collapse streak and the uncapped climb each have a unit test.
+- *Netem's shaper queue is the enemy of the data channel.* A lone viewer
+  clamped to the shared-encoder band sent 2 Mbps into a 1.5 Mbit shaper
+  for the 2 s a tier switch takes; the kernel queue grew past what SCTP
+  tolerates and the session died of a transport error. Hence the
+  single-subscriber rule.
+- *Measure the agent through the exempt port.* Under `bad` the
+  `bandwidth-stats` events queue behind the video and arrive 3 s late;
+  the lab's `RobotContainer.netem` now keeps port 7381 out of the
+  impairment like `docker/lab/netem.sh`, and `netemToward(profile, ip)`
+  impairs the robot's egress toward one address only, which is how the
+  three-viewer gate gets one bad link.
+- *`congested-viewer` runs in `dev`, not the robot container*: netem on
+  `lo` shapes both directions through one queue and the simulator's own
+  pings died behind the video. The `netem-*` scenarios still impair `lo`
+  both ways and the simulator's pings died behind the video; the
+  `netem-*` scenarios now run it from `dev` against the robot's `eth0`
+  egress, one-directional like a browser's downlink.
+- *A webrtcbin receiver over-reports loss under jitter.* With `lossy`
+  (5 % loss, 30 ± 15 ms) on the media path alone, the simulator's
+  webrtcbin reports 20–50 % loss per feedback window and the estimate
+  falls to the floor, while Chromium under the same profile reports ~5 %
+  and the rate holds (`tests/stack/ratecontrol.spec.ts`): its feedback
+  marks packets that arrive after the feedback that should have covered
+  them as lost. The viewers Fjarr ships to are browsers, so `netem-lossy`
+  records the agent's estimate instead of asserting it and the browser
+  lab is the oracle for that profile.
 
 **6b — passthrough.** The `rtsp` source's elementary output and
 `thumbnail_url`, `passthrough = true` on a camera track, the parse-only

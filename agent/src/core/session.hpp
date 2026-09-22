@@ -26,6 +26,8 @@
 #include "loop.hpp"
 #include "media/consumer.hpp"
 #include "media/media_plane.hpp"
+#include "media/rate_estimator.hpp"
+#include "media/tier_policy.hpp"
 #include "protocol.hpp"
 
 namespace fjarr::core {
@@ -178,6 +180,9 @@ class Session : public std::enable_shared_from_this<Session> {
     void handle_core(const Envelope& env);
     void handle_select_tracks(const Envelope& env, const AttachedCapability& cap);
     void sample_stats();
+    /// docs/23#rate-control-and-tier-switching: read the peer's TWCC window, update the estimate,
+    /// share it across the enabled tracks, report to the plane, tick each track's tier policy.
+    void rate_tick();
     void apply_demand(const std::string& track_id, bool enabled, const std::string& tier);
     void unsubscribe_all();
     AttachedCapability* attached(std::string_view cap);
@@ -211,6 +216,10 @@ class Session : public std::enable_shared_from_this<Session> {
     glib::SourceGuard watchdog_;
     glib::SourceGuard liveness_;
     glib::SourceGuard stats_timer_;
+    glib::SourceGuard rate_timer_;
+    std::optional<media::RateEstimator> estimator_;
+    media::TwccSample last_twcc_; // the window read at the previous tick: an identical read is no new feedback
+    std::map<std::string, media::TierPolicy> tier_policy_; // track_id → this viewer's tier override
     glib::SourceGuard silence_timer_;
     glib::SourceGuard close_timer_;
     std::string closing_reason_;
