@@ -135,8 +135,37 @@ void MediaPlane::forget_allotment(const void* subscriber) {
     }
 }
 
+namespace {
+/// What the track's source says about itself, before or without a producer (docs/06 passthrough):
+/// is the demanded output an elementary stream, and is there a substream to demote a viewer to?
+struct SourceShape {
+    bool elementary = false;
+    bool substream = false;
+};
+SourceShape shape_of(const SourceRef& src) {
+    SourceShape s;
+    if (!src.source) return s;
+    for (const auto& o : src.source->describe().outputs) {
+        if (o.name == src.output) s.elementary = o.declared_caps.rfind("video/x-h26", 0) == 0;
+        if (o.name == "thumbnail") s.substream = true;
+    }
+    return s;
+}
+} // namespace
+
 bool MediaPlane::tier_possible(const std::string& track_id, const std::string& tier) const {
-    return tracks_.count(track_id) > 0 && (tier == "active" || tier == "thumbnail");
+    auto it = tracks_.find(track_id);
+    if (it == tracks_.end() || (tier != "active" && tier != "thumbnail")) return false;
+    if (it->second.producer) return it->second.producer->tier_possible(tier);
+    const SourceShape s = shape_of(it->second.reg.spec.source);
+    return !s.elementary || tier == "active" || s.substream;
+}
+
+bool MediaPlane::adaptive(const std::string& track_id) const {
+    auto it = tracks_.find(track_id);
+    if (it == tracks_.end()) return true;
+    const bool passthrough = it->second.producer ? it->second.producer->passthrough() : shape_of(it->second.reg.spec.source).elementary;
+    return !passthrough || tier_possible(track_id, "thumbnail");
 }
 
 std::pair<int, int> MediaPlane::band_kbps(const std::string& track_id, const std::string& tier) const {

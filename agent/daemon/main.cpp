@@ -34,6 +34,9 @@ int probe_source(const std::string& spec) {
     const fjarr::ProbeResult r = fjarr::probe_source(spec);
     std::printf("probe: source  %s\nprobe: caps    %s\nprobe: memory  %s\nprobe: frames  %d in 2 s (%.1f fps)\n", r.description.c_str(),
                 r.caps.empty() ? "(none negotiated)" : r.caps.c_str(), r.memory.empty() ? "(unknown)" : r.memory.c_str(), r.frames, r.fps);
+    // Passthrough (docs/06): the track costs no encoder, and the browser has to accept this codec.
+    if (r.passthrough)
+        std::printf("probe: encoded %s (passthrough: parsed and packetized, never transcoded)\n", r.codec.empty() ? "(codec unknown)" : r.codec.c_str());
     if (!r.error.empty()) std::printf("probe: ERROR   %s\n", r.error.c_str());
     std::printf("probe: result  %s\n", r.ok ? "OK" : "FAILED");
     return r.ok ? 0 : 1;

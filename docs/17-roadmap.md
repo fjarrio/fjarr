@@ -90,8 +90,10 @@ image running the demo robot under the lab smoke — unpublished until M2.5;
 ADR-0007 closed on webrtcbin with the agent's own TWCC estimator;
 NACK/RTX and keyframe feedback in the offer; banded shared-encoder
 targets with per-viewer tier switching; the lab gates under the netem
-profiles — [review](reviews/slice-6a-review.md)) · **6b** passthrough (a camera's own H.264 untouched, the
-substream as the thumbnail tier, `adaptive: false` otherwise) ·
+profiles — [review](reviews/slice-6a-review.md)) · **6b ✔** passthrough (2026-09-22:
+a camera's own H.264 untouched — no encoder for the track — with its
+substream as the thumbnail tier and `adaptive: false` without one;
+[review](reviews/slice-6b-review.md)) ·
 7 fault injection + latency harness on the frame stamp.
 
 **Gate:** the three-demo stack end-to-end — demo-robot (embedding libfjarr)

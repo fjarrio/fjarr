@@ -67,6 +67,9 @@ class MediaPlane {
     void forget_allotment(const void* subscriber);
     /// Can this track serve `tier` for a demoted viewer? (a lower tier exists; passthrough without a substream says no)
     bool tier_possible(const std::string& track_id, const std::string& tier) const;
+    /// False when nothing about this track can follow a viewer's link: a passthrough stream the
+    /// agent cannot re-encode, with no lower tier to move to (docs/16, `bandwidth-stats.adaptive`).
+    bool adaptive(const std::string& track_id) const;
     /// The band a tier adapts within, for the session's demotion rule.
     std::pair<int, int> band_kbps(const std::string& track_id, const std::string& tier) const;
 

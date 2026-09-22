@@ -45,7 +45,10 @@ receiver never costs the others more than that band
 ([docs/23](23-agent-core-architecture.md#rate-control-and-tier-switching)).
 A passthrough track (the camera's own encoded stream) cannot adapt at the
 agent: it adapts by tier only when the source offers a lower stream,
-otherwise not at all, and says so in the manifest.
+otherwise not at all, and says so (`adaptive: false`). In exchange it
+costs no encoder at all — the robot's GPU and CPU budgets above are per
+*transcoded* track, so a fleet of passthrough cameras is bounded by the
+network, not by the encoder count.
 
 ## Robot resource budget (Intel NUC class, one active session + one thumbnail)
 

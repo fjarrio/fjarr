@@ -41,7 +41,17 @@ int main() {
     config.capabilities["fjarr.camera"] = {
         {"tracks",
          {{"pattern", {{"label", "Pattern (camera)"}, {"source", {{"type", "test"}, {"pattern", "ball"}, {"width", 1280}, {"height", 720}, {"fps", 30}}}}},
-          {"rtsp", {{"label", "RTSP simulator"}, {"source", {{"type", "rtsp"}, {"url", std::getenv("FJARR_DEMO_RTSP_URL") ? std::getenv("FJARR_DEMO_RTSP_URL") : "rtsp://rtsp-sim:8554/pattern"}, {"latency", 200}, {"protocols", "tcp"}}}}},
+          // Passthrough (docs/06, slice 6b): the simulator's own H.264 is sent untouched — no decode, no
+          // encoder on the robot — with its low-resolution mount as the thumbnail tier.
+          {"rtsp",
+           {{"label", "RTSP simulator"},
+            {"source",
+             {{"type", "rtsp"},
+              {"url", env_or("FJARR_DEMO_RTSP_URL", "rtsp://rtsp-sim:8554/pattern")},
+              {"thumbnail_url", env_or("FJARR_DEMO_RTSP_THUMBNAIL_URL", "rtsp://rtsp-sim:8554/pattern-low")},
+              {"passthrough", true},
+              {"latency", 200},
+              {"protocols", "tcp"}}}}},
           {"webcam", {{"label", "Webcam"}, {"source", webcam_source()}}}}}};
     config.apply_env(); // FJARR_SERVER_URL, FJARR_DEV_DEVICE_TOKEN, FJARR_MEDIA_ENCODER, FJARR_ROBOT_ID …
     try {

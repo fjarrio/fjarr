@@ -46,9 +46,10 @@ Peer consumer. Ports the proven camera-streamer v3 model ([prior art](11-prior-a
 
   [capabilities."fjarr.camera".tracks.gate]
   label  = "Gate camera"
-  source = { type = "rtsp", url = "rtsp://10.0.0.7/stream1", thumbnail_url = "rtsp://10.0.0.7/stream2", latency = 200, protocols = "tcp" }
-  passthrough = true     # the camera's own H.264 is sent as is — no decode, no encoder on the robot (slice 6b);
-                         # `thumbnail_url` gives the lower tier; without one the track has a single tier and no adaptation
+  # passthrough: the camera's own H.264 is sent as it is — no decode, no encoder on the robot.
+  # `thumbnail_url` is the camera's substream and becomes the track's thumbnail tier; without one
+  # the track has a single tier and cannot adapt to a viewer's link (slice 6b).
+  source = { type = "rtsp", url = "rtsp://10.0.0.7/stream1", thumbnail_url = "rtsp://10.0.0.7/stream2", passthrough = true, latency = 200, protocols = "tcp" }
 
   [capabilities."fjarr.camera".tracks.pattern]
   label  = "Test"
@@ -58,18 +59,23 @@ Peer consumer. Ports the proven camera-streamer v3 model ([prior art](11-prior-a
   Unplugging a camera removes its track through the same renegotiation
   as a monitor hot-plug; replugging restores the same `track_id`.
 
-**Passthrough** (`passthrough = true`, slice 6b): for cameras with an
-on-board encoder the track carries the source's elementary stream
-untouched — the agent parses and packetizes, never decodes or encodes,
-so the track costs no encoder and keeps the camera's quality. The
+**Passthrough** (`passthrough = true` in the *source*, slice 6b): for
+cameras with an on-board encoder the track carries the source's
+elementary stream untouched — the agent parses and packetizes, never
+decodes or encodes, so the track costs no encoder and keeps the camera's
+quality. It is a source setting, not a track setting, because it changes
+how the source's pipeline is built (depayload and parse instead of
+decode); the `rtsp` type takes it, a `gst` description declares it
+(`source = { type = "gst", description = "… ! h264parse", passthrough = true }`),
+and a registered type declares `video/x-h264` output caps. The
 `thumbnail` tier exists only if the source provides a lower stream
-(`rtsp`'s `thumbnail_url`, a registered type's `src_thumbnail` output);
+(`rtsp`'s `thumbnail_url`, a registered type's `thumbnail` output);
 otherwise the track has one tier, cannot adapt to a viewer's link, and
 says so (`adaptive: false` in `bandwidth-stats`,
 [docs/16](16-performance-budgets.md)). The camera decides its keyframes: a
 joining viewer starts from the retained one, a keyframe request is a
-counted no-op. `--probe-source` reports the codec, profile and level;
-`--check` refuses passthrough on a raw-output source.
+counted no-op. `--probe-source` reports the codec, profile and level a
+browser must accept.
 
 Control messages: `select-tracks` and `bandwidth-stats` are the generic
 [track-control messages](08-protocol.md#track-control) the core serves for

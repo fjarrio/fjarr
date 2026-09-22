@@ -793,7 +793,7 @@ void Session::sample_stats() {
             auto& arr = per_cap[it->second.first];
             if (!arr.is_array()) arr = nlohmann::json::array();
             arr.push_back({{"track_id", t.track_id}, {"enabled", ct->enabled}, {"tier", ct->demanded_tier}, {"effective_tier", ct->tier},
-                           {"estimate_bps", static_cast<std::uint64_t>(ct->allotment_bps)}, {"adaptive", true},
+                           {"estimate_bps", static_cast<std::uint64_t>(ct->allotment_bps)}, {"adaptive", deps_.plane->adaptive(t.track_id)},
                            {"bitrate_bps", delta_bytes * 8}, {"frames", frames}, {"dropped", dropped}, {"nacks", nacks}, {"keyframe_requests", kfr}});
         }
         last_stats_ = nlohmann::json::object();

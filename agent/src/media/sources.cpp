@@ -12,8 +12,8 @@ namespace fjarr::media {
 
 // ------------------------------------------------------ description
 
-GstDescriptionSource::GstDescriptionSource(std::string description, std::string identity)
-    : description_(std::move(description)), identity_(identity.empty() ? description_ : std::move(identity)) {}
+GstDescriptionSource::GstDescriptionSource(std::string description, std::string identity, bool passthrough)
+    : description_(std::move(description)), identity_(identity.empty() ? description_ : std::move(identity)), passthrough_(passthrough) {}
 
 std::string GstDescriptionSource::first_factory(const std::string& description) {
     std::istringstream ss(description);
@@ -23,7 +23,7 @@ std::string GstDescriptionSource::first_factory(const std::string& description) 
 }
 
 SourceInfo GstDescriptionSource::describe() const {
-    return SourceInfo{identity_, {SourceOutput{"src", TrackKind::Video, "video/x-raw"}}};
+    return SourceInfo{identity_, {SourceOutput{"src", TrackKind::Video, passthrough_ ? "video/x-h264" : "video/x-raw"}}};
 }
 
 GstBin* GstDescriptionSource::create_bin() {
@@ -189,40 +189,100 @@ void V4l2Source::watch() {
 
 RtspSource::RtspSource(Params p) : p_(std::move(p)) {}
 
-std::string RtspSource::description() const {
-    std::string d = "rtspsrc location=" + p_.url + " latency=" + std::to_string(p_.latency_ms);
+std::string RtspSource::description(const std::string& output) const {
+    const std::string url = output == "thumbnail" ? p_.thumbnail_url : p_.url;
+    std::string d = "rtspsrc location=" + url + " latency=" + std::to_string(p_.latency_ms);
     if (p_.protocols == "tcp") d += " protocols=tcp";
     else if (p_.protocols == "udp") d += " protocols=udp";
+    // Passthrough (docs/06): the camera's own H.264, depayloaded and parsed — never decoded, so the
+    // core builds no encoder for the track. rtspsrc's pad is delayed either way.
+    if (p_.passthrough) return d + " ! rtph264depay ! h264parse name=fjarr-rtsp-parse-" + output + " config-interval=-1";
     return d + " ! decodebin name=fjarr-rtsp-decode";
 }
 
-SourceInfo RtspSource::describe() const { return SourceInfo{"rtsp:" + p_.url, {SourceOutput{"src", TrackKind::Video, "video/x-raw"}}}; }
+SourceInfo RtspSource::describe() const {
+    const char* caps = p_.passthrough ? "video/x-h264" : "video/x-raw";
+    SourceInfo info{"rtsp:" + p_.url, {SourceOutput{"src", TrackKind::Video, caps}}};
+    if (p_.passthrough && !p_.thumbnail_url.empty()) info.outputs.push_back(SourceOutput{"thumbnail", TrackKind::Video, caps});
+    return info;
+}
 
-GstBin* RtspSource::create_bin() {
-    std::string err;
-    GstBin* bin = make_late_ghost_bin(description(), "fjarr-rtsp-decode", rtsp_pad_added_, &err);
-    if (!bin) {
-        log::error("source", "rtsp description failed", {{"description", description()}, {"error", err}});
-        return nullptr;
-    }
-    // Video only in slice 4: an audio stream announced first would take decodebin's single sink
-    // through the parser's delayed link and the video would never arrive.
-    GstIterator* it = gst_bin_iterate_elements(bin);
+void select_video_streams(GstBin* bin, std::vector<glib::SignalConnection>& out) {
+    GstIterator* it = gst_bin_iterate_recurse(bin);
     GValue v = G_VALUE_INIT;
     while (gst_iterator_next(it, &v) == GST_ITERATOR_OK) {
         auto* e = static_cast<GstElement*>(g_value_get_object(&v));
-        if (gst_element_get_factory(e) && std::string(GST_OBJECT_NAME(gst_element_get_factory(e))) == "rtspsrc") {
-            rtsp_select_stream_ = glib::SignalConnection(e, "select-stream", G_CALLBACK((+[](GstElement*, guint, GstCaps* caps, gpointer) -> gboolean {
-                                                             const GstStructure* st = caps ? gst_caps_get_structure(caps, 0) : nullptr;
-                                                             const char* media = st ? gst_structure_get_string(st, "media") : nullptr;
-                                                             return media == nullptr || g_strcmp0(media, "video") == 0;
-                                                         })),
-                                                         nullptr);
-        }
+        if (gst_element_get_factory(e) && std::string(GST_OBJECT_NAME(gst_element_get_factory(e))) == "rtspsrc")
+            out.emplace_back(e, "select-stream", G_CALLBACK((+[](GstElement*, guint, GstCaps* caps, gpointer) -> gboolean {
+                                 const GstStructure* st = caps ? gst_caps_get_structure(caps, 0) : nullptr;
+                                 const char* media = st ? gst_structure_get_string(st, "media") : nullptr;
+                                 return media == nullptr || g_strcmp0(media, "video") == 0;
+                             })),
+                             nullptr);
         g_value_unset(&v);
     }
     gst_iterator_free(it);
-    return bin;
+}
+
+GstBin* RtspSource::build_stream(GstBin* into, const std::string& output, std::string* error) {
+    // One chain per stream, ghosted as `src` / `src_<output>` (docs/09 multi-output sources).
+    const std::string desc = description(output);
+    const std::string pad = output == "src" ? "src" : "src_" + output;
+    if (p_.passthrough) {
+        // FALSE: with automatic ghosting the parser ghosts the depayloader's *sink* pad (unlinked at
+        // parse time, because rtspsrc's pad is delayed), which counts as linked and makes rtspsrc's
+        // delayed link fail — the same trap make_late_ghost_bin documents for decodebin (slice 6b).
+        GError* err = nullptr;
+        GstElement* chain = gst_parse_bin_from_description(desc.c_str(), FALSE, &err);
+        if (err) {
+            glib::GErrorPtr guard(err);
+            if (chain) [[maybe_unused]] auto released = glib::sink_element(chain);
+            if (error) *error = err->message;
+            return nullptr;
+        }
+        gst_object_set_name(GST_OBJECT(chain), ("rtsp-" + output).c_str());
+        gst_bin_add(into, chain);
+        // The parser's src pad is the stream; ghost it by name, since nothing was ghosted for us.
+        glib::GstElementPtr parse = glib::adopt_element(gst_bin_get_by_name(GST_BIN(chain), ("fjarr-rtsp-parse-" + output).c_str()));
+        glib::GstPadPtr src = parse ? glib::adopt_pad(gst_element_get_static_pad(parse.get(), "src")) : nullptr;
+        if (!src) {
+            if (error) *error = "no h264parse src pad in the rtsp chain";
+            return nullptr;
+        }
+        GstPad* inner = gst_ghost_pad_new("src", src.get()); // the chain bin's own pad…
+        gst_pad_set_active(inner, TRUE);
+        gst_element_add_pad(chain, inner);
+        GstPad* ghost = gst_ghost_pad_new(pad.c_str(), inner); // …and the outer bin's
+        gst_pad_set_active(ghost, TRUE);
+        gst_element_add_pad(GST_ELEMENT(into), ghost);
+        return into;
+    }
+    // Decoding: decodebin's pad arrives late, so the chain is its own late-ghost bin.
+    GstBin* chain = make_late_ghost_bin(desc, "fjarr-rtsp-decode", output == "thumbnail" ? rtsp_pad_added_thumb_ : rtsp_pad_added_, error);
+    if (!chain) return nullptr;
+    gst_object_set_name(GST_OBJECT(chain), ("rtsp-" + output).c_str());
+    gst_bin_add(into, GST_ELEMENT(chain));
+    glib::GstPadPtr src = glib::adopt_pad(gst_element_get_static_pad(GST_ELEMENT(chain), "src"));
+    GstPad* ghost = gst_ghost_pad_new(pad.c_str(), src.get());
+    gst_pad_set_active(ghost, TRUE);
+    gst_element_add_pad(GST_ELEMENT(into), ghost);
+    return into;
+}
+
+GstBin* RtspSource::create_bin() {
+    rtsp_select_streams_.clear();
+    // Owned while it is built, handed over still floating: `create_bin()` returns a floating ref
+    // and the caller sinks it (docs/09; the leaks gate caught the double reference in slice 6b).
+    glib::GstElementPtr outer = glib::adopt_element(gst_bin_new("rtsp"));
+    std::string err;
+    for (const auto& o : describe().outputs) {
+        if (!build_stream(GST_BIN(outer.get()), o.name, &err)) {
+            log::error("source", "rtsp description failed", {{"description", description(o.name)}, {"error", err}});
+            return nullptr;
+        }
+    }
+    select_video_streams(GST_BIN(outer.get()), rtsp_select_streams_);
+    return GST_BIN(outer.release());
 }
 
 // ------------------------------------------------------- late-ghost bins
@@ -272,9 +332,12 @@ nlohmann::json int_prop() { return nlohmann::json{{"type", "integer"}, {"minimum
 } // namespace
 
 SourceRegistry::SourceRegistry(GMainContext* ctx) : ctx_(ctx) {
-    add(SourceType{"gst", nlohmann::json{{"type", "object"}, {"properties", {{"description", {{"type", "string"}}}}}, {"required", {"description"}}},
+    add(SourceType{"gst",
+                   nlohmann::json{{"type", "object"},
+                                  {"properties", {{"description", {{"type", "string"}}}, {"passthrough", {{"type", "boolean"}}}}},
+                                  {"required", {"description"}}},
                    [](const nlohmann::json& p) -> std::unique_ptr<VideoSource> {
-                       return std::make_unique<GstDescriptionSource>(p.at("description").get<std::string>());
+                       return std::make_unique<GstDescriptionSource>(p.at("description").get<std::string>(), "", p.value("passthrough", false));
                    }});
     add(SourceType{"test",
                    nlohmann::json{{"type", "object"},
@@ -307,13 +370,19 @@ SourceRegistry::SourceRegistry(GMainContext* ctx) : ctx_(ctx) {
                                   {"properties",
                                    {{"url", {{"type", "string"}}},
                                     {"latency", int_prop()},
-                                    {"protocols", {{"type", "string"}, {"enum", {"auto", "tcp", "udp"}}}}}},
+                                    {"protocols", {{"type", "string"}, {"enum", {"auto", "tcp", "udp"}}}},
+                                    {"passthrough", {{"type", "boolean"}}},
+                                    {"thumbnail_url", {{"type", "string"}}}}},
                                   {"required", {"url"}}},
                    [](const nlohmann::json& p) -> std::unique_ptr<VideoSource> {
                        RtspSource::Params rp;
                        rp.url = p.at("url").get<std::string>();
                        rp.latency_ms = p.value("latency", 200);
                        rp.protocols = p.value("protocols", "auto");
+                       rp.passthrough = p.value("passthrough", false);
+                       rp.thumbnail_url = p.value("thumbnail_url", "");
+                       if (!rp.thumbnail_url.empty() && !rp.passthrough)
+                           throw FjarrError("config", "rtsp: thumbnail_url is the passthrough track's lower tier; set passthrough = true (docs/06)");
                        return std::make_unique<RtspSource>(rp);
                    }});
 }

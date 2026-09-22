@@ -83,6 +83,9 @@ test.describe("rate control (slice 6a)", () => {
     const agentTrack = async (): Promise<BwTrack | undefined> => {
       const body = (await stack.introspect("/stats")) as StatsBody | null;
       const mine = body?.sessions.find((x) => (x.session_id ?? x.id) === sid);
+      // A session that disappears from /stats died on the impaired link; say so rather than
+      // timing out on "not promoted", which reads as a rate-control defect.
+      if (body && !mine) throw new Error(`the agent no longer has session ${sid}: it ended while the link was impaired (state ${await loopback.state()})`);
       return (mine?.stats?.["fjarr.test"] as BwTrack[] | undefined)?.find((t) => t.track_id === "test-pattern");
     };
     await expect.poll(async () => (await agentTrack())?.bitrate_bps ?? 0, { timeout: 10_000, message: "the clean-link bitrate" }).toBeGreaterThan(3_000_000);

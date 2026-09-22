@@ -102,9 +102,12 @@ struct Agent::Impl {
                 for (const char* t : {"active", "thumbnail"})
                     if (p->has_tier(t)) {
                         tiers.push_back(t);
-                        kbps[t] = p->current_kbps(t); // the rate-controlled target (docs/23#rate-control-and-tier-switching)
+                        // The rate-controlled target (docs/23#rate-control-and-tier-switching); a passthrough
+                        // tier has none — the camera sets its own rate (docs/06).
+                        if (p->current_kbps(t) > 0) kbps[t] = p->current_kbps(t);
                     }
-                producers.push_back({{"name", p->name()}, {"playing", p->playing()}, {"tiers", tiers}, {"kbps", kbps}, {"error", p->error()}});
+                producers.push_back({{"name", p->name()}, {"playing", p->playing()}, {"tiers", tiers}, {"kbps", kbps},
+                                     {"passthrough", p->passthrough()}, {"error", p->error()}});
             }
         }
         return nlohmann::json{{"robot_id", config.agent.robot_id}, {"sessions", sessions ? sessions->stats() : nlohmann::json::array()},

@@ -14,6 +14,10 @@ struct ProbeResult {
     std::string description; // the GStreamer description that was run
     std::string caps;        // negotiated caps at the sink
     std::string memory;      // "system" | "VAMemory" | "DMABuf" … from the caps features (zero-copy tells)
+    /// Passthrough (docs/06): the source hands over an encoded stream, so the track needs no encoder.
+    /// `codec` is what a browser must accept, e.g. "H.264 profile=main level=3.1".
+    bool passthrough = false;
+    std::string codec;
     int frames = 0;
     double fps = 0.0;
     std::string error;

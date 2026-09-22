@@ -96,6 +96,8 @@ ProbeResult probe_source(const SourceFactory& sources, const std::string& spec, 
             r.error = "unavailable: " + typed->describe().identity;
             return r;
         }
+        for (const auto& o : typed->describe().outputs)
+            if (o.name == "src") r.passthrough = o.declared_caps.rfind("video/x-h26", 0) == 0;
         GstBin* bin = typed->create_bin();
         if (!bin) {
             r.error = "the source's bin failed to build";
@@ -103,7 +105,8 @@ ProbeResult probe_source(const SourceFactory& sources, const std::string& spec, 
         }
         pipe = glib::sink_element(gst_pipeline_new("probe"));
         glib::GstElementPtr sbin = glib::sink_element(GST_ELEMENT(bin));
-        glib::GstElementPtr conv = glib::make_element("videoconvert", "probe-convert");
+        // An elementary output is parsed, never decoded — the same path the producer builds.
+        glib::GstElementPtr conv = r.passthrough ? glib::make_element("h264parse", "probe-convert") : glib::make_element("videoconvert", "probe-convert");
         glib::GstElementPtr sink = glib::make_element("fakesink", "probe-sink");
         g_object_set(sink.get(), "sync", TRUE, nullptr);
         gst_bin_add_many(GST_BIN(pipe.get()), sbin.get(), conv.get(), sink.get(), nullptr);
@@ -172,6 +175,17 @@ ProbeResult probe_source(const SourceFactory& sources, const std::string& spec, 
         glib::GstCapsPtr scaps(gst_pad_get_current_caps(source_pad.get()));
         r.memory = memory_of(scaps.get());
         if (scaps) r.caps = glib::caps_to_string(scaps.get()); // what the source produces, not videoconvert's output
+    }
+    // Passthrough: what a browser has to accept (docs/06) — the codec and its profile/level.
+    if (r.passthrough && !r.caps.empty()) {
+        glib::GstCapsPtr scaps(source_pad ? gst_pad_get_current_caps(source_pad.get()) : gst_pad_get_current_caps(pad.get()));
+        const GstStructure* st = scaps && gst_caps_get_size(scaps.get()) ? gst_caps_get_structure(scaps.get(), 0) : nullptr;
+        if (st) {
+            const std::string name = gst_structure_get_name(st);
+            r.codec = name == "video/x-h264" ? "H.264" : name == "video/x-h265" ? "H.265" : name;
+            for (const char* f : {"profile", "level"})
+                if (const char* v = gst_structure_get_string(st, f)) r.codec += std::string(" ") + f + "=" + v;
+        }
     }
     counter.remove();
     gst_element_set_state(pipe.get(), GST_STATE_NULL);

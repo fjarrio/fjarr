@@ -183,9 +183,10 @@ struct SourceOutput {
   std::string name;        // "src" for single-output sources; "left"/"right"/"depth" …
   TrackKind kind;          // Video | Audio
   std::string declared_caps;  // caps string of what the output will produce (raw, DMABuf/VAMemory, or x-h264…)
-  // Elementary-stream outputs (passthrough, docs/06): the core parses and packetizes, never
-  // transcodes. A source with a lower second stream names it "thumbnail" so the track has two
-  // tiers; a lone elementary output is one tier without adaptation (docs/23#rate-control-and-tier-switching).
+  // Elementary-stream outputs (`video/x-h264`, passthrough — docs/06): the core parses and
+  // packetizes, never transcodes, and builds no encoder for the track. A source with a lower
+  // second stream names that output "thumbnail" so the track has two tiers; a lone elementary
+  // output is one tier without adaptation (docs/23#rate-control-and-tier-switching).
 };
 
 struct SourceInfo {

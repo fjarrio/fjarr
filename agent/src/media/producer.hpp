@@ -40,13 +40,22 @@ class Producer {
     bool build();
     /// Add/remove a tier's encode branch (idempotent).
     bool start_tier(const std::string& tier);
+    /// Can this producer serve `tier` at all? A passthrough track's tiers are the source's
+    /// elementary outputs: `active` is `src`, `thumbnail` the substream, and without one there is
+    /// no lower tier to demote a viewer to (docs/06, docs/23#rate-control-and-tier-switching).
+    bool tier_possible(const std::string& tier) const;
+    /// Passthrough: the camera's own encoded stream, parsed and packetized, never transcoded —
+    /// its bitrate is the camera's, so rate control can only move a viewer between tiers.
+    bool passthrough() const { return passthrough_; }
     void stop_tier(const std::string& tier);
     bool has_tier(const std::string& tier) const { return tiers_.count(tier) > 0; }
     std::size_t tier_count() const { return tiers_.size(); }
     bool playing() const { return playing_; }
     void stop();
-    /// Force a keyframe on a tier's encoder.
+    /// Force a keyframe on a tier's encoder. A passthrough track has none: the camera decides its
+    /// keyframes, so the request is counted and dropped (docs/08#rtp-feedback).
     void request_keyframe(const std::string& tier);
+    unsigned long keyframe_requests_dropped() const { return keyframe_requests_dropped_; }
     /// Rate control (docs/23#rate-control-and-tier-switching): the tier encoder's target, changed
     /// while playing. Returns true when the encoder's property changed.
     bool set_bitrate(const std::string& tier, int kbps);
@@ -81,6 +90,7 @@ class Producer {
     std::string track_id_;
     SourceRef source_;
     bool stamp_;
+    bool passthrough_ = false; // the source's outputs are elementary streams (docs/06)
     ProducerConfig config_;
     FrameHub& hub_;
     GMainContext* bus_context_;
@@ -89,6 +99,7 @@ class Producer {
     glib::GstElementPtr convert_;
     glib::GstElementPtr rawcaps_;
     glib::GstElementPtr tee_;
+    std::map<std::string, glib::GstElementPtr> passthrough_tees_; // passthrough: one per source output, so an undemanded stream has somewhere to go
     glib::GstPadPtr source_pad_;
     glib::PadProbe stamp_probe_;
     glib::PadProbe alloc_probe_; // stamped sources stay on system memory (see build())
@@ -99,6 +110,7 @@ class Producer {
     std::string error_;
     bool error_in_source_ = false; // the bus error came from inside the source bin (device/network), not the encode path
     bool playing_ = false;
+    unsigned long keyframe_requests_dropped_ = 0;
     int source_width_ = 0, source_height_ = 0, source_fps_ = 30;
 };
 

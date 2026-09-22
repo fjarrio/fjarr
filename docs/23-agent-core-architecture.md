@@ -346,8 +346,8 @@ takes `mjpeg`, and `--probe-source` says which), `width`, `height`,
 `fps`: a convenience over tier 1 with hot-plug from the kernel's
 `/dev/v4l/by-id` tree, watched with GIO; no libudev in the core), `rtsp`
 (`url`, `latency` ms, `protocols` tcp|udp|auto, and from slice 6b
-`thumbnail_url` for a camera's low-resolution substream; decoded to raw
-unless the track asks for passthrough, below).
+`passthrough` and `thumbnail_url` — the camera's own stream and its
+substream, below; without `passthrough` the stream is decoded to raw).
 
 The contract, in prose (the C++ is in docs/09):
 
@@ -358,20 +358,22 @@ The contract, in prose (the C++ is in docs/09):
   `vapostproc` as needed), raw in device memory (`memory:DMABuf`,
   `memory:VAMemory`, NVMM later) for zero-copy into the hardware encoder,
   or an elementary stream (`video/x-h264`; `video/x-h265` once browsers
-  take it) for cameras with on-board encoders. A track configured
-  `passthrough = true` (docs/06) takes such an output as its `active`
-  tier untouched: the core parses (`h264parse config-interval=-1`) and
-  packetizes, never decodes or encodes, so the track costs the robot no
-  encoder at all. Its `thumbnail` tier exists only if the source declares
-  a second, lower elementary output (`rtsp`'s `thumbnail_url`; a
-  registered type's `src_thumbnail`); otherwise the track has one tier and
-  no adaptation (docs/16). Keyframes cannot be requested from the camera:
-  the hub's keyframe gate still starts a joining viewer from the retained
-  keyframe, and a PLI is a counted no-op. `--probe-source` reports the
-  codec, profile and level and whether a browser accepts them; `--check`
-  refuses `passthrough` on a source whose output is raw. A source declares
-  each output's kind (`video` or `audio`; audio outputs feed
-  `fjarr.audio`).
+  take it) for cameras with on-board encoders. **Passthrough** is that
+  declaration: a source whose demanded output declares an elementary
+  stream is parsed (`h264parse config-interval=-1`) and packetized, never
+  decoded or encoded, so the track costs the robot no encoder at all. The
+  `rtsp` type turns it on with `passthrough = true` (docs/06), a `gst`
+  description with the same param, a registered type by declaring the
+  caps — the core decides from the caps alone, so nothing else in the
+  media plane knows about the setting. A passthrough track's tiers are the
+  camera's own streams: `active` is the output, `thumbnail` a second
+  output of that name (`rtsp`'s `thumbnail_url`), and without one the
+  track has one tier and no adaptation (docs/16, `adaptive: false`).
+  Keyframes cannot be requested from the camera: the hub's keyframe gate
+  still starts a joining viewer from the retained keyframe, and a PLI is
+  counted and dropped. `--probe-source` reports the codec, profile and
+  level a browser must accept. A source declares each output's kind
+  (`video` or `audio`; audio outputs feed `fjarr.audio`).
 - **Lifecycle.** `describe()` (outputs, declared caps, stable identity),
   `create_bin()` on demand, and the bin's normal GStreamer state changes;
   the core creates the bin when the first tier of the first output is
@@ -1448,22 +1450,47 @@ it, ≤ 2 Mbps on `bad`); (6) every earlier gate green, the soak included.
   records the agent's estimate instead of asserting it and the browser
   lab is the oracle for that profile.
 
-**6b — passthrough.** The `rtsp` source's elementary output and
-`thumbnail_url`, `passthrough = true` on a camera track, the parse-only
-producer path, `adaptive: false` in the manifest and stats when no lower
-stream exists, the PLI no-op, `--probe-source` codec/profile reporting,
-`--check` refusing passthrough on raw sources, the lab's RTSP simulator
+**6b — passthrough.** The `rtsp` source's `passthrough` and
+`thumbnail_url` params and its elementary outputs, the same param on a
+`gst` description, the producer's parse-only path with one
+`allow-not-linked` tee per stream, tiers that are the camera's own
+streams, `adaptive: false` when no substream exists, the keyframe no-op,
+`--probe-source` codec/profile reporting, the lab's RTSP simulator
 serving a second low-resolution mount, the demo robot's RTSP track in
-passthrough. *Gate:* (1) the demo's RTSP track streams to three viewers
-with `/stats` showing no encoder for it and the agent's CPU for that
-track below a quarter of the transcoding path's (measured in the lab);
-(2) a viewer behind `bad` on the passthrough track is demoted to the
-substream, and with `thumbnail_url` removed from the config the track
-reports `adaptive: false` and the viewer keeps decoding what it can;
-(3) a joining viewer's first frame arrives within one GOP of the camera
-without any keyframe request reaching the source; (4) a raw-output
-source with `passthrough = true` is a `--check` error with the reason;
-(5) every earlier gate green.
+passthrough. *Gate:* (1) the demo's RTSP track streams to the browser and
+its pipeline contains no encoder and no decoder — only depayload and
+parse — with `/stats` reporting `passthrough: true` and no encoder
+target (`tests/stack/passthrough.spec.ts`); (2) `select-tracks` to the
+thumbnail tier gives the browser the camera's 640×360 substream without a
+renegotiation, and back again; (3) no keyframe request reaches the camera
+while a viewer joins and streams; (4) a passthrough source without a
+substream reports one tier and `adaptive: false`, with a transcoded track
+reporting both (unit tests over the media plane); (5) every earlier gate
+green.
+**Met 2026-09-22** ([review](reviews/slice-6b-review.md)).
+
+**Implementation notes (slice 6b)** — passthrough as built:
+
+- *The core decides from the caps, not from a flag.* `Producer::build()`
+  reads the demanded output's `declared_caps`; an elementary stream skips
+  convert, rawcaps and the shared tee entirely. `set_bitrate` refuses (the
+  camera owns the rate), `request_keyframe` counts and drops, and
+  `MediaPlane::adaptive()` answers the `bandwidth-stats` field from the
+  source's shape before a producer exists and from the producer after.
+- *One tee per stream, `allow-not-linked`.* A camera's substream is
+  connected as soon as the producer builds, but the thumbnail tier may
+  never start; an unlinked ghost pad returns not-linked and rtspsrc fails
+  the whole pipeline with "Internal data stream error". Each passthrough
+  output therefore goes through its own tolerant tee, as the raw path's
+  tee already did.
+- *`gst_parse_bin_from_description(…, TRUE)` ghosts the depayloader's
+  sink pad*, which counts as linked and makes rtspsrc's delayed link fail
+  ("Delayed linking failed") — the same trap `make_late_ghost_bin`
+  documents for decodebin. The passthrough chain parses with `FALSE` and
+  ghosts the named parser's src pad by hand.
+- *`create_bin()` returns a floating ref* (docs/09). Wrapping the chains
+  in an outer bin with the RAII sink helper handed the caller a second
+  reference and the leaks gate caught it on the first run.
 
 ## Where `fjarr.test` lives
 

@@ -17,7 +17,9 @@ namespace fjarr::media {
 /// Tier 1: a GStreamer description string wrapped as a bin with a ghost `src` pad.
 class GstDescriptionSource final : public VideoSource {
   public:
-    explicit GstDescriptionSource(std::string description, std::string identity = "");
+    /// `passthrough`: the description ends in an elementary stream (`… ! h264parse`), so the core
+    /// packetizes it as it is and builds no encoder for the track (docs/06).
+    explicit GstDescriptionSource(std::string description, std::string identity = "", bool passthrough = false);
     SourceInfo describe() const override;
     GstBin* create_bin() override;
     bool available() const override;
@@ -30,6 +32,7 @@ class GstDescriptionSource final : public VideoSource {
   private:
     std::string description_;
     std::string identity_;
+    bool passthrough_ = false;
     std::function<void(bool)> cb_;
     mutable std::string last_error_;
 };
@@ -98,21 +101,33 @@ class RtspSource final : public VideoSource {
         std::string url;
         int latency_ms = 200;
         std::string protocols = "auto"; // auto | tcp | udp
+        /// Send the camera's own H.264 untouched (docs/06): depayload and parse, never decode. The
+        /// outputs are then elementary streams and the core builds no encoder for the track.
+        bool passthrough = false;
+        /// Passthrough only: a second, lower stream of the same camera — the track's thumbnail tier
+        /// (docs/23#rate-control-and-tier-switching). Without one a passthrough track has one tier.
+        std::string thumbnail_url;
     };
     explicit RtspSource(Params p);
     SourceInfo describe() const override;
     GstBin* create_bin() override;
     bool available() const override { return true; } // a network source is tried; failures are bus errors
     void on_availability_changed(std::function<void(bool)>) override {}
-    std::string description() const;
+    /// The description of one stream: `src` (the main url) or `thumbnail` (the substream).
+    std::string description(const std::string& output = "src") const;
 
   private:
+    GstBin* build_stream(GstBin* into, const std::string& output, std::string* error);
     Params p_;
     // Per create_bin(): the plane serializes producers per track (the old one is reset before the
     // next is built), so one connection per source suffices; a second live bin would steal it.
-    glib::SignalConnection rtsp_pad_added_;
-    glib::SignalConnection rtsp_select_stream_;
+    glib::SignalConnection rtsp_pad_added_, rtsp_pad_added_thumb_;
+    std::vector<glib::SignalConnection> rtsp_select_streams_;
 };
+
+/// Video only: an audio stream announced first would take decodebin's single sink through the
+/// parser's delayed link and the video would never arrive. Applied to every rtspsrc in `bin`.
+void select_video_streams(GstBin* bin, std::vector<glib::SignalConnection>& out);
 
 /// A bin whose last element is a decodebin: parsed without ghosting (the parser would ghost
 /// decodebin's *internal* typefind pad, and for rtspsrc its delayed link), then given a targetless

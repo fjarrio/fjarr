@@ -57,4 +57,18 @@ GstElement* make_encode_bin(const EncoderChoice& enc, const TierProfile& tier, c
     return bin;
 }
 
+GstElement* make_passthrough_bin(const std::string& prefix) {
+    auto q = [](const std::string& v) { return "\"" + v + "\""; };
+    const std::string desc = "h264parse name=" + q(prefix + "/parser") + " config-interval=-1 ! capsfilter name=" + q(prefix + "/outcaps") +
+                             " caps=" + q("video/x-h264,stream-format=byte-stream,alignment=au");
+    GError* err = nullptr;
+    GstElement* bin = gst_parse_bin_from_description(desc.c_str(), TRUE, &err);
+    if (err) {
+        glib::GErrorPtr guard(err);
+        if (bin) [[maybe_unused]] auto released = glib::sink_element(bin);
+        throw FjarrError("media", std::string("passthrough branch failed: ") + err->message + " [" + desc + "]");
+    }
+    return bin;
+}
+
 } // namespace fjarr::media

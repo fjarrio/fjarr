@@ -20,6 +20,10 @@ bool Producer::build() {
         error_ = "no source";
         return false;
     }
+    // Passthrough (docs/06): an elementary output is parsed and packetized, never decoded — no
+    // convert, no tee, no encoder; each tier is one of the source's own streams.
+    for (const auto& o : source_.source->describe().outputs)
+        if (o.name == source_.output) passthrough_ = o.declared_caps.rfind("video/x-h26", 0) == 0;
     GstBin* bin = source_.source->create_bin();
     if (!bin) {
         error_ = "source bin failed to build";
@@ -29,6 +33,36 @@ bool Producer::build() {
     glib::ObjectCensus::instance().pipelines++;
     source_bin_ = glib::sink_element(GST_ELEMENT(bin));
     gst_object_set_name(GST_OBJECT(source_bin_.get()), (name() + "/source").c_str());
+    if (passthrough_) {
+        gst_bin_add(GST_BIN(pipeline_.get()), source_bin_.get());
+        source_pad_ = glib::adopt_pad(gst_element_get_static_pad(source_bin_.get(), "src"));
+        if (!source_pad_) {
+            error_ = "source bin has no pad src";
+            return false;
+        }
+        // One tee per stream, `allow-not-linked` as on the raw path: a substream nobody demands
+        // must not fail the whole pipeline with a not-linked flow error (found in slice 6b).
+        for (const auto& o : source_.source->describe().outputs) {
+            const std::string pad = o.name == "src" ? "src" : "src_" + o.name;
+            glib::GstPadPtr src = glib::adopt_pad(gst_element_get_static_pad(source_bin_.get(), pad.c_str()));
+            if (!src) continue;
+            glib::GstElementPtr tee = glib::make_element("tee", name() + "/tee" + (o.name == "src" ? "" : ":" + o.name));
+            g_object_set(tee.get(), "allow-not-linked", TRUE, nullptr);
+            gst_bin_add(GST_BIN(pipeline_.get()), tee.get());
+            glib::GstPadPtr tsink = glib::adopt_pad(gst_element_get_static_pad(tee.get(), "sink"));
+            if (gst_pad_link(src.get(), tsink.get()) != GST_PAD_LINK_OK) {
+                error_ = "cannot link the source's " + pad + " pad to its tee";
+                return false;
+            }
+            passthrough_tees_[o.name] = std::move(tee);
+        }
+        glib::GstBusPtr pbus(gst_pipeline_get_bus(GST_PIPELINE(pipeline_.get())));
+        GSource* pwatch = gst_bus_create_watch(pbus.get());
+        g_source_set_callback(pwatch, reinterpret_cast<GSourceFunc>(&Producer::on_bus), this, nullptr);
+        g_source_attach(pwatch, bus_context_);
+        bus_watch_ = glib::SourceGuard::attached(pwatch);
+        return true;
+    }
     convert_ = glib::make_element("videoconvert", name() + "/convert");
     rawcaps_ = glib::make_element("capsfilter", name() + "/rawcaps");
     glib::GstCapsPtr raw(gst_caps_from_string("video/x-raw,format=I420"));
@@ -157,9 +191,22 @@ GstFlowReturn Producer::on_new_sample(GstAppSink* sink, gpointer user) {
     return GST_FLOW_OK;
 }
 
+bool Producer::tier_possible(const std::string& tier) const {
+    if (!passthrough_) return tier == "active" || tier == "thumbnail";
+    if (tier == "active") return true;
+    if (!source_.source) return false;
+    for (const auto& o : source_.source->describe().outputs)
+        if (o.name == "thumbnail") return true;
+    return false; // no substream: one tier, and nothing to demote a viewer to (docs/23)
+}
+
 bool Producer::start_tier(const std::string& tier) {
     if (!pipeline_) return false;
     if (tiers_.count(tier)) return true;
+    if (!tier_possible(tier)) {
+        log::info("producer", "tier not available", {{"producer", name()}, {"tier", tier}, {"reason", "passthrough source without a substream (docs/06)"}});
+        return true; // not an error: the track simply has one tier
+    }
     const TierProfile profile = profile_for(tier);
     const std::string prefix = name() + ":" + tier;
     auto t = std::make_unique<Tier>();
@@ -169,7 +216,9 @@ bool Producer::start_tier(const std::string& tier) {
     g_object_set(t->queue.get(), "leaky", 2 /* downstream */, "max-size-buffers", 2u, "max-size-bytes", 0u, "max-size-time",
                  static_cast<guint64>(0), nullptr);
     try {
-        t->encode = glib::sink_element(make_encode_bin(config_.encoder, profile, prefix));
+        // Passthrough: parse and hand over, byte-stream/au as every consumer's appsrc expects.
+        t->encode = passthrough_ ? glib::sink_element(make_passthrough_bin(prefix))
+                                 : glib::sink_element(make_encode_bin(config_.encoder, profile, prefix));
     } catch (const std::exception& e) {
         error_ = e.what();
         return false;
@@ -191,13 +240,28 @@ bool Producer::start_tier(const std::string& tier) {
     gst_element_sync_state_with_parent(t->sink.get());
     gst_element_sync_state_with_parent(t->encode.get());
     gst_element_sync_state_with_parent(t->queue.get());
-    t->tee_pad = glib::adopt_pad(gst_element_request_pad_simple(tee_.get(), "src_%u"));
     glib::GstPadPtr qsink = glib::adopt_pad(gst_element_get_static_pad(t->queue.get(), "sink"));
-    if (gst_pad_link(t->tee_pad.get(), qsink.get()) != GST_PAD_LINK_OK) {
-        error_ = "cannot link tee to tier";
-        return false;
+    if (passthrough_) {
+        // Each tier is one of the source's own streams: `src` for active, the substream for thumbnail.
+        const std::string output = tier == "thumbnail" ? "thumbnail" : "src";
+        auto tee = passthrough_tees_.find(output);
+        if (tee == passthrough_tees_.end()) {
+            error_ = "no passthrough stream for the " + tier + " tier";
+            return false;
+        }
+        t->tee_pad = glib::adopt_pad(gst_element_request_pad_simple(tee->second.get(), "src_%u"));
+        if (gst_pad_link(t->tee_pad.get(), qsink.get()) != GST_PAD_LINK_OK) {
+            error_ = "cannot link the " + output + " stream to the " + tier + " tier";
+            return false;
+        }
+    } else {
+        t->tee_pad = glib::adopt_pad(gst_element_request_pad_simple(tee_.get(), "src_%u"));
+        if (gst_pad_link(t->tee_pad.get(), qsink.get()) != GST_PAD_LINK_OK) {
+            error_ = "cannot link tee to tier";
+            return false;
+        }
     }
-    t->kbps = profile.kbps;
+    t->kbps = passthrough_ ? 0 : profile.kbps; // passthrough: the camera sets the rate, not us
     tiers_[tier] = std::move(t);
     if (!playing_) {
         if (gst_element_set_state(pipeline_.get(), GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
@@ -206,13 +270,18 @@ bool Producer::start_tier(const std::string& tier) {
         }
         playing_ = true;
     }
-    log::info("producer", "tier started", {{"producer", name()}, {"tier", tier}, {"kbps", std::to_string(profile.kbps)},
-                                            {"size", std::to_string(profile.width) + "x" + std::to_string(profile.height)},
-                                            {"fps", std::to_string(profile.fps)}});
+    if (passthrough_)
+        log::info("producer", "tier started", {{"producer", name()}, {"tier", tier}, {"passthrough", "yes"},
+                                               {"stream", tier == "thumbnail" ? "the camera's substream" : "the camera's main stream"}});
+    else
+        log::info("producer", "tier started", {{"producer", name()}, {"tier", tier}, {"kbps", std::to_string(profile.kbps)},
+                                               {"size", std::to_string(profile.width) + "x" + std::to_string(profile.height)},
+                                               {"fps", std::to_string(profile.fps)}});
     return true;
 }
 
 bool Producer::set_bitrate(const std::string& tier, int kbps) {
+    if (passthrough_) return false; // the camera's bitrate is the camera's (docs/16)
     auto it = tiers_.find(tier);
     if (it == tiers_.end() || !it->second->encode || kbps <= 0) return false;
     Tier& t = *it->second;
@@ -264,6 +333,12 @@ void Producer::stop_tier(const std::string& tier) {
 void Producer::request_keyframe(const std::string& tier) {
     auto it = tiers_.find(tier);
     if (it == tiers_.end()) return;
+    if (passthrough_) {
+        // The camera decides its keyframes (docs/06): counted and dropped. A joining viewer still
+        // starts at the keyframe the hub retained.
+        keyframe_requests_dropped_++;
+        return;
+    }
     GstEvent* ev = gst_video_event_new_upstream_force_key_unit(GST_CLOCK_TIME_NONE, TRUE, 0);
     gst_element_send_event(it->second->sink.get(), ev); // upstream from the sink into the encoder
 }

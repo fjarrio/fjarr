@@ -33,4 +33,8 @@ struct TierProfile {
 /// `<prefix>/convert`, `<prefix>/encoder`, `<prefix>/parser`.
 GstElement* make_encode_bin(const EncoderChoice& enc, const TierProfile& tier, const std::string& prefix);
 
+/// Passthrough (docs/06): the same ghost pads and output caps, but only a parser — a camera's own
+/// H.264 is packetized as it is, so the track costs the robot no encoder at all.
+GstElement* make_passthrough_bin(const std::string& prefix);
+
 } // namespace fjarr::media

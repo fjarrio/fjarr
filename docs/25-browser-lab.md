@@ -85,7 +85,9 @@ Test with fixtures:
   (`docker/lab/rtsp-sim.py`, GStreamer's RTSP server serving a moving test
   pattern as H.264) stands in for a network camera, so `fjarr.camera`'s
   `rtsp` source type is exercised in CI without hardware
-  (`tests/stack/camera.spec.ts`).
+  (`tests/stack/camera.spec.ts`). From slice 6b it also serves
+  `/pattern-low` (640×360 at 5 fps), the substream a passthrough track
+  uses as its thumbnail tier.
 - `tests/stack/introspect.spec.ts` (slice 5a): `fjarr.introspect` through
   the session pipeline feed on the lab page — bodies as blob references
   over the bulk channel, the valve following `select-tracks`, the hot-plug
@@ -100,6 +102,11 @@ Test with fixtures:
   behind `bad` toward it alone (the simulator's `congested-viewer` in
   `dev`), the clean two untouched. Measured through the introspection
   port, which the impairment exempts.
+- `tests/stack/passthrough.spec.ts` (slice 6b): the demo's RTSP track as
+  the camera's own H.264 — the producer's pipeline holds no encoder and no
+  decoder, `/stats` reports `passthrough` with no encoder target, no
+  keyframe request reaches the camera, and a tier switch hands the browser
+  the 640×360 substream and back without a renegotiation.
 - `tests/stack/viewer.spec.ts` (slice 5b): the viewer the endpoint serves
   — the page without a token, the API refused without and served with it,
   traversal refused; in the lab browser the token entered once, the
