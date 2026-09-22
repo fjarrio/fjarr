@@ -13,7 +13,7 @@ dev container. Report results as a compact PASS/FAIL table, then fix failures
 
 1. Ensure services are up: `docker compose up -d dev robot-sim`.
 2. Environment: `docker compose exec dev make doctor`
-   (expected: 0 failures; WARNs for uinput and webrtcsink are by design).
+   (expected: 0 failures; the uinput WARN is by design).
 3. C++: `docker compose exec dev make agent-build` then
    `docker compose exec dev make agent-test`, then the two memory-ladder
    gates (docs/15): `make agent-raii-gate` and `make agent-test-asan`

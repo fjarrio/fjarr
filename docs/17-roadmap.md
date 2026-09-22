@@ -86,8 +86,13 @@ backend's operator/developer roles —
 introspect` opening it with the demo's token, the CI-built `fjarr-agent`
 image running the demo robot under the lab smoke — unpublished until M2.5;
 [review](reviews/slice-5b-review.md)) ·
-6 ADR-0007 spike + adaptive bitrate · 7 fault injection + latency harness
-on the frame stamp.
+**6a** repair and rate control (planned 2026-09-22, [docs/23](23-agent-core-architecture.md#slices-3a-3b-3c-and-their-gates):
+ADR-0007 closed on webrtcbin with the agent's own TWCC estimator;
+NACK/RTX and keyframe feedback in the offer; banded shared-encoder
+targets with per-viewer tier switching; the lab gates under the netem
+profiles) · **6b** passthrough (a camera's own H.264 untouched, the
+substream as the thumbnail tier, `adaptive: false` otherwise) ·
+7 fault injection + latency harness on the frame stamp.
 
 **Gate:** the three-demo stack end-to-end — demo-robot (embedding libfjarr)
 streams 2 tracks to 3 browsers through the `fjarr-server` sidecar, the TS

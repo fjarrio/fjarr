@@ -34,10 +34,18 @@ ceiling (e.g. a decimated point cloud ≤ 2 Mbps at 5–10 Hz); frames older
 than one interval are dropped, never queued.
 
 **Adaptive bitrate is a hard requirement** (the camera-streamer gap): the encoder
-target follows congestion feedback (GCC/TWCC — mechanism per
-[ADR-0007](adr/0007-webrtcbin-vs-webrtcsink.md)) between a floor of 250 kbps
-and the tier target, reacting within ~2 s to loss and recovering within ~10 s.
-Fixed-CBR-only operation is a spec violation.
+target follows congestion feedback (per-peer TWCC into the agent's own
+estimator — [ADR-0007](adr/0007-webrtcbin-vs-webrtcsink.md)) between a
+floor of 250 kbps and the tier target, reacting within ~2 s to loss and
+recovering within ~10 s. Fixed-CBR-only operation is a spec violation.
+Because one encoder serves every viewer of a tier, the encoder only follows
+its viewers within a band (half the tier target and up); a viewer whose
+link is below the band is moved to the lower tier on its own, so one bad
+receiver never costs the others more than that band
+([docs/23](23-agent-core-architecture.md#rate-control-and-tier-switching)).
+A passthrough track (the camera's own encoded stream) cannot adapt at the
+agent: it adapts by tier only when the source offers a lower stream,
+otherwise not at all, and says so in the manifest.
 
 ## Robot resource budget (Intel NUC class, one active session + one thumbnail)
 

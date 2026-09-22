@@ -63,7 +63,6 @@ demo-backend demo-dashboard` (and `demo-robot` after `make agent-build`).
 | `DISPLAY=:99` + `ximagesrc` capture | robot-sim not up, or stale X socket — `docker compose restart robot-sim` |
 | `libei`/`pipewire`/`libevdev` pkg-config | dev packages missing from image |
 | `/dev/uinput` | WARN by default; opt in via the uinput override |
-| `webrtcsink` | WARN until the ADR-0007 spike layer exists |
 
 ## Opt-in overrides (conscious privilege grants)
 

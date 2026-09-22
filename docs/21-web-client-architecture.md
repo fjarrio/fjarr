@@ -261,6 +261,12 @@ handle.release();
 
 Per track: `enabled = any consumer visible`, `tier = max over visible
 consumers`, `preference = sharpness if any visible consumer asks for it`.
+The agent may send a *lower* tier than asked while this peer's link is
+below the tier's band ([docs/23](23-agent-core-architecture.md#rate-control-and-tier-switching));
+the track entry then carries `effectiveTier` beside `tier` (from
+`bandwidth-stats`), `adaptive: false` marks a passthrough track that
+cannot adapt, and the demand model never changes what it asks for because
+of it — the agent's override is the agent's.
 Changes are debounced (~250 ms) and coalesced into one `select-tracks`
 request **per track-owning capability** (`fjarr.camera` for camera tracks,
 `fjarr.desktop` for monitors — [docs/06](06-capabilities.md#fjarrcamera--camera-video-m1-reference-implementation));
@@ -347,7 +353,10 @@ redesigned here as a core service rather than a component's `setInterval`.
   "rtt 340 ms > 300 ms"] }` with thresholds taken from the
   [performance budgets](16-performance-budgets.md#connection-health-thresholds)
   and hysteresis (a level changes only after three consecutive samples
-  agree) so a single bad second doesn't flap the badge.
+  agree) so a single bad second doesn't flap the badge. A tier reduced by
+  the robot is a reason of its own ("tier reduced by the robot: link
+  900 kbps", from `bandwidth-stats`), so the badge explains a quality step
+  that the browser's own stats would show as healthy.
   `<ConnectionQuality>` renders it; hosts can render their own from the
   same hook.
 

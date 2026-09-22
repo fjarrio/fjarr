@@ -29,9 +29,6 @@ done
 # Wayland capture is WARN until the M2 spikes need it inside a session:
 gst-inspect-1.0 pipewiresrc >/dev/null 2>&1 && pass "gst element: pipewiresrc" \
   || warn "gst element missing: pipewiresrc"
-# webrtcsink (gst-plugins-rs) is only needed for the ADR-0007 spike:
-gst-inspect-1.0 webrtcsink >/dev/null 2>&1 && pass "gst element: webrtcsink" \
-  || warn "webrtcsink absent (expected until the ADR-0007 spike layer is added)"
 
 # --- ADR-0011 license policy: GPL encoder must NOT be present -------------
 if gst-inspect-1.0 x264enc >/dev/null 2>&1; then

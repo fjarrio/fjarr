@@ -28,6 +28,20 @@ description: Normative wire specification — signaling messages, DataChannel to
 | WebRTC media tracks | camera/desktop video (RTP) |
 | WebRTC DataChannels | everything else, per the topology below |
 
+### RTP feedback and repair {#rtp-feedback}
+
+Every video m-line the agent offers carries, and the agent honours:
+
+| Feedback | Offered as | The agent's side |
+|---|---|---|
+| Congestion feedback | `a=rtcp-fb:* transport-cc` + the transport-wide sequence header extension | the per-peer estimator's input ([docs/23](23-agent-core-architecture.md#rate-control-and-tier-switching)); browsers send it by default |
+| Retransmission | `a=rtcp-fb:* nack` + an `rtx` payload per video payload | a lost packet is re-sent on request from a per-peer buffer of one GOP; a receiver waits at most one round trip instead of asking for a keyframe |
+| Keyframe requests | `a=rtcp-fb:* nack pli`, `ccm fir` | a keyframe from the tier's encoder, rate-limited (≥ 1 s, shared by every viewer of the tier); a no-op with a counted log line on a passthrough track (the camera decides) |
+| Forward error correction | **not offered** | it spends bandwidth on every link to help the lossy ones; revisit with a customer on a link where retransmission's round trip is too long |
+
+A track's `bandwidth-stats` shows the effect (below): the estimate the
+agent holds for this peer and the tier it is actually sending.
+
 ## Signaling messages {#signaling}
 
 JSON text frames on the WSS connection. Common fields on **every** message:
@@ -146,7 +160,7 @@ client sends one request per track-owning capability
 | `type` | kind | payload | semantics |
 |---|---|---|---|
 | `select-tracks` | request → result | `{"tracks": [{"track_id", "enabled": bool, "tier": "active" \| "thumbnail", "preference"?: "motion" \| "sharpness"}]}` | full desired state for the tracks listed (unlisted = unchanged); the core flips valves, applies docs/16 tier params, requests a keyframe on enable, maps `preference` to the encoder's degradation preference; `result{ok:true}` once applied. A `track_id` that is not in this capability's manifest makes the whole request fail — `result{ok:false, error:{code:"payload-invalid", message:"unknown track <id>"}}` — and nothing is applied |
-| `bandwidth-stats` | event (agent → operator) | `{"interval_ms": 1000, "tracks": [{"track_id", "enabled", "tier", "bitrate_bps", "frames", "dropped"}]}` | once per second while any of the capability's tracks is enabled. `bitrate_bps` = `outbound-rtp` bytes sent over the interval × 8; `frames` = encoded frames pushed to this peer in the interval; `dropped` = frames skipped for this peer in the interval (FrameHub ring overrun + leaky-queue drops). Informational for the UI; the client's health score uses its own `getStats` (docs/21) |
+| `bandwidth-stats` | event (agent → operator) | `{"interval_ms": 1000, "tracks": [{"track_id", "enabled", "tier", "effective_tier", "estimate_bps", "adaptive", "bitrate_bps", "frames", "dropped", "nacks", "keyframe_requests"}]}` | once per second while any of the capability's tracks is enabled. `tier` = what the client asked for, `effective_tier` = what the agent sends (lower while this peer's link is below the tier's band — [docs/23](23-agent-core-architecture.md#rate-control-and-tier-switching)); `estimate_bps` = the agent's estimate of this peer's available bandwidth for the track; `adaptive` = false on a passthrough track without a lower stream (nothing the agent can do about congestion); `nacks` and `keyframe_requests` = repair requests served in the interval. `bitrate_bps` = `outbound-rtp` bytes sent over the interval × 8; `frames` = encoded frames pushed to this peer in the interval; `dropped` = frames skipped for this peer in the interval (FrameHub ring overrun + leaky-queue drops). Informational for the UI; the client's health score uses its own `getStats` (docs/21) |
 
 Codec strings in the manifest are RTP encoding names, uppercase: `H264`,
 `H265`, `VP8`, `VP9`, `OPUS`. `mid` values are opaque strings; a

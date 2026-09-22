@@ -2,7 +2,7 @@
 title: "ADR 0007: webrtcbin vs webrtcsink"
 ---
 
-- **Status**: **proposed** — closed by an M1 spike
+- **Status**: **accepted** (2026-09-22, slice 6 planning; the M1 spikes below are its evidence)
 - **Date**: 2026-09-15
 
 ## Context
@@ -55,14 +55,35 @@ restart is unchanged, and the `webrtcsink` question above is still open.
   manifests, per-track valving, DC control, and our reconnect ladder fit its
   model; adds a vendored Rust plugin build to the agent image.
 
+**Environment re-check (2026-09-22, slice 6 planning):** neither
+`webrtcsink` nor gst-plugins-rs's `rtpgccbwe` estimator is packaged on
+Ubuntu 26.04, so both routes to congestion control would mean vendoring a
+Rust plugin build into the dev image and the agent image. `rtpsession`
+does expose `twcc-stats` (transport-wide congestion control feedback, per
+packet), and the retransmission and FEC elements are present.
+
 ## Decision
 
-Deferred: M1 builds the camera capability on **webrtcbin+FrameHub** (the
-proven path) while a timeboxed spike measures webrtcsink against the same
-harness (adaptation reaction time, CPU, integration friction with docs/08).
-Whichever meets docs/16 with less ongoing complexity wins.
+**webrtcbin + FrameHub, with a congestion estimator of our own.** The
+core built in slices 3–5 (FrameHub fan-out, per-consumer pipelines, the
+docs/08 session and track model, the reconnection ladder, introspection)
+stays; adaptive bitrate is a small loss-and-delay estimator in `libfjarr`
+fed by webrtcbin's per-peer TWCC feedback, driving the shared tier
+encoders and per-viewer tier switching as
+[docs/23](../23-agent-core-architecture.md#rate-control-and-tier-switching)
+specifies. Loss repair is NACK/RTX plus keyframe requests, no FEC
+([docs/08](../08-protocol.md#rtp-feedback)).
+
+Rejected: **webrtcsink** — it would replace the tested core for a model
+that does not carry docs/08's session and track semantics, and it is not
+on the baseline; **vendoring `rtpgccbwe`** — a Rust toolchain in the C++
+build and the image for one element, when the estimator it implements is
+a few hundred lines against the same `twcc-stats`; **REMB** — deprecated
+receiver-side estimation, coarse and unavailable on some browsers.
 
 ## Consequences
 
-Possible M1 rework if webrtcsink wins (accepted: the capability API hides
-the choice). The doctor WARNs on webrtcsink absence until the spike lands.
+The estimator is ours to measure and maintain: docs/16's reaction (~2 s)
+and recovery (~10 s) times are gated in the lab under the netem profiles
+every commit (docs/23 slice 6a). ICE restart stays as recorded (open
+question #21). The doctor's `webrtcsink` row is dropped.

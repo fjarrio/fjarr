@@ -345,9 +345,9 @@ preferred raw format in system memory; a camera that only offers MJPEG
 takes `mjpeg`, and `--probe-source` says which), `width`, `height`,
 `fps`: a convenience over tier 1 with hot-plug from the kernel's
 `/dev/v4l/by-id` tree, watched with GIO; no libudev in the core), `rtsp`
-(`url`, `latency` ms, `protocols` tcp|udp|auto — decoded to raw in slice 4;
-passthrough of a camera's own elementary stream lands with adaptive
-bitrate in slice 6, where the tier model for undecoded streams is decided).
+(`url`, `latency` ms, `protocols` tcp|udp|auto, and from slice 6b
+`thumbnail_url` for a camera's low-resolution substream; decoded to raw
+unless the track asks for passthrough, below).
 
 The contract, in prose (the C++ is in docs/09):
 
@@ -357,10 +357,20 @@ The contract, in prose (the C++ is in docs/09):
   (`video/x-raw`, any format — the core inserts `videoconvert` /
   `vapostproc` as needed), raw in device memory (`memory:DMABuf`,
   `memory:VAMemory`, NVMM later) for zero-copy into the hardware encoder,
-  or an elementary stream (`video/x-h264`, `video/x-h265`) for cameras
-  with on-board encoders, in which case the core parses and never
-  transcodes (from slice 6; until then an `rtsp` source decodes). A source
-  declares each output's kind (`video` or `audio`; audio outputs feed
+  or an elementary stream (`video/x-h264`; `video/x-h265` once browsers
+  take it) for cameras with on-board encoders. A track configured
+  `passthrough = true` (docs/06) takes such an output as its `active`
+  tier untouched: the core parses (`h264parse config-interval=-1`) and
+  packetizes, never decodes or encodes, so the track costs the robot no
+  encoder at all. Its `thumbnail` tier exists only if the source declares
+  a second, lower elementary output (`rtsp`'s `thumbnail_url`; a
+  registered type's `src_thumbnail`); otherwise the track has one tier and
+  no adaptation (docs/16). Keyframes cannot be requested from the camera:
+  the hub's keyframe gate still starts a joining viewer from the retained
+  keyframe, and a PLI is a counted no-op. `--probe-source` reports the
+  codec, profile and level and whether a browser accepts them; `--check`
+  refuses `passthrough` on a source whose output is raw. A source declares
+  each output's kind (`video` or `audio`; audio outputs feed
   `fjarr.audio`).
 - **Lifecycle.** `describe()` (outputs, declared caps, stable identity),
   `create_bin()` on demand, and the bin's normal GStreamer state changes;
@@ -506,6 +516,50 @@ profiling shows payloading above 1 % per viewer.
 
 **Audio** fans out the same way: one Opus encoder per source, the ring
 holds encoded frames, each session gets its own `appsrc ! rtpopuspay`.
+
+### Rate control and tier switching {#rate-control-and-tier-switching}
+
+docs/16 demands adaptive bitrate; the fan-out demands that one encoder
+serves every viewer of a tier. The two meet like this (ADR-0007; planned
+2026-09-22, slice 6a):
+
+- **Per peer: an estimate.** Each consumer pipeline reads its
+  `rtpsession`'s `twcc-stats` (per-packet send and arrival times and
+  losses, from the browser's transport-wide feedback) into a
+  `RateEstimator` owned by the session: a delay-gradient trend detector
+  plus a loss rule (loss below 2 % over a window: grow 5 % per second;
+  above 10 %: cut to `estimate × (1 − loss / 2)`; between: hold), bounded
+  to `[floor, 1.2 × tier target]`, with a step down applied within 200 ms
+  of the feedback that caused it. The estimate is per (peer, track).
+- **Per producer: a target inside a band.** A tier encoder's target is
+  recomputed every 500 ms as the *minimum estimate among its current
+  subscribers*, clamped to the tier's band `[band_low, target]`, where
+  `band_low` is half the target for `active` and the docs/16 floor for
+  `thumbnail`. The `EncoderAdapter` applies it live (`set_bitrate`; an
+  encoder that cannot change bitrate while playing gets a keyframe and a
+  reconfigure, which the adapter reports so the doctor can say so).
+- **Per peer: a tier.** A subscriber whose estimate stays below its tier's
+  `band_low` for 2 s is demoted to the next lower tier *by the agent*:
+  its hub subscription moves, a keyframe is requested, `bandwidth-stats`
+  reports `effective_tier` below `tier`. It is promoted back when its
+  estimate stays above 1.2 × the higher tier's `band_low` for 10 s. The
+  client's demanded tier is remembered and never overwritten; the agent's
+  override sits beside it. A peer that has no lower tier to go to (the
+  thumbnail producer refused for the encoder budget, or a passthrough
+  track without a lower stream) keeps its tier with the per-consumer leaky
+  queue as its only protection, and the track reports `adaptive: false`.
+- **What this buys.** One encoder per demanded tier, none when idle, as
+  before. A lone viewer gets the whole adaptive range down to the floor. A
+  bad receiver among good ones can pull the shared encoder down to
+  `band_low` for at most 2 s, then leaves for the lower tier alone; the
+  others never see less than half the target. The price is a quality
+  step for the demoted viewer instead of a slide; a middle tier is one
+  more encoder if the demos show the step is too coarse.
+- **Where it shows.** `bandwidth-stats` per track (docs/08), the session
+  pipeline's snapshot (the encoder's current bitrate property, the
+  estimator's numbers under `session:<sid8>/<track>/rate`), `/stats`, and
+  the web client's health reasons ("tier reduced by the robot: link
+  900 kbps").
 
 **Measurement.** The loop test streams one 1080p30 source to `N` consumer
 branches ending in `fakesink` for `N ∈ {1, 2, 5, 10}` and records CPU per
@@ -699,8 +753,9 @@ allow_unsupervised = false
 [media]
 encoder        = "auto"                    # auto | vaapi | software — never a silent fallback (below)
 gop_seconds    = 2                         # keyframe interval; ring and consumer queue are sized to it
-active_kbps    = 4000                      # fixed until adaptive bitrate (slice 6)
-thumbnail_kbps = 300
+active_kbps    = 4000                      # the active tier's target; the encoder adapts in [active_kbps/2, active_kbps] (rate control, above)
+active_floor_kbps = 250                    # a lone viewer may take the encoder down to here (docs/16)
+thumbnail_kbps = 300                       # the thumbnail tier's target
 tier_grace_ms  = 10000                     # producer lingers this long after the last demand
 
 [introspect]                               # docs/24
@@ -1301,6 +1356,53 @@ image contains no `x264enc`; (5) nothing is published.
   once when the simulator dies of a *signal* (a failed check still fails
   at once), and the agent's own soak, which runs the same elements for 200
   sessions, stays the watch for the same corruption on the robot side.
+
+**6 — loss recovery, rate control, passthrough**, planned 2026-09-22 as
+two increments, each with its own review (decisions: ADR-0007 closed on
+webrtcbin with our own estimator; one thumbnail tier, on demand as today;
+NACK/RTX plus keyframe requests, no FEC; passthrough by config):
+
+**6a — repair and rate control.** The offer carries `transport-cc`,
+`nack`/`rtx` and the keyframe feedback (docs/08#rtp-feedback; the
+transceiver's `do-nack`, the RTX payload, the TWCC extension — a probe
+against the lab's Chromium first, as the webrtcbin spike's Q7: the
+cadence and content of `twcc-stats` with a browser receiver, and whether
+`vah264enc` / `openh264enc` take a bitrate change while playing). Then
+the `RateEstimator` per (peer, track), the producer's banded target
+through `EncoderAdapter::set_bitrate`, tier demotion and promotion with
+their hysteresis, the `bandwidth-stats` fields, the `rate` node in the
+session snapshot, the web client's `effectiveTier` on the track entry and
+the health reason. *Gate, in the lab under the docs/25 profiles:* (1)
+`4g` applied to a streaming session: the track's `bitrate_bps` falls
+below the profile's rate within 2 s and the stream keeps decoding
+(stamps advance, no freeze over 1 s); `4g` removed: `bitrate_bps` is back
+within 10 % of the target within 10 s (docs/16); (2) three viewers, one
+behind `bad`: within 3 s that viewer reports `effective_tier =
+thumbnail` and still decodes, the other two keep ≥ 90 % of their bitrate
+and their frame rate throughout; the bad link removed: promoted back
+within 15 s; (3) `lossy` (5 % loss): `nacks` > 0 per interval,
+`keyframe_requests` per minute below 5 and freezes below 2 per minute,
+against a control run with NACK disabled that shows the difference;
+(4) a lone viewer under `bad` reaches the floor and recovers; (5) opsim
+`netem-*` scenarios assert the same from the wire; (6) every earlier gate
+green, the soak included (estimator objects must not move the census).
+
+**6b — passthrough.** The `rtsp` source's elementary output and
+`thumbnail_url`, `passthrough = true` on a camera track, the parse-only
+producer path, `adaptive: false` in the manifest and stats when no lower
+stream exists, the PLI no-op, `--probe-source` codec/profile reporting,
+`--check` refusing passthrough on raw sources, the lab's RTSP simulator
+serving a second low-resolution mount, the demo robot's RTSP track in
+passthrough. *Gate:* (1) the demo's RTSP track streams to three viewers
+with `/stats` showing no encoder for it and the agent's CPU for that
+track below a quarter of the transcoding path's (measured in the lab);
+(2) a viewer behind `bad` on the passthrough track is demoted to the
+substream, and with `thumbnail_url` removed from the config the track
+reports `adaptive: false` and the viewer keeps decoding what it can;
+(3) a joining viewer's first frame arrives within one GOP of the camera
+without any keyframe request reaching the source; (4) a raw-output
+source with `passthrough = true` is a `--check` error with the reason;
+(5) every earlier gate green.
 
 ## Where `fjarr.test` lives
 
