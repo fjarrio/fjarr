@@ -29,8 +29,12 @@ GstElement* make_encode_bin(const EncoderChoice& enc, const TierProfile& tier, c
     // Explicit capsfilters everywhere: bare caps strings in a bin description do not parse reliably.
     auto q = [](const std::string& v) { return "\"" + v + "\""; };
     std::string desc;
+    // A tier's fps is a CEILING, not a target (docs/23: "the source size at <= 30 fps"). The filter
+    // must therefore be a range: `videorate drop-only=true` can only drop frames, so demanding an
+    // exact `fps/1` makes every source slower than the tier unlinkable — a 15 fps camera could not
+    // stream at all (found by the slice-7a ladder test, which ran its source at 15 fps).
     desc += "videorate name=" + q(prefix + "/rate") + " drop-only=true ! capsfilter name=" + q(prefix + "/ratecaps") +
-            " caps=" + q("video/x-raw,framerate=" + std::to_string(tier.fps) + "/1") + " ! ";
+            " caps=" + q("video/x-raw,framerate=(fraction)[0/1," + std::to_string(tier.fps) + "/1]") + " ! ";
     if (tier.width > 0 && tier.height > 0) {
         desc += "videoscale name=" + q(prefix + "/scale") + " ! capsfilter name=" + q(prefix + "/scalecaps") + " caps=" +
                 q("video/x-raw,width=" + std::to_string(tier.width) + ",height=" + std::to_string(tier.height)) + " ! ";

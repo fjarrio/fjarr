@@ -96,12 +96,22 @@ impl Hs256GrantVerifier {
         let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
         validation.set_audience(&["fjarr"]);
         validation.set_required_spec_claims(&["exp", "aud"]);
+        // docs/15 "grant expired / clock skew": the customer's backend mints grants on
+        // its own clock, so a few seconds of skew must not look like an expired grant.
+        // Stated explicitly rather than inherited from the library's default, because
+        // it is a policy: the window in which we accept a grant we believe is stale.
+        validation.leeway = GRANT_CLOCK_SKEW_LEEWAY_SECS;
         Self {
             key: jsonwebtoken::DecodingKey::from_secret(secret),
             validation,
         }
     }
 }
+
+/// How far a grant's `exp` may lie in the past and still be accepted, to absorb
+/// clock skew between the customer's backend and this server (docs/15). Beyond
+/// it the grant is `grant-expired` — retryable by refetching, never `auth-failed`.
+pub const GRANT_CLOCK_SKEW_LEEWAY_SECS: u64 = 60;
 
 impl GrantVerifier for Hs256GrantVerifier {
     fn verify(&self, auth: &Value) -> Result<VerifiedGrant, AuthError> {
@@ -181,5 +191,89 @@ pub struct LogSink;
 impl EventSink for LogSink {
     fn emit(&self, event: Event, data: Value) {
         tracing::info!(event = event.name(), %data, "fjarr event");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mint(secret: &[u8], exp: i64) -> Value {
+        let claims = serde_json::json!({
+            "iss": "test", "aud": "fjarr", "exp": exp, "tenant": "acme",
+            "robot_id": "robot-1",
+            "operator": {"id": "anna@acme.test", "label": "Anna"},
+            "capabilities": [{"name": "fjarr.test"}],
+        });
+        let jwt = jsonwebtoken::encode(
+            &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256),
+            &claims,
+            &jsonwebtoken::EncodingKey::from_secret(secret),
+        )
+        .expect("encode");
+        serde_json::json!({ "jwt": jwt })
+    }
+
+    /// The wire code of a rejection; an `Internal` here is a test failure, not a code.
+    fn code(err: &AuthError) -> &'static str {
+        match err {
+            AuthError::Rejected { code, .. } => code,
+            AuthError::Internal(m) => panic!("expected a rejection, got internal: {m}"),
+        }
+    }
+
+    fn now() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_secs() as i64
+    }
+
+    #[test]
+    fn a_valid_grant_verifies() {
+        let v = Hs256GrantVerifier::new(b"secret");
+        let g = v
+            .verify(&mint(b"secret", now() + 300))
+            .expect("valid grant");
+        assert_eq!(g.robot_id, "robot-1");
+        assert_eq!(g.tenant, "acme");
+    }
+
+    /// docs/15: a backend clock a few seconds behind ours must not lock operators out.
+    #[test]
+    fn a_grant_expired_inside_the_skew_window_is_accepted() {
+        let v = Hs256GrantVerifier::new(b"secret");
+        let exp = now() - (GRANT_CLOCK_SKEW_LEEWAY_SECS as i64 / 2);
+        assert!(
+            v.verify(&mint(b"secret", exp)).is_ok(),
+            "within leeway must verify"
+        );
+    }
+
+    /// The taxonomy matters more than the rejection: `grant-expired` tells the client
+    /// to refetch and try again, `auth-failed` tells it to stop. Confusing them is
+    /// either a retry storm or an operator who cannot get back in.
+    #[test]
+    fn a_grant_expired_beyond_the_skew_window_is_grant_expired_not_auth_failed() {
+        let v = Hs256GrantVerifier::new(b"secret");
+        let exp = now() - (GRANT_CLOCK_SKEW_LEEWAY_SECS as i64) - 30;
+        let err = v.verify(&mint(b"secret", exp)).expect_err("must reject");
+        assert_eq!(code(&err), ec::GRANT_EXPIRED);
+    }
+
+    #[test]
+    fn a_grant_signed_with_the_wrong_secret_is_auth_failed() {
+        let v = Hs256GrantVerifier::new(b"secret");
+        let err = v
+            .verify(&mint(b"other-secret", now() + 300))
+            .expect_err("must reject");
+        assert_eq!(code(&err), ec::AUTH_FAILED);
+    }
+
+    #[test]
+    fn a_missing_jwt_is_auth_failed() {
+        let v = Hs256GrantVerifier::new(b"secret");
+        let err = v.verify(&serde_json::json!({})).expect_err("must reject");
+        assert_eq!(code(&err), ec::AUTH_FAILED);
     }
 }
