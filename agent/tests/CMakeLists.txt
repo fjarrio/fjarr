@@ -10,6 +10,7 @@ add_executable(fjarr-tests
   test_channels.cpp
   test_blob.cpp
   test_rate_estimator.cpp
+  test_supervision.cpp
   test_tier_policy.cpp
   test_passthrough.cpp
   test_introspect_capability.cpp
@@ -22,5 +23,8 @@ add_executable(fjarr-tests
 target_include_directories(fjarr-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 target_link_libraries(fjarr-tests PRIVATE fjarr::fjarr GTest::gtest PkgConfig::GST PkgConfig::SOUP)
 target_compile_definitions(fjarr-tests PRIVATE FJARR_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/protocol/fixtures")
+# The supervision probe spawns the real daemon under a fake systemd notify socket (docs/15).
+target_compile_definitions(fjarr-tests PRIVATE FJARR_AGENT_BINARY="$<TARGET_FILE:fjarr-agent>")
+add_dependencies(fjarr-tests fjarr-agent)
 include(GoogleTest)
 gtest_discover_tests(fjarr-tests DISCOVERY_TIMEOUT 60)

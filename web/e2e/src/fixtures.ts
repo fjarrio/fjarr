@@ -328,6 +328,14 @@ export class Stack {
     throw new Error("fjarr-server did not come back within 30 s");
   }
 
+  /** docs/15 "agent SIGKILL mid-session": kill the agent outright, then bring it back. */
+  killRobot(): Promise<void> {
+    return this.robot.kill();
+  }
+  startRobot(): Promise<void> {
+    return this.robot.start();
+  }
+
   /** Skip unless the demo robot container runs (a failure in CI). */
   async requireRobot(): Promise<void> {
     const up = await this.robot.isUp();

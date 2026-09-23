@@ -42,6 +42,33 @@ export class RobotContainer {
     }
   }
 
+  /**
+   * docs/15 "agent SIGKILL mid-session": the agent dies without a chance to say
+   * goodbye — no session-close, no socket shutdown, just gone. The lab has no
+   * supervisor (M2.5 brings the systemd unit), so the test restarts it and the
+   * "robot reachable again" clock runs from the kill.
+   */
+  async kill(): Promise<void> {
+    await run("docker", ["compose", "kill", "-s", "KILL", this.service]);
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      if (!(await this.isUp())) return;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error(`${this.service} still running after SIGKILL`);
+  }
+
+  /** Start it again after `kill()`; resolves once the container runs (not once the agent is online). */
+  async start(): Promise<void> {
+    await run("docker", ["compose", "start", this.service]);
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      if (await this.isUp()) return;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error(`${this.service} did not come back up`);
+  }
+
   /** Apply the profile's netem spec (replacing whatever was there); `lan` clears it. */
   async netem(profile: ProfileName, iface: string = this.iface): Promise<string> {
     const spec = NETWORK_PROFILES[profile].media;

@@ -96,10 +96,12 @@ a camera's own H.264 untouched — no encoder for the track — with its
 substream as the thumbnail tier and `adaptive: false` without one;
 [review](reviews/slice-6b-review.md)) ·
 7 in two increments ([docs/23](23-agent-core-architecture.md#slices-3a-3b-3c-and-their-gates)):
-**7a** the four robot-lifecycle fault rows nothing exercises yet — a
-killed agent, a wedged core loop against a fake notify-socket supervisor,
-a pipeline error through the escalation ladder, and an expired or skewed
-grant — plus reconnect and ICE restart promoted into the stack suite;
+**7a ✔** (2026-09-23) the four robot-lifecycle fault rows nothing exercised
+— a killed agent, a wedged core loop against a fake notify-socket
+supervisor, a pipeline error through the escalation ladder, and an expired
+or skewed grant — plus a signaling-server restart under the real agent; it
+found and fixed a tier-framerate bug that stopped **any camera below 30 fps
+from streaming at all**;
 **7b** the glass-to-glass harness on the existing frame stamp, with
 `coturn` in the `lab` profile for the relay column, a loose ceiling in CI
 and the docs/16 budgets gated nightly on the prepared runner.

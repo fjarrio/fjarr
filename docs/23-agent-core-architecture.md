@@ -1525,6 +1525,45 @@ noted, with the timings read against the docs/16 budgets; (2) the M1
 gate's "reconnect and ICE restart under fault injection" promoted from
 opsim-only into the stack suite against a real browser; (3) every earlier
 gate green.
+**Met 2026-09-23** — `agent/tests/test_supervision.cpp`,
+`agent/tests/test_loop_media.cpp`, `web/e2e/tests/stack/faults.spec.ts`,
+`signaling/…/hooks.rs` tests.
+
+**Implementation notes (slice 7a)** — what the rows cost and what they found:
+
+- *A tier's framerate was a target, not a ceiling — and it broke every slow
+  camera.* The pipeline-error test ran its source at 15 fps and the producer
+  would not start: `cannot link tee to tier`. `make_encode_bin` filtered the
+  rate with `videorate drop-only=true ! capsfilter framerate=<fps>/1`, an
+  exact rate that `drop-only` can never reach from below, so the caps
+  intersection through the queue was empty and the tee refused to link. **No
+  camera under 30 fps could stream on any tier.** The filter is a range now.
+  Every fixture in the repo runs at 30 fps, which is exactly why three
+  milestones of testing never saw it — the bug needed a *slower* source, and
+  we had never written one down.
+- *The test is the supervisor.* The watchdog row needs no systemd: bind a
+  unix datagram socket, name it in `NOTIFY_SOCKET`, set `WATCHDOG_USEC`, and
+  the daemon's real `sd_notify` path runs against it. `SIGSTOP` is then an
+  honest whole-process hang — the process genuinely cannot run, so it
+  genuinely cannot ping, which is the property systemd relies on. Pinning
+  "READY is not claimed before the first `hello-ack`" came free from the same
+  rig and matters as much: an agent that reports ready while it has never
+  reached the server makes `systemctl status` lie about an unreachable robot.
+- *A killed agent is noticed by the server, not by the heartbeat.* SIGKILL
+  closes the agent's socket, so the operator saw `peer-gone:agent-disconnected`
+  **629 ms** after the kill — far inside the heartbeat budget, which is the
+  fallback for an agent that stops talking without dying. Streaming again
+  **6.9 s** after the kill, with the test playing the supervisor M2.5 will
+  ship.
+- *The stack test owns spacing, not arithmetic.* The exact hello count under
+  a rejected grant is the client's ladder arithmetic and is pinned against
+  the mock in `review.test.ts`; against the real server what matters is that
+  retries are bounded and spread out. Observed gaps 45 / 11 / 476 / 1013 ms:
+  the free refetch, then real backoff.
+- *`ice-restart` against the real agent already existed* (slice 3b,
+  `agent.spec.ts`), so the M1 gate's reconnect row needed only the other
+  half: a signaling-server restart under the **real** C++ agent rather than
+  the in-page one.
 
 **7b — the latency harness.** Less new code than it looks: the
 [frame stamp](25-browser-lab.md#frame-stamp-the-latency-harnesss-oracle)

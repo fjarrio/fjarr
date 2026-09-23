@@ -360,3 +360,11 @@ reconnect round is now a counted round rather than a fatal error
    under the clean, lossy and relay profiles, and the tracked CSV.
    Input-to-photon waits for a robot-side input path and lands with
    `fjarr.desktop` in M3.
+
+> **Running the media suites back to back locally starves the software
+> encoder.** `agent`, `camera` and `ratecontrol` pass one file at a time and
+> fail together on a developer laptop: several 720p30 software encodes, each
+> fanned out to several Chromium decoders in one container. The frame stamp
+> names it precisely — 13 frames in 1.5 s with a max counter gap of 8 is CPU
+> starvation, not a protocol fault. CI runs them on a dedicated runner. When
+> a media suite fails locally, re-run it alone before believing it.
