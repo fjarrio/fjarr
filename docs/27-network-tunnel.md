@@ -152,11 +152,12 @@ IP packet**, no header, unordered and never retransmitted. TCP inside the
 tunnel does its own recovery; an outer retransmission would fight it and
 lose on a bad link.
 
-- **MTU 1280**, fixed and configurable. It is the IPv6 minimum, a
-  well-tested floor, and leaves roughly 80 bytes of UDP, DTLS and SCTP
-  headroom under a 1500-byte path, so the tunnel survives relay and other
-  tunnels without inner fragmentation. It is not adaptive: the interface's
-  MTU is fixed at creation and everything binds to it.
+- **MTU 1280**, fixed and configurable. It is the IPv6 minimum and a
+  well-tested floor. UDP, DTLS and SCTP add roughly 80 bytes, so a 1280-byte
+  inner packet sits well inside a 1500-byte path and keeps sitting there
+  behind a relay or someone else's tunnel, without inner fragmentation. It
+  is not adaptive: the interface's MTU is fixed at creation and everything
+  binds to it.
 - **Bounded queue, tail-drop.** The pump respects the channel's buffered
   amount and drops when it is full, counting the drop. It never grows a
   queue: a queue would deliver a burst of stale packets after congestion,
@@ -226,7 +227,8 @@ blocked so DDS could only reach the peer through the tunnel:
   required: `<Interfaces>` with explicit `priority` values, which stops the
   arbitrary choice, and unicast `<Peers>`, which supplies the discovery that
   multicast cannot carry across a point-to-point link. The exact file ships
-  in the docs, and `fjarr-agent setup` offers to write it.
+  in the docs, and `fjarr-agent net setup` offers to write it
+  ([docs/26](26-robot-install-and-drivers.md)).
 
 Topic-name collisions between two robots attached at once are a ROS 2
 concern, solved with namespaces or distinct domain ids. Fjarr does not
@@ -283,7 +285,9 @@ Per [docs/15](15-testing-strategy.md):
 
 ## Open questions
 
-Tracked in [docs/18](18-open-questions.md): IPv6 inside the tunnel, how
-tunnel traffic and video should share one peer connection under congestion,
-Windows support for `fjarr-connect`, and whether a forwarded-socket mode is
-ever worth adding for hosts that cannot provide a TUN device.
+Tracked in [docs/18](18-open-questions.md) as #22–#26: IPv6 inside the
+tunnel, how tunnel traffic and video should share one peer connection under
+congestion, Windows support for `fjarr-connect`, whether a forwarded-socket
+mode is ever worth adding for hosts that cannot provide a TUN device, and
+what to do if a design partner's cellular carrier hands out WAN addresses
+inside the default range ([above](#addressing)).
