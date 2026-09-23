@@ -95,7 +95,15 @@ profiles — [review](reviews/slice-6a-review.md)) · **6b ✔** passthrough (20
 a camera's own H.264 untouched — no encoder for the track — with its
 substream as the thumbnail tier and `adaptive: false` without one;
 [review](reviews/slice-6b-review.md)) ·
-7 fault injection + latency harness on the frame stamp.
+7 in two increments ([docs/23](23-agent-core-architecture.md#slices-3a-3b-3c-and-their-gates)):
+**7a** the four robot-lifecycle fault rows nothing exercises yet — a
+killed agent, a wedged core loop against a fake notify-socket supervisor,
+a pipeline error through the escalation ladder, and an expired or skewed
+grant — plus reconnect and ICE restart promoted into the stack suite;
+**7b** the glass-to-glass harness on the existing frame stamp, with
+`coturn` in the `lab` profile for the relay column, a loose ceiling in CI
+and the docs/16 budgets gated nightly on the prepared runner.
+Input-to-photon needs a robot-side input path and lands with M3.
 
 **Gate:** the three-demo stack end-to-end — demo-robot (embedding libfjarr)
 streams 2 tracks to 3 browsers through the `fjarr-server` sidecar, the TS

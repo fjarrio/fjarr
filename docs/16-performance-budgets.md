@@ -20,6 +20,12 @@ targets to be confirmed against M1 measurements (then this doc goes
 Terminal echo round-trip: < 150 ms LAN. Pointer motion send rate ≤ 60 Hz
 coalesced; stale motion dropped, never queued.
 
+These are the numbers the **nightly** run on known hardware is held to.
+The per-push CI job measures the same paths but fails only above a loose
+ceiling, because a shared runner cannot hold a p95 honestly and a flaky
+gate teaches people to re-run it
+([docs/15](15-testing-strategy.md#latency-harness)).
+
 ## Bitrate tiers (per video track)
 
 | Tier | Resolution/fps | Target bitrate |

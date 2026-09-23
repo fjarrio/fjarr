@@ -1492,6 +1492,64 @@ green.
   in an outer bin with the RAII sink helper handed the caller a second
   reference and the leaks gate caught it on the first run.
 
+**7a — the remaining fault rows.** The [fault menu](15-testing-strategy.md#fault-injection)
+is mostly covered: `fjarr-opsim` already carries `socket-drop`,
+`silent-operator`, `ice-restart`, `relay-only`, `deadman`,
+`congested-viewer` and `hotplug`, and the netem profiles arrived with 6a.
+What is left is the robot's own lifecycle, which nothing exercises today:
+
+- **A killed agent.** The operator-visible half: `peer-gone` within the
+  heartbeat budget, the `robot.offline` webhook, and the robot streaming
+  again after a restart. The *supervised* restart is M2.5's systemd unit,
+  so this slice restarts it from the test and measures the rest.
+- **A wedged core loop.** The watchdog half of the
+  [supervision contract](#process-model) exists in code and nothing
+  exercises it, which is the exact shape of the safety bug this project
+  keeps citing. A **fake notify-socket supervisor** in the agent tests
+  (`NOTIFY_SOCKET` names a unix datagram socket, so no systemd is needed)
+  asserts `READY=1` after the first `hello-ack`, `WATCHDOG=1` at
+  `WatchdogSec/3`, and that the pings **stop** when a `fjarr.test` fault
+  blocks the loop. A real watchdog kill on a systemd host is an M2.5 gate.
+- **A pipeline error outside the source bin**, injected through a
+  `fjarr.test` fault that posts a bus `ERROR` on a chosen producer
+  element: the 0.5 s → 5 s × 5 backoff, then the escalation that closes
+  every session with `media-restart` while the signaling socket stays up
+  and the robot stays online, and exit code 2 on the third plane rebuild
+  within ten minutes ([media-plane recovery](#media-plane-recovery)). The
+  in-source-bin case is already covered by slice 4's per-track failure.
+- **An expired grant and a skewed clock**: one attempt, a fatal
+  `grant-expired`, no retry storm, on the web ladder and in `fjarr-opsim`.
+
+*Gate:* (1) each row above asserted in the lab or in the agent tests as
+noted, with the timings read against the docs/16 budgets; (2) the M1
+gate's "reconnect and ICE restart under fault injection" promoted from
+opsim-only into the stack suite against a real browser; (3) every earlier
+gate green.
+
+**7b — the latency harness.** Less new code than it looks: the
+[frame stamp](25-browser-lab.md#frame-stamp-the-latency-harnesss-oracle)
+already carries a counter and a 48-bit sender timestamp, the per-frame
+reader already exists, and the reader already applies the
+`fjarr.core/time-sync` offset — so no stamp change and no protocol change.
+The work is assembly and reporting:
+
+- `coturn` joins the `lab` profile (today it exists only under `turn`), so
+  the **relay** column is measurable at all; the browser forces it with
+  `iceTransportPolicy: "relay"` and `fjarr-opsim` with `--ice-policy relay`.
+- p50 and p95 over a run under **clean**, **lossy** and **relay**, plus
+  time-to-first-frame after enable, written to the run's `summary.txt` and
+  appended to a tracked CSV with a hardware label
+  ([docs/15](15-testing-strategy.md#latency-harness)).
+- **Input-to-photon is not in this slice.** It needs a robot-side input
+  path, which is `fjarr.desktop` in M3. The harness is built so that
+  adding it is a second measurement, not a second harness.
+
+*Gate:* (1) glass-to-glass p50/p95 reported for all three profiles, the CI
+job failing only above the loose ceiling while the nightly job on the
+prepared runner gates the docs/16 numbers themselves; (2) the CSV grows by
+one labelled row per nightly run; (3) time-to-first-frame reported and
+within budget; (4) every earlier gate green, the soak included.
+
 ## Where `fjarr.test` lives
 
 `fjarr::TestCapability` is a public class in `libfjarr` (docs/06), enabled

@@ -32,6 +32,10 @@ own integration without a browser or a robot; the C++ side ships
 the network rows below as named profiles on both the browser and the media
 path. Minimum fault menu:
 
+Rows are implemented as the capability that makes them meaningful arrives;
+the four robot-lifecycle rows land in **slice 7a**, the mid-transfer kill
+with `fjarr.files` in M4, and monitor hot-plug with `fjarr.desktop` in M3.
+
 | Fault | Expected behavior |
 |---|---|
 | Signaling socket killed | reconnect with the spec backoff; ICE restart; session resumes or closes cleanly |
@@ -57,9 +61,20 @@ From M1, a measurement rig — not vibes:
   network profiles).
 - **Input-to-photon**: synthetic click → screen change at a known pixel →
   time to that change appearing in the received stream.
-- Results append to a tracked CSV; regressions against
-  [docs/16](16-performance-budgets.md) fail CI (M1+) and gate the ADR-0006/0007
-  decisions.
+- **Two gates, because the budgets are NUC-class and CI is not.** Shared
+  runners with a software encoder cannot hold a p95 honestly, and a gate
+  people learn to re-run is worse than no gate. So the CI job fails only
+  above a **loose ceiling** — gross regression, not budget — while the
+  **nightly job on the prepared runner** gates the
+  [docs/16](16-performance-budgets.md) numbers themselves.
+- Results append to a tracked CSV, one row per nightly run, carrying a
+  **hardware label** so rows from different machines are never compared.
+  CI writes its numbers as a run artifact and appends nothing: a job that
+  commits to the repository on every push is noise, not history.
+- Input-to-photon needs a robot-side input path and therefore arrives with
+  `fjarr.desktop` in M3; glass-to-glass lands in slice 7b
+  ([docs/23](23-agent-core-architecture.md#slices-3a-3b-3c-and-their-gates)).
+  Together they gate the ADR-0006 decision.
 
 ## Safety behaviors {#safety-behaviors}
 

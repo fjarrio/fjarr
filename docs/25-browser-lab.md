@@ -352,5 +352,11 @@ reconnect round is now a counted round rather than a fatal error
 2. **Slice 3b gate**: the ladder and hot-plug scenarios against the real
    agent with the `fjarr.test` stamp; **3c**: the `introspect` command.
 3. **Slice 5**: demo scenarios, profiling scenarios in nightly, budgets
-   enforced; **slice 7**: the full latency harness (glass-to-glass,
-   input-to-photon) on the frame stamp.
+   enforced.
+4. **Slice 7a**: the robot-lifecycle fault rows
+   ([docs/15](15-testing-strategy.md#fault-injection)) against a real
+   browser. **Slice 7b**: the glass-to-glass harness on the frame stamp —
+   `coturn` joins the `lab` profile so the relay column exists, p50/p95
+   under the clean, lossy and relay profiles, and the tracked CSV.
+   Input-to-photon waits for a robot-side input path and lands with
+   `fjarr.desktop` in M3.
