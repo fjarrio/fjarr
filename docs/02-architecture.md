@@ -118,6 +118,19 @@ sequenceDiagram
 Signaling always flows through `fjarr-server` (WSS, 443-friendly). TURN uses
 ephemeral HMAC credentials minted per session ([docs/10](10-security.md)).
 
+The operator end is a browser for every capability but one. The
+[network tunnel](27-network-tunnel.md) needs a network interface, which a
+browser cannot create, so it is driven by `fjarr-connect` — a native binary
+speaking the same signaling and the same session protocol, with data channels
+only and no media ([ADR-0024](adr/0024-native-operator-client.md)). It is a
+fourth consumer of the protocol, not a fourth tier: it embeds nothing and
+nobody integrates against it.
+
+A tunnel link is point-to-point and terminates at the operator host. Two
+robots attached at once are two independent links with no path between them
+([docs/27](27-network-tunnel.md#isolation)) — a fleet is not a network of
+peers, and Fjarr never makes it one.
+
 ## Trust boundaries
 
 1. **Browser ↔ fjarr-server**: session grant required; grants are short-lived
@@ -128,7 +141,15 @@ ephemeral HMAC credentials minted per session ([docs/10](10-security.md)).
    REST in.
 4. **Inside the robot**: the agent runs unprivileged; input injection that
    needs privileges goes through a minimal separate helper
-   ([ADR-0009](adr/0009-privilege-separation.md)).
+   ([ADR-0009](adr/0009-privilege-separation.md)). The tunnel interface is
+   created once at install and attached by the same unprivileged user, so the
+   agent never holds `CAP_NET_ADMIN`
+   ([docs/27](27-network-tunnel.md#lifecycle)).
+5. **Across a tunnel link**: whatever the robot binds is reachable to an
+   operator holding a `net` grant, so the grant is treated as
+   shell-equivalent ([docs/10](10-security.md#network-tunnel)). Both ends drop
+   packets not addressed to their own tunnel address, so the boundary is the
+   robot, never the network behind it.
 
 ## Codebase ↔ spec map
 

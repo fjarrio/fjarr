@@ -195,6 +195,42 @@ so it proves the extension API generalizes beyond video.
 **Accepted when:** interactive shell round-trip < 150 ms LAN; disconnect
 kills the PTY (no orphan shells); every session start/end is audit-logged.
 
+## `fjarr.net` — network tunnel (M4.5)
+
+Peer consumer, and the only capability whose peer is **not a browser**.
+
+A session-scoped point-to-point IP link between one operator machine and one
+robot, so the tools a developer already owns work unchanged: `ssh`, `scp`,
+a UDP bridge onto a CAN bus, `ros2 topic list` against the robot's graph.
+It exists so that the list of things nobody will write a protocol for stops
+being a roadmap. Full design in [docs/27](27-network-tunnel.md); the shape
+decision in [ADR-0023](adr/0023-network-tunnel-virtual-interface.md).
+
+- A **persistent** TUN interface at each end, created by the installer
+  before the robot's software starts — DDS binds its interfaces at
+  participant creation, so a tunnel that appears at connect time is
+  invisible to a ROS stack that is already running.
+- Packets on `fjarr:stream:fjarr.net` with `raw` framing, unordered and
+  never retransmitted ([docs/08](08-protocol.md#net-packets)); MTU 1280;
+  bounded queue with tail-drop.
+- The operator's address is fixed, the robot's is derived from its robot id.
+  No allocator and no state in the signaling server.
+- **Isolation is structural**: every link terminates at the operator and
+  nothing is forwarded between links, so two robots attached at once cannot
+  reach or see each other.
+- Off by default; an explicit `net` claim in the session grant; audited at
+  open and close. The grant is as consequential as `fjarr.terminal`
+  ([docs/10](10-security.md#network-tunnel)).
+- The operator end is `fjarr-connect`, a native binary
+  ([ADR-0024](adr/0024-native-operator-client.md)).
+
+**Accepted when:** `fjarr-connect robot-42` brings a link up in under 3 s
+and `ssh` logs in; a 1 GB `scp` completes to a verified hash; `ros2 topic
+list` shows the robot's topics with Fast DDS unconfigured and with the
+documented Cyclone file; a second robot attached at the same time is
+unreachable from the first, in both directions; the agent restarts without
+the robot's ROS stack restarting; every open and close is audit-logged.
+
 ## `fjarr.observability` — fleet observability (M7, flagship paid tier)
 
 Backend consumer.

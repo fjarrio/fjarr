@@ -106,7 +106,7 @@ Channels are created by the agent at session setup, named
 | `fjarr:control` | control | yes | reliable | envelopes: capability control, telemetry, clipboard metadata, heartbeat |
 | `fjarr:realtime` | realtime | **no** | **0** | pointer motion, joint states — newest-wins data only |
 | `fjarr:bulk:<cap>` | bulk | yes | reliable | one per bulk-using capability; either [blob frames](#blob-frames) (file chunks, clipboard payloads, snapshot bodies) or a raw byte stream — the capability declares which |
-| `fjarr:stream:<cap>` | stream | **no** | **0** | lossy binary frames (point clouds, depth maps, custom sensor data) in either direction; frame-level newest-wins ([ADR-0018](adr/0018-stream-channel-class.md)) |
+| `fjarr:stream:<cap>` | stream | **no** | **0** | lossy binary in either direction: `framed` framing for chunked frames with frame-level newest-wins (point clouds, depth maps, custom sensor data — [ADR-0018](adr/0018-stream-channel-class.md)), `raw` framing for one self-contained datagram per message ([network packets](#net-packets)) |
 
 Rules:
 
@@ -114,10 +114,12 @@ Rules:
   reliability required). Pointer *motion* → **realtime**.
 - Bulk channels implement [backpressure](#backpressure); control/realtime
   messages MUST stay ≤ 16 KiB.
-- Stream frames carry a 12-byte header (`u32 frame_seq`, `u16 chunk_index`,
-  `u16 chunk_count`, `u32 payload_len`) so receivers reassemble whole frames
-  and drop incomplete or stale ones; a frame larger than
-  `sctp.maxMessageSize` is chunked, never queued behind a newer frame.
+- Stream frames under `framed` framing carry a 12-byte header (`u32
+  frame_seq`, `u16 chunk_index`, `u16 chunk_count`, `u32 payload_len`) so
+  receivers reassemble whole frames and drop incomplete or stale ones; a
+  frame larger than `sctp.maxMessageSize` is chunked, never queued behind a
+  newer frame. Under `raw` framing there is no header and no reassembly:
+  one binary message is one complete datagram, dropped or delivered whole.
 - Session-level messages that belong to no capability use the reserved
   `cap` `fjarr.core` ([below](#fjarr-core)).
 - Heartbeat: `ping`/`pong` envelope on control every 5 s, 3 missed → the
@@ -125,12 +127,14 @@ Rules:
   the [reconnection ladder](#reconnection) (its signaling socket death, or a
   `session-close(reason="heartbeat")` if the socket is still up, tells the
   server); the agent ends the session with `session-close(reason="heartbeat")`.
-- A bulk channel's **framing is declared** in the capability manifest,
-  never guessed by a peer: `raw` (terminal input — every binary message is
-  bytes for the capability, no header) or `blob` ([blob frames](#blob-frames):
+- A bulk **or stream** channel's **framing is declared** in the capability
+  manifest, never guessed by a peer. Bulk: `raw` (terminal input — every
+  binary message is bytes for the capability, no header) or `blob`
+  ([blob frames](#blob-frames):
   files, clipboard payloads, introspection snapshots — chunks of a named,
-  sized blob that an envelope refers to). Control and realtime carry
-  envelopes only.
+  sized blob that an envelope refers to). Stream: `framed` (the 12-byte
+  header above, the default) or `raw`. Control and realtime carry envelopes
+  only.
 
 ### Session-level messages (`fjarr.core`) {#fjarr-core}
 
@@ -339,6 +343,35 @@ sha256, direction — the offer *is* the blob reference) → `accept` →
 chunks → `file-complete(result)`. Resume: receiver sends
 `file-resume {transfer_id, ranges:[[start,end],…]}` after reconnect; sender
 fills gaps only. Integrity: whole-file SHA-256 verified before `result.ok`.
+
+### Network packets (fjarr.net) {#net-packets}
+
+The [network tunnel](27-network-tunnel.md) uses `fjarr:stream:fjarr.net`
+with `raw` framing: **one binary message is exactly one IP packet**, with no
+header of ours at all. The channel is unordered with no retransmission
+because the traffic inside carries its own recovery, and an outer
+retransmission would fight TCP's and lose on a poor link.
+
+- A packet larger than the negotiated MTU is **dropped, never fragmented**;
+  the interface's MTU makes this unreachable in practice and the counter
+  exists to catch misconfiguration.
+- Senders bound their queue and **drop the tail** when the channel's
+  buffered amount is high. Queueing is forbidden: a queue delivers a burst
+  of stale packets after congestion, which damages the round-trip estimate
+  of every connection inside the tunnel more than the loss would have.
+- Both ends drop any packet whose destination is not their own tunnel
+  address, or whose source is not the expected peer
+  ([docs/27](27-network-tunnel.md#isolation)). These checks are normative:
+  they are what makes one robot unreachable from another.
+
+Control messages for the capability travel on `fjarr:control` as ordinary
+envelopes:
+
+| `type` | kind | payload | semantics |
+|---|---|---|---|
+| `open` | request → result | `{}` | brings the link up. `result{ok:true, address, peer_address, mtu, policy:{forwarding:false, allow_ports}}` — `address` is the robot's tunnel address, `peer_address` the operator's. Refused with `error{code:"forbidden"}` when the session grant carries no `net` claim, and `error{code:"unavailable"}` when the interface is absent or the agent is not attached to it |
+| `close` | request → result | `{}` | stops the flow; the interface itself stays, since it is persistent by design |
+| `link-stats` | event (agent → operator) | `{"interval_ms": 1000, "tx_packets", "rx_packets", "tx_bytes", "rx_bytes", "dropped_no_peer", "dropped_policy", "dropped_queue", "dropped_mtu"}` | once per second while the link is open; the four drop counters are what a support engineer reads first |
 
 ### Backpressure {#backpressure}
 

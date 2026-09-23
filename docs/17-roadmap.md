@@ -16,6 +16,7 @@ by revision (this document's history), never by renumbering.
 | M0 Docs & environment | **done** 2026-09-15 | doctor 0 failures, 3 tiers + 3 demos build, site builds |
 | M0.5 Public foundations | **done** 2026-09-16 | CI green, fjarr.io + fjarr.dev live, registrations, prior-art anonymization policy |
 | M1 Core + extension API (camera video) | **in progress** | slices 0–2 done and reviewed, 2.9 (baseline bump, [ADR-0022](adr/0022-baseline-ubuntu-2604-gstreamer-128.md)) done 2026-09-18, 3a (browser lab) 2026-09-19, 3b (agent core) 2026-09-20, 3c (introspection + memory ladder) 2026-09-20, **4 (`fjarr.camera` on real sources) 2026-09-20**; 5–7 pending |
+| M4.5 Network tunnel | planned | added 2026-09-23 after the [ROS 2 tunnel spike](../agent/spikes/ros2-tunnel/README.md) ([docs/27](27-network-tunnel.md), ADR-0023, ADR-0024); depends only on M2.5, so it can be pulled earlier if a design partner asks |
 | M2 – M8 | planned | revised 2026-09-17 after the slice-3 planning ([docs/23](23-agent-core-architecture.md)–[26](26-robot-install-and-drivers.md), ADR-0019–0022, the [webrtcbin spike](../agent/spikes/webrtcbin-probe/README.md), the [planning review](reviews/slice-3-planning-review.md)): new **M2.5 packaging** milestone; M3 lightened |
 
 ## M0 — Documentation & environment *(done)*
@@ -179,13 +180,38 @@ actually picks the stream class — docs/13 KISS); the cheap conventions:
 isolation within budget; telemetry replay after outage; logs tail from
 robot-sim with a filter; spike report attached to open question #16.
 
+## M4.5 — Direct access: the network tunnel
+
+`fjarr.net` per [docs/27](27-network-tunnel.md): the persistent tunnel
+interface created by `fjarr-agent setup`, the packet pump on
+`fjarr:stream:fjarr.net`, derived addressing, the two policy rules that make
+isolation structural, and the audit trail. Plus **`fjarr-connect`**
+([ADR-0024](adr/0024-native-operator-client.md)), Fjarr's first non-browser
+operator and its first macOS artifact, shipped in `fjarr-tools`. Plus the
+documented Cyclone DDS configuration and `setup`'s offer to write it.
+
+Its only hard dependency is the M2.5 packaging and installer, because the
+interface must be created before the robot's software starts — **it may be
+pulled ahead of M3 or M4 if a design partner needs field debugging sooner**,
+and the [spike](../agent/spikes/ros2-tunnel/README.md) already de-risked the
+unknowns.
+
+**Gate:** [docs/06 `fjarr.net` criteria](06-capabilities.md) —
+`ssh` and a hash-verified 1 GB `scp` to a robot behind carrier NAT; `ros2
+topic list` against it with Fast DDS unconfigured and with the documented
+Cyclone file; two robots attached at once provably unable to reach each
+other; the agent upgraded without restarting the robot's ROS stack; every
+open and close in the audit log.
+
 ## M5 — Hardening + Fjarr Cloud alpha
 
 Device enrollment/identity, multi-tenancy, ephemeral TURN at scale plus
 TURNS/TCP-443 fallback, usage metering, the first OpenAPI-generated SDK
 (TS), **multi-operator presence** (`session-peers` from the ownership
-leases), Cloud alpha implementing the same ADR-0015 contract as the
-sidecar.
+leases), **access governance for the tunnel** (time-boxed and
+approval-gated `net` grants, per-user policy, audit export — the paid half
+of [docs/03](03-product-strategy.md#tunnel-positioning)), Cloud alpha
+implementing the same ADR-0015 contract as the sidecar.
 **Gate:** a design partner integrates against Cloud using only public docs;
 security review of docs/10 items; metering visible in webhooks; two
 operators on one robot see each other and hand over control.

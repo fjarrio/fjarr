@@ -40,6 +40,7 @@ with rationale).
 | 24 | [Pipeline introspection](24-pipeline-introspection.md) | Live, visual and machine-readable GStreamer pipeline graphs — for developers, customers and AI agents | review |
 | 25 | [Browser lab](25-browser-lab.md) | CDP-driven Chromium in the stack: e2e, traffic introspection, network emulation, profiling — for people and agents | review |
 | 26 | [Robot install & drivers](26-robot-install-and-drivers.md) | One-line install; the driver catalog, `setup`, `drivers` and `--check`; only the drivers a use case needs | draft |
+| 27 | [Network tunnel](27-network-tunnel.md) | `fjarr.net`: a session-scoped IP link to one robot — ssh, scp, UDP bridges and ROS 2 tooling; why it is a link and not a VPN | draft |
 
 ## Architecture decision records
 
@@ -65,6 +66,7 @@ and the [slice-6b passthrough review](reviews/slice-6b-review.md).
 ## Reading paths
 
 - **"I'm a robot company evaluating Fjarr"** → 00 → 02 → 06 → 09 → 04
+- **"I want to debug a robot in the field"** → 27 → 26 → 10
 - **"I'm implementing a milestone"** → 17 → the specs it gates on → 13
 - **"I'm writing a capability plugin"** → 05 → 08 → 09
 - **"I'm reviewing security"** → 10 → 08 → 09 → 14

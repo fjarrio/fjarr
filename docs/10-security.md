@@ -93,6 +93,36 @@ fjarr-agent            unprivileged user "fjarr"
 The privileged surface is auditable in one sitting (< 500 lines target). It
 validates ranges, rate-limits, and refuses when no session claim exists.
 
+## Network tunnel ([docs/27](27-network-tunnel.md)) {#network-tunnel}
+
+`fjarr.net` gives an operator a routable address for one robot. **Granting
+it is equivalent to granting network access to the robot from inside**:
+anything the robot binds becomes reachable, including services that assume
+they are only reachable on localhost or on a trusted LAN. It is the most
+consequential grant in the catalog alongside `fjarr.terminal`, and it is
+treated as such:
+
+- **Off by default.** No interface exists unless `net.enabled` is set.
+- **Explicit claim.** The session grant must carry `net` among its
+  capabilities ([ADR-0015](adr/0015-backend-integration-strategy.md)); the
+  agent refuses `open` otherwise. The customer's backend decides who gets
+  it, with the identity system that already governs the robot.
+- **Audited** at open and close, with the session, the operator identity and
+  the byte counters — the same treatment the terminal gets.
+- **No lateral movement.** Both ends drop any packet not addressed to their
+  own tunnel address, in userspace. IP forwarding is never enabled, so the
+  link reaches the robot and not the network behind it. An operator holding
+  two links cannot route between them, and the robots cannot see each other.
+- **Optional port allow-list** (`net.allow_ports`) for deployments that want
+  the surface narrower than "this robot's own address".
+- **No privilege gain.** The device is created once at install and the agent
+  attaches to it as the unprivileged `fjarr` user with no `CAP_NET_ADMIN`
+  (measured — [docs/27](27-network-tunnel.md#lifecycle)).
+
+The residual risk is honest and documented rather than engineered away: an
+operator with `net` can reach a robot's internal services. The control is
+who gets the claim, for how long, and the audit record afterwards.
+
 ## Update integrity (forward reference, M8)
 
 OTA artifacts are signed (SWUpdate signing + our manifest); agents verify

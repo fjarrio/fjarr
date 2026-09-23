@@ -10,8 +10,9 @@ description: The living SaaS business plan — open-core split, pricing meters, 
 ## One-line pitch
 
 *Fjarr gives robot companies the remote connectivity stack they keep
-rebuilding — embeddable camera streaming, remote desktop, file transfer and
-fleet tooling — as open-source libraries plus a managed cloud.*
+rebuilding — embeddable camera streaming, remote desktop, file transfer,
+direct developer access and fleet tooling — as open-source libraries plus a
+managed cloud.*
 
 ## Market hypothesis
 
@@ -33,6 +34,52 @@ support engineer or an AI coding agent see exactly what the media plane is
 doing, on the robot and from the dashboard, and an install that puts only
 the drivers a robot actually needs on it ([docs/26](26-robot-install-and-drivers.md)).
 
+### Why the network tunnel is not a worse mesh VPN {#tunnel-positioning}
+
+[`fjarr.net`](27-network-tunnel.md) looks superficially like the mesh VPN
+products a developer already knows, and the difference decides whether it is
+a feature or a liability.
+
+Those products build a **network**: a shared address space where many devices
+become mutually reachable, governed by their own identity system, their own
+policy language and their own coordination service. Fjarr builds a **link**:
+one operator, one robot, one path, alive only while an authorized session is
+open.
+
+Five consequences make the narrow thing the better product *for this use
+case*, and we should say so plainly in the marketing rather than pretend to
+compete on breadth:
+
+1. **One authorization path instead of two.** A robot company already decides
+   who may reach robot 42, in their backend, with their SSO. The tunnel is
+   that same decision, carried by the same grant and landing in the same
+   audit record ([ADR-0015](adr/0015-backend-integration-strategy.md)). A
+   general VPN adds a second identity and policy system to operate alongside
+   the one that already governs the robot — and the two will disagree, at the
+   worst possible moment, about who may touch a machine that moves.
+2. **Isolation that cannot be misconfigured.** Customers ask "can a
+   compromised robot reach my other robots?" In a mesh product the answer is
+   "not if the policy is right". Here it is "there is no path": each link
+   terminates at the operator and nothing is forwarded between links. A
+   structural answer survives an audit; a configurable one costs a meeting.
+3. **Nothing extra to deploy.** It is a capability inside the agent the
+   company already ships — no second daemon, no per-device seat licence, no
+   second thing to explain to their customer's IT department. For a robot
+   sold into hospitals and factories, "one agent" is a sales argument.
+4. **Access that expires by construction.** The link lives and dies with a
+   session grant that already expires. A mesh VPN's purpose is permanent
+   reachability, which is exactly what a support tool should not have.
+5. **One connection to support.** NAT traversal, relay fallback and
+   reconnection are solved once for video and the tunnel alike. A separate
+   VPN duplicates all of it and then fails independently — two things that
+   can be down is materially harder to support than one.
+
+The boundary is also a product decision: this is **developer and support
+access**, not the production data plane. Production traffic belongs in a
+capability with a declared wire shape and backpressure. Holding that line is
+what keeps Fjarr from drifting into being a general network with a robot logo
+on it.
+
 ## Open-core split ([ADR-0011](adr/0011-license-open-core.md), [ADR-0015](adr/0015-backend-integration-strategy.md))
 
 | Free & open (AGPL-3.0) | Paid |
@@ -42,6 +89,7 @@ the drivers a robot actually needs on it ([docs/26](26-robot-install-and-drivers
 | `@fjarr/core`, `@fjarr/react` | **OTA campaigns**: staged rollouts, fleet targeting, audit (M8) |
 | Protocol spec, SDKs, docs, demos | SSO/SCIM, audit export, support/SLA |
 | Pipeline introspection on the robot + in the dashboard ([docs/24](24-pipeline-introspection.md)) | fleet-wide pipeline history, search and retention in Cloud (M7) |
+| The [network tunnel](27-network-tunnel.md) and `fjarr-connect`, unlimited, self-hosted | **Access governance** around it: time-boxed and approval-gated grants, per-user policy, session recording, audit export (M5+) |
 | | **Commercial license** for companies that can't ship AGPL |
 
 Principles: the open core must be *genuinely usable alone* (a company can run
@@ -82,7 +130,11 @@ Cloud, plain observability when self-hosted.
 
 1. **Open-source adoption engine** (M0.5→): landing at **fjarr.io**, honest
    docs, the three-demo stack as the "aha" (clone → `make demo-up` → see a
-   robot in a dashboard in minutes). Content: the build-vs-buy engineering
+   robot in a dashboard in minutes). The tunnel is the second "aha" and aimed
+   at the person who actually picks the framework: the integrating developer
+   evaluates by asking "how do I debug this thing in the field", and
+   `ssh` to a robot behind carrier NAT, with no jump host and no VPN to
+   provision, answers it in one command. Content: the build-vs-buy engineering
    story we lived ([prior art](11-prior-art.md)).
 2. **Pilot on Cloud, scale anywhere**: because sidecar and Cloud implement
    the same contract, evaluation friction is near zero and self-host is
@@ -101,6 +153,8 @@ Cloud, plain observability when self-hosted.
 | AGPL scares embedded legal teams | commercial license path, clean per-file headers, CLA from day one |
 | TURN bandwidth cost underestimated | meter from M1; relay GB is priced through |
 | Solo-founder bus factor | docs-first development *is* the mitigation |
+| The tunnel grant is shell-equivalent — one mis-issued token exposes a robot's internals | off by default, explicit claim, audited both ends, no lateral movement by construction ([docs/10](10-security.md#network-tunnel)); the governance around it is the paid tier, so the safe path is also the commercial one |
+| "Isn't this just a VPN?" in every evaluation | answer it in the docs and on the landing page, not in the call ([above](#tunnel-positioning)) |
 
 ## Brand
 

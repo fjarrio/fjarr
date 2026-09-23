@@ -13,6 +13,9 @@ exactly these meanings. Add here first; then use.
 | **Agent** | The Fjarr process on the robot: `libfjarr` embedded in the customer's software, or the `fjarr-agent` reference daemon. |
 | **Capability** | A pluggable unit of functionality (camera video, remote desktop, file transfer…). Owns media tracks and/or DataChannel message namespaces. See [docs/05](05-extension-model.md). |
 | **Capability consumer** | Whoever the capability serves: a **peer consumer** (a dashboard connected P2P) or the **backend consumer** (observability ingest, OTA orchestration). |
+| **Operator host** | The machine an operator connects from. A browser for every capability but one; for the [network tunnel](27-network-tunnel.md) a native `fjarr-connect` process, because a browser cannot create a network interface ([ADR-0024](adr/0024-native-operator-client.md)). |
+| **Link** | The point-to-point IP path of one `fjarr.net` session: one operator host, one robot, two tunnel addresses. Never a network — links never join, and nothing routes between them ([docs/27](27-network-tunnel.md)). |
+| **Tunnel address** | The address an end owns on its tunnel interface. The operator's is fixed; a robot's is derived from its robot id ([docs/27](27-network-tunnel.md#addressing)). |
 | **Session** | One WebRTC peer connection between an agent and one operator client, carrying whatever capabilities were granted. Identified by `session_id`. |
 | **Session grant** | The short-lived signed token (JWT) minted by the customer's backend that authorizes creating a session with specific capabilities. See [docs/09](09-interfaces.md). |
 | **Signaling** | The message exchange (offer/answer/ICE) that establishes sessions, relayed by `fjarr-server`. Never carries media. |

@@ -71,7 +71,16 @@ regresses**:
 - `release_all_input()` on any session end (no stuck modifiers — test:
   disconnect mid-keydown, assert keyup injected);
 - ownership lease expiry (fail-open) under media-plane hang;
-- heartbeat teardown timings.
+- heartbeat teardown timings;
+- **tunnel isolation** ([docs/27](27-network-tunnel.md#testing)): with two
+  robots attached at once, no packet crosses from one link to the other in
+  either direction, and each end drops anything not addressed to its own
+  tunnel address. Isolation is the property customers will ask about, so it
+  is a test that fails loudly, not a configuration note.
+- **tunnel interface ordering**: a DDS participant created while the agent is
+  detached must not advertise the tunnel address; created while attached it
+  must; and it must keep advertising across an agent restart. These pin the
+  three measured facts the tunnel lifecycle rests on.
 
 ## Memory safety (C++) {#memory-safety-c}
 

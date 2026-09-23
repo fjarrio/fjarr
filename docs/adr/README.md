@@ -44,3 +44,5 @@ options weighed, the choice, and its consequences — so future maintainers
 | [0020](0020-vendor-sources-as-gstreamer-plugins.md) | Vendor camera support ships as separately packaged GStreamer plugins | accepted (desktop sentence superseded by 0021) |
 | [0021](0021-desktop-backends-as-runtime-modules.md) | Desktop backends are in-tree runtime modules in separate packages | accepted |
 | [0022](0022-baseline-ubuntu-2604-gstreamer-128.md) | Baseline bump to Ubuntu 26.04 LTS / GStreamer 1.28 | accepted |
+| [0023](0023-network-tunnel-virtual-interface.md) | The network tunnel is a virtual interface, not forwarded sockets | accepted |
+| [0024](0024-native-operator-client.md) | `fjarr-connect` — a native operator client, data channels only | accepted |

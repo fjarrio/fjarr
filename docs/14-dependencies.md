@@ -50,6 +50,22 @@ groups with comments.
 | base64 | 0.22 | TURN credential encoding | MIT/Apache-2.0 | yes |
 | subtle | 2 | constant-time token comparison | BSD-3 | yes |
 | uuid (v7) | 1.x | event/session ids | MIT/Apache-2.0 | yes |
+
+## Operator client (`fjarr-connect`) — ships in `fjarr-tools` (planned, M4.5)
+
+Versions are pinned when the binary is implemented; these rows exist so the
+licence question is settled before the code is written
+([ADR-0024](adr/0024-native-operator-client.md)). The **robot** side of the
+tunnel adds no dependency at all — a TUN device is the kernel plus two
+ioctls.
+
+| Dependency | Version | Purpose | License | Ships |
+|---|---|---|---|---|
+| webrtc-rs | pinned at implementation | peer connection + data channels, no media | MIT/Apache-2.0 | yes |
+| tokio | 1.x | async runtime | MIT | yes |
+| a TUN/utun crate | pinned at implementation | the virtual interface on Linux and macOS; the candidate must be MIT or Apache-2.0 | MIT/Apache-2.0 required | yes |
+| clap | 4.x | the CLI surface | MIT/Apache-2.0 | yes |
+| `fjarr-signaling` (this repo) | workspace | shared signaling message types — the reason wire drift is a compile error | AGPL-3.0 | yes |
 | reqwest (rustls) | 0.12 | webhook delivery | MIT/Apache-2.0 | yes |
 | tokio-tungstenite | 0.24 | e2e test WS client | MIT | dev-only |
 

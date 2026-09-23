@@ -7,6 +7,7 @@ const capabilities = [
   { icon: "📈", name: "Sensor streaming", desc: "Typed telemetry with change-triggered updates and offline store-and-forward.", status: "planned" },
   { icon: "📦", name: "File transfer", desc: "Resumable, backpressured transfers — a 4 GB log dump over LTE that survives reconnects.", status: "planned" },
   { icon: "⌨️", name: "Remote terminal", desc: "An audited PTY in the browser, over the same session.", status: "planned" },
+  { icon: "🔌", name: "Network tunnel", desc: "ssh, scp, a CAN-over-UDP bridge and ros2 topic list straight to one robot behind carrier NAT — the tools you already use.", status: "planned" },
   { icon: "🩺", name: "Fleet observability", desc: "Versions, host metrics, error rates across the fleet.", status: "planned" },
   { icon: "🔄", name: "Atomic OTA", desc: "SWUpdate-based A/B updates with rollback and streamed binary diffs.", status: "planned" },
 ];
@@ -16,7 +17,7 @@ const capabilities = [
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Fjarr — remote connectivity for robot fleets</title>
-    <meta name="description" content="Embeddable peer-to-peer connectivity for robots: camera video, remote desktop, files, terminal, and fleet tooling over WebRTC. Open core, your stack." />
+    <meta name="description" content="Embeddable peer-to-peer connectivity for robots: camera video, remote desktop, files, terminal, a direct network link for ssh and ROS 2, and fleet tooling over WebRTC. Open core, your stack." />
     <style>
       :root { color-scheme: dark; }
       * { box-sizing: border-box; }
@@ -49,9 +50,10 @@ const capabilities = [
     <header class="hero wrap">
       <h1>Stop rebuilding robot connectivity.<br /><span class="fjarr">Fjarr</span> is the stack you keep writing.</h1>
       <p class="tag">
-        Live camera video, remote desktop, file transfer, telemetry, and a remote
-        terminal to every robot in your fleet — over WebRTC, embedded in
-        <em>your</em> robot, <em>your</em> backend, and <em>your</em> dashboard.
+        Live camera video, remote desktop, file transfer, telemetry, a remote
+        terminal, and an <code>ssh</code>-able link to every robot in your fleet
+        — over WebRTC, embedded in <em>your</em> robot, <em>your</em> backend,
+        and <em>your</em> dashboard.
       </p>
       <p class="sub">Open-core (AGPL-3.0) libraries you self-host, plus a managed cloud when you'd rather not. <i>Fjärr</i> is Swedish for "remote".</p>
       <a class="cta primary" href="/readme/">Read the docs</a>
@@ -85,6 +87,29 @@ const capabilities = [
         ))}
       </div>
       <p style="color:#7d8590;">Statuses track the public <a href="/17-roadmap/">roadmap</a> — we don't market what doesn't run.</p>
+    </section>
+
+    <section class="wrap">
+      <h2>A link to one robot <small style="font-weight:400;color:#7d8590;">— not a VPN</small></h2>
+      <p style="color:#9da7b3;max-width:52rem;">
+        Every robot company keeps a list of things they occasionally need to do to
+        a robot that nobody will ever write a protocol for. The network tunnel is
+        the escape hatch that stops that list becoming a roadmap: an authorized
+        operator gets a routable address for <b>one</b> robot, inside the session
+        that already carries its video. <code>ssh</code> in. <code>scp</code> the
+        log out. Point a UDP bridge at the CAN bus. Run
+        <code>ros2 topic list</code> and see the robot's graph from your laptop.
+      </p>
+      <div class="grid">
+        <div class="card"><h3>🔒 Isolation you can't misconfigure</h3><p style="margin:0;color:#9da7b3;">Connect to two robots at once and they still can't see each other. Every link ends at you and nothing is forwarded between them — there's no path to leave open by mistake.</p></div>
+        <div class="card"><h3>🎫 One set of permissions</h3><p style="margin:0;color:#9da7b3;">You already decide who may reach robot 42. The tunnel is that same decision, in the same token, in the same audit log. No second identity system to run alongside the one you have.</p></div>
+        <div class="card"><h3>⏱️ Access that expires</h3><p style="margin:0;color:#9da7b3;">The link exists while a session does, then it's gone. Nothing becomes permanently reachable, and there's no extra daemon on the robot to install, update or license.</p></div>
+      </div>
+      <p style="color:#7d8590;">
+        It deliberately isn't a mesh: no shared network, no robot-to-robot routing, no
+        always-on reachability. It's developer and support access — read
+        <a href="/27-network-tunnel/">the design</a> for exactly where that line sits.
+      </p>
     </section>
 
     <section class="wrap">

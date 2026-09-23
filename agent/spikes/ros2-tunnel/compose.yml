@@ -1,0 +1,17 @@
+# THROWAWAY SPIKE FIXTURE (agent/spikes/ros2-tunnel): two ROS 2 hosts that can only reach each
+# other through a userspace point-to-point link. Not part of the product's compose stack.
+services:
+  robot:
+    image: ros:jazzy-ros-base
+    container_name: spike-robot
+    cap_add: [NET_ADMIN]
+    devices: ["/dev/net/tun:/dev/net/tun"]
+    volumes: ["./:/spike:ro"]
+    command: sleep infinity
+  client:
+    image: ros:jazzy-ros-base
+    container_name: spike-client
+    cap_add: [NET_ADMIN]
+    devices: ["/dev/net/tun:/dev/net/tun"]
+    volumes: ["./:/spike:ro"]
+    command: sleep infinity

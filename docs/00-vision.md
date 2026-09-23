@@ -6,8 +6,9 @@ description: Why Fjarr exists, who it serves, and what it deliberately is not.
 **Fjarr** (from Swedish *fjärr*, "remote" — as in *fjärrkontroll*, remote
 control) is a generic framework for **peer-to-peer connectivity to robots and
 IoT devices**: live camera video, remote desktop, sensor streaming, file
-transfer, and a remote terminal, delivered over WebRTC, and extensible with
-capabilities we haven't thought of yet.
+transfer, a remote terminal, and a direct network link to one robot,
+delivered over WebRTC, and extensible with capabilities we haven't thought
+of yet.
 
 ## The problem
 
@@ -46,6 +47,14 @@ Everything user-visible is a **capability plugin** on a shared core
 ([extension model](05-extension-model.md)); companies extend Fjarr with their
 own capabilities without forking it.
 
+One of those capabilities is the escape hatch that keeps the others honest.
+[`fjarr.net`](27-network-tunnel.md) gives an authorized operator a routable
+address for **one** robot, inside the session that already carries its video,
+so `ssh`, `scp`, a UDP bridge onto a CAN bus and `ros2 topic list` work
+against a remote robot without a capability per tool. Every robot company has
+a list of things they occasionally need to do to a robot that nobody will
+ever write a protocol for; this is what stops that list becoming a roadmap.
+
 Longer-term, the same connectivity substrate carries **fleet observability**
 (versions, metrics, error rates) and **atomic OTA updates** (SWUpdate-based
 A/B with rollback) — see [capabilities](06-capabilities.md) and the
@@ -68,7 +77,12 @@ A/B with rollback) — see [capabilities](06-capabilities.md) and the
   company's own control stack; it connects to them through adapters.
 - **Not a dashboard** — `@fjarr/react` provides components, never a portal.
   The demo dashboard is a demo.
-- **Not modem/VPN management** — Fjarr assumes IP connectivity exists.
+- **Not a mesh VPN** — the [network tunnel](27-network-tunnel.md) is a
+  session-scoped, point-to-point link to *one* robot, not a fabric that makes
+  devices mutually reachable. No shared address space, no robot-to-robot
+  routing, no membership, no second identity system: a fleet is not a network
+  of peers, and robots that cannot reach each other is the feature.
+- **Not modem/link management** — Fjarr assumes IP connectivity exists.
 
 ## Success criteria
 

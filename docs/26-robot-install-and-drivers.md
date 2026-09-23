@@ -30,7 +30,7 @@ description: How the agent is installed on a robot and how a customer discovers,
 
 | Channel | Contents | For |
 |---|---|---|
-| **apt repository** (`deb [arch=amd64,arm64] https://apt.fjarr.io …`) | `fjarr-agent` (core + `fjarr.test` + introspection), `fjarr-desktop-x11`, `fjarr-desktop-wayland`, `fjarr-inputd`, `fjarr-gst-<vendor>` per vendor and architecture, `fjarr-tools` (opsim, probe) | robots on Ubuntu 26.04 LTS (the supported platform, docs/04, ADR-0022) |
+| **apt repository** (`deb [arch=amd64,arm64] https://apt.fjarr.io …`) | `fjarr-agent` (core + `fjarr.test` + introspection), `fjarr-desktop-x11`, `fjarr-desktop-wayland`, `fjarr-inputd`, `fjarr-gst-<vendor>` per vendor and architecture, `fjarr-tools` (opsim, probe, and from M4.5 `fjarr-connect`) | robots on Ubuntu 26.04 LTS (the supported platform, docs/04, ADR-0022) |
 | **Container images** | `ghcr.io/fjarrio/fjarr-agent:<ver>` (core) and per-vendor variants `…:<ver>-zed`, `…:<ver>-realsense`, plus `-desktop-x11`/`-wayland`; the same packages, layered. The core image exists from slice 5b (`docker/agent/Dockerfile`, built and smoke-tested in CI, amd64, unpublished — [docs/12](12-development-environment.md#running-the-demo-robot-from-the-agent-image)); the variants, arm64 and publishing are this milestone | containerized robot stacks, the demo, CI |
 | **Embedding** | `libfjarr` as a CMake package (`find_package(fjarr)`), headers = docs/09; the customer's app links the core and installs the driver packages it wants | robot companies embedding the library in their own daemon |
 | **Install script** | `curl -fsSL https://get.fjarr.io \| sh` — adds the repository, installs `fjarr-agent`, runs `fjarr-agent setup` | first contact |
@@ -100,10 +100,19 @@ on this machine" instead of failing an install.
 | `fjarr-agent drivers detect` | hardware currently attached, matched against the catalog, with the package each needs |
 | `fjarr-agent --check` | the doctor: every configured source and backend with element availability, plus the one-line fix for each missing one (`install: sudo fjarr-agent drivers install realsense`) |
 | `fjarr-agent --probe-source …` | bring up one source standalone ([docs/09](09-interfaces.md#the-video-source-contract)) |
+| `fjarr-agent net setup` (M4.5) | creates the persistent tunnel interface owned by the `fjarr` user, derives the robot's address, checks the configured range against existing routes, writes the systemd ordering so the agent attaches before the robot's software, and offers to write the Cyclone DDS configuration file ([docs/27](27-network-tunnel.md)) |
 
 `setup` never guesses silently: every proposed track and every install
 is shown and confirmed (`--yes` for provisioning scripts), and the result
 is a plain `fjarr.toml` the customer can read and edit.
+
+The tunnel is the one piece of setup that **must** run before the robot's
+own software starts, and the one that needs root. The interface is created
+once, here; afterwards the agent attaches to it unprivileged, and upgrading
+the agent does not disturb anything bound to it
+([docs/27](27-network-tunnel.md#lifecycle)). `fjarr-agent --check` reports
+the interface, its address, whether the agent is attached, and whether the
+configured range overlaps a route that already exists on the machine.
 
 ## In the dashboard and the fleet view
 
