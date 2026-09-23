@@ -197,18 +197,155 @@ A browser cannot create a network interface, so this is Fjarr's **first
 non-browser operator**: `fjarr-connect`, a small native binary in the
 `fjarr-tools` package.
 
-```console
-$ fjarr-connect robot-42
-robot-42  100.66.18.203  mtu 1280  up in 1.2 s
-$ ssh robot@100.66.18.203
-```
-
 It speaks the ordinary signaling and session protocol and uses **data
 channels only, no media**, which is why it needs no GStreamer and ships as
 one static binary ([ADR-0024](adr/0024-native-operator-client.md)). It
 requires `CAP_NET_ADMIN` to create its interface and add routes, granted by
 `setcap` at install or by running it under `sudo`, and uses no other
 privilege.
+
+## Finding a robot, and who authorizes it {#discovery}
+
+`fjarr-connect` is a dashboard without a screen. It discovers and authorizes
+the way the browser does, so the tunnel adds **no new trust boundary and no
+second source of truth**.
+
+| Party | Owns | What the CLI asks it |
+|---|---|---|
+| The customer's backend | their users, which humans may reach which robots, the fleet list, and presence from the `robot.online` / `robot.offline` webhooks it already receives | "what may I reach" and "mint me a grant for this one" |
+| `fjarr-server` (sidecar or Cloud) | grant verification, signaling relay, TURN credentials, session events, metering | nothing extra: it presents the grant and starts a session, exactly as a browser does |
+| `fjarr-connect` | one tunnel interface and its routes | — |
+
+**The CLI never holds the tenant API token and never calls the control-plane
+REST API** ([docs/09](09-interfaces.md#c-control-plane-rest-customer-backend--fjarr-server)).
+That token is a fleet-wide administrative credential. It belongs on a server,
+not on a laptop that travels.
+
+The robot list comes from the customer's backend rather than from
+`fjarr-server`, even though the server also knows who is connected. Only the
+customer's backend knows **who you are**, so only it can return the robots
+*you* may reach instead of the whole tenant's fleet. That scoping is the
+property worth having, and it is not ours to compute.
+
+### The operator API
+
+Two endpoints, both thin wrappers over code the integrator already has
+([docs/09](09-interfaces.md#operator-api)):
+
+| Endpoint | Returns |
+|---|---|
+| `GET /fjarr/robots` | the robots this human may reach: `robot_id`, `label`, `status`, `last_seen` |
+| `POST /fjarr/grants` | a grant for one `robot_id` — the same JWT their dashboard already mints, with whatever capabilities their policy allows |
+
+Their fleet table answers the first, the webhooks they already receive supply
+`status`, and the second is the grant-minting code from
+[docs/09](09-interfaces.md#a-session-grants-customer-backend--operator-client).
+
+For anyone who would rather add nothing, the CLI's own config may instead
+name a command that prints a grant on stdout, and `fjarr-connect --grant
+<jwt>` accepts one directly — which is what the first day of any integration
+looks like:
+
+```toml
+# ~/.config/fjarr/config.toml — the operator's machine, not the robot
+[backend]
+url = "https://fleet.acme.com"
+grant_command = "acme-cli fjarr-grant --robot {robot}"
+```
+
+That path works everywhere and costs the integrator nothing, at the honest
+price of losing the list and the picker.
+
+### Logging in
+
+A browser dashboard holds a logged-in session; a shell holds nothing. So
+`fjarr-connect login` hands off to the browser, the way familiar developer
+CLIs do:
+
+1. The CLI opens a listener bound **only to loopback** on a random port and
+   opens the customer's dashboard with a callback URL and a random `state`.
+2. The page — already inside their authenticated app — posts a credential
+   for the signed-in user back to the callback, showing which port it is
+   handing to.
+3. The CLI checks `state`, caches the credential at mode 0600 under
+   `~/.config/fjarr/`, and closes the listener.
+
+The page itself ships as a drop-in `@fjarr/react` component
+([docs/21](21-web-client-architecture.md#cli-login)), so the integrator's work
+is mounting a route rather than building a flow.
+
+**With no browser to open** — a workstation reached over ssh, which in
+robotics is the common case, not the exception — the CLI prints a URL and a
+short code, you approve it wherever a browser exists, and the CLI polls until
+you do.
+
+Credential lifetime is the **customer's** choice, because it is their
+identity system. Fjarr does not dictate it and does not refresh it; expiry
+means running `login` again.
+
+### What it feels like
+
+```console
+$ fjarr-connect login https://fleet.acme.com
+opening browser… approved as anna@acme.com · 12 robots reachable
+
+$ fjarr-connect list
+ROBOT      LABEL               STATUS   LAST SEEN
+robot-024  Packer 3 · Malmo    online   -
+robot-031  Packer 4 · Malmo    offline  3h ago
+robot-112  Mower A · Lund      online   -
+
+$ fjarr-connect
+? which robot  (type to filter, enter to connect)
+> robot-024  Packer 3 · Malmo   online
+  robot-112  Mower A · Lund     online
+  robot-031  Packer 4 · Malmo   offline
+
+$ fjarr-connect robot-024
+robot-024  100.66.18.203  mtu 1280  up in 1.2 s  via relay
+  ssh robot@100.66.18.203
+^C  link closed · 41 MB up / 3 MB down
+```
+
+The argument is optional. Without one you get the picker; with one it
+connects; with several it attaches several robots at once, which is the case
+the [interface layout](#the-shape) was designed for. The filter matches the
+label as well as the id, so `fjarr-connect packer3` works and nobody
+memorises identifiers.
+
+**A link lives in the terminal that started it.** Ctrl-C ends it, and
+closing the window ends it. For a grant this consequential
+([docs/10](10-security.md#network-tunnel)), a link that cannot outlive the
+window you are looking at is the safer default, and there is no daemon to
+forget about.
+
+So that this does not mean two terminals for everything, the CLI runs a
+command with the link up and tears it down when the command exits, with the
+address in its environment:
+
+```sh
+fjarr-connect robot-024 -- ssh robot@$FJARR_ADDR
+fjarr-connect robot-024 -- ros2 topic list
+fjarr-connect robot-024 -- scp robot@$FJARR_ADDR:/var/log/robot.log .
+```
+
+One mechanism, no per-tool wrappers, and it composes with anything already
+installed.
+
+**Offline robots fail fast and specifically.** The grant is valid, so the
+refusal comes from signaling as `robot-offline`
+([docs/08](08-protocol.md#errors)), which the server already returns today.
+The CLI prints when the robot was last seen instead of waiting on a session
+that cannot establish.
+
+**Addresses are stable, so `ssh` config is worth writing once.** A robot's
+address is derived from its id ([above](#addressing)) and never changes, so a
+`Host packer3` stanza can live in `~/.ssh/config` permanently.
+`fjarr-connect list --ssh-config` prints the stanzas to paste.
+
+The customer's audit needs nothing new: a tunnel session raises the same
+`session.started` and `session.ended` webhooks as a camera session, with
+`fjarr.net` among the grant's capabilities.
 
 ## ROS 2 over the link {#ros2}
 
@@ -254,6 +391,8 @@ bad one.
 
 ## Configuration
 
+On the robot, in `fjarr.toml` ([docs/23](23-agent-core-architecture.md)):
+
 ```toml
 [net]
 enabled = false              # off unless explicitly turned on
@@ -262,6 +401,21 @@ range = "100.64.0.0/10"      # both ends must agree
 address = "auto"             # derived from the robot id; pin to override
 mtu = 1280
 allow_ports = []             # empty = every port on this robot's own address
+```
+
+On the operator's machine, in `~/.config/fjarr/config.toml`. The cached
+credential from `login` lives beside it at mode 0600 and is never written
+here:
+
+```toml
+[backend]
+url = "https://fleet.acme.com"   # where the operator API lives
+# grant_command = "…"            # the escape hatch instead of the operator API
+
+[net]
+interface = "fjarr0"
+range = "100.64.0.0/10"          # must match the robots'
+address = "100.64.0.1"           # this machine, the same on every link
 ```
 
 ## Testing {#testing}

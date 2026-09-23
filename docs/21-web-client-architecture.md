@@ -455,6 +455,34 @@ breaking later. Slice 2 provides them up front:
 - **Events, not toasts**: `client.on("session-event", …)` emits typed
   lifecycle/errors; how they're shown is the host's job.
 
+### CLI login handoff {#cli-login}
+
+`fjarr-connect` needs an operator credential and has no logged-in session of
+its own ([docs/27](27-network-tunnel.md#discovery)). `@fjarr/react` ships the
+handoff as a component the host mounts on one **authenticated** route, so
+their work is adding a route rather than building a flow:
+
+```tsx
+<FjarrCliLogin mintOperatorCredential={() => api.post("/me/fjarr-cli-token")} />
+```
+
+It renders inside the host's app and therefore inherits the signed-in user;
+the host supplies one function that returns a credential for that user, which
+is usually a call to something they already have. The component handles both
+shapes the CLI can ask for:
+
+- **Loopback** — posts the credential to a `127.0.0.1` callback the CLI is
+  listening on, after echoing the port and requiring an explicit click. It
+  refuses any callback that is not loopback, and round-trips the CLI's
+  `state` value.
+- **Code** — shows a short code the user confirms matches the one their
+  terminal printed, for the headless case where no browser can be opened on
+  the machine running the CLI.
+
+It is a component, not a page: the host's layout, and the host's decision
+about who may mint a credential at all. The library never stores the
+credential and never sees the CLI.
+
 ### Wire tap {#wire-tap}
 
 `createFjarrClient({ wireTap: true })` enables `client.on("wire", (e) => …)`

@@ -290,6 +290,35 @@ bootstrap), `DELETE /v1/robots/{id}`, `GET /v1/robots?status=`,
 `POST /v1/tenants/{t}/keys` (grant-verification keys). Auth: per-tenant API
 token.
 
+### d) The operator API (optional — for `fjarr-connect`) {#operator-api}
+
+A browser dashboard carries the customer's logged-in session; a terminal
+carries nothing. A customer whose developers use the
+[network tunnel](27-network-tunnel.md) therefore exposes two endpoints behind
+their own auth, and Fjarr stays out of their authentication as everywhere
+else:
+
+| Endpoint | Returns |
+|---|---|
+| `GET /fjarr/robots` | the robots *this human* may reach: `robot_id`, `label`, `status`, `last_seen` — their fleet table, plus the presence they already receive on the `robot.online`/`robot.offline` webhooks of (b) |
+| `POST /fjarr/grants` | a session grant for one `robot_id` — the same JWT as (a), minted by the same code |
+
+Why here and not on `fjarr-server`: the server knows which robots are
+connected, but only the customer's backend knows **who the caller is**, so
+only it can scope the list to one human instead of the whole tenant. The
+control-plane API of (c) must never be reached from a laptop — its per-tenant
+token is a fleet-wide administrative credential.
+
+`fjarr-connect login` obtains its operator credential by handing off to the
+customer's dashboard, which mounts the drop-in component from
+[docs/21](21-web-client-architecture.md#cli-login); lifetime is the
+customer's choice, since it is their identity system.
+
+**Optional by design.** `fjarr-connect` can instead run a configured command
+that prints a grant, or take one directly, so no integration is ever blocked
+on building this ([docs/27](27-network-tunnel.md#discovery)). `demo-backend`
+and `demo-dashboard` implement it as the reference.
+
 ### The Rust crate beneath (`fjarr-signaling`)
 
 For Rust shops and as the substrate of both editions:

@@ -188,7 +188,12 @@ interface created by `fjarr-agent setup`, the packet pump on
 isolation structural, and the audit trail. Plus **`fjarr-connect`**
 ([ADR-0024](adr/0024-native-operator-client.md)), Fjarr's first non-browser
 operator and its first macOS artifact, shipped in `fjarr-tools`. Plus the
-documented Cyclone DDS configuration and `setup`'s offer to write it.
+documented Cyclone DDS configuration and `setup`'s offer to write it. Plus
+the discovery half, without which the CLI is a debugging tool rather than a
+product: the optional [operator API](09-interfaces.md#operator-api) on the
+customer's backend, the `FjarrCliLogin` handoff component in `@fjarr/react`,
+and both implemented in `demo-backend` and `demo-dashboard` as the
+reference.
 
 Its only hard dependency is the M2.5 packaging and installer, because the
 interface must be created before the robot's software starts — **it may be
@@ -199,8 +204,10 @@ unknowns.
 **Gate:** [docs/06 `fjarr.net` criteria](06-capabilities.md) —
 `ssh` and a hash-verified 1 GB `scp` to a robot behind carrier NAT; `ros2
 topic list` against it with Fast DDS unconfigured and with the documented
-Cyclone file; two robots attached at once provably unable to reach each
-other; the agent upgraded without restarting the robot's ROS stack; every
+Cyclone file; `fjarr-connect login` through the demo dashboard followed by a
+list, a pick and a connect without anyone typing a robot id, and the same on
+a host with no browser; two robots attached at once provably unable to reach
+each other; the agent upgraded without restarting the robot's ROS stack; every
 open and close in the audit log.
 
 ## M5 — Hardening + Fjarr Cloud alpha
