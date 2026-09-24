@@ -21,7 +21,12 @@ for tool in cmake ninja gcc clangd-21 clang-format-21 cargo node pnpm gst-launch
 done
 
 # --- GStreamer elements the specs depend on -------------------------------
-need_elements=(webrtcbin nicesrc ximagesrc vah264enc vapostproc appsink appsrc valve)
+# Encoder elements are NOT in this list: they belong to an encoder family and are
+# checked per family below (ADR-0025). The `va` plugin in particular registers its
+# elements per VA device, so on a machine with no usable VA device `vah264enc` and
+# `vapostproc` do not merely fail to run — they do not exist, and a flat "missing
+# element" failure would call a perfectly good NVIDIA or AMD machine broken.
+need_elements=(webrtcbin nicesrc ximagesrc appsink appsrc valve)
 for el in "${need_elements[@]}"; do
   if gst-inspect-1.0 "$el" >/dev/null 2>&1; then pass "gst element: $el"
   else fail "gst element missing: $el"; fi
@@ -51,17 +56,26 @@ if [ -e /dev/dri/renderD128 ]; then
   else
     warn "vainfo shows no encode entrypoints — HW encode unavailable"
   fi
-  if timeout 20 gst-launch-1.0 -q videotestsrc num-buffers=30 \
-       ! vapostproc ! vah264enc ! fakesink >/dev/null 2>&1; then
-    pass "smoke pipeline: videotestsrc ! vapostproc ! vah264enc ! fakesink"
-  elif [ "${FJARR_MEDIA_ENCODER:-}" = "software" ]; then
-    # A render node is not an Intel one. An NVIDIA card presents /dev/dri/renderD128
-    # and no VA-API H.264 encoder, and our hardware path is VA-API (ADR-0022; NVENC is
-    # open question #2). On a machine that has explicitly chosen the software encoder
-    # that is the documented, non-silent fallback (docs/23) and not a broken setup.
-    warn "no VA-API H.264 encode on this machine; media.encoder = software was chosen explicitly"
+  # One verdict for the whole VA-API family: the elements exist AND encode. A render
+  # node is not an Intel one — an NVIDIA card presents /dev/dri/renderD128, no VA-API
+  # encoder, and (because `va` enumerates per device) no `vah264enc` element either.
+  if ! gst-inspect-1.0 vah264enc >/dev/null 2>&1 || ! gst-inspect-1.0 vapostproc >/dev/null 2>&1; then
+    va_verdict="the va plugin registered no H.264 encoder (no usable VA device)"
+  elif timeout 20 gst-launch-1.0 -q videotestsrc num-buffers=30 \
+         ! vapostproc ! vah264enc ! fakesink >/dev/null 2>&1; then
+    va_verdict=""
+    pass "encoder family vaapi: vah264enc encodes (videotestsrc ! vapostproc ! vah264enc)"
   else
-    fail "vah264enc smoke pipeline failed (set media.encoder / FJARR_MEDIA_ENCODER = software to use the CPU path deliberately)"
+    va_verdict="vah264enc is present but the smoke pipeline failed"
+  fi
+  if [ -n "$va_verdict" ]; then
+    if [ "${FJARR_MEDIA_ENCODER:-}" = "software" ]; then
+      # An explicit software choice is the documented, never-silent CPU path (docs/23),
+      # not a broken setup: an AMD or NVIDIA runner is expected to land here.
+      warn "encoder family vaapi unavailable ($va_verdict); media.encoder = software was chosen explicitly"
+    else
+      fail "encoder family vaapi unavailable ($va_verdict) — set media.encoder / FJARR_MEDIA_ENCODER = software to use the CPU path deliberately"
+    fi
   fi
 else
   warn "/dev/dri absent — VA-API checks skipped (no GPU passthrough on this machine)"

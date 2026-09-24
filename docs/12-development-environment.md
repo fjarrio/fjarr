@@ -56,10 +56,10 @@ demo-backend demo-dashboard` (and `demo-robot` after `make agent-build`).
 | Check | On failure |
 |---|---|
 | toolchains (cmake/cargo/node/…) | image build incomplete — rebuild `dev` |
-| GStreamer elements (`webrtcbin`, `vah264enc`, `ximagesrc`, …) | missing plugin package — see Dockerfile groups |
+| GStreamer elements (`webrtcbin`, `nicesrc`, `ximagesrc`, …) | missing plugin package — see Dockerfile groups. Encoder elements are not here: they belong to a family, below |
 | `x264enc` **absent** | if present: GPL plugin leaked in — ADR-0011 violation, fix the image |
 | `/dev/dri` accessible | `RENDER_GID` in `.env` ≠ host render group; fix + `docker compose build dev` |
-| `vainfo` encode entrypoints + `vah264enc` smoke pipeline | iHD driver problem — see GPU troubleshooting. A **warning** instead when `FJARR_MEDIA_ENCODER=software`: a machine with no Intel GPU (an NVIDIA or AMD runner) has deliberately chosen the CPU path, which is not a broken setup |
+| encoder family `vaapi`: the elements exist **and** encode | iHD driver problem — see GPU troubleshooting. The `va` plugin registers per VA device, so a machine with no usable one has no `vah264enc` at all rather than a broken one. A **warning** instead of a failure when `FJARR_MEDIA_ENCODER=software`: an NVIDIA or AMD runner has deliberately chosen the CPU path ([ADR-0025](adr/0025-encoder-families.md)), which is not a broken setup |
 | `DISPLAY=:99` + `ximagesrc` capture | robot-sim not up, or stale X socket — `docker compose restart robot-sim` |
 | `libei`/`pipewire`/`libevdev` pkg-config | dev packages missing from image |
 | `/dev/uinput` | WARN by default; opt in via the uinput override |
