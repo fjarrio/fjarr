@@ -100,7 +100,10 @@ jobs:
       # app that does the same. Installing is not enough: without this the run dies with
       # "Cannot find module .../@fjarr/core/dist/index.js" and reports "No tests found",
       # which reads like a harness misconfiguration rather than a missing build.
-      - run: pnpm -r --filter './web/packages/**' --filter './web/apps/**' build
+      # Packages only, deliberately: this job runs the latency and @heavy suites, neither of
+      # which needs the introspection viewer app, and building it on a persistent self-hosted
+      # runner tripped over a dist/ directory an earlier run had left owned by root.
+      - run: pnpm -r --filter './web/packages/**' build
       - name: glass-to-glass latency (docs/15 latency harness, slice 7b)
         # The docs/16 budgets are NUC-class numbers, so STRICT belongs on the prepared
         # machine only: set the repository variable FJARR_LATENCY_STRICT=1 once
