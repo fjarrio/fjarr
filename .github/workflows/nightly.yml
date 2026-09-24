@@ -75,7 +75,11 @@ jobs:
         run: docker compose exec -T dev make agent-heaptrack
       - name: start the demo stack (fjarr-server, demo backend, the real agent)
         run: |
-          docker compose --profile stack up -d --build --wait fjarr-server
+          # coturn belongs here, not only in the latency step: .env now configures TURN for
+          # every session, so without it each one spends time failing to resolve a server
+          # that is not running ("Can't resolve TURN server coturn"). CI starts it; this
+          # job must match, or the two measure different stacks.
+          docker compose --profile stack up -d --build --wait fjarr-server coturn
           docker compose --profile demo --profile stack up -d demo-backend demo-robot
           sleep 8 && docker compose logs --no-color demo-robot | tail -10
       - name: the ${{ inputs.soak_cycles || '200' }}-cycle soak (docs/16 census + RSS budget)
@@ -107,7 +111,7 @@ jobs:
           E2E_LATENCY_STRICT: ${{ vars.FJARR_LATENCY_STRICT || '0' }}
           CI: "true"
         run: |
-          FJARR_TURN_URLS=turn:coturn:3478 docker compose --profile lab --profile stack up -d --build --wait browser coturn
+          docker compose --profile lab --profile stack up -d --build --wait browser coturn
           pnpm --filter '@fjarr/e2e' exec playwright test tests/stack/latency.spec.ts --project stack
       - name: the @heavy acceptance suites CI cannot hold (docs/15)
         # Three viewers decoding six streams while the robot encodes them: a hardware
