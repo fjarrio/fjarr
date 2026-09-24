@@ -27,20 +27,35 @@ jobs:
           sed -i "s/^USER_UID=.*/USER_UID=$(id -u)/; s/^USER_GID=.*/USER_GID=$(id -g)/; s#^DOCKER_GID=.*#DOCKER_GID=$(stat -c %g /var/run/docker.sock)#" .env
           if [ -e /dev/dri/renderD128 ]; then
             sed -i "s/^RENDER_GID=.*/RENDER_GID=$(stat -c %g /dev/dri/renderD128)/" .env
-            echo "GPU runner: /dev/dri present, media.encoder=auto will engage VA-API"
-            echo "FJARR_MEDIA_ENCODER=auto" >> "$GITHUB_ENV"
+            echo "render node present; whether it can ENCODE is decided by probing, below"
           else
             sudo mkdir -p /dev/dri
-            echo "no /dev/dri: software encoder"
-            echo "FJARR_MEDIA_ENCODER=software" >> "$GITHUB_ENV"
+            echo "no /dev/dri on this runner"
           fi
           sudo sysctl -w vm.mmap_rnd_bits=28 || true
           grep -E "^(USER_UID|USER_GID|DOCKER_GID|RENDER_GID)=" .env
-      - name: build the dev image and the agent
+      - name: build the dev image
         run: |
           docker compose build dev
           docker compose up -d dev robot-sim
-          docker compose exec -T dev make doctor
+      - name: choose the encoder by probing VA-API, not by the presence of a device
+        # A render node is not an Intel one. An NVIDIA card presents /dev/dri/renderD128
+        # and no VA-API H.264 encoder, while our hardware path IS VA-API (ADR-0022; NVENC
+        # is open question #2). Trusting the device node put such a runner on
+        # `media.encoder=auto`, where the agent correctly refuses to start rather than
+        # fall back silently (docs/23) — a green machine failing for the right reason at
+        # the wrong time. Running the pipeline is the only honest test.
+        run: |
+          if docker compose exec -T dev sh -c 'timeout 30 gst-launch-1.0 -q videotestsrc num-buffers=10 ! vapostproc ! vah264enc ! fakesink' >/dev/null 2>&1; then
+            echo "VA-API H.264 encode works here: media.encoder=auto"
+            echo "FJARR_MEDIA_ENCODER=auto" >> "$GITHUB_ENV"
+          else
+            echo "no usable VA-API H.264 encoder on this runner: media.encoder=software (deliberate, docs/23)"
+            echo "FJARR_MEDIA_ENCODER=software" >> "$GITHUB_ENV"
+          fi
+      - name: doctor and the agent build
+        run: |
+          docker compose exec -T -e FJARR_MEDIA_ENCODER="$FJARR_MEDIA_ENCODER" dev make doctor
           docker compose exec -T dev make agent-build
       - name: valgrind memcheck on the loop tests (docs/15 nightly row)
         run: docker compose exec -T dev make agent-memcheck

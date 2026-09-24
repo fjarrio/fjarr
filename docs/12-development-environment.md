@@ -59,7 +59,7 @@ demo-backend demo-dashboard` (and `demo-robot` after `make agent-build`).
 | GStreamer elements (`webrtcbin`, `vah264enc`, `ximagesrc`, …) | missing plugin package — see Dockerfile groups |
 | `x264enc` **absent** | if present: GPL plugin leaked in — ADR-0011 violation, fix the image |
 | `/dev/dri` accessible | `RENDER_GID` in `.env` ≠ host render group; fix + `docker compose build dev` |
-| `vainfo` encode entrypoints + `vah264enc` smoke pipeline | iHD driver problem — see GPU troubleshooting |
+| `vainfo` encode entrypoints + `vah264enc` smoke pipeline | iHD driver problem — see GPU troubleshooting. A **warning** instead when `FJARR_MEDIA_ENCODER=software`: a machine with no Intel GPU (an NVIDIA or AMD runner) has deliberately chosen the CPU path, which is not a broken setup |
 | `DISPLAY=:99` + `ximagesrc` capture | robot-sim not up, or stale X socket — `docker compose restart robot-sim` |
 | `libei`/`pipewire`/`libevdev` pkg-config | dev packages missing from image |
 | `/dev/uinput` | WARN by default; opt in via the uinput override |
@@ -189,26 +189,48 @@ so a race with both ends in fjarr code is always reported.
 ## Nightly CI and the self-hosted GPU runner
 
 `.github/workflows/nightly.yml` (docs/15) runs the 200-cycle soak, valgrind,
-heaptrack and the `netem-*` scenarios every night and on demand. Its
-`runs-on` is the repository variable `FJARR_NIGHTLY_RUNNER`, falling back
-to GitHub's `ubuntu-24.04` (software encoder only, no GPU). To measure the
-VA-API path, register a machine with an Intel iGPU as a self-hosted runner
-and point the variable at it; nothing else changes:
+heaptrack, the `netem-*` scenarios and the latency harness every night and
+on demand. Its `runs-on` is the repository variable `FJARR_NIGHTLY_RUNNER`,
+falling back to GitHub's `ubuntu-24.04`.
 
-1. On the machine: Ubuntu 24.04 or later, Docker Engine with Compose v2,
-   the user in the `docker`, `render` and `video` groups, `/dev/dri`
-   present (`vainfo` shows H.264 encode entrypoints),
-   `vm.mmap_rnd_bits=28` in `/etc/sysctl.d/` (TSan, above), and `make`.
+> **This repository is public, so a self-hosted runner may only serve
+> workflows that untrusted code cannot reach.** Anyone can open a pull
+> request, and a workflow that runs on it executes their code on your
+> machine. `nightly.yml` is safe by construction: it triggers on `schedule`
+> and `workflow_dispatch`, which only ever run from the default branch and
+> which a fork cannot trigger. **`ci.yml` must stay on hosted runners** —
+> it runs on `push` and `pull_request`. Also set Settings → Actions →
+> *Fork pull request workflows* to require approval for all outside
+> collaborators, and prefer a machine that is not someone's daily desktop.
+
+Setting one up:
+
+1. **On the machine**: Ubuntu 24.04 or later, Docker Engine with Compose v2,
+   the runner's user in the `docker` group (and `render`/`video` when
+   `/dev/dri` exists), `vm.mmap_rnd_bits=28` in `/etc/sysctl.d/` (TSan,
+   above) or passwordless sudo for the job's `sysctl`, `make`, and enough
+   disk for the dev image plus build trees.
 2. GitHub → Settings → Actions → Runners → *New self-hosted runner*;
-   install it as a service with the labels `self-hosted,fjarr-gpu`.
+   install it as a service and give it a label you will point at.
 3. GitHub → Settings → Secrets and variables → Actions → *Variables*:
-   `FJARR_NIGHTLY_RUNNER = fjarr-gpu`. Unset it to go back to the hosted
-   runner.
+   `FJARR_NIGHTLY_RUNNER = <label>`. Unset it to fall back to hosted.
 
-The job writes `RENDER_GID`/`VIDEO_GID` from the machine into `.env`, runs
-the doctor, and asserts VA-API only when `/dev/dri` exists. The runner
-should be dedicated (the nightly applies `tc netem` to containers and
-leaves nothing behind, but it does need `NET_ADMIN`).
+**A render node is not an Intel one.** Our hardware encode path is VA-API
+([ADR-0022](adr/0022-baseline-ubuntu-2604-gstreamer-128.md); NVENC is
+[open question #2](18-open-questions.md)), and an NVIDIA card presents
+`/dev/dri/renderD128` while offering no VA-API H.264 encoder. The nightly
+therefore **probes the pipeline** rather than trusting the device node, and
+sets `media.encoder` to `software` when the probe fails — the explicit,
+never-silent fallback of [docs/23](23-agent-core-architecture.md). The
+doctor treats a failed VA-API smoke as a warning when the encoder has been
+chosen as `software`, and as a failure otherwise. So a big AMD or NVIDIA
+box is a fine runner; it just will not exercise the VA-API path.
+
+For the [latency harness](15-testing-strategy.md#latency-harness) the same
+runner takes `FJARR_LATENCY_LABEL` (the hardware, for the CSV) and
+`FJARR_LATENCY_STRICT=1` (hold the run to the docs/16 budgets). Turn strict
+on only for a machine nobody is using: the budgets assume a quiet host, and
+the harness refuses a run that could not decode the source rate anyway.
 
 ## Pipeline introspection
 

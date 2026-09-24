@@ -54,8 +54,14 @@ if [ -e /dev/dri/renderD128 ]; then
   if timeout 20 gst-launch-1.0 -q videotestsrc num-buffers=30 \
        ! vapostproc ! vah264enc ! fakesink >/dev/null 2>&1; then
     pass "smoke pipeline: videotestsrc ! vapostproc ! vah264enc ! fakesink"
+  elif [ "${FJARR_MEDIA_ENCODER:-}" = "software" ]; then
+    # A render node is not an Intel one. An NVIDIA card presents /dev/dri/renderD128
+    # and no VA-API H.264 encoder, and our hardware path is VA-API (ADR-0022; NVENC is
+    # open question #2). On a machine that has explicitly chosen the software encoder
+    # that is the documented, non-silent fallback (docs/23) and not a broken setup.
+    warn "no VA-API H.264 encode on this machine; media.encoder = software was chosen explicitly"
   else
-    fail "vah264enc smoke pipeline failed"
+    fail "vah264enc smoke pipeline failed (set media.encoder / FJARR_MEDIA_ENCODER = software to use the CPU path deliberately)"
   fi
 else
   warn "/dev/dri absent — VA-API checks skipped (no GPU passthrough on this machine)"
