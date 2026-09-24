@@ -73,7 +73,7 @@ services:
       FJARR_GRANT_HS256_SECRET: ${FJARR_GRANT_HS256_SECRET:-dev-only-grant-secret}
       FJARR_DEV_DEVICE_TOKEN: ${FJARR_DEV_DEVICE_TOKEN:-dev-only-device-token}
       FJARR_TURN_URLS: ${FJARR_TURN_URLS:-}
-      FJARR_TURN_SECRET: ${TURN_SECRET:-}
+      FJARR_TURN_SECRET: ${TURN_SECRET:-dev-only-change-me} # matches coturn's default, so the lab needs no .env
 
   demo-backend:
     profiles: [demo]
@@ -194,7 +194,9 @@ services:
 
   # ---------------------------------------------------------------- turn --
   coturn:
-    profiles: [turn]
+    # `lab` too, from slice 7b: the latency harness's relay column needs a real
+    # TURN server to measure through (docs/25, docs/16).
+    profiles: [turn, lab]
     image: coturn/coturn:4.6-alpine
     # use-auth-secret from day one: ephemeral HMAC credentials only, never
     # static passwords (teleop-car lesson — docs/10-security.md).

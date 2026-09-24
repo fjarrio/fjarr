@@ -30,8 +30,9 @@ turn-up: ## Start coturn (use-auth-secret mode)
 
 # ------------------------------------------------------------ browser lab --
 .PHONY: lab-up
-lab-up: ## Start the lab browser (CDP at http://localhost:9222) beside fjarr-server (docs/25)
-	docker compose --profile lab --profile stack up -d --build browser fjarr-server
+lab-up: ## Start the lab browser (CDP at http://localhost:9222) beside fjarr-server and coturn (docs/25)
+	FJARR_TURN_URLS=$${FJARR_TURN_URLS:-turn:coturn:3478} \
+	  docker compose --profile lab --profile stack up -d --build browser fjarr-server coturn
 
 .PHONY: lab-down
 lab-down: ## Stop the lab browser
@@ -40,6 +41,11 @@ lab-down: ## Stop the lab browser
 .PHONY: e2e
 e2e: ## Browser e2e suites against the lab browser (run inside dev; `make lab-up` first)
 	pnpm --filter @fjarr/e2e exec playwright test
+
+.PHONY: latency
+latency: ## Glass-to-glass latency on THIS machine, recorded to web/e2e/latency.csv (LABEL=<hardware>; STRICT=1 holds it to the docs/16 budgets)
+	E2E_LATENCY_LABEL=$(or $(LABEL),$(shell hostname)) E2E_LATENCY_STRICT=$(or $(STRICT),0) \
+	  pnpm --filter @fjarr/e2e exec playwright test tests/stack/latency.spec.ts --project stack
 
 .PHONY: e2e-loopback
 e2e-loopback: ## Only the loopback-agent suites (no fjarr-server needed)

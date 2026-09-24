@@ -58,6 +58,30 @@ jobs:
       - name: netem scenarios (docs/25 profiles on the agent's interface; `bad` joins when slice 6 brings loss recovery + adaptive bitrate)
         run: |
           for p in wifi-ok 4g lossy; do make opsim-netem NETEM_PROFILE=$p; done
+      # The latency harness is a browser suite, so this job needs node as well as make.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: glass-to-glass latency (docs/15 latency harness, slice 7b)
+        # The docs/16 budgets are NUC-class numbers, so STRICT belongs on the prepared
+        # machine only: set the repository variable FJARR_LATENCY_STRICT=1 once
+        # FJARR_NIGHTLY_RUNNER points at it. Until then this measures and records, and the
+        # harness itself withholds a verdict on a run that could not decode the source rate.
+        env:
+          E2E_BROWSER: http://localhost:9222
+          E2E_PAGE_ORIGIN: http://host.docker.internal:5174
+          E2E_SERVER_WS: ws://fjarr-server:8080/ws
+          E2E_SERVER_HTTP: http://localhost:8080
+          E2E_INTROSPECT_HTTP: http://localhost:7381
+          E2E_LATENCY_LABEL: ${{ vars.FJARR_LATENCY_LABEL || vars.FJARR_NIGHTLY_RUNNER || 'github-hosted' }}
+          E2E_LATENCY_STRICT: ${{ vars.FJARR_LATENCY_STRICT || '0' }}
+          CI: "true"
+        run: |
+          FJARR_TURN_URLS=turn:coturn:3478 docker compose --profile lab --profile stack up -d --build --wait browser coturn
+          pnpm --filter '@fjarr/e2e' exec playwright test tests/stack/latency.spec.ts --project stack
       - name: profiles and logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -66,6 +90,8 @@ jobs:
           path: |
             build/memcheck/**
             build/heaptrack/**
+            web/e2e/latency.csv
+            web/e2e/out/**/summary.*
           if-no-files-found: ignore
       - name: stack logs on failure
         if: failure()

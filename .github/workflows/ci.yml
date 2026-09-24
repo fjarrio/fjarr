@@ -73,7 +73,9 @@ jobs:
           # dev and demo-robot map /dev/dri (VA-API); a hosted runner has none. An empty
           # directory maps no device and the demo robot stays on the software encoder.
           sudo mkdir -p /dev/dri
-          docker compose --profile lab --profile stack up -d --build --wait browser fjarr-server
+          # coturn rides the lab profile from slice 7b: without it the latency harness's relay
+          # column cannot be measured at all (docs/25).
+          FJARR_TURN_URLS=turn:coturn:3478 docker compose --profile lab --profile stack up -d --build --wait browser fjarr-server coturn
           docker compose build dev
           docker compose up -d dev
           docker compose exec -T dev make agent-build

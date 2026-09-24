@@ -102,10 +102,14 @@ supervisor, a pipeline error through the escalation ladder, and an expired
 or skewed grant — plus a signaling-server restart under the real agent; it
 found and fixed a tier-framerate bug that stopped **any camera below 30 fps
 from streaming at all**;
-**7b** the glass-to-glass harness on the existing frame stamp, with
-`coturn` in the `lab` profile for the relay column, a loose ceiling in CI
-and the docs/16 budgets gated nightly on the prepared runner.
-Input-to-photon needs a robot-side input path and lands with M3.
+**7b ✔** (2026-09-24) the glass-to-glass harness on the existing frame
+stamp: `coturn` in the `lab` profile so the relay column exists and is
+asserted to be genuinely relayed, p50/p95 and time-to-first-frame under
+clean/lossy/relay, a loose ceiling in CI with the docs/16 budgets behind
+`E2E_LATENCY_STRICT` for the prepared runner, and `make latency` recording
+a labelled row that carries its own decoded `fps` so a CPU-limited machine
+cannot be mistaken for a slow network. Input-to-photon needs a robot-side
+input path and lands with M3.
 
 **Gate:** the three-demo stack end-to-end — demo-robot (embedding libfjarr)
 streams 2 tracks to 3 browsers through the `fjarr-server` sidecar, the TS

@@ -67,10 +67,17 @@ From M1, a measurement rig — not vibes:
   above a **loose ceiling** — gross regression, not budget — while the
   **nightly job on the prepared runner** gates the
   [docs/16](16-performance-budgets.md) numbers themselves.
-- Results append to a tracked CSV, one row per nightly run, carrying a
-  **hardware label** so rows from different machines are never compared.
-  CI writes its numbers as a run artifact and appends nothing: a job that
-  commits to the repository on every push is noise, not history.
+- Results append to `web/e2e/latency.csv` — but **only a labelled run
+  records** (`make latency LABEL=<hardware>`, or the nightly job with the
+  label variable set). The label is mandatory because rows from different
+  machines must never be compared. Nothing commits a row automatically: CI
+  and the nightly upload theirs as a run artifact, since a job that pushes to
+  the repository every night is noise, not history.
+- **Every row carries its own trust marker.** A machine that cannot encode
+  the source rate is measuring its own CPU, not the path, so the harness
+  records the decoded `fps` beside the percentiles and flags a run below 60 %
+  of the source rate as CPU-limited. Strict mode *refuses* such a run rather
+  than holding it to a budget it was never measuring.
 - Input-to-photon needs a robot-side input path and therefore arrives with
   `fjarr.desktop` in M3; glass-to-glass lands in slice 7b
   ([docs/23](23-agent-core-architecture.md#slices-3a-3b-3c-and-their-gates)).

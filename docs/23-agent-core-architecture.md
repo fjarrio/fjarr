@@ -1583,11 +1583,40 @@ The work is assembly and reporting:
   path, which is `fjarr.desktop` in M3. The harness is built so that
   adding it is a second measurement, not a second harness.
 
-*Gate:* (1) glass-to-glass p50/p95 reported for all three profiles, the CI
-job failing only above the loose ceiling while the nightly job on the
-prepared runner gates the docs/16 numbers themselves; (2) the CSV grows by
-one labelled row per nightly run; (3) time-to-first-frame reported and
-within budget; (4) every earlier gate green, the soak included.
+*Gate:* (1) glass-to-glass p50/p95 reported for all three conditions, the CI
+job failing only above the loose ceiling while a strict run on the prepared
+runner gates the docs/16 numbers themselves; (2) a labelled run appends to
+the tracked CSV; (3) time-to-first-frame reported; (4) every earlier gate
+green.
+**Met 2026-09-24** — `web/e2e/tests/stack/latency.spec.ts`, `make latency`,
+`web/e2e/latency.csv`.
+
+**Implementation notes (slice 7b)** — the harness as built:
+
+- *Almost no new measurement code.* The stamp already carried a counter and a
+  48-bit sender timestamp, the per-frame reader already applied the
+  `fjarr.core/time-sync` offset, and `stamps()` already returned p50/p95. The
+  slice is the rig around them: the three conditions, the relay path, the
+  gates and the record.
+- *coturn joined the `lab` profile*, and `FJARR_TURN_SECRET` now defaults to
+  coturn's own dev secret, so the relay column needs no `.env` to exist. The
+  relay test **asserts the selected candidate pair is actually relayed** —
+  a relay measurement that silently went direct is worse than none — and
+  reads it *after* the sampling window, because `getStats` has no candidate
+  pair in the first moments of a session and reports "not relayed" for a
+  session that is about to relay every packet.
+- *The first condition measured pays the producer's cold start*, which made
+  whichever test ran first the slowest and the ordering look like physics. A
+  settle window before sampling removes it; two consecutive runs now agree
+  within a few percent.
+- *Every row says whether to believe it.* On a developer laptop the software
+  encoder cannot hold the source rate, so latency tracks CPU rather than the
+  path. The row carries its decoded `fps`, a run below 60 % of the source
+  rate is marked CPU-limited, and strict mode refuses such a run outright
+  instead of failing it against a budget it was never measuring. This is the
+  same starvation docs/25 records for the media suites.
+- *Input-to-photon is not here*: it needs a robot-side input path and lands
+  with `fjarr.desktop` in M3, as a second measurement on this rig.
 
 ## Where `fjarr.test` lives
 

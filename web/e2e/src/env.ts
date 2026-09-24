@@ -36,4 +36,20 @@ export const env = {
   robotService: process.env.E2E_ROBOT_SERVICE ?? "demo-robot",
   /** Where every run's artifacts go (`out/<test>/`). */
   outRoot: process.env.E2E_OUT ?? fileURLToPath(new URL("../out/", import.meta.url)),
+  /**
+   * Latency harness (docs/15#latency-harness, slice 7b). The docs/16 budgets are
+   * NUC-class numbers: only a run on known hardware may be held to them, and only
+   * such a run may append to the tracked CSV. A shared CI runner measures the same
+   * paths and fails on gross regression alone.
+   */
+  latency: {
+    /** Hardware this run measured on, e.g. "nuc-i7-1260p". Empty = do not record a row. */
+    label: process.env.E2E_LATENCY_LABEL ?? "",
+    /** 1 = hold the run to the docs/16 budgets (the nightly job on the prepared runner). */
+    strict: process.env.E2E_LATENCY_STRICT === "1",
+    /** Steady-state sampling window per condition. */
+    sampleMs: Number(process.env.E2E_LATENCY_SAMPLE_MS ?? 10_000),
+    /** The tracked history; one row per recorded run per condition. */
+    csv: process.env.E2E_LATENCY_CSV ?? fileURLToPath(new URL("../latency.csv", import.meta.url)),
+  },
 };

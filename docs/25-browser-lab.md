@@ -355,11 +355,15 @@ reconnect round is now a counted round rather than a fatal error
    enforced.
 4. **Slice 7a**: the robot-lifecycle fault rows
    ([docs/15](15-testing-strategy.md#fault-injection)) against a real
-   browser. **Slice 7b**: the glass-to-glass harness on the frame stamp —
-   `coturn` joins the `lab` profile so the relay column exists, p50/p95
-   under the clean, lossy and relay profiles, and the tracked CSV.
-   Input-to-photon waits for a robot-side input path and lands with
-   `fjarr.desktop` in M3.
+   browser — `tests/stack/faults.spec.ts`.
+5. **Slice 7b**: the glass-to-glass harness on that stamp —
+   `tests/stack/latency.spec.ts` and `make latency`: p50/p95 and time to
+   first frame under clean, lossy and relay, a loose ceiling in CI with the
+   docs/16 budgets behind `E2E_LATENCY_STRICT`, and a labelled row in
+   `web/e2e/latency.csv` carrying its own decoded `fps`. `coturn` joins the
+   `lab` profile so the relay condition exists at all, and the relay test
+   asserts the selected candidate pair really is relayed. Input-to-photon
+   waits for a robot-side input path and lands with `fjarr.desktop` in M3.
 
 > **Running the media suites back to back locally starves the software
 > encoder.** `agent`, `camera` and `ratecontrol` pass one file at a time and
