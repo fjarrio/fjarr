@@ -210,8 +210,15 @@ Setting one up:
    `/dev/dri` exists), `vm.mmap_rnd_bits=28` in `/etc/sysctl.d/` (TSan,
    above) or passwordless sudo for the job's `sysctl`, `make`, and enough
    disk for the dev image plus build trees.
-2. GitHub → Settings → Actions → Runners → *New self-hosted runner*;
-   install it as a service and give it a label you will point at.
+2. GitHub → **the repository's** Settings → Actions → Runners → *New
+   self-hosted runner*; install it as a service and give it a label you will
+   point at. Register it on the repository, not the organisation: an org
+   runner lives in a runner group, and **a group does not serve public
+   repositories unless you tick "Allow public repositories"** — off by
+   default, for the reason in the box above. The job simply waits forever
+   with no error, labels matching and the runner idle. Flipping that toggle
+   also exposes the machine to every public repository in the org, now and
+   later; a repository-scoped runner is as capable and stays scoped.
 3. GitHub → Settings → Secrets and variables → Actions → *Variables*:
    `FJARR_NIGHTLY_RUNNER = <label>`. Unset it to fall back to hosted.
 
