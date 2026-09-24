@@ -72,7 +72,9 @@ jobs:
           grep -E "^(USER_UID|USER_GID|DOCKER_GID)=" .env
           # dev and demo-robot map /dev/dri (VA-API); a hosted runner has none. An empty
           # directory maps no device and the demo robot stays on the software encoder.
-          sudo mkdir -p /dev/dri
+          # `-n` never prompts: harmless here (hosted sudo is passwordless) and it stops
+          # this hanging forever if anyone ever points CI at a self-hosted machine.
+          sudo -n mkdir -p /dev/dri || mkdir -p /dev/dri || true
           # coturn rides the lab profile from slice 7b: without it the latency harness's relay
           # column cannot be measured at all (docs/25).
           # FJARR_WEBHOOK_URL points the sidecar at demo-backend so the ADR-0015 webhook half
@@ -100,7 +102,8 @@ jobs:
         run: pnpm --filter '@fjarr/e2e' exec playwright test --project loopback --project stack
       - name: unit + loop tests under ThreadSanitizer (a gate, docs/15; runner-level because of the sysctl)
         run: |
-          sudo sysctl -w vm.mmap_rnd_bits=28   # TSan's shadow layout vs 32-bit ASLR entropy (docs/12)
+          # TSan's shadow layout vs 32-bit ASLR entropy (docs/12); `-n` never prompts.
+          [ "$(cat /proc/sys/vm/mmap_rnd_bits)" -le 28 ] || sudo -n sysctl -w vm.mmap_rnd_bits=28
           docker compose exec -T dev make agent-test-tsan
       - name: fjarr-opsim scenarios against the demo robot (docs/23 gate 2)
         # From the runner: the target execs into the demo robot's container itself.

@@ -29,10 +29,22 @@ jobs:
             sed -i "s/^RENDER_GID=.*/RENDER_GID=$(stat -c %g /dev/dri/renderD128)/" .env
             echo "render node present; whether it can ENCODE is decided by probing, below"
           else
-            sudo mkdir -p /dev/dri
-            echo "no /dev/dri on this runner"
+            # `sudo -n` never prompts. A self-hosted runner started interactively HAS a
+            # terminal, so a plain `sudo` there does not fail — it waits for a password
+            # forever, and the job hangs with no error to read.
+            sudo -n mkdir -p /dev/dri 2>/dev/null || mkdir -p /dev/dri 2>/dev/null \
+              || echo "no /dev/dri and cannot create it without sudo; compose maps nothing"
           fi
-          sudo sysctl -w vm.mmap_rnd_bits=28 || true
+          # TSan needs <= 28 bits of ASLR entropy. Prefer the value already set: a
+          # self-hosted runner should carry it in /etc/sysctl.d (docs/12), and then this
+          # needs no privileges at all.
+          if [ "$(cat /proc/sys/vm/mmap_rnd_bits)" -le 28 ]; then
+            echo "vm.mmap_rnd_bits=$(cat /proc/sys/vm/mmap_rnd_bits): TSan-compatible already"
+          elif sudo -n sysctl -w vm.mmap_rnd_bits=28 >/dev/null 2>&1; then
+            echo "vm.mmap_rnd_bits lowered to 28 for this run"
+          else
+            echo "::warning::vm.mmap_rnd_bits=$(cat /proc/sys/vm/mmap_rnd_bits) and no passwordless sudo — TSan will be skipped. Persist it on the runner: echo 'vm.mmap_rnd_bits=28' | sudo tee /etc/sysctl.d/60-tsan.conf && sudo sysctl --system"
+          fi
           grep -E "^(USER_UID|USER_GID|DOCKER_GID|RENDER_GID)=" .env
       - name: build the dev image
         run: |
