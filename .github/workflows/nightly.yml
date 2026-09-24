@@ -96,6 +96,11 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The browser suites import @fjarr/core from its BUILT output, and the lab page is a Vite
+      # app that does the same. Installing is not enough: without this the run dies with
+      # "Cannot find module .../@fjarr/core/dist/index.js" and reports "No tests found",
+      # which reads like a harness misconfiguration rather than a missing build.
+      - run: pnpm -r --filter './web/packages/**' --filter './web/apps/**' build
       - name: glass-to-glass latency (docs/15 latency harness, slice 7b)
         # The docs/16 budgets are NUC-class numbers, so STRICT belongs on the prepared
         # machine only: set the repository variable FJARR_LATENCY_STRICT=1 once
