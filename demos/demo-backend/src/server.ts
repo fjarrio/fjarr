@@ -7,11 +7,11 @@
  * the control-plane REST API of the fjarr-server sidecar running BESIDE it.
  * It imports no Fjarr code. "Keep your backend, add two endpoints."
  *
- * M0 STATUS: the two endpoints exist with stub payloads; real JWT signing
- * and webhook verification land with the M1 contract implementation.
+ * M1 STATUS: real HS256 grant signing, and webhook receipt with HMAC signature
+ * verification (slice 7 / the M1 gate review). Per-tenant keys arrive at M5.
  * spec: docs/09-interfaces.md#2-backend-tier--the-integration-contract-adr-0015
  */
-import { createHmac } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 
 const PORT = Number(process.env.PORT ?? 9090);
@@ -19,6 +19,32 @@ const FJARR_SERVER_URL = process.env.FJARR_SERVER_URL ?? "http://localhost:8080"
 // The grant-signing secret registered in fjarr-server (docs/09#a-session-grants).
 // Slice 3b: HS256 with the shared dev secret; per-tenant keys arrive at M5.
 const GRANT_SECRET = process.env.FJARR_GRANT_HS256_SECRET ?? "dev-only-grant-secret";
+// The webhook secret the sidecar signs with (docs/09#b-webhooks). Same shared-secret
+// story as the grant key: per-tenant keys arrive at M5.
+const WEBHOOK_SECRET = process.env.FJARR_WEBHOOK_SECRET ?? "dev-only-webhook-secret";
+
+/** What arrived, newest last, bounded — a customer backend would write these to its own store. */
+interface ReceivedWebhook {
+  event: string;
+  event_id: string;
+  ts: number;
+  data: unknown;
+}
+const received: ReceivedWebhook[] = [];
+const RECEIVED_MAX = 200;
+
+/**
+ * A webhook receiver that does not verify its signature is an open endpoint that
+ * anyone may post session events to (docs/10). The demo is the reference
+ * integration, so it verifies — constant-time, over the raw body.
+ */
+function signatureValid(raw: string, header: string | undefined): boolean {
+  if (!header) return false;
+  const expected = `sha256=${createHmac("sha256", WEBHOOK_SECRET).update(raw).digest("hex")}`;
+  const a = Buffer.from(header);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 const b64url = (s: string | Buffer) => Buffer.from(s).toString("base64url");
 function mintGrant(robotId: string, operator: { id: string; label: string }, capabilities: Array<{ name: string; params?: Record<string, unknown> }>) {
@@ -90,8 +116,24 @@ const server = createServer(async (req, res) => {
   if (url.pathname === "/api/fjarr/webhook" && req.method === "POST") {
     let body = "";
     for await (const chunk of req) body += chunk;
-    console.log(`[demo-backend] webhook received: ${body.slice(0, 200)}`);
+    if (!signatureValid(body, req.headers["x-fjarr-signature"] as string | undefined)) {
+      console.warn(`[demo-backend] webhook REJECTED: bad or missing x-fjarr-signature`);
+      return respond(401, { error: "bad signature" });
+    }
+    const event = JSON.parse(body) as ReceivedWebhook;
+    // At-least-once delivery (docs/09): the same event_id may arrive twice.
+    if (!received.some((e) => e.event_id === event.event_id)) {
+      received.push(event);
+      if (received.length > RECEIVED_MAX) received.shift();
+    }
+    console.log(`[demo-backend] webhook ${event.event} ${event.event_id} ${JSON.stringify(event.data).slice(0, 160)}`);
     return respond(200, { received: true });
+  }
+
+  // Not part of the contract: the demo's own window onto what it has received, so the
+  // dashboard and the e2e suite can see that the webhook half of ADR-0015 really runs.
+  if (url.pathname === "/api/fjarr/webhooks" && req.method === "GET") {
+    return respond(200, { events: received });
   }
 
   return respond(404, { error: "not found" });

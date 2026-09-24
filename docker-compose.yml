@@ -74,6 +74,11 @@ services:
       FJARR_DEV_DEVICE_TOKEN: ${FJARR_DEV_DEVICE_TOKEN:-dev-only-device-token}
       FJARR_TURN_URLS: ${FJARR_TURN_URLS:-}
       FJARR_TURN_SECRET: ${TURN_SECRET:-dev-only-change-me} # matches coturn's default, so the lab needs no .env
+      # docs/09#b-webhooks. Empty by default: the `stack` profile runs fjarr-server
+      # without demo-backend, and delivering to nothing would retry three times per
+      # event. `make demo-up` sets it, which is where a receiver actually exists.
+      FJARR_WEBHOOK_URL: ${FJARR_WEBHOOK_URL:-}
+      FJARR_WEBHOOK_SECRET: ${FJARR_WEBHOOK_SECRET:-dev-only-webhook-secret}
 
   demo-backend:
     profiles: [demo]
@@ -85,6 +90,7 @@ services:
       FJARR_SERVER_URL: http://fjarr-server:8080
       PORT: "9090"
       FJARR_GRANT_HS256_SECRET: ${FJARR_GRANT_HS256_SECRET:-dev-only-grant-secret}
+      FJARR_WEBHOOK_SECRET: ${FJARR_WEBHOOK_SECRET:-dev-only-webhook-secret}
     command: node --experimental-strip-types src/server.ts
     ports:
       - "9090:9090"

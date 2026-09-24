@@ -14,7 +14,8 @@ sim-up: ## Start the fake robot desktop (watch it at http://localhost:6080)
 
 .PHONY: demo-up
 demo-up: ## Start the full three-demo customer topology
-	docker compose --profile demo up -d --build
+	FJARR_WEBHOOK_URL=$${FJARR_WEBHOOK_URL:-http://demo-backend:9090/api/fjarr/webhook} \
+	  docker compose --profile demo up -d --build
 
 .PHONY: demo-down
 demo-down: ## Stop the demo stack

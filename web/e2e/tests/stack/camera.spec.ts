@@ -66,13 +66,26 @@ test.describe("fjarr.camera on the real agent (slice 4)", () => {
       await v.waitForStreaming("rtsp", 20_000);
       expect(await v.watchStamps("pattern")).toBe(true);
     }
-    await loopback.page.waitForTimeout(2000);
-    const stats = (await stack.introspect("/stats")) as StatsBody | null;
-    if (stats) {
-      // one producer per track, three hub subscribers each: the fan-out, not three encodes (docs/23)
-      expect(stats.hub.find((h) => h.track_id === "pattern" && h.tier === "active")?.subscribers).toBe(3);
-      expect(stats.hub.find((h) => h.track_id === "rtsp" && h.tier === "active")?.subscribers).toBe(3);
-      expect(stats.producers.filter((p) => p.playing).map((p) => p.name).sort()).toEqual(["producer:pattern", "producer:rtsp"]);
+    // One producer per track, three hub subscribers each: the fan-out, not three encodes
+    // (docs/23). `/stats` is a global, instantaneous view of the robot, so this polls
+    // rather than sampling once: sessions from an earlier run may still be draining
+    // (counts read high) or this run's third viewer may not have subscribed yet (low).
+    // Reading it once passes only on a freshly started robot, which is CI and nowhere else.
+    if ((await stack.introspect("/stats")) !== null) {
+      await expect
+        .poll(
+          async () => {
+            const st = (await stack.introspect("/stats")) as StatsBody | null;
+            if (!st) return null;
+            return {
+              pattern: st.hub.find((h) => h.track_id === "pattern" && h.tier === "active")?.subscribers,
+              rtsp: st.hub.find((h) => h.track_id === "rtsp" && h.tier === "active")?.subscribers,
+              producers: st.producers.filter((p) => p.playing).map((p) => p.name).sort(),
+            };
+          },
+          { timeout: 30_000, message: "the hub never settled at three subscribers per track with one producer each" },
+        )
+        .toEqual({ pattern: 3, rtsp: 3, producers: ["producer:pattern", "producer:rtsp"] });
     }
     for (const v of viewers) {
       const s = await v.stamps("pattern"); // grid tiles are small: the stamp may be unreadable, presented frames still count

@@ -683,14 +683,12 @@ class Peer {
         const std::string user = turn.value("username", ""), cred = turn.value("credential", "");
         for (const auto& u : turn["urls"]) {
             if (!u.is_string()) continue;
-            std::string url = u.get<std::string>();
-            const auto pos = url.find("://");
-            if (pos == std::string::npos) continue;
-            const std::string scheme = url.substr(0, pos);
-            if (scheme != "turn" && scheme != "turns") continue;
-            glib::GStrPtr eu(g_uri_escape_string(user.c_str(), nullptr, FALSE));
-            glib::GStrPtr ep(g_uri_escape_string(cred.c_str(), nullptr, FALSE));
-            const std::string full = scheme + "://" + eu.get() + ":" + ep.get() + "@" + url.substr(pos + 3);
+            const std::string url = u.get<std::string>();
+            const std::string full = fjarr::protocol::turn_url_with_credentials(url, user, cred);
+            if (full.empty()) {
+                logf("peer: add-turn-server %s -> UNUSABLE URL (ignored)", url.c_str());
+                continue;
+            }
             gboolean ok = FALSE;
             g_signal_emit_by_name(webrtc_.get(), "add-turn-server", full.c_str(), &ok);
             logf("peer: add-turn-server %s -> %s", url.c_str(), ok ? "ok" : "rejected");
@@ -1551,13 +1549,17 @@ void scenario_relay_only(Operator& op) {
     r.check("connect", true, "session " + op.sid8() + " connected in " + std::to_string(op.connected_ms()) + " ms with ice-transport-policy=relay");
     auto pairs = op.peer()->selected_candidate_types();
     std::string detail;
-    bool all_relay = !pairs.empty();
+    // The operator is relay-only, so every packet of this session traverses the TURN
+    // server whatever the agent's own candidate is. Asserting the REMOTE end is also a
+    // relay candidate would be asserting the robot's configuration (FJARR_ICE_POLICY),
+    // not this session's path, and would fail against any normally configured robot.
+    bool local_relay = !pairs.empty();
     for (auto& [l, rm] : pairs) {
         detail += "local=" + l + " remote=" + rm + "; ";
-        all_relay = all_relay && l == "relay" && rm == "relay";
+        local_relay = local_relay && l == "relay";
     }
     if (pairs.empty()) detail = "no candidate-pair in get-stats ";
-    r.check("relay-candidates", all_relay, detail + "(ice-transport-policy=relay on this side; the agent side needs FJARR_ICE_POLICY=relay)");
+    r.check("relay-candidates", local_relay, detail + "(operator forced to relay; the agent relays too only with FJARR_ICE_POLICY=relay)");
     for (const std::string& t : op.manifest_tracks()) stream_and_assert(op, t);
     close_and_assert(op);
 }

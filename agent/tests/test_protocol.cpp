@@ -92,3 +92,24 @@ TEST(Protocol, manifestJsonMatchesTheWireShape) {
     EXPECT_TRUE(j[0]["monitor"].is_null());
     EXPECT_EQ(j[0]["mid"], "0");
 }
+
+TEST(Protocol, turnUrlAcceptsBothTheRfcFormAndWebrtcbinsForm) {
+    // Found by the M1 gate review: the server mints `turn:host:port` (RFC 7065, what every
+    // browser takes) while webrtcbin's add-turn-server wants `turn://user:pass@host:port`.
+    // Both consumers required the slashes and skipped anything else IN SILENCE, so a robot
+    // configured with a perfectly ordinary TURN URL had no relay path and said nothing —
+    // the failure only shows up behind the symmetric NAT that TURN exists for.
+    using fjarr::protocol::turn_url_with_credentials;
+    EXPECT_EQ(turn_url_with_credentials("turn:coturn:3478", "u", "p"), "turn://u:p@coturn:3478");
+    EXPECT_EQ(turn_url_with_credentials("turn://coturn:3478", "u", "p"), "turn://u:p@coturn:3478");
+    EXPECT_EQ(turn_url_with_credentials("turns:relay.example.com:5349?transport=tcp", "u", "p"),
+              "turns://u:p@relay.example.com:5349?transport=tcp");
+    // Credentials are URL-escaped: an ephemeral coturn credential is base64 and carries '+' and '/'.
+    EXPECT_EQ(turn_url_with_credentials("turn:h:1", "17900:bot", "a+b/c="), "turn://17900%3Abot:a%2Bb%2Fc%3D@h:1");
+    // Anything else is refused explicitly so the caller can log it rather than drop it.
+    EXPECT_EQ(turn_url_with_credentials("stun:stun.example.com:3478", "u", "p"), "");
+    EXPECT_EQ(turn_url_with_credentials("https://example.com", "u", "p"), "");
+    EXPECT_EQ(turn_url_with_credentials("coturn:3478", "u", "p"), "");
+    EXPECT_EQ(turn_url_with_credentials("turn:", "u", "p"), "");
+    EXPECT_EQ(turn_url_with_credentials("", "u", "p"), "");
+}

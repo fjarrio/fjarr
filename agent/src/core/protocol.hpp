@@ -63,6 +63,15 @@ struct SignalingMessage {
 std::optional<SignalingMessage> parse_signaling(std::string_view text, bool* higher_major = nullptr);
 
 std::optional<TurnCredentials> parse_turn(const nlohmann::json& j);
+
+/// webrtcbin's `add-turn-server` wants `turn(s)://user:pass@host:port`, but the URL a
+/// server mints is the RFC 7065 form every browser takes — `turn:host:port`, with no
+/// slashes. Both are accepted here and the credentials are URL-escaped into the result.
+/// Returns an empty string for anything that is not a turn/turns URL, so the caller can
+/// say so instead of dropping it silently (docs/02 deployment topologies: relay is the
+/// path that matters most and the one nobody exercises until a customer is behind a
+/// symmetric NAT). spec: docs/09-interfaces.md#a-session-grants
+std::string turn_url_with_credentials(const std::string& url, const std::string& username, const std::string& credential);
 std::optional<std::vector<CapabilityGrant>> parse_capabilities(const nlohmann::json& j);
 std::optional<OperatorInfo> parse_operator(const nlohmann::json& j);
 

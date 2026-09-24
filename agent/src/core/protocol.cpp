@@ -7,6 +7,8 @@
 
 #include <fjarr/errors.hpp>
 
+#include "core/glib/raii.hpp"
+
 namespace fjarr::protocol {
 
 namespace {
@@ -97,6 +99,21 @@ Envelope make_envelope(std::string cap, std::string type, std::string kind, nloh
     e.payload = payload.is_object() ? std::move(payload) : nlohmann::json::object();
     e.event_id = event_id.empty() ? new_event_id() : std::move(event_id);
     return e;
+}
+
+std::string turn_url_with_credentials(const std::string& url, const std::string& username, const std::string& credential) {
+    const auto colon = url.find(':');
+    if (colon == std::string::npos) return {};
+    const std::string scheme = url.substr(0, colon);
+    if (scheme != "turn" && scheme != "turns") return {};
+    // `turn://host:port` (what webrtcbin wants) and `turn:host:port` (RFC 7065, what a
+    // browser and therefore a server's config uses) differ only by the slashes.
+    std::string rest = url.substr(colon + 1);
+    if (rest.rfind("//", 0) == 0) rest = rest.substr(2);
+    if (rest.empty()) return {};
+    glib::GStrPtr user(g_uri_escape_string(username.c_str(), nullptr, FALSE));
+    glib::GStrPtr pass(g_uri_escape_string(credential.c_str(), nullptr, FALSE));
+    return scheme + "://" + user.get() + ":" + pass.get() + "@" + rest;
 }
 
 std::optional<TurnCredentials> parse_turn(const nlohmann::json& j) {

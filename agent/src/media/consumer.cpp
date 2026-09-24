@@ -71,15 +71,15 @@ bool ConsumerPipeline::build(const std::string& ice_policy, const std::optional<
     if (ice_policy == "relay") g_object_set(webrtc_.get(), "ice-transport-policy", GST_WEBRTC_ICE_TRANSPORT_POLICY_RELAY, nullptr);
     if (turn) {
         for (const auto& url : turn->urls) {
-            // turn(s)://user:pass@host:port[?transport=tcp] — credentials URL-escaped (docs/23, spike Q6).
-            std::string u = url;
-            const auto scheme_end = u.find("://");
-            if (scheme_end == std::string::npos) continue;
-            const std::string scheme = u.substr(0, scheme_end);
-            if (scheme != "turn" && scheme != "turns") continue;
-            glib::GStrPtr user(g_uri_escape_string(turn->username.c_str(), nullptr, FALSE));
-            glib::GStrPtr pass(g_uri_escape_string(turn->credential.c_str(), nullptr, FALSE));
-            const std::string full = scheme + "://" + user.get() + ":" + pass.get() + "@" + u.substr(scheme_end + 3);
+            // turn(s)://user:pass@host:port[?transport=tcp] — credentials URL-escaped (docs/23,
+            // spike Q6). The server mints the RFC 7065 form (`turn:host:port`), which webrtcbin
+            // does not take; the helper accepts both. A URL we cannot use is LOGGED, never
+            // dropped in silence: a robot with no relay path must not look like one that has one.
+            const std::string full = protocol::turn_url_with_credentials(url, turn->username, turn->credential);
+            if (full.empty()) {
+                log::warn("consumer", "unusable TURN URL, ignored", {{"session", sid8_}, {"url", url}});
+                continue;
+            }
             gboolean ok = FALSE;
             g_signal_emit_by_name(webrtc_.get(), "add-turn-server", full.c_str(), &ok);
             if (!ok) log::warn("consumer", "add-turn-server rejected a URL", {{"session", sid8_}, {"url", url}});

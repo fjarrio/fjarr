@@ -75,7 +75,11 @@ jobs:
           sudo mkdir -p /dev/dri
           # coturn rides the lab profile from slice 7b: without it the latency harness's relay
           # column cannot be measured at all (docs/25).
-          FJARR_TURN_URLS=turn:coturn:3478 docker compose --profile lab --profile stack up -d --build --wait browser fjarr-server coturn
+          # FJARR_WEBHOOK_URL points the sidecar at demo-backend so the ADR-0015 webhook half
+          # is exercised (tests/stack/contract.spec.ts); demo-backend starts below and the
+          # sidecar's delivery retries cover the gap.
+          FJARR_TURN_URLS=turn:coturn:3478 FJARR_WEBHOOK_URL=http://demo-backend:9090/api/fjarr/webhook \
+            docker compose --profile lab --profile stack up -d --build --wait browser fjarr-server coturn
           docker compose build dev
           docker compose up -d dev
           docker compose exec -T dev make agent-build

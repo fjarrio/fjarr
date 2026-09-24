@@ -15,6 +15,14 @@ test.describe("robot lifecycle faults", () => {
     await stack.requireServer();
   });
 
+  // This suite is the only one that stops the robot. If an assertion fails between the
+  // kill and the restart, every later test in the run would fail against a robot that is
+  // simply not there — a real defect reported as a dozen fake ones. Bring it back
+  // whatever happened; starting a running container is a no-op.
+  test.afterEach(async ({ stack }) => {
+    await stack.startRobot().catch(() => {});
+  });
+
   test("the agent is killed mid-session: the operator sees it go, and it streams again after a restart", async ({ loopback, stack }) => {
     test.slow(); // a container stop/start plus a fresh session
     await stack.requireRobot();
