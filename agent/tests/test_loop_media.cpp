@@ -185,8 +185,13 @@ TEST(LoopMedia, anEncodePathErrorClimbsTheRestartLadderAndThenAsksForAPlaneRebui
     plane->hub().subscribe(HubKey{"encodefail", "active"}, sink);
 
     // Post one non-source error per live producer until the ladder escalates. The ladder's own
-    // backoff (0.5 + 1 + 2 + 4 + 5 s) paces this loop; 60 s is a generous ceiling over that 12.5 s.
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    // backoff (0.5 + 1 + 2 + 4 + 5 s) paces this loop, so a healthy run finishes in about 13 s and
+    // leaves immediately. The ceiling has to clear the *slowest* environment this test runs in,
+    // which is valgrind in the nightly (docs/15): the backoff is wall-clock and unaffected, but
+    // every rebuild in between costs seconds instead of milliseconds. A tight ceiling made this
+    // fail there with four restarts of the five it needs — a test that only passes when it is not
+    // being measured.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(240);
     int posted = 0;
     std::string diag;
     while (rebuilds == 0 && std::chrono::steady_clock::now() < deadline) {
@@ -206,7 +211,12 @@ TEST(LoopMedia, anEncodePathErrorClimbsTheRestartLadderAndThenAsksForAPlaneRebui
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
-    EXPECT_EQ(rebuilds, 1) << "the exhausted fast ladder must ask for exactly one plane rebuild; diag: " << diag;
+    // At least one, not exactly one: this test's callback only counts, where the agent's
+    // handler closes the sessions and actually rebuilds the plane, which resets the counter.
+    // So every error posted after the first escalation asks again, and how many land before
+    // the loop notices is a fact about this loop's pacing — it is one locally and several
+    // under valgrind. The behaviour being tested is that the exhausted ladder escalates at all.
+    EXPECT_GE(rebuilds, 1) << "the exhausted fast ladder never asked for a plane rebuild; diag: " << diag;
     EXPECT_GE(restarts, 5) << "the producer must be retried five times before escalating (got " << restarts << " after " << posted << " errors)";
     EXPECT_EQ(source_failures, 0) << "an error outside the source bin must never be blamed on the source";
     {
