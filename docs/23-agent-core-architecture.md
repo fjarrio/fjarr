@@ -1005,7 +1005,19 @@ fjarr-opsim --server ws://fjarr-server:8080/ws --robot demo-robot-01 \
 
 It mints its own operator grant (HS256 over the dev secret with GLib's
 `GHmac`, the same claims the demo-backend uses) so it needs no browser and
-no backend. Scenarios, each with the assertions it makes and the state it
+no backend.
+
+**What the simulator may not judge: rate control under jitter.** Its
+`webrtcbin` receiver counts packets that arrive after it has sent feedback
+as lost. Measured 2026-09-24 on the `wifi-ok` profile, which injects 3 ms of
+jitter and **no loss at all**: the agent read loss of 34–51 % with a carried
+ratio of 0.47–0.57, and cut its estimate from 4 Mbps to 1.6 — correctly,
+because from where the agent sits half of what it sends is not arriving. A
+Chromium receiver does not do this under the same profile. So any netem
+profile with jitter **records** the rate rather than asserting it, and
+[`tests/stack/ratecontrol.spec.ts`](25-browser-lab.md) is where rate control
+is judged. The simulator is still the right tool for everything that does
+not depend on the receiver's own loss reporting. Scenarios, each with the assertions it makes and the state it
 expects the agent to end in:
 
 | Scenario | Drives | Asserts |

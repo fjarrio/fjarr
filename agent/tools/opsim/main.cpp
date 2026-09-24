@@ -1992,7 +1992,14 @@ struct NetemTolerance {
 // level and record decode health (15 % loss on a 5 fps stream needs a repair round trip per frame); the stamp is unreadable at
 // thumbnail resolution.
 const std::map<std::string, NetemTolerance> kNetemProfiles = {
-    {"lan", {"active", 8000, 5000, 100, 1000, true, 5000, true}},     {"wifi-ok", {"active", 8000, 5000, 100, 1000, true, 5000, true}},
+    {"lan", {"active", 8000, 5000, 100, 1000, true, 5000, true}},
+    // wifi-ok: RECORDED, not asserted, for the same reason as `lossy` below and measured on
+    // 2026-09-24. The profile injects 3 ms of jitter and ZERO loss, yet the agent's estimator reads
+    // loss 34-51 % with a carried ratio of 0.47-0.57 — because this simulator's webrtcbin receiver
+    // counts packets that arrive after its feedback as lost. The agent is then right to cut: from
+    // where it sits, half of what it sends is not arriving. Chromium does not do this, so the
+    // browser lab asserts this profile (tests/stack/ratecontrol.spec.ts).
+    {"wifi-ok", {"active", 8000, 5000, 100, 1000, true, 5000, false}},
     {"4g", {"active", 8000, 5000, 100, 1000, true, 5000, true}},
     // lossy: a webrtcbin *receiver* under media-path jitter reports packets that arrive after its feedback as lost
     // (20–50 % per window at 5 % real loss; Chromium reports ~5 % under the same profile, tests/stack/ratecontrol.spec.ts),
