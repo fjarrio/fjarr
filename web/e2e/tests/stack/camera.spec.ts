@@ -49,7 +49,12 @@ test.describe("fjarr.camera on the real agent (slice 4)", () => {
     expect(presented).toBeGreaterThan(20);
   });
 
-  test("three viewers watch two camera tracks concurrently (docs/06 acceptance)", async ({ loopback, context, out, stack }) => {
+  // @heavy: three browser viewers decoding six streams while the robot software-encodes
+  // them needs a machine. On a four-core hosted runner it starves and the viewers present
+  // a frame or two where fifteen are asked for — a hardware fact reported as a product
+  // failure. The acceptance criterion is real and must be demonstrated, so it runs in the
+  // nightly on the self-hosted runner instead of on every push (docs/25, docs/15).
+  test("three viewers watch two camera tracks concurrently (docs/06 acceptance) @heavy", async ({ loopback, context, out, stack }) => {
     const viewers: Loopback[] = [loopback];
     for (let i = 2; i <= 3; i++) {
       const page = await context.newPage();

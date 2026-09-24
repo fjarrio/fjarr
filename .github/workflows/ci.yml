@@ -75,13 +75,11 @@ jobs:
           # `-n` never prompts: harmless here (hosted sudo is passwordless) and it stops
           # this hanging forever if anyone ever points CI at a self-hosted machine.
           sudo -n mkdir -p /dev/dri || mkdir -p /dev/dri || true
-          # coturn rides the lab profile from slice 7b: without it the latency harness's relay
-          # column cannot be measured at all (docs/25).
-          # FJARR_WEBHOOK_URL points the sidecar at demo-backend so the ADR-0015 webhook half
-          # is exercised (tests/stack/contract.spec.ts); demo-backend starts below and the
-          # sidecar's delivery retries cover the gap.
-          FJARR_TURN_URLS=turn:coturn:3478 FJARR_WEBHOOK_URL=http://demo-backend:9090/api/fjarr/webhook \
-            docker compose --profile lab --profile stack up -d --build --wait browser fjarr-server coturn
+          # TURN and the webhook URL come from .env (copied above), NOT from this line: a
+          # later `docker compose up` without them recreates fjarr-server without them, and
+          # then relay sessions never connect and no webhook is ever delivered. That is
+          # exactly how both broke the first time.
+          docker compose --profile lab --profile stack up -d --build --wait browser fjarr-server coturn
           docker compose build dev
           docker compose up -d dev
           docker compose exec -T dev make agent-build
@@ -95,11 +93,16 @@ jobs:
           E2E_SERVER_WS: ws://fjarr-server:8080/ws
           E2E_SERVER_HTTP: http://localhost:8080
           E2E_DASHBOARD_HTTP: http://localhost:5173
+          # the harness runs on the runner host here, so compose service names do not resolve
+          E2E_BACKEND_HTTP: http://localhost:9090
           E2E_INTROSPECT_HTTP: http://localhost:7381
           E2E_VIEWER_URL: http://demo-robot:7381/
           CI: "true"
         # pnpm 10 forwards `--` literally: call playwright through `exec` to pass flags
-        run: pnpm --filter '@fjarr/e2e' exec playwright test --project loopback --project stack
+        # @heavy suites need more machine than a hosted runner has; the nightly runs them
+        # on the self-hosted one. Excluding them here is not lowering the bar — it moves
+        # the bar to where it can be measured (docs/15, docs/25).
+        run: pnpm --filter '@fjarr/e2e' exec playwright test --project loopback --project stack --grep-invert '@heavy'
       - name: unit + loop tests under ThreadSanitizer (a gate, docs/15; runner-level because of the sysctl)
         run: |
           # TSan's shadow layout vs 32-bit ASLR entropy (docs/12); `-n` never prompts.

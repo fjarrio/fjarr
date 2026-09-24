@@ -74,14 +74,28 @@ impl Config {
                 .unwrap_or(600);
             config.turn = turn_from_env_values(&urls, &secret, ttl_secs);
         }
-        if let (Ok(url), Ok(secret)) = (
-            std::env::var("FJARR_WEBHOOK_URL"),
-            std::env::var("FJARR_WEBHOOK_SECRET"),
+        // Same trap the TURN list has, and the same answer: compose passes
+        // `FJARR_WEBHOOK_URL=""` when it is unset, which `env::var` reports as a
+        // perfectly good empty string. Building a sink from it made every lifecycle
+        // event fail to send and retry three times — a warning storm in the log of a
+        // server nobody asked to deliver webhooks at all.
+        if let (Some(url), Some(secret)) = (
+            non_empty_env("FJARR_WEBHOOK_URL"),
+            non_empty_env("FJARR_WEBHOOK_SECRET"),
         ) {
             config.event_sink = Arc::new(WebhookSink::new(url, secret));
         }
         config
     }
+}
+
+/// An environment variable that is set but blank is not configuration. Compose writes
+/// `VAR=""` for every unset interpolation, so "present" and "meaningful" differ here.
+fn non_empty_env(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
 }
 
 /// TURN from `FJARR_TURN_URLS` / `FJARR_TURN_SECRET`: an empty or
@@ -129,7 +143,27 @@ async fn healthz() -> &'static str {
 
 #[cfg(test)]
 mod env_tests {
-    use super::turn_from_env_values;
+    use super::{non_empty_env, turn_from_env_values};
+
+    /// Compose writes `VAR=""` for every unset interpolation, so a variable can be
+    /// present and meaningless. Treating those apart is the difference between "no
+    /// webhooks configured" and "every event fails to send, three times, forever".
+    #[test]
+    fn a_blank_environment_variable_is_not_configuration() {
+        // SAFETY: single-threaded test, and the names are unique to it.
+        unsafe {
+            std::env::set_var("FJARR_TEST_BLANK", "");
+            std::env::set_var("FJARR_TEST_SPACES", "   ");
+            std::env::set_var("FJARR_TEST_SET", "  https://example.test/hook  ");
+        }
+        assert_eq!(non_empty_env("FJARR_TEST_BLANK"), None);
+        assert_eq!(non_empty_env("FJARR_TEST_SPACES"), None);
+        assert_eq!(non_empty_env("FJARR_TEST_UNSET_ENTIRELY"), None);
+        assert_eq!(
+            non_empty_env("FJARR_TEST_SET").as_deref(),
+            Some("https://example.test/hook")
+        );
+    }
 
     #[test]
     fn empty_turn_url_list_means_no_turn() {

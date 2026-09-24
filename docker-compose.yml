@@ -200,9 +200,11 @@ services:
 
   # ---------------------------------------------------------------- turn --
   coturn:
-    # `lab` too, from slice 7b: the latency harness's relay column needs a real
-    # TURN server to measure through (docs/25, docs/16).
-    profiles: [turn, lab]
+    # Every profile that runs fjarr-server runs coturn, because the sidecar mints TURN
+    # credentials from `.env` and credentials pointing at a server that is not there are
+    # worse than none: ICE waits on it. `lab` needs it for the latency harness's relay
+    # column (docs/25, docs/16); `demo` because a customer's topology has a relay.
+    profiles: [turn, lab, demo, stack]
     image: coturn/coturn:4.6-alpine
     # use-auth-secret from day one: ephemeral HMAC credentials only, never
     # static passwords (teleop-car lesson — docs/10-security.md).

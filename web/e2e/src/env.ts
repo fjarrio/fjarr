@@ -18,6 +18,12 @@ export const env = {
   dashboardHttp: process.env.E2E_DASHBOARD_HTTP ?? process.env.E2E_DASHBOARD_URL ?? "http://demo-dashboard:5173",
   /** The demo backend as the BROWSER reaches it (the dashboard fetches grants from it). */
   dashboardBackend: process.env.E2E_DASHBOARD_BACKEND ?? "http://demo-backend:9090",
+  /**
+   * The demo backend as the HARNESS reaches it. Not the same thing: the harness runs in
+   * `dev` on the compose network locally, but on the runner's host in CI, where compose
+   * service names do not resolve and the port is published on loopback instead.
+   */
+  backendHttp: process.env.E2E_BACKEND_HTTP ?? process.env.E2E_DASHBOARD_BACKEND ?? "http://demo-backend:9090",
   /** Dev hooks shared with compose (.env / docs/09). */
   grantSecret: process.env.FJARR_GRANT_HS256_SECRET ?? "dev-only-grant-secret",
   deviceToken: process.env.FJARR_DEV_DEVICE_TOKEN ?? "dev-only-device-token",

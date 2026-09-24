@@ -13,7 +13,7 @@ description: The M1 gate checked promise by promise against evidence — what he
 
 | Promise | Verdict | Evidence |
 |---|---|---|
-| demo-robot streams **2 tracks to 3 browsers** through the sidecar | met, on CI-class hardware | `tests/stack/camera.spec.ts` — three pages, both camera tracks, one producer each. Its fan-out assertion was racy and is fixed below; it cannot pass on this laptop for reasons that are not Fjarr's ([below](#what-this-machine-cannot-check)) |
+| demo-robot streams **2 tracks to 3 browsers** through the sidecar | met, but **nightly-gated** | `tests/stack/camera.spec.ts` — three pages, both camera tracks, one producer each. Its fan-out assertion was racy and is fixed below. It does not pass on a four-core hosted runner either, which this review first assumed it did: three viewers decoding six streams while the robot software-encodes them starves the machine. It is tagged `@heavy` and runs in the nightly on the self-hosted runner, so **CI green does not cover this row** ([below](#what-this-machine-cannot-check)) |
 | the demo backend **minting grants** per ADR-0015 | met since slice 3b | every `stack` test connects with a grant the demo backend minted; role-scoped grants in `introspect.spec.ts` |
 | the demo backend **receiving webhooks** per ADR-0015 | **was not met** — now met | finding 1: nothing had ever delivered one. `tests/stack/contract.spec.ts` now asserts signed `session.started`/`session.ended` arrive and that forged ones are refused |
 | **reconnect + ICE restart** under fault injection | met | `agent.spec.ts` (ice-restart → `session-close{retry:true}` against the real agent), `ladder.spec.ts` (server restart, silent agent, peer-gone), `faults.spec.ts` (killed agent, server restart under the **real** agent) |
@@ -52,10 +52,15 @@ are expected. The same starvation makes the simulator's hot-plug scenario
 intermittent when run after others, while it passes alone.
 
 This is recorded in [docs/25](../25-browser-lab.md), and it is why the latency
-harness refuses to hold a CPU-limited run to a budget. For the gate it means
-the two media acceptance items are **verified on CI, not here**, and the
-honest statement of this review is that the gate is met subject to the next CI
-run being green.
+harness refuses to hold a CPU-limited run to a budget.
+
+**Correction, after the first CI run of this work.** This review originally
+said the media acceptance items were verified on CI. They were not: the
+three-viewer suite starves a four-core hosted runner too, for the same reason
+it starves a laptop. It is now tagged `@heavy` and demonstrated in the nightly
+on the self-hosted runner, which has the cores for it. So the gate is met with
+that row resting on the nightly rather than on CI — which is a weaker claim
+than the one first written here, and the true one.
 
 ## Follow-ups
 

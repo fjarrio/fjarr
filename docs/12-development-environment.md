@@ -11,7 +11,8 @@ your setup can do what the specs assume.
 
 ```bash
 git clone <repo> fjarr && cd fjarr
-cp .env.example .env            # then check RENDER_GID matches your host:
+cp .env.example .env            # an .env from before 2026-09-24 needs FJARR_WEBHOOK_URL
+                                # then check RENDER_GID matches your host:
 stat -c %g /dev/dri/renderD128  # → RENDER_GID in .env
 # recommended, once per host: let ThreadSanitizer run inside containers (below)
 sudo sysctl -w vm.mmap_rnd_bits=28 && echo 'vm.mmap_rnd_bits=28' | sudo tee /etc/sysctl.d/60-tsan.conf

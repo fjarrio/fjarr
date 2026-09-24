@@ -365,6 +365,15 @@ reconnect round is now a counted round rather than a fatal error
    asserts the selected candidate pair really is relayed. Input-to-photon
    waits for a robot-side input path and lands with `fjarr.desktop` in M3.
 
+**`@heavy` suites run in the nightly, not on every push.** A test tagged
+`@heavy` in its title needs more machine than a hosted runner has — three
+browser viewers decoding six streams while the robot software-encodes them is
+the current example. CI runs `--grep-invert '@heavy'`; the nightly runs
+`--grep '@heavy'` on the self-hosted runner. This is not a lowered bar: the
+acceptance criterion is still demonstrated, on hardware where the result means
+something rather than measuring the runner. A suite that starves reports a
+hardware fact as a product failure, and that teaches people to ignore it.
+
 > **Running the media suites back to back locally starves the software
 > encoder.** `agent`, `camera` and `ratecontrol` pass one file at a time and
 > fail together on a developer laptop: several 720p30 software encodes, each

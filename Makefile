@@ -14,8 +14,7 @@ sim-up: ## Start the fake robot desktop (watch it at http://localhost:6080)
 
 .PHONY: demo-up
 demo-up: ## Start the full three-demo customer topology
-	FJARR_WEBHOOK_URL=$${FJARR_WEBHOOK_URL:-http://demo-backend:9090/api/fjarr/webhook} \
-	  docker compose --profile demo up -d --build
+	docker compose --profile demo up -d --build
 
 .PHONY: demo-down
 demo-down: ## Stop the demo stack
@@ -32,8 +31,7 @@ turn-up: ## Start coturn (use-auth-secret mode)
 # ------------------------------------------------------------ browser lab --
 .PHONY: lab-up
 lab-up: ## Start the lab browser (CDP at http://localhost:9222) beside fjarr-server and coturn (docs/25)
-	FJARR_TURN_URLS=$${FJARR_TURN_URLS:-turn:coturn:3478} \
-	  docker compose --profile lab --profile stack up -d --build browser fjarr-server coturn
+	docker compose --profile lab --profile stack up -d --build browser fjarr-server coturn
 
 .PHONY: lab-down
 lab-down: ## Stop the lab browser

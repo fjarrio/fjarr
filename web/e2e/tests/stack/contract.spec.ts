@@ -10,7 +10,7 @@
 import { expect, test } from "../../src/fixtures.ts";
 import { env } from "../../src/env.ts";
 
-const backend = env.dashboardBackend;
+const backend = env.backendHttp; // the harness's view, not the browser's (they differ in CI)
 
 interface Received {
   event: string;

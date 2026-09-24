@@ -109,6 +109,18 @@ jobs:
         run: |
           FJARR_TURN_URLS=turn:coturn:3478 docker compose --profile lab --profile stack up -d --build --wait browser coturn
           pnpm --filter '@fjarr/e2e' exec playwright test tests/stack/latency.spec.ts --project stack
+      - name: the @heavy acceptance suites CI cannot hold (docs/15)
+        # Three viewers decoding six streams while the robot encodes them: a hardware
+        # requirement, so it is demonstrated here rather than on every push.
+        env:
+          E2E_BROWSER: http://localhost:9222
+          E2E_PAGE_ORIGIN: http://host.docker.internal:5174
+          E2E_SERVER_WS: ws://fjarr-server:8080/ws
+          E2E_SERVER_HTTP: http://localhost:8080
+          E2E_BACKEND_HTTP: http://localhost:9090
+          E2E_INTROSPECT_HTTP: http://localhost:7381
+          CI: "true"
+        run: pnpm --filter '@fjarr/e2e' exec playwright test --project stack --grep '@heavy'
       - name: profiles and logs
         if: always()
         uses: actions/upload-artifact@v4
