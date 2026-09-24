@@ -23,10 +23,15 @@ class TierPolicy {
     const std::string& effective() const { return effective_; }
     bool demoted() const { return overridden_; }
 
+    /// The sender must be pushing at least this share of the estimate for it to count as tested.
+    static constexpr double TESTED_RATIO = 0.9;
+
     /// One tick with this viewer's allotment for the track; `active_low_bps` is the active band's
     /// floor (the demotion line and, ×1.2, the promotion line); `lower_possible` = the track can
-    /// serve a thumbnail tier. Returns the new effective tier when it changed.
-    std::optional<std::string> update(double allotment_bps, double active_low_bps, bool lower_possible, clock::time_point now);
+    /// serve a thumbnail tier; `estimate_tested` = the peer is actually sending at or above its
+    /// estimate, so a low estimate means a limit rather than an untested guess (docs/23). Returns
+    /// the new effective tier when it changed.
+    std::optional<std::string> update(double allotment_bps, double active_low_bps, bool lower_possible, bool estimate_tested, clock::time_point now);
 
   private:
     std::string demanded_ = "active";

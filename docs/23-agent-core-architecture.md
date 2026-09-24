@@ -556,8 +556,23 @@ serves every viewer of a tier. The two meet like this (ADR-0007; planned
   `thumbnail`. The `EncoderAdapter` applies it live (`set_bitrate`; an
   encoder that cannot change bitrate while playing gets a keyframe and a
   reconfigure, which the adapter reports so the doctor can say so).
+- **Demotion needs evidence, not just a low number.** The estimator never
+  believes in more bandwidth than 1.5× what arrived, because an encoder
+  sending less than the estimate proves nothing about the ceiling. The
+  mirror of that rule was missing and cost a real defect (found by the
+  nightly, 2026-09-24): a track whose content compresses well — a static
+  scene, a camera on a white wall, the test pattern — emits far below its
+  target, so the estimate is pinned near what little arrived, falls under
+  the band floor, and the viewer is **demoted on a perfect link**. An
+  estimate the sender never pushed against is untested, not low. So a
+  viewer is demoted only while the peer is actually sending at or above its
+  estimate (≥ 0.9 × it, over the same feedback window); below that the
+  demotion timer does not even start. Promotion is unaffected: an
+  unexercised estimate that is *high* is still evidence a viewer can be
+  restored.
 - **Per peer: a tier.** A subscriber whose estimate stays below its tier's
-  `band_low` for 2 s is demoted to the next lower tier *by the agent*:
+  `band_low` for 2 s **while that estimate is being tested** is demoted to
+  the next lower tier *by the agent*:
   its hub subscription moves, a keyframe is requested, `bandwidth-stats`
   reports `effective_tier` below `tier`. It is promoted back when its
   estimate stays above 1.2 × the higher tier's `band_low` for 10 s. The

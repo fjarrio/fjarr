@@ -747,6 +747,11 @@ void Session::rate_tick() {
     last_twcc_ = twcc;
     if (same) twcc.packets = 0;
     estimator_->update(twcc, now);
+    // Is the estimate a measurement or a guess? The estimator credits no more than 1.5x what
+    // arrived, so a source that compresses well (a static scene, the test pattern) pins it low
+    // while the link is perfect. Demoting on that is demoting on nothing — the peer has to be
+    // pushing against the estimate for it to mean anything (docs/23#rate-control-and-tier-switching).
+    const bool estimate_tested = twcc.packets > 0 && twcc.bitrate_sent >= media::TierPolicy::TESTED_RATIO * estimator_->estimate_bps();
     if (enabled.empty() || sum_targets <= 0) return;
     // Share the peer's estimate across its tracks in proportion to their tier targets; report
     // each share to the plane (the encoder follows the minimum over its viewers) and tick the
@@ -761,7 +766,7 @@ void Session::rate_tick() {
         // the active tier would need instead.
         const double judged = ct->tier == "active" ? ct->allotment_bps : estimator_->estimate_bps() * (deps_.plane->band_kbps(ct->track_id, "active").second * 1000.0) / (sum_targets - target + deps_.plane->band_kbps(ct->track_id, "active").second * 1000.0);
         auto& policy = tier_policy_[ct->track_id];
-        if (auto changed = policy.update(judged, active_low, deps_.plane->tier_possible(ct->track_id, "thumbnail"), now)) {
+        if (auto changed = policy.update(judged, active_low, deps_.plane->tier_possible(ct->track_id, "thumbnail"), estimate_tested, now)) {
             log::info("session", policy.demoted() ? "tier reduced for this viewer" : "tier restored for this viewer",
                       {{"session", sid8_}, {"track", ct->track_id}, {"tier", *changed}, {"estimate_bps", std::to_string(static_cast<long long>(estimator_->estimate_bps()))}});
             apply_demand(ct->track_id, true, ct->demanded_tier); // resolves to the new effective tier

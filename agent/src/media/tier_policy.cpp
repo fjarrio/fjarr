@@ -13,10 +13,14 @@ void TierPolicy::set_demanded(const std::string& tier) {
     effective_ = overridden_ ? "thumbnail" : tier;
 }
 
-std::optional<std::string> TierPolicy::update(double allotment_bps, double active_low_bps, bool lower_possible, clock::time_point now) {
+std::optional<std::string> TierPolicy::update(double allotment_bps, double active_low_bps, bool lower_possible, bool estimate_tested, clock::time_point now) {
     if (demanded_ != "active") return std::nullopt;
     if (!demoted()) {
-        if (!lower_possible || allotment_bps >= active_low_bps) {
+        // An estimate the sender never pushed against is untested, not low: a scene that compresses
+        // well emits far below its target, the estimator will not credit more than 1.5x what
+        // arrived, and the viewer would be demoted on a perfect link (docs/23; found by the nightly
+        // 2026-09-24). The timer does not even start until the estimate is a real constraint.
+        if (!lower_possible || !estimate_tested || allotment_bps >= active_low_bps) {
             below_since_.reset();
             return std::nullopt;
         }
