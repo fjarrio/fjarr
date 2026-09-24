@@ -99,10 +99,7 @@ jobs:
           E2E_VIEWER_URL: http://demo-robot:7381/
           CI: "true"
         # pnpm 10 forwards `--` literally: call playwright through `exec` to pass flags
-        # @heavy suites need more machine than a hosted runner has; the nightly runs them
-        # on the self-hosted one. Excluding them here is not lowering the bar — it moves
-        # the bar to where it can be measured (docs/15, docs/25).
-        run: pnpm --filter '@fjarr/e2e' exec playwright test --project loopback --project stack --grep-invert '@heavy'
+        run: pnpm --filter '@fjarr/e2e' exec playwright test --project loopback --project stack
       - name: unit + loop tests under ThreadSanitizer (a gate, docs/15; runner-level because of the sysctl)
         run: |
           # TSan's shadow layout vs 32-bit ASLR entropy (docs/12); `-n` never prompts.

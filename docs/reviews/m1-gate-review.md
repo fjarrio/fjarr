@@ -13,7 +13,7 @@ description: The M1 gate checked promise by promise against evidence — what he
 
 | Promise | Verdict | Evidence |
 |---|---|---|
-| demo-robot streams **2 tracks to 3 browsers** through the sidecar | met, but **nightly-gated** | `tests/stack/camera.spec.ts` — three pages, both camera tracks, one producer each. Its fan-out assertion was racy and is fixed below. It does not pass on a four-core hosted runner either, which this review first assumed it did: three viewers decoding six streams while the robot software-encodes them starves the machine. It is tagged `@heavy` and runs in the nightly on the self-hosted runner, so **CI green does not cover this row** ([below](#what-this-machine-cannot-check)) |
+| demo-robot streams **2 tracks to 3 browsers** through the sidecar | met, on CI | `tests/stack/camera.spec.ts` — three pages, both camera tracks, one producer each. Getting here took two corrections of this review's own making ([below](#what-this-machine-cannot-check)) |
 | the demo backend **minting grants** per ADR-0015 | met since slice 3b | every `stack` test connects with a grant the demo backend minted; role-scoped grants in `introspect.spec.ts` |
 | the demo backend **receiving webhooks** per ADR-0015 | **was not met** — now met | finding 1: nothing had ever delivered one. `tests/stack/contract.spec.ts` now asserts signed `session.started`/`session.ended` arrive and that forged ones are refused |
 | **reconnect + ICE restart** under fault injection | met | `agent.spec.ts` (ice-restart → `session-close{retry:true}` against the real agent), `ladder.spec.ts` (server restart, silent agent, peer-gone), `faults.spec.ts` (killed agent, server restart under the **real** agent) |
@@ -54,13 +54,30 @@ intermittent when run after others, while it passes alone.
 This is recorded in [docs/25](../25-browser-lab.md), and it is why the latency
 harness refuses to hold a CPU-limited run to a budget.
 
-**Correction, after the first CI run of this work.** This review originally
-said the media acceptance items were verified on CI. They were not: the
-three-viewer suite starves a four-core hosted runner too, for the same reason
-it starves a laptop. It is now tagged `@heavy` and demonstrated in the nightly
-on the self-hosted runner, which has the cores for it. So the gate is met with
-that row resting on the nightly rather than on CI — which is a weaker claim
-than the one first written here, and the true one.
+**Two corrections, both of this review's own making.** They are left here
+rather than tidied away, because the sequence is the lesson.
+
+Finding 3 replaced a fixed two-second wait with a poll on the hub's
+subscriber count. That was right, but the two seconds had been doing a second
+job nobody had written down: giving the frame-stamp watchers time to collect
+frames before the next assertion read them. On a fast machine the poll returns
+in milliseconds, so that assertion began reading empty watchers.
+
+I then mis-read the resulting CI failure as hardware. It looked exactly like
+the starvation documented above, so I tagged the suite `@heavy` and moved it
+to the nightly — a workaround for a problem I had introduced, resting on a
+diagnosis that the evidence did not support. The tell was there and I walked
+past it: the suite failed in **3.7 seconds**, far too fast to be a machine
+running out of breath, and it had been green on hosted CI before this review
+touched it.
+
+The fix is to wait for the frames themselves rather than for a duration, which
+depends on no machine's speed. With that, the suite passes on a four-core
+runner and on a laptop that genuinely does starve under load. The `@heavy`
+mechanism is gone: it existed only to serve the wrong diagnosis.
+
+The starvation described above is real and still applies to the media suites
+run back to back. It simply was not this.
 
 ## Follow-ups
 

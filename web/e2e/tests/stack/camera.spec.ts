@@ -49,12 +49,7 @@ test.describe("fjarr.camera on the real agent (slice 4)", () => {
     expect(presented).toBeGreaterThan(20);
   });
 
-  // @heavy: three browser viewers decoding six streams while the robot software-encodes
-  // them needs a machine. On a four-core hosted runner it starves and the viewers present
-  // a frame or two where fifteen are asked for — a hardware fact reported as a product
-  // failure. The acceptance criterion is real and must be demonstrated, so it runs in the
-  // nightly on the self-hosted runner instead of on every push (docs/25, docs/15).
-  test("three viewers watch two camera tracks concurrently (docs/06 acceptance) @heavy", async ({ loopback, context, out, stack }) => {
+  test("three viewers watch two camera tracks concurrently (docs/06 acceptance)", async ({ loopback, context, out, stack }) => {
     const viewers: Loopback[] = [loopback];
     for (let i = 2; i <= 3; i++) {
       const page = await context.newPage();
@@ -92,9 +87,18 @@ test.describe("fjarr.camera on the real agent (slice 4)", () => {
         )
         .toEqual({ pattern: 3, rtsp: 3, producers: ["producer:pattern", "producer:rtsp"] });
     }
+    // Poll rather than read once. This used to sit behind a fixed 2 s wait; the hub check above
+    // replaced that wait with a poll, and on a fast machine the poll returns in milliseconds — so
+    // the stamp watchers had no time to collect anything before this ran, and the suite failed in
+    // under four seconds on the one machine powerful enough to pass it. Waiting for the frames
+    // themselves depends on no machine's speed.
     for (const v of viewers) {
-      const s = await v.stamps("pattern"); // grid tiles are small: the stamp may be unreadable, presented frames still count
-      expect(s.frames + s.unreadable, "each viewer presents the pattern").toBeGreaterThan(15);
+      await expect
+        .poll(async () => {
+          const s = await v.stamps("pattern"); // grid tiles are small: the stamp may be unreadable, presented frames still count
+          return s.frames + s.unreadable;
+        }, { timeout: 30_000, message: "a viewer never presented the pattern" })
+        .toBeGreaterThan(15);
     }
     for (const v of viewers.slice(1)) await v.page.close();
   });
