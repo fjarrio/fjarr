@@ -405,13 +405,29 @@ server. The doctor gains a row per configured source.
 
 ### Encoders and tiers
 
-The core owns encoding through the `EncoderAdapter` seam (VA-API H.264
-first; the doctor's `vah264enc`), so a source never picks an encoder and
-hardware differences (Jetson later) stay in one place. The adapter
-chooses the upload/convert path from the source's memory type (DMABuf →
-`vapostproc` without a copy; system memory → `videoconvert !
-vapostproc`); a pre-encoded output bypasses it (`h264parse
-config-interval=-1` only).
+The core owns encoding through the `EncoderAdapter` seam, so a source never
+picks an encoder and hardware differences stay in one place. From M2.6 there
+are **four families** — `software`, `vaapi`, `nvcodec`, `nvv4l2` —
+selected by `media.encoder` ([ADR-0025](adr/0025-encoder-families.md), which
+also fixes the `auto` order and the rule that each family owes the nightly a
+runner).
+
+**The source's memory type picks the upload path, not the encoder.** A frame
+already on the device is never round-tripped through system memory, and a
+frame in system memory is converted once, on the CPU, and uploaded once:
+DMABuf → `vapostproc`; system memory → `videoconvert ! vapostproc` for
+VA-API, `videoconvert ! cudaupload` for nvcodec (or `cudaupload !
+cudaconvertscale` where the CUDA runtime compiler is present); NVMM →
+`nvvidconv`. A tier's scale and rate filters move to the device wherever a
+device-side equivalent exists. A pre-encoded output bypasses all of it
+(`h264parse config-interval=-1` only).
+
+**A family declares whether it can change bitrate while playing.** Rate
+control ([below](#rate-control-and-tier-switching)) sets a tier's target
+every 500 ms; a family that cannot take a live change says so, and its tracks
+fall back to tier switching alone through the same `adaptive: false` path
+passthrough uses. No family may make `bandwidth-stats` claim an adaptivity it
+does not have.
 
 Tiers (docs/16) are **separate producers of the same source output**: the
 output goes through a `tee`; `active` encodes at full resolution/fps,

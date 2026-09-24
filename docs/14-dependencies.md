@@ -23,6 +23,9 @@ groups with comments.
 | libevdev | 1.13.6 | uinput helper | MIT-ish (X11) | yes (in `fjarr-inputd`) |
 | libdbus / sd-bus | 26.04 | portal negotiation | AFL-2.1/GPL dual → use LGPL path; verify at M2 | yes — in `fjarr-desktop-wayland` only |
 | nlohmann-json | 3.11 | envelopes, config | MIT | yes |
+| GStreamer `nvcodec` plugin (`nvh264enc`, plugins-bad) | 1.28 | the `nvcodec` encoder family for discrete NVIDIA cards ([ADR-0025](adr/0025-encoder-families.md), M2.6) | LGPL-2.1 (dynamic) | yes (optional) |
+| NVIDIA driver libraries (`libnvidia-encode`, `libcuda`) | the host's driver | what `nvcodec` loads at runtime; **never linked or redistributed by us** — the machine's own driver install provides them, exactly as the Intel VA driver is | proprietary, not shipped | **no** |
+| NVIDIA L4T GStreamer (`nvv4l2h264enc`) | JetPack | the `nvv4l2` encoder family on Jetson (M2.6); from NVIDIA's own repository on the board, arm64 only | NVIDIA SDK terms, not shipped | **no** |
 | openh264 (`openh264enc`, plugins-bad) | 2.4 | the explicit `encoder = "software"` path (CI, no-GPU dev, portable robots) — never a silent fallback (docs/23) | BSD-2 | yes (optional) |
 | libsoup-3 (+ glib-networking) | 3.6 | WS/HTTP signaling client (ADR-0017) and the introspection server (docs/24) | LGPL-2.1 (dynamic) | yes |
 | toml++ (`tomlplusplus`) | 3.4 (header-only) | `fjarr.toml` config (docs/23) | MIT | yes |

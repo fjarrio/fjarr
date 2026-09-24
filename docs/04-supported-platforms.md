@@ -14,16 +14,27 @@ one. Targets outside the primary column are adapters, not core concerns.
 | Ubuntu 24.04 LTS | Embedders only, at their own risk | GStreamer 1.24 works as the offerer against browsers; a `webrtcbin` answerer (`fjarr-opsim`, loop tests) needs ≥ 1.26 for `reuse-source-pads` ([docs/23](23-agent-core-architecture.md#offer-construction-and-renegotiation)); not supported by the packaged agent |
 | Ubuntu 22.04 | Not targeted | GStreamer 1.20 lacks `vah264enc`, unusable libei; upgrade the robot instead |
 | Debian 13 / other distros | Untested, likely works | Same component versions; no CI |
-| NVIDIA Jetson (Ubuntu-based) | Planned adapter | camera-streamer heritage: `nvv4l2h264enc` encoder adapter; post-M6, [open question](18-open-questions.md) |
+| NVIDIA Jetson (Ubuntu-based, L4T) | Planned, M2.6 | arm64, NVIDIA's own GStreamer: the `nvv4l2` encoder family ([ADR-0025](adr/0025-encoder-families.md)). **Not** the nvcodec plugin a desktop card uses — different plugin, packages and memory type |
 
 ## Robot — GPU / encoder
 
-| | Status | Notes |
-|---|---|---|
-| **Intel VA-API (iHD)** | **Primary** | `vah264enc` via GStreamer `va`; Gen9+ iGPU incl. Meteor Lake NUCs; `LIBVA_DRIVER_NAME=iHD` |
-| Software fallback | Dev only | `openh264enc`/`vp8enc` for machines without a GPU — never the product path ([docs/16](16-performance-budgets.md)) |
-| `x264enc` | **Forbidden in shipped artifacts** | GPL — [ADR-0011](adr/0011-license-open-core.md); doctor enforces absence |
-| NVIDIA (`nvh264enc`/Jetson) | Planned adapter | with the Jetson work |
+Four families behind one adapter ([ADR-0025](adr/0025-encoder-families.md)).
+**A family with no nightly runner is best effort and untested, never
+supported** — a hardware path nobody exercises rots quietly and is then
+found by a customer:
+
+| Family (`media.encoder`) | Status | Nightly runner | Notes |
+|---|---|---|---|
+| **`vaapi`** (Intel iHD) | **Primary** | wanted | `vah264enc` via GStreamer `va`; Gen9+ iGPU incl. Meteor Lake NUCs; `LIBVA_DRIVER_NAME=iHD`; DMABuf straight into `vapostproc` |
+| `nvcodec` (NVIDIA dGPU) | Planned, M2.6 | **yes** (`gpu-desktop`, RTX 2080 Ti) | `nvh264enc`, CUDA memory, x86-64; needs the container toolkit's `video` capability (`NVIDIA_DRIVER_CAPABILITIES`), and the CUDA runtime compiler for device-side convert/scale |
+| `nvv4l2` (Jetson) | Planned, M2.6 | no board yet | `nvv4l2h264enc`, NVMM, arm64, L4T packages from NVIDIA |
+| `software` | Explicit choice only | every runner | `openh264enc` for machines with no usable hardware family — never chosen silently ([docs/16](16-performance-budgets.md), [docs/23](23-agent-core-architecture.md)) |
+| `x264enc` | **Forbidden in shipped artifacts** | — | GPL — [ADR-0011](adr/0011-license-open-core.md); doctor enforces absence |
+
+`auto` probes `vaapi`, then `nvv4l2`, then `nvcodec`, and fails loudly when
+none works. On a robot with an Intel iGPU **and** a discrete NVIDIA card the
+iGPU wins on purpose: the dGPU is usually running perception, and taking its
+encoder to stream a camera steals from the job the robot exists to do.
 
 ## Robot — display server (remote desktop capability)
 

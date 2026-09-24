@@ -46,3 +46,4 @@ options weighed, the choice, and its consequences — so future maintainers
 | [0022](0022-baseline-ubuntu-2604-gstreamer-128.md) | Baseline bump to Ubuntu 26.04 LTS / GStreamer 1.28 | accepted |
 | [0023](0023-network-tunnel-virtual-interface.md) | The network tunnel is a virtual interface, not forwarded sockets | accepted |
 | [0024](0024-native-operator-client.md) | `fjarr-connect` — a native operator client, data channels only | accepted |
+| [0025](0025-encoder-families.md) | Four encoder families behind one adapter, and what each owes CI | accepted |
