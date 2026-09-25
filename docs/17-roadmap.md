@@ -290,6 +290,32 @@ pulled ahead of M3 or M4 if a design partner needs field debugging sooner**,
 and the [spike](../agent/spikes/ros2-tunnel/README.md) already de-risked the
 unknowns.
 
+**Pulled forward, in two slices (planned 2026-09-25).** The installer is the
+only part that needs packaging; in the lab, compose creates the device the
+same way the installer will, so everything else is buildable and testable
+now:
+
+- **4.5a — the agent side.** The core cannot route inbound stream-class data
+  at all today: it assumes every binary channel is a bulk one, so a tunnel
+  packet would be dropped and counted. That comes first, with the framing
+  declared like bulk's (`raw` for the tunnel, so ADR-0018's chunker stays
+  unbuilt until something needs it). Then the `fjarr.net` capability:
+  attaching to a persistent device, the packet pump, derived addressing, the
+  two policy rules that make isolation structural, the bounded tail-dropping
+  queue, and `link-stats`. Proven end to end by an **opsim tunnel
+  scenario** — the simulator is already a webrtcbin answerer, so it can
+  attach its own device and send real IP traffic long before the Rust client
+  exists, which is where the spike's surprises lived. *Gate:* IP reaches the
+  robot over a real data channel; a packet not addressed to the robot's own
+  tunnel address is dropped; the queue tail-drops instead of growing.
+- **4.5b — `fjarr-connect`** ([ADR-0024](adr/0024-native-operator-client.md))
+  and the real end-to-end: ssh, a hash-verified `scp`, `ros2 topic list`, and
+  two robots at once proving they cannot reach each other. The shared
+  signaling types move into their own crate **here**, when a second consumer
+  exists: the protocol module is 217 lines needing only serde, while the
+  signaling crate carries axum, hyper and the HMAC stack that an operator CLI
+  has no business linking.
+
 **Gate:** [docs/06 `fjarr.net` criteria](06-capabilities.md) —
 `ssh` and a hash-verified 1 GB `scp` to a robot behind carrier NAT; `ros2
 topic list` against it with Fast DDS unconfigured and with the documented
