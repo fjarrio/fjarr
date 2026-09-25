@@ -5,6 +5,9 @@
 // install smoke test, docs/06) and streams the test pattern to the demo
 // dashboard through fjarr-server.
 #include <csignal>
+
+#include <pwd.h>
+#include <unistd.h>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -12,6 +15,13 @@
 #include <fjarr/fjarr.hpp>
 
 namespace {
+/// The account this process runs as: the only one the agent can start a shell for, since it runs
+/// unprivileged and verifies rather than switches (docs/10#terminal).
+std::string current_user() {
+    const struct passwd* pw = ::getpwuid(::geteuid());
+    return pw && pw->pw_name ? pw->pw_name : std::to_string(::geteuid());
+}
+
 const char* env_or(const char* name, const char* fallback) {
     const char* v = std::getenv(name);
     return v && *v ? v : fallback; // an empty variable (compose's `${X:-}`) means unset
@@ -53,6 +63,11 @@ int main() {
               {"latency", 200},
               {"protocols", "tcp"}}}}},
           {"webcam", {{"label", "Webcam"}, {"source", webcam_source()}}}}}};
+    // fjarr.terminal (docs/06): named user, no default. The demo names the account the container
+    // already runs as, because the agent verifies rather than switches (docs/10#terminal).
+    config.capabilities["fjarr.terminal"] = {{"enabled", true},
+                                            {"user", std::string(env_or("FJARR_DEMO_TERMINAL_USER", current_user().c_str()))},
+                                            {"shell", "/bin/bash"}};
     config.apply_env(); // FJARR_SERVER_URL, FJARR_DEV_DEVICE_TOKEN, FJARR_MEDIA_ENCODER, FJARR_ROBOT_ID …
     try {
         config.validate();
@@ -63,6 +78,7 @@ int main() {
     fjarr::Agent agent{config};
     agent.register_capability(std::make_unique<fjarr::TestCapability>());
     agent.register_capability(std::make_unique<fjarr::CameraCapability>());
+    agent.register_capability(std::make_unique<fjarr::TerminalCapability>());
     agent.on_session_event([](const fjarr::SessionEvent& ev) {
         std::printf("demo-robot audit: session %s %s operator=%s %s\n", fjarr::short_session_id(ev.session_id).c_str(), ev.type.c_str(),
                     ev.operator_info.label.c_str(), ev.reason.c_str());

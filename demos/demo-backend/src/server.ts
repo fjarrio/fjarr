@@ -65,9 +65,11 @@ function mintGrant(robotId: string, operator: { id: string; label: string }, cap
 }
 
 /** The company's own roles → the Fjarr capabilities each may open (a demo-only convention, docs/09). */
+// A shell is a different risk class from watching a camera (docs/10#terminal), so only the
+// developer role carries it — the demo's stand-in for "their auth decides".
 const ROLES: Record<string, string[]> = {
   operator: ["fjarr.test", "fjarr.camera"],
-  developer: ["fjarr.test", "fjarr.camera", "fjarr.introspect"],
+  developer: ["fjarr.test", "fjarr.camera", "fjarr.introspect", "fjarr.terminal"],
 };
 
 /** The company's own robot registry — their data, not Fjarr's. */

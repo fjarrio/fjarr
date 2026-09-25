@@ -235,6 +235,9 @@ const lab: LabApi = {
   vitals,
   request: (cap, type, payload, robotId) => sessionOf(robotId).request(cap, type, payload).then((r) => JSON.parse(JSON.stringify(r)) as unknown),
   blob: (cap, ref, robotId) => sessionOf(robotId).bulk(cap).receive(ref).then((b) => new TextDecoder().decode(b)),
+  // The raw byte channel, for capabilities whose bulk framing is `raw` (docs/08): the terminal
+  // now, file transfer later. Only usable inside one page evaluation — it is a live object.
+  channel: (cap, robotId) => sessionOf(robotId).channel(cap),
   feed: {
     start: (robotId) => {
       feed?.close();

@@ -3,7 +3,7 @@
  * and the harness (src/*.ts, runs in Node): everything reachable through
  * `window.__lab`. Values crossing the boundary must be JSON-serializable.
  */
-import type { SessionEvent, SessionOptions, SessionState, SessionStats, WireEvent } from "@fjarr/core";
+import type { ByteChannel, SessionEvent, SessionOptions, SessionState, SessionStats, WireEvent } from "@fjarr/core";
 import type { LoopbackTrackSpec } from "@fjarr/core/testing/browser";
 
 export interface LabSetup {
@@ -100,6 +100,11 @@ export interface LabApi {
   vitals(): VitalsSnapshot;
   /** A request on the control channel; resolves with the result payload (rejects with the error). */
   request(cap: string, type: string, payload: unknown, robotId?: string): Promise<unknown>;
+  /**
+   * The raw byte channel of a `raw`-framed bulk capability (docs/08): bytes both ways, no
+   * framing of ours. A live object, so it is only usable within one `lab()` evaluation.
+   */
+  channel(cap: string, robotId?: string): ByteChannel;
   /** Resolve a blob reference from an envelope on `cap`'s bulk channel (docs/08#blob-frames); the bytes as text. */
   blob(cap: string, ref: { blob: string; len: number; type?: string }, robotId?: string): Promise<string>;
   /** The session pipeline feed (docs/21#pipeline-feeds) of the default robot, driven from the test. */

@@ -134,10 +134,15 @@ the bulk byte channel.
 **Slices** (planned 2026-09-25; the three deliverables are unusually
 independent, so they land in this order for the reason each gives):
 
-- **2a — `fjarr.terminal`.** The pty over the bulk byte channel in both
-  directions ([docs/08](08-protocol.md#terminal)), the xterm component, the
-  ownership lease, the audit, and the config that makes it exist at all
-  ([docs/06](06-capabilities.md), [docs/10](10-security.md#terminal)).
+- **2a ✔** (2026-09-25) **`fjarr.terminal`.** The pty over the bulk byte
+  channel in both directions ([docs/08](08-protocol.md#terminal)), the xterm
+  component, the ownership lease, the audit, and the config that makes it
+  exist at all ([docs/06](06-capabilities.md),
+  [docs/10](10-security.md#terminal)). **It did what it was scheduled to
+  do**: the extension API needed one amendment, `watch_readable`, because a
+  pty is a file descriptor and nothing in the interface could serve one
+  without breaking the single-loop rule ([docs/09](09-interfaces.md)).
+  Measured: an interactive round trip of **11 ms** against a 150 ms budget.
   First because it needs no hardware and no display server, and because an
   extension API with one consumer is not proven generic — it is camera video
   with extra structure. If the API is wrong, this is the cheapest moment to
