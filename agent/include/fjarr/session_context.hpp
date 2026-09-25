@@ -67,6 +67,13 @@ class FdWatch {
     virtual ~FdWatch() = default;
 };
 
+/// A repeating timer on the core loop. The timer stops when this is destroyed.
+/// spec: docs/09-interfaces.md#the-capability-interface-agent-side
+class Timer {
+  public:
+    virtual ~Timer() = default;
+};
+
 class SessionContext {
   public:
     virtual ~SessionContext() = default;
@@ -111,6 +118,14 @@ class SessionContext {
     /// closes it; destroying the handle only stops the watching. Added in M2 for `fjarr.terminal`,
     /// whose pty is an fd and which `run_async` cannot serve: that is fire-once, not a read loop.
     virtual std::unique_ptr<FdWatch> watch_readable(int fd, std::function<bool()> on_readable) = 0;
+
+    /// Call `on_tick` on the core loop every `period` until it returns false or the handle is
+    /// destroyed; the session ending destroys it either way. Added in M4.5 for `fjarr.net`, whose
+    /// `link-stats` is specified per second *while the link is open* — an idle link with rising
+    /// drop counters is exactly the case a support engineer needs to see, and driving the event
+    /// off traffic would show nothing then. Not a scheduler: work that belongs off the loop still
+    /// goes through run_async.
+    virtual std::unique_ptr<Timer> every(std::chrono::milliseconds period, std::function<bool()> on_tick) = 0;
 
     // Off-loop work: run `job` on the pool, then `done` back on the core loop
     // — dropped if the session is gone by then (generation-guarded).

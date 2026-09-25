@@ -68,6 +68,11 @@ int main() {
     config.capabilities["fjarr.terminal"] = {{"enabled", true},
                                             {"user", std::string(env_or("FJARR_DEMO_TERMINAL_USER", current_user().c_str()))},
                                             {"shell", "/bin/bash"}};
+    // fjarr.net (docs/27): off unless the lab created the tunnel interface (`make tun-up`), so
+    // the demo robot behaves like a real one — the device exists before the agent starts, and the
+    // agent attaches to it with no CAP_NET_ADMIN of its own.
+    config.capabilities["fjarr.net"] = {{"enabled", std::string(env_or("FJARR_DEMO_NET", "0")) == "1"},
+                                        {"interface", std::string(env_or("FJARR_DEMO_NET_INTERFACE", "fjarr0"))}};
     config.apply_env(); // FJARR_SERVER_URL, FJARR_DEV_DEVICE_TOKEN, FJARR_MEDIA_ENCODER, FJARR_ROBOT_ID …
     try {
         config.validate();
@@ -79,6 +84,7 @@ int main() {
     agent.register_capability(std::make_unique<fjarr::TestCapability>());
     agent.register_capability(std::make_unique<fjarr::CameraCapability>());
     agent.register_capability(std::make_unique<fjarr::TerminalCapability>());
+    agent.register_capability(std::make_unique<fjarr::NetCapability>(config.agent.robot_id));
     agent.on_session_event([](const fjarr::SessionEvent& ev) {
         std::printf("demo-robot audit: session %s %s operator=%s %s\n", fjarr::short_session_id(ev.session_id).c_str(), ev.type.c_str(),
                     ev.operator_info.label.c_str(), ev.reason.c_str());

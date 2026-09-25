@@ -39,14 +39,16 @@ struct TrackDecl {
 /// DataChannel classes. spec: docs/08-protocol.md#datachannel-topology
 enum class ChannelClass : std::uint8_t { Control, Realtime, Bulk, Stream };
 
-/// A bulk channel's framing, declared here and never guessed by a peer (docs/08#blob-frames):
-/// `Raw` hands every binary message to the capability as-is (terminal input); `Blob` carries
-/// blob frames the core parses and checks before delivering chunks.
+/// A binary channel's framing, declared here and never guessed by a peer (docs/08#blob-frames):
+/// `Raw` hands every binary message to the capability as-is (terminal input, tunnel packets);
+/// `Blob` carries blob frames the core parses and checks before delivering chunks. Stream-class
+/// channels declare it too — `Raw` there means one message is one self-contained datagram, which
+/// is why the tunnel needs no chunker (docs/08#net-packets).
 enum class BulkFraming : std::uint8_t { Raw, Blob };
 
 struct ChannelDecl {
     ChannelClass channel = ChannelClass::Control;
-    BulkFraming framing = BulkFraming::Raw; // bulk only
+    BulkFraming framing = BulkFraming::Raw; // bulk and stream
 };
 
 /// One validated chunk of a blob as the core delivers it (docs/08#blob-frames). The payload view

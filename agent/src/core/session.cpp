@@ -94,6 +94,37 @@ struct Session::BulkSender final : ChannelSender {
     void on_drain(std::function<void()> fn) override { drain = std::move(fn); }
 };
 
+/// A stream channel is lossy on purpose (docs/08#datachannel-topology): unordered, no
+/// retransmission. `send_binary` therefore refuses above HIGH_WATER exactly like bulk — but what
+/// the caller must do with the refusal is the opposite. Bulk queues and waits for on_drain; a
+/// stream sender drops, because a queue on this class delivers a burst of stale frames after
+/// congestion (docs/08#net-packets). The drop belongs to the capability, which alone knows which
+/// frame is the stale one, so the sender only reports and counts.
+struct Session::StreamSender final : ChannelSender {
+    GstWebRTCDataChannel* dc = nullptr;
+    unsigned long refused = 0;
+    void send(const Envelope&) override { throw FjarrError("payload-invalid", "envelopes do not ride stream channels (docs/08)"); }
+    bool send_binary(std::span<const std::byte> frame) override {
+        if (!dc) return false;
+        if (frame.size() > SCTP_MAX_MESSAGE) throw FjarrError("payload-invalid", "frame exceeds the SCTP max-message-size; chunk it (docs/08)");
+        if (dc_buffered(dc) >= HIGH_WATER) {
+            refused++;
+            return false;
+        }
+        glib::GBytesPtr bytes(g_bytes_new(frame.data(), frame.size()));
+        GError* err = nullptr;
+        if (!gst_webrtc_data_channel_send_data_full(dc, bytes.get(), &err)) {
+            glib::GErrorPtr e(err);
+            return false;
+        }
+        return true;
+    }
+    std::size_t buffered_amount() const override { return dc ? dc_buffered(dc) : 0; }
+    /// No drain callback: a lossy sender that waited to be told the queue drained would be
+    /// queueing. A capability pushes when it has data and drops when this returns false.
+    void on_drain(std::function<void()>) override {}
+};
+
 struct Session::DeniedSender final : ChannelSender {
     std::string why;
     void send(const Envelope&) override { throw FjarrError(std::string(error_codes::capability_denied), why); }
@@ -191,10 +222,22 @@ class FdWatchImpl final : public FdWatch {
   private:
     glib::SourceGuard guard_;
 };
+
+/// The same, for time. spec: docs/09-interfaces.md#the-capability-interface-agent-side
+class TimerImpl final : public Timer {
+  public:
+    explicit TimerImpl(glib::SourceGuard guard) : guard_(std::move(guard)) {}
+
+  private:
+    glib::SourceGuard guard_;
+};
 } // namespace
 
 std::unique_ptr<FdWatch> SessionContextImpl::watch_readable(int fd, std::function<bool()> on_readable) {
     return std::make_unique<FdWatchImpl>(session_.loop().add_fd_watch(fd, std::move(on_readable)));
+}
+std::unique_ptr<Timer> SessionContextImpl::every(milliseconds period, std::function<bool()> on_tick) {
+    return std::make_unique<TimerImpl>(session_.loop().add_timeout(period, std::move(on_tick)));
 }
 void SessionContextImpl::run_async(std::function<void()> job, std::function<void()> done) { session_.run_async(std::move(job), std::move(done)); }
 std::unique_ptr<DeadmanHandle> SessionContextImpl::arm_deadman(milliseconds budget, std::function<void()> on_expiry) {
@@ -491,6 +534,27 @@ void Session::on_channel_open(GstWebRTCDataChannel* dc, const std::string& label
             })),
             data_ctx, [](gpointer d, GClosure*) { delete static_cast<ChannelContext*>(d); });
         pump_blobs(label); // blobs queued before the channel opened go out now
+    } else if (label.rfind("fjarr:stream:", 0) == 0) {
+        auto s = std::make_unique<StreamSender>();
+        s->dc = dc;
+        senders_[label] = std::move(s);
+        // Inbound, the same hand-off as bulk: copied off the SCTP thread, delivered on the loop.
+        // No buffered-amount-low signal — nothing on this class waits for a drain.
+        auto* data_ctx = new ChannelContext{weak_from_this(), generation_, deps_.loop, label};
+        dc_signals_.emplace_back(
+            dc, "on-message-data",
+            G_CALLBACK((+[](GstWebRTCDataChannel*, GBytes* data, gpointer d) {
+                const auto* c = static_cast<const ChannelContext*>(d);
+                gsize n = 0;
+                const auto* p = static_cast<const char*>(data ? g_bytes_get_data(data, &n) : nullptr);
+                std::string bytes(p ? p : "", p ? n : 0);
+                c->loop->post([w = c->session, g = c->generation, label = c->label, bytes = std::move(bytes)] {
+                    auto self = w.lock();
+                    if (!self || self->generation_ != g) return;
+                    self->on_channel_data(label, bytes);
+                });
+            })),
+            data_ctx, [](gpointer d, GClosure*) { delete static_cast<ChannelContext*>(d); });
     }
 }
 
@@ -499,7 +563,16 @@ void Session::on_channel_data(const std::string& label, const std::string& bytes
         dropped_binary_++;
         return;
     }
-    const std::string cap_name = label.substr(std::string("fjarr:bulk:").size());
+    // Which class the channel is decides both who gets the bytes and how they are framed. This
+    // used to assume `fjarr:bulk:` unconditionally, so a stream-class message was cut at the wrong
+    // offset, matched no capability, and was dropped and counted — the silent failure the network
+    // tunnel would have hit on its first packet.
+    const auto ch = protocol::parse_binary_label(label);
+    if (!ch) {
+        dropped_binary_++;
+        return;
+    }
+    const std::string& cap_name = ch->cap;
     AttachedCapability* cap = attached(cap_name);
     auto ctx = contexts_.find(cap_name);
     if (!cap || ctx == contexts_.end()) {
@@ -508,7 +581,10 @@ void Session::on_channel_data(const std::string& label, const std::string& bytes
     }
     BulkFraming framing = BulkFraming::Raw;
     for (const auto& d : cap->manifest.channels)
-        if (d.channel == ChannelClass::Bulk) framing = d.framing;
+        if (d.channel == ch->cls) framing = d.framing;
+    // Registration refuses a `framed` stream channel (ADR-0018's chunker is not built), so a
+    // stream message here is always one self-contained datagram.
+    if (ch->cls == ChannelClass::Stream) framing = BulkFraming::Raw;
     const std::span<const std::byte> view(reinterpret_cast<const std::byte*>(bytes.data()), bytes.size());
     try {
         if (framing == BulkFraming::Raw) {

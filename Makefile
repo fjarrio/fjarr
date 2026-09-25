@@ -161,6 +161,26 @@ NETEM_DEV ?= eth0
 opsim-netem: ## Apply a docs/25 profile (NETEM_PROFILE=lan|wifi-ok|4g|lossy|bad) on the demo robot's egress (NETEM_DEV), run netem-<profile> from dev, always clear the qdisc
 	@export NETEM_DEV="$(NETEM_DEV)"; trap 'docker/lab/netem.sh clear' EXIT; docker/lab/netem.sh apply $(NETEM_PROFILE) && $(MAKE) --no-print-directory opsim OPSIM_SCENARIO=netem-$(NETEM_PROFILE) OPSIM_IN=dev OPSIM_INTROSPECT=http://demo-robot:7381 OPSIM_EXTRA="--introspect-token $(INTROSPECT_TOKEN) $(OPSIM_EXTRA)"
 
+TUN_DEV ?= fjarr0
+TUN_OPERATOR ?= 100.64.0.1
+.PHONY: tun-up
+tun-up: ## Create the tunnel interfaces the installer creates on a real robot (docs/27): fjarr0 on demo-robot and on dev, then restart the robot with fjarr.net on
+	@addr=$$(docker compose exec -T -e FJARR_ROBOT_ID=$(OPSIM_ROBOT) dev ./build/$(BUILD_PRESET)/agent/daemon/fjarr-agent --net-address | tail -1); \
+	  echo "tun-up: $(OPSIM_ROBOT) derives $$addr (docs/27#addressing)"; \
+	  FJARR_DEMO_NET=1 docker compose up -d demo-robot && \
+	  docker/lab/tundev.sh up demo-robot "$$addr" $(TUN_OPERATOR) $(TUN_DEV) && \
+	  docker/lab/tundev.sh up dev $(TUN_OPERATOR) "$$addr" $(TUN_DEV)
+	@echo "tun-up: the robot waited for its interface before starting — the ordering the whole design rests on (docs/27#lifecycle)"
+
+.PHONY: tun-down
+tun-down: ## Remove the lab's tunnel interfaces and put the demo robot back to its usual state
+	@docker/lab/tundev.sh down demo-robot $(TUN_DEV); docker/lab/tundev.sh down dev $(TUN_DEV)
+	@FJARR_DEMO_NET=0 docker compose up -d demo-robot >/dev/null 2>&1 || true
+
+.PHONY: opsim-tunnel
+opsim-tunnel: ## The docs/27 tunnel scenario: real IP over fjarr:stream:fjarr.net, from dev's own network namespace
+	$(MAKE) --no-print-directory opsim OPSIM_SCENARIO=tunnel OPSIM_IN=dev OPSIM_INTROSPECT=http://demo-robot:7381 OPSIM_EXTRA="--introspect-token $(INTROSPECT_TOKEN) $(OPSIM_EXTRA)"
+
 # -------------------------------------------------------------- signaling --
 .PHONY: signaling-run
 signaling-run: ## Run fjarr-server from source

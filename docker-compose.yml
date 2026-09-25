@@ -10,9 +10,13 @@
 # Overrides (conscious privilege grants, opt in explicitly):
 #   docker-compose.host-x11.yml   capture your real host desktop
 #   docker-compose.uinput.yml     /dev/uinput injection experiments
-# Standing grant (dev-only, docs/12): `dev` mounts the host docker socket so
-# the browser lab can drive this stack from inside (netem, pause, restart).
-# `make doctor` checks that DOCKER_GID in .env matches the socket's group.
+# Standing grants (dev-only, docs/12):
+#   `dev` mounts the host docker socket so the browser lab can drive this stack from inside
+#   (netem, pause, restart). `make doctor` checks that DOCKER_GID in .env matches its group.
+#   `dev` and `demo-robot` get /dev/net/tun and NET_ADMIN so `make tun-up` can create the tunnel
+#   interfaces the installer creates on a real robot (docs/27). Neither the agent nor fjarr-opsim
+#   uses the capability — they attach to a device someone else made, which is the whole point of
+#   the persistent-interface design.
 name: fjarr
 
 services:
@@ -40,6 +44,13 @@ services:
       CCACHE_DIR: /home/dev/.cache/ccache
     devices:
       - /dev/dri:/dev/dri # Intel VA-API; comment out on machines without a GPU
+      # The operator end of the tunnel lab (docs/27): `make tun-up` creates fjarr0 here the way
+      # the installer creates it on a robot, and fjarr-opsim attaches to it. dev must be in its
+      # own network namespace for this to mean anything — opsim's other scenarios share the
+      # robot's, where both tunnel addresses would be local and the kernel would short-circuit.
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN # creating the lab's tunnel interface; the agent and opsim need none of it
     networks:
       default:
         # The lab browser loads pages served from here (docs/25). Not "dev":
@@ -124,16 +135,27 @@ services:
       FJARR_INTROSPECT_BIND: "0.0.0.0"
       FJARR_INTROSPECT_TOKEN: ${FJARR_INTROSPECT_TOKEN:-dev-only-introspect-token}
       FJARR_INTROSPECT_VIEWER_DIR: /usr/share/fjarr/viewer
+      # fjarr.net (docs/27): on only once `make tun-up` has created the interface, which is the
+      # real ordering too — the device exists before the agent starts, never the other way round.
+      FJARR_DEMO_NET: ${FJARR_DEMO_NET:-0}
     ports:
       - "127.0.0.1:7381:7381"
     working_dir: /workspace
     cap_add:
-      - NET_ADMIN   # tc netem for the browser lab's media-path profiles (docs/25)
+      - NET_ADMIN   # tc netem for the browser lab's media-path profiles (docs/25); the tunnel
+                    # interface (docs/27) — used by `make tun-up`, never by the agent itself
     devices:
       - /dev/dri:/dev/dri
+      - /dev/net/tun:/dev/net/tun # the robot end of the tunnel lab (docs/27)
     command: >
       bash -c "test -x ./build/release/demos/demo-robot/demo-robot
       || { echo 'demo-robot not built yet — run: make agent-build'; sleep infinity; };
+      if [ \"$$FJARR_DEMO_NET\" = 1 ]; then
+      echo 'waiting for the tunnel interface before starting the agent (docs/27#lifecycle: the device exists first, always)';
+      for i in $$(seq 20); do ip link show $${FJARR_DEMO_NET_INTERFACE:-fjarr0} >/dev/null 2>&1 && break; sleep 1; done;
+      ip link show $${FJARR_DEMO_NET_INTERFACE:-fjarr0} >/dev/null 2>&1
+      || echo 'no tunnel interface after 20 s — starting anyway, with fjarr.net unavailable. A container restart takes its
+      network namespace with it, which a real robot does not do; run `make tun-up` again.'; fi;
       exec ./build/release/demos/demo-robot/demo-robot"
     depends_on:
       - robot-sim

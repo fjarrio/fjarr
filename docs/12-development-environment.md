@@ -65,6 +65,30 @@ demo-backend demo-dashboard` (and `demo-robot` after `make agent-build`).
 | `libei`/`pipewire`/`libevdev` pkg-config | dev packages missing from image |
 | `/dev/uinput` | WARN by default; opt in via the uinput override |
 
+## The network tunnel in the lab
+
+`fjarr.net` ([docs/27](27-network-tunnel.md)) attaches to a TUN interface that
+someone else created — on a robot the installer, in the lab `make tun-up`:
+
+```bash
+make tun-up          # fjarr0 on demo-robot and on dev, then the robot with fjarr.net on
+make opsim-tunnel    # real IP over fjarr:stream:fjarr.net (docs/27 gate)
+make tun-down
+```
+
+`dev` and `demo-robot` therefore carry `/dev/net/tun` and `NET_ADMIN` as a
+standing grant. Neither the agent nor `fjarr-opsim` uses the capability:
+`docker/lab/tundev.sh` creates the device as root and hands it to the agent's
+user, and both processes then attach with none of their own — which is the
+property the lab exists to keep honest, since it is what lets a real robot run
+the agent unprivileged.
+
+`dev` holds the operator end rather than `demo-robot` because `fjarr-opsim`
+normally shares the robot's network namespace, where both tunnel addresses
+would be local and the kernel would short-circuit the link it is meant to
+test. `make opsim-tunnel` runs from `dev` for that reason, as `opsim-netem`
+does.
+
 ## Opt-in overrides (conscious privilege grants)
 
 **Host desktop capture** — develop against your real screen:

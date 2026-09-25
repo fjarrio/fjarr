@@ -58,6 +58,8 @@ add_library(fjarr STATIC
   src/capabilities/camera_capability.cpp
   src/capabilities/introspect_capability.cpp
   src/capabilities/terminal_capability.cpp
+  src/capabilities/net_capability.cpp
+  src/capabilities/net_addressing.cpp
   src/capabilities/desktop_capability.cpp
   src/desktop/module_loader.cpp
 )

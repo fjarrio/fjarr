@@ -102,7 +102,7 @@ they are only reachable on localhost or on a trusted LAN. It is the most
 consequential grant in the catalog alongside `fjarr.terminal`, and it is
 treated as such:
 
-- **Off by default.** No interface exists unless `net.enabled` is set.
+- **Off by default.** Nothing is attached unless `capabilities."fjarr.net".enabled` is set.
 - **Explicit claim.** The session grant must carry `net` among its
   capabilities ([ADR-0015](adr/0015-backend-integration-strategy.md)); the
   agent refuses `open` otherwise. The customer's backend decides who gets
@@ -113,7 +113,7 @@ treated as such:
   own tunnel address, in userspace. IP forwarding is never enabled, so the
   link reaches the robot and not the network behind it. An operator holding
   two links cannot route between them, and the robots cannot see each other.
-- **Optional port allow-list** (`net.allow_ports`) for deployments that want
+- **Optional port allow-list** (`capabilities."fjarr.net".allow_ports`) for deployments that want
   the surface narrower than "this robot's own address".
 - **No privilege gain.** The device is created once at install and the agent
   attaches to it as the unprivileged `fjarr` user with no `CAP_NET_ADMIN`

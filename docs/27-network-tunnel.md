@@ -95,19 +95,20 @@ configuration can name one peer literally, forever, whoever connects.
 A robot's address is **derived deterministically from its robot id** —
 masked from a SHA-256 of the id into the range, skipping the reserved /24.
 No allocator, no state in the signaling server, and the robot knows its own
-address at boot without talking to anyone. `net.address` in `fjarr.toml`
-pins it when derivation is not wanted.
+address at boot without talking to anyone. `address` in the capability's
+[config](#configuration) pins it when derivation is not wanted, and
+`fjarr-agent --net-address` prints whichever applies.
 
 Neither end ever adds a route for the whole range. The robot adds its own
 /32 and a /32 for the operator; the operator adds a /32 per attached robot.
 A robot whose cellular carrier hands it a `100.64.0.0/10` WAN address
 therefore still routes normally, unless the carrier hands out one of those
 exact two addresses. `fjarr-agent --check` reports an overlap between the
-configured range and an existing route, and `net.range` changes it.
+configured range and an existing route, and `range` changes it.
 
 Two robots that derive the same address cannot be attached at once. The
 operator detects the collision, refuses the second link, names both robots
-and prints the `net.address` line that fixes it.
+and prints the `address` line that fixes it.
 
 ## Lifecycle, and the ordering rule {#lifecycle}
 
@@ -180,7 +181,9 @@ they cannot be switched off by a sysctl:
   another, so robot A cannot reach robot B, and neither learns the other
   exists.
 
-`net.allow_ports` optionally narrows the robot side to a port list. The
+`allow_ports` optionally narrows the robot side to a port list. A packet
+carrying no port to read — ICMP, a later fragment — cannot satisfy a port
+list and does not get a free pass through one. The
 default is every port on the robot's own tunnel address, because the
 motivating use cases need dynamic ports, and because a grant that must be
 edited for every tool is a grant nobody uses.
@@ -389,19 +392,24 @@ defeats. That is a property of DDS, not of the tunnel, and the honest
 statement is that ROS 2 tooling needs a usable link while `ssh` tolerates a
 bad one.
 
-## Configuration
+## Configuration {#configuration}
 
-On the robot, in `fjarr.toml` ([docs/23](23-agent-core-architecture.md)):
+On the robot, in `fjarr.toml`, as an ordinary capability table validated
+against the capability's own schema ([docs/23](23-agent-core-architecture.md#configuration)):
 
 ```toml
-[net]
+[capabilities."fjarr.net"]
 enabled = false              # off unless explicitly turned on
-interface = "fjarr0"
+interface = "fjarr0"         # attached to, never created (see the ordering rule above)
 range = "100.64.0.0/10"      # both ends must agree
 address = "auto"             # derived from the robot id; pin to override
-mtu = 1280
+mtu = 1280                   # the interface's own MTU wins if they disagree
 allow_ports = []             # empty = every port on this robot's own address
 ```
+
+`fjarr-agent --net-address` prints the address this robot will use, derived or
+pinned, so the installer can create the interface with it before the agent
+runs.
 
 On the operator's machine, in `~/.config/fjarr/config.toml`. The cached
 credential from `login` lives beside it at mode 0600 and is never written
@@ -422,12 +430,24 @@ address = "100.64.0.1"           # this machine, the same on every link
 
 Per [docs/15](15-testing-strategy.md):
 
-- **Unit**: address derivation and collision detection; the two policy rules
-  rejecting wrong source and wrong destination; tail-drop at the queue
-  bound; MTU enforcement.
+- **Unit** (slice 4.5a, `agent/tests/test_net.cpp`): address derivation; the
+  two policy rules rejecting wrong source and wrong destination, in both
+  directions; the port allow-list, including that a packet with no port to
+  read does not pass one; tail-drop at the queue bound, and that what was
+  dropped is gone rather than queued; MTU enforcement. The packet pump runs
+  against a socketpair, so the rules are tested with no device and no
+  privileges. Collision detection is the operator's, and lands with it.
+- **End to end** (slice 4.5a, `fjarr-opsim --scenario tunnel`): the simulator
+  attaches to its own persistent interface and pumps real IP over
+  `fjarr:stream:fjarr.net` — an HTTP request to the robot's own introspection
+  endpoint on its tunnel address, answered over the link, plus a packet
+  addressed into the robot's LAN that the robot refuses and counts. `make
+  tun-up` creates both interfaces the way the installer will, before the
+  agent starts.
 - **Isolation regression** (safety class, never removed): two robots
   attached at once, robot A cannot reach robot B in either direction, and no
-  packet crosses between links.
+  packet crosses between links. Needs two ends, so it lands with
+  `fjarr-connect` in 4.5b.
 - **Ordering regression**: a participant created while the agent is detached
   does not advertise the tunnel address; created while attached, it does;
   and it keeps advertising across an agent restart. These three are the

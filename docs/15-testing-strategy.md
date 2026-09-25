@@ -98,7 +98,11 @@ regresses**:
   robots attached at once, no packet crosses from one link to the other in
   either direction, and each end drops anything not addressed to its own
   tunnel address. Isolation is the property customers will ask about, so it
-  is a test that fails loudly, not a configuration note.
+  is a test that fails loudly, not a configuration note. The single-ended
+  half of it ships with the agent (slice 4.5a): `test_net.cpp` pins both
+  rules in both directions, and the `tunnel` opsim scenario proves the robot
+  refuses a packet aimed into its LAN over a real data channel. The
+  two-robot half needs two operator ends and lands with `fjarr-connect`.
 - **tunnel interface ordering**: a DDS participant created while the agent is
   detached must not advertise the tunnel address; created while attached it
   must; and it must keep advertising across an agent restart. These pin the

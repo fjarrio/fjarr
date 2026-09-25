@@ -2,6 +2,7 @@
 // A SessionContext that records what a capability asks of it: tracks, envelopes
 // and blobs — the unit-test stand-in for the core's real context (docs/15:
 // capabilities are tested without a peer).
+#include <chrono>
 #include <functional>
 #include <stdexcept>
 #include <string>
@@ -51,7 +52,22 @@ struct RecordingContext final : SessionContext {
     ChannelSender &control() override { throw std::runtime_error("no channel"); }
     ChannelSender &realtime() override { throw std::runtime_error("no channel"); }
     ChannelSender &bulk() override { throw std::runtime_error("no channel"); }
-    ChannelSender &stream() override { throw std::runtime_error("no channel"); }
+    /// A stream channel that records what was sent and can be told to refuse, the way a real one
+    /// does above its watermark — which is how a lossy capability's drop path gets tested.
+    struct RecordingSender final : ChannelSender {
+        std::vector<std::string> frames;
+        bool refuse = false;
+        void send(const Envelope &) override { throw std::runtime_error("envelopes do not ride binary channels"); }
+        bool send_binary(std::span<const std::byte> f) override {
+            if (refuse) return false;
+            frames.emplace_back(reinterpret_cast<const char *>(f.data()), f.size());
+            return true;
+        }
+        std::size_t buffered_amount() const override { return 0; }
+        void on_drain(std::function<void()>) override {}
+    };
+    RecordingSender stream_sender;
+    ChannelSender &stream() override { return stream_sender; }
     void accept(const Envelope &r) override { sent.push_back({"accept", r.type, {}}); }
     void feedback(const Envelope &r, nlohmann::json p) override { sent.push_back({"feedback", r.type, std::move(p)}); }
     void result(const Envelope &r, nlohmann::json p) override { sent.push_back({"result", r.type, std::move(p)}); }
@@ -77,6 +93,19 @@ struct RecordingContext final : SessionContext {
         struct NoopWatch final : FdWatch {};
         return std::make_unique<NoopWatch>();
     }
+    /// Same as the fd watch: the double records the request and never fires on its own, so a
+    /// test says when a second passed instead of waiting one.
+    std::unique_ptr<Timer> every(std::chrono::milliseconds period, std::function<bool()> on_tick) override {
+        timers.push_back(period);
+        on_tick_ = std::move(on_tick);
+        struct NoopTimer final : Timer {};
+        return std::make_unique<NoopTimer>();
+    }
+    /// Fire the registered timer once; returns what the capability's handler said.
+    bool fire_timer() { return on_tick_ ? on_tick_() : false; }
+    std::vector<std::chrono::milliseconds> timers;
+    std::function<bool()> on_tick_;
+
     /// Pretend the fd became readable; returns what the capability's handler said.
     bool fire_readable() { return on_readable_ ? on_readable_() : false; }
     std::vector<int> watched;

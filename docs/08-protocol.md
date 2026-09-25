@@ -395,8 +395,8 @@ envelopes:
 
 | `type` | kind | payload | semantics |
 |---|---|---|---|
-| `open` | request → result | `{}` | brings the link up. `result{ok:true, address, peer_address, mtu, policy:{forwarding:false, allow_ports}}` — `address` is the robot's tunnel address, `peer_address` the operator's. Refused with `error{code:"forbidden"}` when the session grant carries no `net` claim, and `error{code:"unavailable"}` when the interface is absent or the agent is not attached to it |
-| `close` | request → result | `{}` | stops the flow; the interface itself stays, since it is persistent by design |
+| `open` | request → result | `{}` | brings the link up. `result{ok:true, address, peer_address, mtu, policy:{forwarding:false, allow_ports}}` — `address` is the robot's tunnel address, `peer_address` the operator's, and `mtu` is the interface's own, which governs whatever the config says. `error{code:"unavailable", message}` when the tunnel is not enabled or the interface is absent, naming what to create ([docs/26](26-robot-install-and-drivers.md)); `error{code:"busy"}` when another session holds the link, because the robot's interface is point-to-point. A grant without `fjarr.net` never reaches the capability at all: the core answers `capability-denied` first ([errors](#errors)) |
+| `close` | request → result | `{}` | stops the flow; the interface itself stays, since it is persistent by design. `error{code:"unavailable"}` when this session has no open link |
 | `link-stats` | event (agent → operator) | `{"interval_ms": 1000, "tx_packets", "rx_packets", "tx_bytes", "rx_bytes", "dropped_no_peer", "dropped_policy", "dropped_queue", "dropped_mtu"}` | once per second while the link is open; the four drop counters are what a support engineer reads first |
 
 ### Backpressure {#backpressure}

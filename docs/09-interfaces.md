@@ -138,6 +138,13 @@ public:
 // whose callbacks did not arrive on the core loop. This was the extension
 // API's first amendment, and the second capability found it — which is why
 // docs/17 schedules a second capability before more are built on the first.
+// `every(period, on_tick)` (added in M4.5) is the same shape for time: it calls
+// back on the core loop until the handler returns false or the handle is
+// destroyed. `fjarr.net` needed it because `link-stats` is specified per second
+// *while the link is open*, and an idle link with rising drop counters is
+// exactly the case a support engineer must be able to see — driving the event
+// off traffic would show nothing then. It is not a scheduler: work that belongs
+// off the loop still goes through run_async.
 // Both contexts are core-loop-only; capabilities never touch sockets, SDP
 // or GStreamer negotiation.
 // spec: docs/23-agent-core-architecture.md#the-concrete-sessioncontext-and-backendcontext

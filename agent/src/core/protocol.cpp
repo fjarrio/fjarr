@@ -61,6 +61,17 @@ bool valid_cap_name(std::string_view cap) {
     return dots >= 1 && seg_started;
 }
 
+std::optional<BinaryChannel> parse_binary_label(std::string_view label) {
+    constexpr std::string_view BULK = "fjarr:bulk:";
+    constexpr std::string_view STREAM = "fjarr:stream:";
+    const bool stream = label.rfind(STREAM, 0) == 0;
+    const bool bulk = label.rfind(BULK, 0) == 0;
+    if (!stream && !bulk) return std::nullopt;
+    const std::string_view cap = label.substr((stream ? STREAM : BULK).size());
+    if (!valid_cap_name(cap)) return std::nullopt;
+    return BinaryChannel{std::string(cap), stream ? ChannelClass::Stream : ChannelClass::Bulk};
+}
+
 std::optional<Envelope> parse_envelope(std::string_view text) {
     nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
     if (!j.is_object()) return std::nullopt;

@@ -23,6 +23,7 @@ namespace {
 int usage() {
     std::printf("fjarr-agent [--config /etc/fjarr/fjarr.toml] [--check] [--probe-source '<description|type>'] [--diagnostics [out.tar.gz]]\n"
                 "  --check          the doctor: encoder, configured sources, endpoint (exit 0/1)\n"
+                "  --net-address    this robot's tunnel address, to create the interface with (docs/27)\n"
                 "  --probe-source   bring one source up standalone and report caps + fps\n"
                 "  --diagnostics    write the support bundle (docs/24) from the running agent's endpoint, or an offline one\n"
                 "env: FJARR_ROBOT_ID FJARR_SERVER_URL FJARR_DEV_DEVICE_TOKEN FJARR_MEDIA_ENCODER FJARR_TEST_HOOKS … (docs/23)\n");
@@ -49,6 +50,7 @@ int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IOLBF, 0);
     std::string config_path;
     bool check_only = false;
+    bool net_address = false;
     std::string probe;
     bool diagnostics = false;
     std::string diagnostics_out = "fjarr-diagnostics.tar.gz";
@@ -56,6 +58,7 @@ int main(int argc, char** argv) {
         const std::string a = argv[i];
         if (a == "--config" && i + 1 < argc) config_path = argv[++i];
         else if (a == "--check") check_only = true;
+        else if (a == "--net-address") net_address = true;
         else if (a == "--probe-source" && i + 1 < argc) probe = argv[++i];
         else if (a == "--diagnostics") {
             diagnostics = true;
@@ -124,11 +127,27 @@ int main(int argc, char** argv) {
         return ok ? 0 : 1;
     }
 
+    if (net_address) {
+        // What `ip tuntap`/`ip addr` must be given before the agent starts (docs/27#lifecycle).
+        // Printed from config, so a pinned address and a derived one look the same to a script.
+        try {
+            const auto& c = config.capabilities.count("fjarr.net") ? config.capabilities["fjarr.net"] : nlohmann::json::object();
+            std::printf("%s\n", fjarr::NetCapability::address_from_config(config.agent.robot_id, c).c_str());
+        } catch (const fjarr::FjarrError& e) {
+            std::fprintf(stderr, "net-address: %s\n", e.what());
+            return 1;
+        }
+        return 0;
+    }
+
     fjarr::Agent agent{config};
     if (config.capabilities["fjarr.test"].value("enabled", true)) agent.register_capability(std::make_unique<fjarr::TestCapability>());
     if (config.capabilities.count("fjarr.camera")) agent.register_capability(std::make_unique<fjarr::CameraCapability>()); // tracks from fjarr.toml (docs/06)
     // Off unless the table exists AND names a user — there is deliberately no default account (docs/10#terminal).
     if (config.capabilities.count("fjarr.terminal")) agent.register_capability(std::make_unique<fjarr::TerminalCapability>());
+    // Off unless the table exists AND sets enabled: granting `net` is granting network access to
+    // the robot from inside (docs/10#network-tunnel). It needs the robot id to derive its address.
+    if (config.capabilities.count("fjarr.net")) agent.register_capability(std::make_unique<fjarr::NetCapability>(config.agent.robot_id));
     agent.on_session_event([](const fjarr::SessionEvent& ev) {
         std::printf("audit: session %s %s operator=%s %s\n", fjarr::short_session_id(ev.session_id).c_str(), ev.type.c_str(), ev.operator_info.label.c_str(),
                     ev.reason.c_str());

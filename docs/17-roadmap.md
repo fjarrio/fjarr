@@ -295,19 +295,23 @@ only part that needs packaging; in the lab, compose creates the device the
 same way the installer will, so everything else is buildable and testable
 now:
 
-- **4.5a — the agent side.** The core cannot route inbound stream-class data
-  at all today: it assumes every binary channel is a bulk one, so a tunnel
-  packet would be dropped and counted. That comes first, with the framing
-  declared like bulk's (`raw` for the tunnel, so ADR-0018's chunker stays
-  unbuilt until something needs it). Then the `fjarr.net` capability:
-  attaching to a persistent device, the packet pump, derived addressing, the
-  two policy rules that make isolation structural, the bounded tail-dropping
-  queue, and `link-stats`. Proven end to end by an **opsim tunnel
-  scenario** — the simulator is already a webrtcbin answerer, so it can
-  attach its own device and send real IP traffic long before the Rust client
-  exists, which is where the spike's surprises lived. *Gate:* IP reaches the
-  robot over a real data channel; a packet not addressed to the robot's own
-  tunnel address is dropped; the queue tail-drops instead of growing.
+- **4.5a — the agent side. Done 2026-09-25.** The core could not route
+  inbound stream-class data at all: it assumed every binary channel was a
+  bulk one, so a tunnel packet was cut at the wrong offset, matched no
+  capability, and was dropped and counted. That came first — one parse of the
+  label for both classes, a sender for the stream class, and registration
+  refusing a `framed` stream channel so ADR-0018's chunker stays unbuilt
+  until something needs it. Then `fjarr.net`: attaching to the persistent
+  device with no `CAP_NET_ADMIN`, the packet pump, derived addressing,
+  the two policy rules, tail-drop, and `link-stats` — which needed the
+  extension API's **second amendment**, `SessionContext::every`, because the
+  event is specified per second on an idle link too. `make tun-up` plays the
+  installer in the lab, and `fjarr-opsim --scenario tunnel` carries an HTTP
+  request to the robot's own introspection endpoint over the link. *Gate
+  met:* `GET http://<robot tunnel address>:7381/stats -> 200` over a real
+  data channel; packets addressed into the robot's LAN refused and counted;
+  tail-drop unit-tested against a refusing channel, including that what was
+  dropped is gone rather than queued.
 - **4.5b — `fjarr-connect`** ([ADR-0024](adr/0024-native-operator-client.md))
   and the real end-to-end: ssh, a hash-verified `scp`, `ros2 topic list`, and
   two robots at once proving they cannot reach each other. The shared

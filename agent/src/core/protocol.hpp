@@ -32,6 +32,14 @@ nlohmann::json envelope_to_json(const Envelope& env);
 std::string serialize_envelope(const Envelope& env);
 bool valid_cap_name(std::string_view cap);
 
+/// Which capability a binary DataChannel belongs to, and on which class (docs/08#datachannel-topology).
+/// Only bulk and stream carry binary; anything else is nullopt.
+struct BinaryChannel {
+    std::string cap;
+    ChannelClass cls;
+};
+std::optional<BinaryChannel> parse_binary_label(std::string_view label);
+
 Envelope make_envelope(std::string cap, std::string type, std::string kind, nlohmann::json payload,
                        std::string event_id = "");
 

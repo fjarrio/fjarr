@@ -113,3 +113,26 @@ TEST(Protocol, turnUrlAcceptsBothTheRfcFormAndWebrtcbinsForm) {
     EXPECT_EQ(turn_url_with_credentials("turn:", "u", "p"), "");
     EXPECT_EQ(turn_url_with_credentials("", "u", "p"), "");
 }
+
+// docs/08#datachannel-topology: which capability a binary channel belongs to. The bug this pins:
+// the router once assumed every binary label was `fjarr:bulk:`, so a stream label lost two
+// characters off the capability name and matched nothing — a dropped packet with no diagnosis.
+TEST(Protocol, parseBinaryLabelTellsBulkFromStream) {
+    const auto bulk = parse_binary_label("fjarr:bulk:fjarr.terminal");
+    ASSERT_TRUE(bulk.has_value());
+    EXPECT_EQ(bulk->cap, "fjarr.terminal");
+    EXPECT_EQ(bulk->cls, fjarr::ChannelClass::Bulk);
+
+    const auto stream = parse_binary_label("fjarr:stream:fjarr.net");
+    ASSERT_TRUE(stream.has_value());
+    EXPECT_EQ(stream->cap, "fjarr.net");
+    EXPECT_EQ(stream->cls, fjarr::ChannelClass::Stream);
+}
+
+TEST(Protocol, parseBinaryLabelRejectsChannelsThatCarryNoBinary) {
+    EXPECT_FALSE(parse_binary_label("fjarr:control").has_value());
+    EXPECT_FALSE(parse_binary_label("fjarr:realtime").has_value());
+    EXPECT_FALSE(parse_binary_label("fjarr:bulk:").has_value());
+    EXPECT_FALSE(parse_binary_label("fjarr:stream:Bad.Name").has_value());
+    EXPECT_FALSE(parse_binary_label("something-else").has_value());
+}

@@ -13,6 +13,7 @@ add_executable(fjarr-tests
   test_rate_estimator.cpp
   test_supervision.cpp
   test_terminal_capability.cpp
+  test_net.cpp
   test_tier_policy.cpp
   test_passthrough.cpp
   test_introspect_capability.cpp

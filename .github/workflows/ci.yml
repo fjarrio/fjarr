@@ -110,6 +110,16 @@ jobs:
         run: make opsim-all
       - name: "20-cycle soak (docs/15: the census returns to baseline every commit; 200 nightly)"
         run: make opsim-soak OPSIM_CYCLES=20
+      - name: the network tunnel end to end (docs/27 gate, slice 4.5a)
+        # tun-up plays the installer: it creates the interfaces and restarts the robot with
+        # fjarr.net on, so the device exists before the agent does — the ordering the design
+        # rests on. The scenario then carries real IP over a real data channel.
+        run: |
+          make tun-up
+          make opsim-tunnel
+      - name: tunnel interfaces down
+        if: always()
+        run: make tun-down
       - name: the fjarr-agent image (docs/12, slice 5b — built and smoke-tested every push, published in M2.5)
         env:
           E2E_BROWSER: http://localhost:9222

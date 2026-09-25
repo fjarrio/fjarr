@@ -729,7 +729,7 @@ public:
   ChannelSender& control();
   ChannelSender& realtime();
   ChannelSender& bulk();     // this capability's fjarr:bulk:<cap>
-  ChannelSender& stream();   // this capability's fjarr:stream:<cap> (ADR-0018; M4)
+  ChannelSender& stream();   // this capability's fjarr:stream:<cap> (docs/08; fjarr.net, M4.5)
 
   // Correlation helpers (docs/08#envelope) — the only way to answer a request.
   void accept(const Envelope& request);
@@ -737,6 +737,13 @@ public:
   void result(const Envelope& request, nlohmann::json payload);   // payload.ok required
   void fail(const Envelope& request, std::string_view code, std::string_view message);
   void event(std::string_view type, nlohmann::json payload);      // kind=event on control
+
+  // Async I/O on the core loop, never on a thread of the capability's own.
+  // watch_readable was the extension API's first amendment (M2, fjarr.terminal's
+  // pty); every() its second (M4.5, fjarr.net's per-second link-stats, which must
+  // arrive on an idle link too). Both handles stop when destroyed.
+  std::unique_ptr<FdWatch> watch_readable(int fd, std::function<bool()> on_readable);
+  std::unique_ptr<Timer> every(std::chrono::milliseconds period, std::function<bool()> on_tick);
 
   // Off-loop work: run `job` on the pool, then `done` back on the core loop
   // — dropped if the session is gone by then (generation-guarded).

@@ -372,6 +372,12 @@ void Agent::register_capability(std::unique_ptr<Capability> capability) {
     if (impl_->registry.count(manifest.name)) throw FjarrError("config", "capability registered twice: " + manifest.name);
     for (const auto& dep : manifest.dependencies)
         if (!impl_->registry.count(dep)) throw FjarrError("config", manifest.name + " depends on unregistered capability " + dep);
+    // docs/08 gives the stream class two framings, `raw` and `framed`. Only `raw` is implemented:
+    // ADR-0018's chunker has no consumer yet, and silently treating `framed` as blob frames would
+    // deliver garbage. Refuse at registration, where the author can read the reason.
+    for (const auto& d : manifest.channels)
+        if (d.channel == ChannelClass::Stream && d.framing != BulkFraming::Raw)
+            throw FjarrError("config", manifest.name + " declares a framed stream channel; only `raw` framing is implemented (ADR-0018)");
     impl_->registry[manifest.name] = core::RegisteredCapability{capability.get(), manifest, true};
     impl_->capabilities.push_back(std::move(capability));
     log::info("agent", "capability registered", {{"name", manifest.name}});

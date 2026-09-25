@@ -45,6 +45,12 @@
 
 #include <fjarr/capability.hpp>
 
+#include <fcntl.h>
+#include <linux/if.h>
+#include <linux/if_tun.h>
+#include <sys/ioctl.h>
+
+#include "capabilities/net_addressing.hpp"
 #include "core/glib/raii.hpp"
 #include "core/loop.hpp"
 #include "core/protocol.hpp"
@@ -69,6 +75,9 @@ struct Options {
     std::string introspect_token; // --introspect-token, else $FJARR_INTROSPECT_TOKEN (the demo exposes the endpoint with one, docs/24)
     int timeout_s = 60;
     int cycles = 200; // soak: connect/stream/close cycles
+    /// What the minted grant claims. The tunnel is off unless explicitly claimed (docs/10), so a
+    /// scenario that needs it says so rather than every session carrying it.
+    std::vector<std::string> capabilities{"fjarr.test"};
     bool verbose = false;
 };
 
@@ -77,7 +86,7 @@ void usage() {
                  "usage: fjarr-opsim --server ws://host:8080/ws --robot <id> --grant-secret <secret> --scenario <name>\n"
                  "                   [--json out.json] [--timeout 60] [--ice-policy all|relay] [--cycles 200]\n"
                  "                   [--introspect http://127.0.0.1:7381] [--introspect-token <t>] [--verbose]\n"
-                 "scenarios: smoke toggle hotplug silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer\n"
+                 "scenarios: smoke toggle hotplug silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer tunnel\n"
                  "           soak (--cycles N, needs --introspect)\n"
                  "           netem-{lan,wifi-ok,4g,lossy,bad} (the profile is applied externally: docker/lab/netem.sh)\n"
                  "exit: 0 all assertions pass, 1 any fail, 2 usage, 3 timeout\n");
@@ -193,7 +202,7 @@ std::string b64url(const std::string& s) { return b64url(reinterpret_cast<const 
 
 /// HS256 session grant with the claims fjarr-server's Hs256GrantVerifier reads
 /// (hooks.rs GrantClaims; web/e2e/src/grant.ts is the TS twin).
-std::string mint_grant(const std::string& secret, const std::string& robot_id) {
+std::string mint_grant(const std::string& secret, const std::string& robot_id, const std::vector<std::string>& capabilities) {
     const std::string header = b64url(json{{"alg", "HS256"}, {"typ", "JWT"}}.dump());
     const auto now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     json claims{{"iss", "fjarr-opsim"},
@@ -202,7 +211,8 @@ std::string mint_grant(const std::string& secret, const std::string& robot_id) {
                 {"tenant", "lab"},
                 {"robot_id", robot_id},
                 {"operator", {{"id", "opsim@fjarr.test"}, {"label", "opsim"}}},
-                {"capabilities", json::array({{{"name", "fjarr.test"}}})}};
+                {"capabilities", json::array()}};
+    for (const auto& c : capabilities) claims["capabilities"].push_back(json{{"name", c}});
     const std::string body = b64url(claims.dump());
     const std::string input = header + "." + body;
     GHmac* h = g_hmac_new(G_CHECKSUM_SHA256, reinterpret_cast<const guchar*>(secret.data()), secret.size());
@@ -595,6 +605,31 @@ class Peer {
         g_signal_emit_by_name(webrtc_.get(), "add-ice-candidate", mline, cand.c_str());
     }
 
+    /// One binary message on a bulk or stream channel. The tunnel's packets ride this
+    /// (docs/08#net-packets): one message is one IP packet, with no framing of ours.
+    bool send_binary(const std::string& label, const std::string& bytes) {
+        GstWebRTCDataChannel* dc = nullptr;
+        {
+            std::lock_guard<std::mutex> lk(dc_mu_);
+            auto it = channels_.find(label);
+            if (it != channels_.end()) dc = it->second.get();
+        }
+        if (!dc) return false;
+        guint64 buffered = 0;
+        g_object_get(dc, "buffered-amount", &buffered, nullptr);
+        if (buffered >= (1u << 20)) return false; // the operator tail-drops too (docs/27)
+        glib::GBytesPtr b(g_bytes_new(bytes.data(), bytes.size()));
+        GError* err = nullptr;
+        if (!gst_webrtc_data_channel_send_data_full(dc, b.get(), &err)) {
+            glib::GErrorPtr e(err);
+            return false;
+        }
+        return true;
+    }
+
+    /// Called on the SCTP thread for every binary message on `label`.
+    void on_binary(std::function<void(const std::string& label, const std::string& bytes)> fn) { on_binary_ = std::move(fn); }
+
     bool send(const std::string& label, const std::string& text) {
         GstWebRTCDataChannel* dc = nullptr;
         {
@@ -893,6 +928,15 @@ class Peer {
                 p->first->on_dc_text(p->second, s ? s : "");
             })),
             new std::pair<Peer*, std::string>(this, label), [](gpointer d, GClosure*) { delete static_cast<std::pair<Peer*, std::string>*>(d); });
+        dc_signals_.emplace_back(
+            ch, "on-message-data",
+            G_CALLBACK((+[](GstWebRTCDataChannel*, GBytes* data, gpointer d) {
+                auto* p = static_cast<std::pair<Peer*, std::string>*>(d);
+                gsize n = 0;
+                const auto* b = static_cast<const char*>(data ? g_bytes_get_data(data, &n) : nullptr);
+                if (p->first->on_binary_) p->first->on_binary_(p->second, std::string(b ? b : "", b ? n : 0));
+            })),
+            new std::pair<Peer*, std::string>(this, label), [](gpointer d, GClosure*) { delete static_cast<std::pair<Peer*, std::string>*>(d); });
         dc_signals_.emplace_back(ch, "on-error", G_CALLBACK((+[](GstWebRTCDataChannel*, GError* e, gpointer) {
                                      logf("peer: datachannel error: %s", e ? e->message : "?");
                                  })),
@@ -942,6 +986,7 @@ class Peer {
     std::vector<glib::SignalConnection> signals_, dc_signals_;
     std::vector<glib::PadProbe> probes_;
     std::mutex dc_mu_;
+    std::function<void(const std::string&, const std::string&)> on_binary_;
     std::map<std::string, glib::GObjectPtr<GstWebRTCDataChannel>> channels_;
     std::mutex cand_mu_;
     bool remote_described_ = false;
@@ -994,7 +1039,7 @@ class Operator {
             throw Abort("websocket connect failed: " + locked<std::string>([this] { return sh_.ws_error; }));
         json hello = protocol::signaling_base("hello");
         hello["role"] = "operator";
-        hello["auth"] = {{"scheme", "grant"}, {"jwt", mint_grant(opts_.grant_secret, opts_.robot)}};
+        hello["auth"] = {{"scheme", "grant"}, {"jwt", mint_grant(opts_.grant_secret, opts_.robot, opts_.capabilities)}};
         hello["client_info"] = {{"client", "fjarr-opsim"}, {"scenario", opts_.scenario}};
         hello["proto_versions"] = {protocol::PROTO_VERSION};
         const std::size_t mark = sig_mark();
@@ -1432,6 +1477,36 @@ class Operator {
 
     Peer* peer() { return peer_.get(); }
     Report& report() { return report_; }
+    fjarr::CoreLoop& loop() { return loop_; }
+
+    /// GET any URL — the tunnel scenario points this at the robot's tunnel address, so the
+    /// assertion is a real TCP conversation with a real service and not a synthetic echo.
+    struct HttpResult {
+        unsigned status = 0;
+        std::string body, error;
+    };
+    HttpResult http_get_url(const std::string& url) {
+        if (!http_) http_.reset(soup_session_new());
+        HttpResult out;
+        glib::GObjectPtr<SoupMessage> msg(soup_message_new(SOUP_METHOD_GET, url.c_str()));
+        if (!msg) {
+            out.error = "bad url " + url;
+            return out;
+        }
+        add_token(msg.get());
+        GError* e = nullptr;
+        glib::GBytesPtr body(soup_session_send_and_read(http_.get(), msg.get(), nullptr, &e));
+        if (!body) {
+            glib::GErrorPtr g(e);
+            out.error = e ? e->message : "failed";
+            return out;
+        }
+        out.status = soup_message_get_status(msg.get());
+        gsize len = 0;
+        const char* data = static_cast<const char*>(g_bytes_get_data(body.get(), &len));
+        out.body.assign(data, len);
+        return out;
+    }
 
   private:
     // Loop thread: everything besides ICE is consumed by the scenario thread from sig_in.
@@ -1537,6 +1612,162 @@ void scenario_smoke(Operator& op) {
     r.check("heartbeat", op.pongs() > 0 && defect.empty(),
             op.pongs() > 0 ? (defect.empty() ? "pong echoes t0; best rtt " + std::to_string(static_cast<int>(op.best_rtt())) + " ms over " + std::to_string(op.pongs()) + " pong(s)" : defect)
                            : "no pong within 6 s");
+    close_and_assert(op);
+}
+
+/// The operator's end of the tunnel (docs/27): attach to the device the lab created the way the
+/// installer creates it on a robot, and pump packets between the kernel and
+/// `fjarr:stream:fjarr.net`. This is what `fjarr-connect` will do in Rust in slice 4.5b; doing it
+/// here first proves the agent side against real IP traffic long before that client exists.
+class TunnelEnd {
+  public:
+    TunnelEnd(Operator& op, std::string ifname) : op_(op), ifname_(std::move(ifname)) {}
+    ~TunnelEnd() {
+        watch_ = {};
+        if (fd_ >= 0) ::close(fd_);
+    }
+
+    /// Attach to the interface. Never creates it: opsim has no CAP_NET_ADMIN either, which is the
+    /// same constraint the agent lives under.
+    std::string attach() {
+        const int fd = ::open("/dev/net/tun", O_RDWR | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0) return std::string("/dev/net/tun: ") + std::strerror(errno);
+        struct ifreq req {};
+        req.ifr_flags = IFF_TUN | IFF_NO_PI;
+        std::snprintf(req.ifr_name, IFNAMSIZ, "%s", ifname_.c_str());
+        if (::ioctl(fd, TUNSETIFF, &req) < 0) {
+            const int e = errno;
+            ::close(fd);
+            return "attach " + ifname_ + ": " + std::strerror(e) + " (run `make tun-up` first)";
+        }
+        fd_ = fd;
+        return {};
+    }
+
+    /// Start pumping. `self` is this end's address, `peer` the robot's.
+    void start(std::uint32_t self, std::uint32_t peer, int mtu) {
+        self_ = self;
+        peer_ = peer;
+        mtu_ = mtu;
+        op_.peer()->on_binary([this](const std::string& label, const std::string& bytes) {
+            if (label != LABEL) return;
+            const std::span<const std::byte> packet(reinterpret_cast<const std::byte*>(bytes.data()), bytes.size());
+            // The same two rules the robot applies, from this end (docs/27#isolation): a packet
+            // arriving on this link is accepted only if it is for us and from the robot.
+            if (fjarr::net::check(fjarr::net::inspect(packet), self_, peer_, {}) != fjarr::net::Verdict::Allow) {
+                refused_++;
+                return;
+            }
+            if (::write(fd_, bytes.data(), bytes.size()) > 0) rx_++;
+        });
+        // The pump runs on opsim's loop thread, so the scenario thread stays free to use the
+        // tunnel — which is the only way a blocking HTTP request over it can work.
+        watch_ = op_.loop().add_fd_watch(fd_, [this] {
+            std::string buf(65536, '\0');
+            for (;;) {
+                const ssize_t n = ::read(fd_, buf.data(), buf.size());
+                if (n <= 0) return true; // EAGAIN: nothing more for now
+                const auto size = static_cast<std::size_t>(n);
+                if (size > static_cast<std::size_t>(mtu_)) continue;
+                if (op_.peer()->send_binary(LABEL, std::string(buf.data(), size))) tx_++;
+                else dropped_++;
+            }
+        });
+    }
+
+    /// Send raw bytes on the channel without going through the kernel — the only way to test what
+    /// the robot does with a packet a well-behaved end would never send.
+    bool inject(const std::string& packet) { return op_.peer()->send_binary(LABEL, packet); }
+
+    unsigned long tx() const { return tx_; }
+    unsigned long rx() const { return rx_; }
+    static constexpr const char* LABEL = "fjarr:stream:fjarr.net";
+
+  private:
+    Operator& op_;
+    std::string ifname_;
+    int fd_ = -1;
+    std::uint32_t self_ = 0, peer_ = 0;
+    int mtu_ = 1280;
+    std::atomic<unsigned long> tx_{0}, rx_{0}, dropped_{0}, refused_{0};
+    glib::SourceGuard watch_;
+};
+
+/// docs/27 gate: IP reaches the robot over a real data channel, a packet not addressed to the
+/// robot's own tunnel address is dropped, and `link-stats` reports both.
+void scenario_tunnel(Operator& op) {
+    Report& r = op.report();
+    connect_and_report(op);
+
+    TunnelEnd tun(op, std::getenv("FJARR_TUN_DEV") ? std::getenv("FJARR_TUN_DEV") : "fjarr0");
+    const std::string attach_error = tun.attach();
+    r.check("tun-attach", attach_error.empty(),
+            attach_error.empty() ? "attached to the operator's persistent interface, with no CAP_NET_ADMIN" : attach_error);
+    if (!attach_error.empty()) return;
+
+    const std::size_t mark = op.inbox_mark();
+    auto opened = op.request("fjarr.net", "open", json::object());
+    const bool open_ok = opened && opened->payload.value("ok", false);
+    const std::string robot_addr = open_ok ? opened->payload.value("address", "") : "";
+    const std::string op_addr = open_ok ? opened->payload.value("peer_address", "") : "";
+    const int mtu = open_ok ? opened->payload.value("mtu", 0) : 0;
+    r.check("open", open_ok && !robot_addr.empty() && mtu > 0,
+            opened ? (open_ok ? "robot " + robot_addr + ", operator " + op_addr + ", mtu " + std::to_string(mtu) + ", forwarding=" +
+                                    (opened->payload.value("policy", json::object()).value("forwarding", true) ? "true" : "false")
+                              : "open refused: " + opened->payload.dump())
+                   : "no result within 5 s");
+    if (!open_ok) return;
+    const auto self = fjarr::net::parse_address(op_addr);
+    const auto peer = fjarr::net::parse_address(robot_addr);
+    if (!self || !peer) {
+        r.check("addresses", false, "open returned addresses that do not parse");
+        return;
+    }
+    tun.start(*self, *peer, mtu);
+
+    // Real IP, both ways: a TCP conversation with the robot's own introspection endpoint over its
+    // tunnel address. Nothing about this request knows it is inside a data channel.
+    const std::string url = "http://" + robot_addr + ":7381/stats";
+    Operator::HttpResult got;
+    const std::int64_t t0 = g_get_monotonic_time();
+    for (int i = 0; i < 10 && got.status != 200; i++) {
+        got = op.http_get_url(url);
+        if (got.status != 200) op.sleep_ms(300);
+    }
+    r.check("ip-reaches-the-robot", got.status == 200,
+            got.status == 200 ? "GET " + url + " -> 200, " + std::to_string(got.body.size()) + " bytes in " +
+                                    ms_str(g_get_monotonic_time() - t0) + " (" + std::to_string(tun.tx()) + " packets out, " +
+                                    std::to_string(tun.rx()) + " in)"
+                              : "GET " + url + " -> " + (got.error.empty() ? "HTTP " + std::to_string(got.status) : got.error));
+
+    // A packet the robot must refuse: addressed into its LAN rather than to its own tunnel
+    // address. This is the rule that makes lateral movement impossible (docs/27#isolation).
+    std::string bad(40, '\0');
+    {
+        auto* b = reinterpret_cast<std::uint8_t*>(bad.data());
+        b[0] = 0x45; // IPv4, 5 words of header
+        b[3] = 40;
+        b[9] = 17; // UDP
+        const std::uint32_t src = *self, dst = *fjarr::net::parse_address("192.168.1.5");
+        for (int i = 0; i < 4; i++) {
+            b[12 + i] = static_cast<std::uint8_t>((src >> (24 - 8 * i)) & 0xff);
+            b[16 + i] = static_cast<std::uint8_t>((dst >> (24 - 8 * i)) & 0xff);
+        }
+    }
+    for (int i = 0; i < 3; i++) tun.inject(bad);
+
+    // link-stats says so, once per second, with the counters a support engineer reads first.
+    auto stats = op.wait_envelope(mark, "fjarr.net", "link-stats", "event", 4000,
+                                  [](const Envelope& e) { return e.payload.value("dropped_policy", 0) >= 3; });
+    r.check("refused-and-counted", stats.has_value(),
+            stats ? "dropped_policy=" + std::to_string(stats->payload.value("dropped_policy", 0)) +
+                        " tx=" + std::to_string(stats->payload.value("tx_packets", 0)) +
+                        " rx=" + std::to_string(stats->payload.value("rx_packets", 0)) +
+                        " dropped_queue=" + std::to_string(stats->payload.value("dropped_queue", 0))
+                  : "no link-stats within 4 s reporting the three refused packets");
+
+    auto closed = op.request("fjarr.net", "close", json::object());
+    r.check("close", closed && closed->payload.value("ok", false), closed ? closed->payload.dump() : "no result within 5 s");
     close_and_assert(op);
 }
 
@@ -2209,7 +2440,7 @@ const std::map<std::string, ScenarioFn> kScenarios = {
     {"smoke", scenario_smoke},       {"toggle", scenario_toggle},   {"hotplug", scenario_hotplug},     {"silent-operator", scenario_silent_operator},
     {"no-answer", scenario_no_answer}, {"socket-drop", scenario_socket_drop}, {"ice-restart", scenario_ice_restart}, {"deadman", scenario_deadman},
     {"congested-viewer", scenario_congested_viewer},
-    {"relay-only", scenario_relay_only}, {"soak", scenario_soak},
+    {"relay-only", scenario_relay_only}, {"tunnel", scenario_tunnel}, {"soak", scenario_soak},
     // netem-<profile>: one function, the profile is read from the scenario name (unknown profile → usage, exit 2).
     {"netem-lan", scenario_netem},     {"netem-wifi-ok", scenario_netem}, {"netem-4g", scenario_netem},     {"netem-lossy", scenario_netem},
     {"netem-bad", scenario_netem},
@@ -2232,6 +2463,9 @@ int main(int argc, char** argv) {
         return 2;
     }
     if (opts.scenario == "relay-only") opts.ice_policy = "relay";
+    // The tunnel is as consequential as a shell (docs/10#network-tunnel), so the grant claims it
+    // only for the scenario that exercises it.
+    if (opts.scenario == "tunnel") opts.capabilities.push_back("fjarr.net");
     gst_init(&argc, &argv);
 
     Shared sh;
