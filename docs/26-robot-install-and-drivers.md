@@ -98,7 +98,7 @@ on this machine" instead of failing an install.
 | `fjarr-agent drivers list` | the catalog, with per-entry status on *this* machine: installed / available / not for this architecture / needs manual step; `--json` for agents |
 | `fjarr-agent drivers install <name>` | installs one entry and its prerequisites, prints the post-install steps |
 | `fjarr-agent drivers detect` | hardware currently attached, matched against the catalog, with the package each needs |
-| `fjarr-agent --check` | the doctor: every configured source and backend with element availability, plus the one-line fix for each missing one (`install: sudo fjarr-agent drivers install realsense`) |
+| `fjarr-agent --check` | the doctor: every configured source and backend with element availability, plus the one-line fix for each missing one (`install: sudo fjarr-agent drivers install realsense`). **Always a `desktop` row** (ADR-0021, slice 2c): available with the backend serving it, or unavailable naming the package to install — and never a failure, because a robot with no desktop is the normal case |
 | `fjarr-agent --probe-source …` | bring up one source standalone ([docs/09](09-interfaces.md#the-video-source-contract)) |
 | `fjarr-agent net setup` (M4.5) | creates the persistent tunnel interface owned by the `fjarr` user, derives the robot's address, checks the configured range against existing routes, writes the systemd ordering so the agent attaches before the robot's software, and offers to write the Cyclone DDS configuration file ([docs/27](27-network-tunnel.md)) |
 

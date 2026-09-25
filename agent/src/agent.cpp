@@ -9,6 +9,7 @@
 
 #include <nlohmann/json-schema.hpp>
 
+#include <fjarr/desktop_capability.hpp>
 #include <fjarr/errors.hpp>
 #include <fjarr/version.hpp>
 
@@ -340,6 +341,15 @@ Agent::Agent(AgentConfig config) : impl_(std::make_unique<Impl>()) {
     if (!gst_is_initialized()) gst_init(nullptr, nullptr);
     log::set_level(impl_->config.agent.log_level);
     log::set_json(impl_->config.agent.log_format == "json");
+    {
+        // Always present (ADR-0021): a robot can always be asked about its screen and give a
+        // useful answer, even when the answer is which package to install.
+        auto desk = std::make_unique<DesktopCapability>();
+        const auto dm = desk->manifest();
+        impl_->registry[dm.name] = core::RegisteredCapability{desk.get(), dm, true};
+        impl_->capabilities.push_back(std::move(desk));
+        log::info("agent", "capability registered", {{"name", dm.name}, {"built_in", "true"}});
+    }
     if (impl_->config.introspect.enabled) {
         // Built in (docs/06): the rings exist once the agent boots, so the capability resolves them lazily.
         auto cap = std::make_unique<capabilities::IntrospectCapability>([this] { return impl_->snapshots.get(); },

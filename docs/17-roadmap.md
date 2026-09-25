@@ -168,11 +168,16 @@ independent, so they land in this order for the reason each gives):
   written and startable; it waits on a host, not on a decision. **2c runs
   first instead**, which changes nothing about it: the loader is
   backend-agnostic, so it does not depend on which combination wins.
-- **2c — the module loader.** A backend loads at runtime from a separate
-  package ([ADR-0021](adr/0021-desktop-backends-as-runtime-modules.md)) and
-  the capability reports `unavailable` with the package to install when none
-  matches. *Gate:* a desktop backend loads as a module from a separate
-  package on the dev stack.
+- **2c ✔** (2026-09-25) **the module loader.** A backend loads at runtime
+  from a separate package
+  ([ADR-0021](adr/0021-desktop-backends-as-runtime-modules.md)) and the
+  always-present `fjarr.desktop` capability reports `unavailable` **with the
+  package to install** when none matches — a robot with no desktop still
+  passes `--check`, because that is the normal case. The seam's version is
+  in the exported symbol's name, so a module built against an older one is
+  not found rather than loaded and misread. *Gate met:* the loader creates a
+  backend from a separate `.so` on the dev stack, and the doctor prints a
+  desktop row either way.
 
 **Gate:** ADR-0006 accepted with data; terminal accepted per
 [docs/06](06-capabilities.md); no extension-API changes needed for it (or

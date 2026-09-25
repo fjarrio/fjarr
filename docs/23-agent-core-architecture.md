@@ -127,7 +127,9 @@ Agent (public, pImpl)
      ├─ CoreLoop                     GMainContext/GMainLoop, post_to_owner sink, worker pool
      ├─ SignalingClient              libsoup-3 WebSocket, hello/backoff, message dispatch
      ├─ CapabilityRegistry           name → Capability, manifests, config validation, dependencies
-     ├─ ModuleLoader                 dlopen of in-tree optional modules (desktop backends, ADR-0021)
+     ├─ ModuleLoader                 dlopen of in-tree optional modules (desktop backends, ADR-0021;
+     │                                 slice 2c: versioned entry SYMBOL so an old module is not found
+     │                                 rather than misread, and every failure carries what to install)
      ├─ MediaPlane
      │   ├─ FrameHub                 track_id/tier → ring of encoded GstSamples, subscribers
      │   ├─ SourceRegistry            type name → VideoSource factory (built-in + customer-registered)

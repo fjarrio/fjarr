@@ -104,3 +104,50 @@ TEST(DesktopModules, somethingThatIsNotOurModuleIsIgnoredWithAReasonRatherThanLo
     EXPECT_FALSE(loader.found().front().reason.empty());
     EXPECT_EQ(loader.select("auto"), nullptr);
 }
+
+#include <fjarr/desktop_capability.hpp>
+
+#include "core/loop.hpp"
+#include "media/sources.hpp"
+
+namespace {
+/// The capability ignores the source factory; one still has to exist to call configure().
+struct Sources {
+    fjarr::CoreLoop loop;
+    fjarr::media::SourceRegistry reg;
+    Sources() : reg(loop.context()) {}
+};
+} // namespace
+
+TEST(DesktopCapability, aRobotWithNoDesktopIsNormalAndSaysWhatToInstall) {
+    // ADR-0021: the capability is always present, so "can this robot share its screen?" has an
+    // answer everywhere — and when the answer is no, it names the package rather than shrugging.
+    Sources sources;
+    fjarr::DesktopCapability cap;
+    cap.configure(nlohmann::json{{"module_dir", "/definitely/not/here"}}, sources.reg);
+    const auto rows = cap.configured_sources();
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_FALSE(rows[0].available);
+    EXPECT_NE(rows[0].reason.find("fjarr-desktop-x11"), std::string::npos) << rows[0].reason;
+    EXPECT_FALSE(rows[0].required) << "a missing desktop must never be a startup error";
+}
+
+TEST(DesktopCapability, withAModuleInstalledItReportsWhichBackendServesIt) {
+    Sources sources;
+    fjarr::DesktopCapability cap;
+    cap.configure(nlohmann::json{{"module_dir", FJARR_STUB_MODULE_DIR}}, sources.reg);
+    const auto rows = cap.configured_sources();
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_TRUE(rows[0].available) << rows[0].reason;
+    EXPECT_EQ(rows[0].identity, "stub");
+}
+
+TEST(DesktopCapability, disabledIsADeploymentChoiceAndSaysSo) {
+    Sources sources;
+    fjarr::DesktopCapability cap;
+    cap.configure(nlohmann::json{{"enabled", false}, {"module_dir", FJARR_STUB_MODULE_DIR}}, sources.reg);
+    const auto rows = cap.configured_sources();
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_FALSE(rows[0].available);
+    EXPECT_NE(rows[0].reason.find("disabled"), std::string::npos) << rows[0].reason;
+}

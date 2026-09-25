@@ -101,6 +101,24 @@ int main(int argc, char** argv) {
                 std::printf("source %-16s %-12s %s%s%s\n", t.track_id.c_str(), t.available ? "available" : "UNAVAILABLE", t.identity.c_str(),
                             t.required ? " (required)" : "", t.reason.empty() ? "" : (" — " + t.reason).c_str());
         }
+        // The desktop is always present (ADR-0021), so it always gets a row — the whole point is
+        // that "can this robot share its screen?" has an answer on every machine, and that the
+        // answer names the package when it is no. Never a reason to fail the check: a robot with
+        // no desktop is the normal case.
+        {
+            fjarr::DesktopCapability desk;
+            const auto table = config.capabilities.count("fjarr.desktop") ? config.capabilities["fjarr.desktop"] : nlohmann::json::object();
+            try {
+                fjarr::validate_json_schema(desk.manifest().config_schema, table);
+                desk.configure(table, *fjarr::builtin_source_factory());
+                for (const auto& t : desk.configured_sources())
+                    std::printf("desktop %-16s %-12s %s%s\n", t.track_id.c_str(), t.available ? "available" : "unavailable", t.identity.c_str(),
+                                t.reason.empty() ? "" : (" — " + t.reason).c_str());
+            } catch (const std::exception& e) {
+                std::printf("desktop: %s\n", e.what());
+                ok = false; // a *malformed* desktop config is a real configuration error
+            }
+        }
         const bool encoder_ok = config.media.encoder == "software" || hw;
         std::printf("check: %s\n", ok ? "OK" : (encoder_ok ? "FAILED — see the source rows above" : "FAILED — VA-API unavailable; set media.encoder = \"software\" or fix /dev/dri"));
         return ok ? 0 : 1;
