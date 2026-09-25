@@ -344,6 +344,32 @@ chunks → `file-complete(result)`. Resume: receiver sends
 `file-resume {transfer_id, ranges:[[start,end],…]}` after reconnect; sender
 fills gaps only. Integrity: whole-file SHA-256 verified before `result.ok`.
 
+### Terminal (fjarr.terminal) {#terminal}
+
+A PTY on the robot. Bytes ride `fjarr:bulk:fjarr.terminal` with `raw`
+framing in **both** directions — every binary message is exactly the bytes
+for the pty, keystrokes one way and output the other, with no header of
+ours. Reliable and ordered, because a terminal that loses a character is
+worse than one that is slow.
+
+**One PTY per session at M2.** That is why nothing here carries a terminal
+id: a second concurrent shell would need the channel multiplexed, which is a
+framing change and therefore a protocol decision to take when something
+actually needs it, not now.
+
+| `type` | kind | payload | semantics |
+|---|---|---|---|
+| `open` | request → result | `{"cols": u16, "rows": u16, "term"?: string}` | start the pty. `result{ok:true}` once the shell is running. `error{code:"forbidden"}` when the grant carries no `fjarr.terminal`; `error{code:"unavailable", message}` when the robot has no terminal configured ([docs/06](06-capabilities.md)) — a deployment choice, not a fault; `error{code:"busy"}` when a pty is already open on this session |
+| `resize` | request → result | `{"cols": u16, "rows": u16}` | `TIOCSWINSZ` + `SIGWINCH`. Sent on every client resize, coalesced by the client |
+| `close` | request → result | `{}` | `SIGHUP`, then reap. Idempotent |
+| `exit` | event (agent → operator) | `{"code"?: int, "signal"?: string}` | the shell ended on its own; exactly one of `code` or `signal` |
+
+The pty dies with the session, always: `release_all_input` on session end
+closes it ([docs/15](15-testing-strategy.md#safety-behaviors)), so a dropped
+connection cannot leave an orphan shell holding the robot's resources. The
+capability is **input-bearing**, so it takes the ownership lease like any
+other ([docs/10](10-security.md#session-ownership)).
+
 ### Network packets (fjarr.net) {#net-packets}
 
 The [network tunnel](27-network-tunnel.md) uses `fjarr:stream:fjarr.net`

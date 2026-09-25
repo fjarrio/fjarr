@@ -58,6 +58,22 @@ install when none matches the running display server.
 
 ## Spike protocol (M2)
 
+**Two phases, because one criterion eliminates.** Unattended access is a
+hard gate, so answering it for all four combinations is cheaper than
+measuring any of them in full. Phase 1 asks only that question, with the
+smallest thing that can answer it: can a rebooted machine with nobody logged
+in be captured and driven at all? Phase 2 fills the criteria table, and only
+for what survived. If all four survive, phase 1 cost one round trip and we
+are no worse off.
+
+**Where.** The `gpu-desktop` self-hosted runner (decided 2026-09-25): a real
+machine running Xorg and GNOME that reboots under its owner's control, which
+is what the gate needs and what no container can give. Xvfb in `robot-sim`
+still carries everything that does not depend on a real session — latency,
+multi-monitor geometry, hot-plug via RandR virtual monitors. The Wayland
+combinations need a Wayland session on that machine alongside the Xorg one,
+which is itself part of phase 1's answer.
+
 Each spike is **throwaway code** in `spikes/desktop-<combo>/`, written only
 after this doc is `stable`, and produces:
 

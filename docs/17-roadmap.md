@@ -131,6 +131,32 @@ loader lands here). In parallel, the terminal capability — the
 deliberately media-free second consumer of the extension API (two
 unrelated capabilities = minimum bar for "generic") and the first user of
 the bulk byte channel.
+**Slices** (planned 2026-09-25; the three deliverables are unusually
+independent, so they land in this order for the reason each gives):
+
+- **2a — `fjarr.terminal`.** The pty over the bulk byte channel in both
+  directions ([docs/08](08-protocol.md#terminal)), the xterm component, the
+  ownership lease, the audit, and the config that makes it exist at all
+  ([docs/06](06-capabilities.md), [docs/10](10-security.md#terminal)).
+  First because it needs no hardware and no display server, and because an
+  extension API with one consumer is not proven generic — it is camera video
+  with extra structure. If the API is wrong, this is the cheapest moment to
+  find out. *Gate:* interactive round trip < 150 ms on LAN; a disconnect
+  leaves no orphan shell; every open and close audited; **no extension-API
+  change was needed**, or the API is amended and the fit review re-run.
+- **2b — the desktop spikes and ADR-0006.** Two phases
+  ([docs/07](07-desktop-backends.md#spike-protocol-m2)): unattended access
+  for all four combinations first, since it eliminates; then the full
+  criteria table for the survivors. On the `gpu-desktop` runner, because a
+  rebooted machine with nobody logged in is the one thing a container cannot
+  simulate. *Gate:* ADR-0006 accepted with numbers, not adjectives, and a
+  go/no-go on unattended access naming the exact mechanism.
+- **2c — the module loader.** A backend loads at runtime from a separate
+  package ([ADR-0021](adr/0021-desktop-backends-as-runtime-modules.md)) and
+  the capability reports `unavailable` with the package to install when none
+  matches. *Gate:* a desktop backend loads as a module from a separate
+  package on the dev stack.
+
 **Gate:** ADR-0006 accepted with data; terminal accepted per
 [docs/06](06-capabilities.md); no extension-API changes needed for it (or
 the API amended + re-reviewed); a desktop backend loads as a module from

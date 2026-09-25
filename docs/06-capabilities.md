@@ -186,11 +186,29 @@ resumed to a verified hash; interactive video latency unaffected during bulk.
 Peer consumer. Deliberately the **second** capability implemented: media-free,
 so it proves the extension API generalizes beyond video.
 
-- PTY on the robot (login shell of a configured user), reliable ordered DC,
-  xterm.js component in `@fjarr/react`.
-- Resize, UTF-8, scrollback handled client-side; session recording hook
-  (audit) from day one — terminal access is the scariest capability
-  ([docs/10](10-security.md)).
+- PTY on the robot over the bulk byte channel in both directions, `raw`
+  framing, one per session ([docs/08](08-protocol.md#terminal)); xterm.js
+  component in `@fjarr/react`. Resize, UTF-8, scrollback client-side.
+- **Off unless configured, and it names its user.** No pty exists until
+  `fjarr.toml` says which account the shell runs as — the capability reports
+  `unavailable` otherwise, which is a deployment choice rather than a fault.
+  There is deliberately no default: the agent's own unprivileged user is
+  chosen for running the agent, not for being a useful or a safe shell, and
+  silently picking it would be a decision made by omission
+  ([docs/10](10-security.md#terminal)).
+
+  ```toml
+  [capabilities."fjarr.terminal"]
+  enabled = true
+  user    = "service"   # required; the shell runs as this account
+  shell   = ""          # default: that user's login shell
+  ```
+
+- **The pty dies with the session, always** — `release_all_input` closes it,
+  so a dropped connection leaves no orphan shell. Input-bearing, so it takes
+  the ownership lease. Every open and close is audited with the operator
+  identity; an I/O recording hook exists from day one but stores nothing by
+  itself ([open question #4](18-open-questions.md)).
 
 **Accepted when:** interactive shell round-trip < 150 ms LAN; disconnect
 kills the PTY (no orphan shells); every session start/end is audit-logged.

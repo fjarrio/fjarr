@@ -123,6 +123,27 @@ The residual risk is honest and documented rather than engineered away: an
 operator with `net` can reach a robot's internal services. The control is
 who gets the claim, for how long, and the audit record afterwards.
 
+## Terminal ([docs/06](06-capabilities.md)) {#terminal}
+
+A shell on the robot, as the account the integrator names. With the network
+tunnel it shares the top of the risk table, and the same treatment:
+
+- **Off unless configured**, and configuration means naming a user. There is
+  no default account, because defaulting to the agent's own user would be a
+  security decision taken by omission — it is chosen for running the agent,
+  not for being a shell anyone should have.
+- **Explicit claim** in the session grant, refused otherwise.
+- **Audited** at open and close with the operator identity, and an I/O
+  recording hook for deployments that need the transcript.
+- **Input-bearing**, so it takes the ownership lease like desktop input.
+- **No orphan shells**: the pty is closed by `release_all_input` on any
+  session end, which is a safety behaviour with a regression test
+  ([docs/15](15-testing-strategy.md#safety-behaviors)), not a best effort.
+
+What the account can do is the integrator's decision and the whole of the
+policy. Fjarr does not sandbox the shell, and says so rather than implying a
+containment it does not provide.
+
 ## Update integrity (forward reference, M8)
 
 OTA artifacts are signed (SWUpdate signing + our manifest); agents verify
