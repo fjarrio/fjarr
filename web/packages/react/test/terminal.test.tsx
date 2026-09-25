@@ -101,7 +101,10 @@ describe("useTerminal", () => {
   });
 
   it("a grant without the capability is denied, and is also not an error to retry", async () => {
-    const { session } = setup(() => ({ ok: false, error: { code: "forbidden", message: "capability not granted" } }));
+    // `capability-denied` is what the CORE answers: it refuses a capability that is not in the
+    // grant before the capability runs, so this — not any capability-level code — is what a
+    // client sees for "you were not given a shell".
+    const { session } = setup(() => ({ ok: false, error: { code: "capability-denied", message: "capability not granted" } }));
     await connected(session);
     const { result } = renderHook(() => useTerminal(session));
     await tick();

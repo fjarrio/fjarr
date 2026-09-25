@@ -359,7 +359,7 @@ actually needs it, not now.
 
 | `type` | kind | payload | semantics |
 |---|---|---|---|
-| `open` | request → result | `{"cols": u16, "rows": u16, "term"?: string}` | start the pty. `result{ok:true}` once the shell is running. `error{code:"forbidden"}` when the grant carries no `fjarr.terminal`; `error{code:"unavailable", message}` when the robot has no terminal configured ([docs/06](06-capabilities.md)) — a deployment choice, not a fault; `error{code:"busy"}` when a pty is already open on this session |
+| `open` | request → result | `{"cols": u16, "rows": u16, "term"?: string}` | start the pty. `result{ok:true}` once the shell is running. `error{code:"unavailable", message}` when the robot has no terminal configured ([docs/06](06-capabilities.md)) — a deployment choice, not a fault; `error{code:"busy"}` when a pty is already open on this session. A grant without `fjarr.terminal` never reaches the capability at all: the core answers `capability-denied` first ([errors](#errors)), and a client must treat that as "you were not given a shell" rather than as a failure |
 | `resize` | request → result | `{"cols": u16, "rows": u16}` | `TIOCSWINSZ` + `SIGWINCH`. Sent on every client resize, coalesced by the client |
 | `close` | request → result | `{}` | `SIGHUP`, then reap. Idempotent |
 | `exit` | event (agent → operator) | `{"code"?: int, "signal"?: string}` | the shell ended on its own; exactly one of `code` or `signal` |

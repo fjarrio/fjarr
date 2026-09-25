@@ -32,6 +32,7 @@ import {
 } from "@fjarr/react";
 import { RobotStatusProvider, useRobotStatus } from "./robot-status.tsx";
 import { Diagnostics } from "./diagnostics.tsx";
+import { TerminalPanel } from "./terminal.tsx";
 
 // Dev only: the browser lab (docs/25) opens this page from inside the compose
 // network, where "localhost" is the lab browser itself — it passes the
@@ -179,6 +180,9 @@ function RemoteView() {
       </Panel>
       <Panel title="Diagnostics (fjarr.introspect — the developer role's grant; an operator sees capability-denied)">
         <Diagnostics session={session} />
+      </Panel>
+      <Panel title="Terminal (fjarr.terminal — developer role only; the robot names the account it runs the shell as)">
+        <TerminalPanel session={session} />
       </Panel>
     </div>
   );

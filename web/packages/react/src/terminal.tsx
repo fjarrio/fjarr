@@ -93,11 +93,13 @@ export function useTerminal(session?: Session, options: UseTerminalOptions = {})
         await s.request(TERMINAL_CAP, "open", { cols: c, rows: r, ...(term ? { term } : {}) });
         setState("open");
       } catch (e) {
-        // docs/08: `unavailable` means no terminal is configured on this robot and `forbidden`
-        // means this grant may not have one. Neither is an error the operator can act on by
-        // retrying, so they are states rather than failures.
+        // Neither refusal is something retrying fixes, so both are states rather than failures.
+        // `capability-denied` is what the CORE answers when the grant lacks the capability — it
+        // refuses before the capability ever runs, so that, not a capability-level code, is what a
+        // client actually sees for "you were not given a shell" (found by the dashboard test).
         const code = (e as { code?: string })?.code;
-        setState(code === "unavailable" ? "unavailable" : code === "forbidden" ? "denied" : "closed");
+        const denied = code === "capability-denied" || code === "capability-unknown";
+        setState(code === "unavailable" ? "unavailable" : denied ? "denied" : "closed");
         setError((e as { message?: string })?.message ?? String(e));
       }
     },
