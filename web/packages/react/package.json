@@ -14,6 +14,10 @@
     "./pipelines": {
       "types": "./dist/pipelines-graph.d.ts",
       "default": "./dist/pipelines-graph.js"
+    },
+    "./terminal": {
+      "types": "./dist/terminal.d.ts",
+      "default": "./dist/terminal.js"
     }
   },
   "files": [
@@ -32,7 +36,9 @@
     "react-dom": ">=19",
     "d3-graphviz": ">=5",
     "d3-selection": ">=3",
-    "d3-transition": ">=3"
+    "d3-transition": ">=3",
+    "@xterm/xterm": ">=5",
+    "@xterm/addon-fit": ">=0.10"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.0",
@@ -41,6 +47,8 @@
     "@types/d3-transition": "^3.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
     "d3-graphviz": "^5.6.0",
     "d3-selection": "^3.0.0",
     "d3-transition": "^3.0.1",
@@ -58,6 +66,12 @@
       "optional": true
     },
     "d3-transition": {
+      "optional": true
+    },
+    "@xterm/xterm": {
+      "optional": true
+    },
+    "@xterm/addon-fit": {
       "optional": true
     }
   }

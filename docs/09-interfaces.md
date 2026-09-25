@@ -129,6 +129,15 @@ public:
 // `cancel_blob(id)` drops one not yet sent. `BlobAssembler` (a helper, not a
 // hook) collects on_blob_chunk() deliveries into whole blobs under a size
 // cap for capabilities that want values rather than streams.
+// `watch_readable(fd, on_readable)` (added in M2) watches a file descriptor on
+// the core loop and returns a handle that stops watching when destroyed; the
+// capability owns the fd and closes it. It exists because `fjarr.terminal`'s
+// pty is a file descriptor and nothing else in the interface could serve one:
+// `run_async` runs a job once and reports back, which is not a read loop, and
+// a capability that spawned its own thread would be the one place in the agent
+// whose callbacks did not arrive on the core loop. This was the extension
+// API's first amendment, and the second capability found it — which is why
+// docs/17 schedules a second capability before more are built on the first.
 // Both contexts are core-loop-only; capabilities never touch sockets, SDP
 // or GStreamer negotiation.
 // spec: docs/23-agent-core-architecture.md#the-concrete-sessioncontext-and-backendcontext

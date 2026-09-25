@@ -132,6 +132,11 @@ tunnel it shares the top of the risk table, and the same treatment:
   no default account, because defaulting to the agent's own user would be a
   security decision taken by omission — it is chosen for running the agent,
   not for being a shell anyone should have.
+- **The named user is verified, never assumed.** The agent is unprivileged
+  and cannot switch accounts, so a configured user it is not running as makes
+  the capability `unavailable` and says so. The failure mode this removes is
+  the quiet one: a robot that was meant to give a restricted shell handing out
+  the agent's own instead.
 - **Explicit claim** in the session grant, refused otherwise.
 - **Audited** at open and close with the operator identity, and an I/O
   recording hook for deployments that need the transcript.

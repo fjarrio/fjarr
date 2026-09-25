@@ -196,6 +196,12 @@ so it proves the extension API generalizes beyond video.
   chosen for running the agent, not for being a useful or a safe shell, and
   silently picking it would be a decision made by omission
   ([docs/10](10-security.md#terminal)).
+- **`user` is verified, not switched to.** The agent runs unprivileged
+  ([ADR-0009](adr/0009-privilege-separation.md)) and cannot become another
+  account, so naming one it is not running as reports `unavailable` **with
+  that reason** rather than quietly starting a shell as the wrong user. To
+  give operators a different account, run the agent as it. Switching users
+  needs a privileged helper, which is a separate decision and not M2's.
 
   ```toml
   [capabilities."fjarr.terminal"]

@@ -69,6 +69,18 @@ struct RecordingContext final : SessionContext {
         return ref;
     }
     void cancel_blob(std::string_view blob_id) override { cancelled.emplace_back(blob_id); }
+    /// No loop here: the double records the request and never fires. A capability under test
+    /// drives its own reads by calling the handler directly.
+    std::unique_ptr<FdWatch> watch_readable(int fd, std::function<bool()> on_readable) override {
+        watched.push_back(fd);
+        on_readable_ = std::move(on_readable);
+        struct NoopWatch final : FdWatch {};
+        return std::make_unique<NoopWatch>();
+    }
+    /// Pretend the fd became readable; returns what the capability's handler said.
+    bool fire_readable() { return on_readable_ ? on_readable_() : false; }
+    std::vector<int> watched;
+
     void run_async(std::function<void()> job, std::function<void()> done) override {
         job();
         done();
@@ -88,6 +100,8 @@ struct RecordingContext final : SessionContext {
             if (it->kind == "result") return &*it;
         return nullptr;
     }
+    std::function<bool()> on_readable_;
+
 };
 
 } // namespace fjarr::testing

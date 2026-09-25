@@ -57,6 +57,7 @@ add_library(fjarr STATIC
   src/capabilities/test_capability.cpp
   src/capabilities/camera_capability.cpp
   src/capabilities/introspect_capability.cpp
+  src/capabilities/terminal_capability.cpp
 )
 add_library(fjarr::fjarr ALIAS fjarr)
 target_include_directories(fjarr
@@ -64,7 +65,7 @@ target_include_directories(fjarr
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(fjarr
   PUBLIC nlohmann_json::nlohmann_json PkgConfig::GST
-  PRIVATE PkgConfig::SOUP tomlplusplus::tomlplusplus nlohmann_json_schema_validator)
+  PRIVATE PkgConfig::SOUP tomlplusplus::tomlplusplus nlohmann_json_schema_validator util) # util: forkpty (fjarr.terminal)
 target_compile_definitions(fjarr PUBLIC GST_USE_UNSTABLE_API)
 if(SYSTEMD_FOUND)
   target_link_libraries(fjarr PRIVATE PkgConfig::SYSTEMD)

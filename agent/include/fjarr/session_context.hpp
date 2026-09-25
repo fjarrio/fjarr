@@ -60,6 +60,13 @@ class DeadmanHandle {
     virtual std::chrono::milliseconds since_feed() const = 0;
 };
 
+/// A file descriptor watched on the core loop. The watch is removed when this is destroyed.
+/// spec: docs/09-interfaces.md#the-capability-interface-agent-side
+class FdWatch {
+  public:
+    virtual ~FdWatch() = default;
+};
+
 class SessionContext {
   public:
     virtual ~SessionContext() = default;
@@ -97,6 +104,13 @@ class SessionContext {
     virtual blob::BlobRef send_blob(std::string bytes, std::string media_type, std::function<void(bool ok)> done = {}) = 0;
     /// Drop a blob not yet fully sent (its receiver times out per docs/08); done(false) if queued.
     virtual void cancel_blob(std::string_view blob_id) = 0;
+
+    /// Watch `fd` for readability on the core loop; `on_readable` runs there, never on another
+    /// thread, so a capability's async I/O obeys the same single-loop rule as everything else
+    /// (docs/23 threading). Return false to remove the watch. The capability owns the fd and
+    /// closes it; destroying the handle only stops the watching. Added in M2 for `fjarr.terminal`,
+    /// whose pty is an fd and which `run_async` cannot serve: that is fire-once, not a read loop.
+    virtual std::unique_ptr<FdWatch> watch_readable(int fd, std::function<bool()> on_readable) = 0;
 
     // Off-loop work: run `job` on the pool, then `done` back on the core loop
     // — dropped if the session is gone by then (generation-guarded).

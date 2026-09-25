@@ -109,6 +109,8 @@ int main(int argc, char** argv) {
     fjarr::Agent agent{config};
     if (config.capabilities["fjarr.test"].value("enabled", true)) agent.register_capability(std::make_unique<fjarr::TestCapability>());
     if (config.capabilities.count("fjarr.camera")) agent.register_capability(std::make_unique<fjarr::CameraCapability>()); // tracks from fjarr.toml (docs/06)
+    // Off unless the table exists AND names a user — there is deliberately no default account (docs/10#terminal).
+    if (config.capabilities.count("fjarr.terminal")) agent.register_capability(std::make_unique<fjarr::TerminalCapability>());
     agent.on_session_event([](const fjarr::SessionEvent& ev) {
         std::printf("audit: session %s %s operator=%s %s\n", fjarr::short_session_id(ev.session_id).c_str(), ev.type.c_str(), ev.operator_info.label.c_str(),
                     ev.reason.c_str());

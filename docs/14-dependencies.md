@@ -83,6 +83,7 @@ ioctls.
 | vitest | ^5 | unit tests (core, react) | MIT | dev-only |
 | happy-dom | ^20 | DOM for `@fjarr/react` hook tests | MIT | dev-only |
 | @testing-library/react | ^16 | hook/component tests | MIT | dev-only |
+| @xterm/xterm + @xterm/addon-fit | ^5.5 / ^0.10 | the terminal renderer in `<TerminalView>` (docs/06 `fjarr.terminal`) | MIT | yes (`@fjarr/react/terminal` entry with **optional** peer dependencies, imported only when the component mounts — a dashboard with no terminal pays nothing) |
 | d3-graphviz (+ its `d3-selection`, `d3-transition` peers) + @hpcc-js/wasm | ^5 (^3) / ^2 | DOT rendering in `<PipelineGraph>` and the on-robot viewer (docs/24) | BSD-3 (ISC) / Apache-2.0 | yes (`@fjarr/react/pipelines` entry with optional peer dependencies; the viewer app's static files served from `introspect.viewer_dir`, docs/24) |
 | `@playwright/test` (+ pinned Chromium image) | 1.63.0 (pinned) | browser lab harness and e2e (docs/25; rows below) | Apache-2.0 | dev-only |
 | Vite + `@vitejs/plugin-react` | ^8 / ^5 | serves the lab page (`web/e2e/app`) | MIT | dev-only |

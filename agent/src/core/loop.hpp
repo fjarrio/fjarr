@@ -54,6 +54,11 @@ class CoreLoop {
     [[nodiscard]] glib::SourceGuard add_timeout(std::chrono::milliseconds period, std::function<bool()> fn,
                                                 int priority = G_PRIORITY_DEFAULT);
     [[nodiscard]] glib::SourceGuard add_idle(std::function<bool()> fn);
+    /// Watch `fd` for readability (and hangup/error) on this loop; `fn` runs on the loop and
+    /// returns false to remove the watch. Not `add_timeout`'s shape: GLib dispatches a unix-fd
+    /// source as a `GUnixFDSourceFunc`, so it cannot share the plain `GSourceFunc` trampoline —
+    /// doing so passes the fd where the closure pointer is expected.
+    [[nodiscard]] glib::SourceGuard add_fd_watch(int fd, std::function<bool()> fn);
 
     /// Worker pool: run `job` off-loop, then `done` on the loop (if `alive`).
     void run_async(std::function<void()> job, std::function<void()> done, std::function<bool()> alive = nullptr);

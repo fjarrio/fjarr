@@ -181,6 +181,21 @@ void SessionContextImpl::cancel_blob(std::string_view blob_id) { session_.cancel
 void SessionContextImpl::event(std::string_view type, nlohmann::json payload) {
     session_.send_control(protocol::make_envelope(cap_, std::string(type), "event", std::move(payload)));
 }
+namespace {
+/// The handle a capability holds: destroying it removes the watch, nothing more. The fd stays
+/// the capability's to close, because only it knows what the fd is for.
+class FdWatchImpl final : public FdWatch {
+  public:
+    explicit FdWatchImpl(glib::SourceGuard guard) : guard_(std::move(guard)) {}
+
+  private:
+    glib::SourceGuard guard_;
+};
+} // namespace
+
+std::unique_ptr<FdWatch> SessionContextImpl::watch_readable(int fd, std::function<bool()> on_readable) {
+    return std::make_unique<FdWatchImpl>(session_.loop().add_fd_watch(fd, std::move(on_readable)));
+}
 void SessionContextImpl::run_async(std::function<void()> job, std::function<void()> done) { session_.run_async(std::move(job), std::move(done)); }
 std::unique_ptr<DeadmanHandle> SessionContextImpl::arm_deadman(milliseconds budget, std::function<void()> on_expiry) {
     return session_.arm_deadman(budget, std::move(on_expiry));

@@ -81,6 +81,7 @@ class SessionContextImpl final : public SessionContext {
     void event(std::string_view type, nlohmann::json payload) override;
     blob::BlobRef send_blob(std::string bytes, std::string media_type, std::function<void(bool ok)> done) override;
     void cancel_blob(std::string_view blob_id) override;
+    std::unique_ptr<FdWatch> watch_readable(int fd, std::function<bool()> on_readable) override;
     void run_async(std::function<void()> job, std::function<void()> done) override;
     std::unique_ptr<DeadmanHandle> arm_deadman(std::chrono::milliseconds budget, std::function<void()> on_expiry) override;
     void close(std::string_view reason) override;

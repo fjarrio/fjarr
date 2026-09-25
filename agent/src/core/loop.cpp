@@ -122,6 +122,29 @@ glib::SourceGuard CoreLoop::add_unix_signal(int signum, std::function<void()> fn
     });
 }
 
+glib::SourceGuard CoreLoop::add_fd_watch(int fd, std::function<bool()> fn) {
+    // The closure is boxed and freed by the source's destroy notify, so it outlives exactly as
+    // long as the source does. The trampoline takes GLib's unix-fd shape, which is why this does
+    // not go through SourceGuard's constructor.
+    auto* boxed = new std::function<bool()>(std::move(fn));
+    GSource* src = g_unix_fd_source_new(fd, static_cast<GIOCondition>(G_IO_IN | G_IO_HUP | G_IO_ERR));
+    const auto trampoline = +[](gint, GIOCondition, gpointer data) -> gboolean {
+        auto& f = *static_cast<std::function<bool()>*>(data);
+        // An exception cannot unwind through GLib's dispatch (docs/23 threading model).
+        try {
+            return f() ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
+        } catch (const std::exception& e) {
+            log::error("loop", "fd watch threw", {{"error", e.what()}});
+            return G_SOURCE_REMOVE;
+        }
+    };
+    g_source_set_callback(src, reinterpret_cast<GSourceFunc>(reinterpret_cast<void (*)()>(trampoline)), boxed,
+                          [](gpointer d) { delete static_cast<std::function<bool()>*>(d); });
+    g_source_attach(src, ctx_);
+    g_source_unref(src); // the context holds it now; the guard destroys it
+    return glib::SourceGuard::attached(src);
+}
+
 glib::SourceGuard CoreLoop::add_idle(std::function<bool()> fn) {
     return glib::SourceGuard(g_idle_source_new(), ctx_, std::move(fn));
 }

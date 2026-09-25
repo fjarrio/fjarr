@@ -333,6 +333,8 @@ export class MockAgent {
   readonly pcs: FakePeerConnection[] = [];
   /** Every envelope the client sent on control/realtime, in order. */
   readonly received: Envelope[] = [];
+  /** Binary the client wrote on each capability's raw bulk channel, in order. */
+  readonly bulkReceived = new Map<string, Uint8Array[]>();
   /** Every signaling message the client sent, across sockets. */
   readonly signaling: SignalingMessage[] = [];
   tracks: TrackManifestEntry[];
@@ -468,7 +470,19 @@ export class MockAgent {
       control.onSend = (d) => this.onEnvelope(control, d);
       const realtime = pc.openDataChannel("fjarr:realtime");
       realtime.onSend = (d) => this.onEnvelope(realtime, d);
-      for (const cap of this.options.bulkCaps ?? []) pc.openDataChannel(`fjarr:bulk:${cap}`);
+      for (const cap of this.options.bulkCaps ?? []) {
+        const bulk = pc.openDataChannel(`fjarr:bulk:${cap}`);
+        // Record what the client writes on a raw bulk channel. Without this a test cannot tell
+        // "the keystrokes reached the robot" from "nothing was sent" (docs/15: extend the mock
+        // rather than hand-rolling a fake in the test).
+        bulk.onSend = (d) => {
+          if (typeof d === "string") return;
+          const view = d instanceof ArrayBuffer ? new Uint8Array(d) : new Uint8Array(d.buffer, d.byteOffset, d.byteLength);
+          const list = this.bulkReceived.get(cap) ?? [];
+          list.push(new Uint8Array(view)); // copy: the caller may reuse the buffer
+          this.bulkReceived.set(cap, list);
+        };
+      }
     };
     if (this.channelsBeforeConnected) openChannels();
     if (pc.connectionState !== "connected") pc.setConnectionState("connected");
