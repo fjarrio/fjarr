@@ -154,8 +154,14 @@ independent, so they land in this order for the reason each gives):
   for all four combinations first, since it eliminates; then the full
   criteria table for the survivors. On the `gpu-desktop` runner, because a
   rebooted machine with nobody logged in is the one thing a container cannot
-  simulate. *Gate:* ADR-0006 accepted with numbers, not adjectives, and a
-  go/no-go on unattended access naming the exact mechanism.
+  simulate. Phase 1 is specified to the point of being startable: a
+  dedicated `fjarr-spike` account, auto-login toggled between runs, both the
+  appliance and login-screen sub-cases, and an injection oracle that records
+  what actually arrived rather than trusting a return value. Its one
+  recorded caveat is that Wayland findings on an NVIDIA machine are
+  provisional until seen on Intel. *Gate:* ADR-0006 accepted with numbers,
+  not adjectives, and a go/no-go on unattended access naming the exact
+  mechanism.
 - **2c — the module loader.** A backend loads at runtime from a separate
   package ([ADR-0021](adr/0021-desktop-backends-as-runtime-modules.md)) and
   the capability reports `unavailable` with the package to install when none

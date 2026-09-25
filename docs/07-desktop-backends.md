@@ -74,6 +74,36 @@ multi-monitor geometry, hot-plug via RandR virtual monitors. The Wayland
 combinations need a Wayland session on that machine alongside the Xorg one,
 which is itself part of phase 1's answer.
 
+### Phase 1 in detail (decided 2026-09-25)
+
+The question, precisely: **after a reboot with nobody logged in, can the
+agent capture the screen and inject input?** Two sub-cases per combination,
+because they answer different product questions and have different answers:
+
+| Sub-case | Setup | What it decides |
+|---|---|---|
+| **Appliance** | a dedicated `fjarr-spike` account with auto-login enabled | whether a robot that ships with an auto-login session can be reached — the case docs/04 says an appliance may legitimately pin |
+| **Login screen** | auto-login off, nobody logged in | whether a robot can be reached *before* anyone logs in, which is what "unattended" means when the appliance trick is not available |
+
+Both are run per combination, on the `gpu-desktop` runner, with a dedicated
+account and auto-login toggled between runs. The Wayland combinations use a
+GNOME-on-Wayland session on the same machine — with the caveat written down
+now rather than discovered later: that machine has an **NVIDIA** GPU, and a
+Wayland session there can behave differently from the Intel hardware robots
+actually run, so a Wayland finding is provisional until it is seen on Intel.
+
+**The injection oracle.** Injection must be *verified*, not assumed, without
+a human watching: the session autostarts a recorder that appends what it
+receives to a file, the probe injects a known sequence, and the file is read
+back over ssh. A capture that produces frames proves nothing about input,
+and "the call returned success" proves nothing at all.
+
+Each run records, per combination and sub-case: yes/no, **the exact
+mechanism or blocker** (a portal restore token that survived, an
+`XAUTHORITY` that had to be readable, a udev rule that was needed), and what
+a robot would have to ship for it to work. A "no" with a precise blocker is
+a useful result; a "yes" without the mechanism is not.
+
 Each spike is **throwaway code** in `spikes/desktop-<combo>/`, written only
 after this doc is `stable`, and produces:
 
