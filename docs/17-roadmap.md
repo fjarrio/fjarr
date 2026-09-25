@@ -162,6 +162,12 @@ independent, so they land in this order for the reason each gives):
   provisional until seen on Intel. *Gate:* ADR-0006 accepted with numbers,
   not adjectives, and a go/no-go on unattended access naming the exact
   mechanism.
+- **2b is blocked on hardware** (2026-09-25): the machine it needed is no
+  longer available, and its question — what a real machine does after a real
+  reboot — is precisely the one no container answers. The protocol is
+  written and startable; it waits on a host, not on a decision. **2c runs
+  first instead**, which changes nothing about it: the loader is
+  backend-agnostic, so it does not depend on which combination wins.
 - **2c — the module loader.** A backend loads at runtime from a separate
   package ([ADR-0021](adr/0021-desktop-backends-as-runtime-modules.md)) and
   the capability reports `unavailable` with the package to install when none

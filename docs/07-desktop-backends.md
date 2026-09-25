@@ -74,6 +74,14 @@ multi-monitor geometry, hot-plug via RandR virtual monitors. The Wayland
 combinations need a Wayland session on that machine alongside the Xorg one,
 which is itself part of phase 1's answer.
 
+> **Blocked on hardware, 2026-09-25.** Access to the `gpu-desktop` machine
+> was lost, and phase 1 is the one part of this that a container cannot
+> stand in for — its whole question is what a real machine does after a real
+> reboot. The protocol below is complete and startable; it is waiting on a
+> host, not on a decision. **Do not soften it to fit a container**: an
+> unattended answer measured without an unattended machine would be worth
+> less than no answer, because it would be believed.
+
 ### Phase 1 in detail (decided 2026-09-25)
 
 The question, precisely: **after a reboot with nobody logged in, can the
