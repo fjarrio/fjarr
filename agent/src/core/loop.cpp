@@ -141,7 +141,10 @@ glib::SourceGuard CoreLoop::add_fd_watch(int fd, std::function<bool()> fn) {
     g_source_set_callback(src, reinterpret_cast<GSourceFunc>(reinterpret_cast<void (*)()>(trampoline)), boxed,
                           [](gpointer d) { delete static_cast<std::function<bool()>*>(d); });
     g_source_attach(src, ctx_);
-    g_source_unref(src); // the context holds it now; the guard destroys it
+    // The guard takes OUR reference, exactly as it does for the bus watches: attach took its own,
+    // and `cancel()` destroys (which releases the context's) and then unrefs ours. Unreffing here
+    // as well left the guard to unref a freed source — `g_source_unref_internal: assertion
+    // 'old_ref > 0' failed` on every terminal or tunnel close, and a read of freed memory.
     return glib::SourceGuard::attached(src);
 }
 
