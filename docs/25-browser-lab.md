@@ -142,6 +142,22 @@ media half through `robot.netem`; `fjarr-lab net` applies both):
 The docs/15 fault menu maps onto these plus the agent's own switches
 (`fjarr-opsim` and the `fjarr.test` hooks: hot-plug, go-silent, SIGSTOP).
 
+**Impair the path the session will actually take.** `netemToward` matches a
+destination address, so it only impairs what ICE chose — and ICE chooses
+*after* the profile is applied. A test that degrades the direct path before its
+viewer connects usually ends up measuring a session that quietly moved to the
+TURN relay, which nothing impaired: measured in slice 4.5b as 14 MB of a
+"congested" viewer's media going to coturn against 3 packets down the impaired
+path, while the test waited for a congestion response that could not come.
+Excluding TURN on the operator side is not enough either, because the robot
+offers its own relay candidate. Decide the path instead of hoping for one:
+give that viewer `iceTransportPolicy: "relay"` (or `fjarr-opsim --ice-policy
+relay`) and impair the robot's egress **toward coturn**, which leaves every
+direct viewer clean. Only `bad` forces a demotion at all — its 1.5 Mbit cap is
+what puts the estimate under the band — so that is the profile to reach for,
+and its loss and jitter also apply to the session's control channel, which
+needs a budget to match.
+
 ## The in-browser loopback agent
 
 `@fjarr/core/testing/browser` adds `LoopbackAgent`: the mock agent's

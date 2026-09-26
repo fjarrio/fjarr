@@ -49,6 +49,16 @@ its viewers within a band (half the tier target and up); a viewer whose
 link is below the band is moved to the lower tier on its own, so one bad
 receiver never costs the others more than that band
 ([docs/23](23-agent-core-architecture.md#rate-control-and-tier-switching)).
+
+The ~2 s reaction above is the estimator's, measured from feedback that already
+carries a low rate. **Demoting a viewer that is behind a bad link from the
+moment it connects takes far longer**, because nothing can be judged until
+transport feedback arrives at all: measured at **11.9–20.4 s** after the track
+was enabled (`bad`: 15 % loss, 100 ± 40 ms, 1.5 Mbit), and longer again when
+other viewers share the encoder (slice 4.5b). That is not a budget violation —
+the 2 s figure governs an established session — but it is the number to design
+tests and support expectations around, and it is why a joining viewer on a bad
+link streams poorly for a few seconds before it is moved down.
 A passthrough track (the camera's own encoded stream) cannot adapt at the
 agent: it adapts by tier only when the source offers a lower stream,
 otherwise not at all, and says so (`adaptive: false`). In exchange it

@@ -340,6 +340,25 @@ session and ordered so every slice is provable when it lands:
   the receiver over-reports under jitter. And a standing question for the
   slice: a critical in a robot's log should fail the run that produced it, not
   wait for someone to read it.
+
+  **In progress 2026-09-26.** The local rows are answered and neither was the
+  agent's. `hotplug` fails only under CPU load — reproduced with 20 spinners
+  and the identical signature, while smoke-then-hotplug is green on an idle
+  machine, so "deterministic after smoke" was the load of my own builds; the
+  frame assertions now report the robot's view of the tracks on failure
+  (`why_no_frames`), which is the evidence that was missing. The three-viewer
+  rate-control test had **three** defects, all in the rig: it impaired the
+  direct path before the viewer connected, so ICE moved to the relay and the
+  session was never congested (14 MB to coturn against 3 packets impaired); it
+  compared steady state against the encoder's opening overshoot, calling
+  convergence to the 4 Mbps target a 15–20 % regression; and its demotion
+  budget came from a design estimate of 8–9 s against a measured 11.9–20.4 s.
+  Fixed by choosing the impaired path (relay + netem toward coturn), judging the
+  clean viewers against the configured target, and setting budgets from
+  measurement: 5 of 5 runs green, and the full `loopback` + `stack` suite 52/52.
+  Measurements folded into [docs/16](16-performance-budgets.md) and the harness
+  rule into [docs/25](25-browser-lab.md). Remaining: CI's intermittent
+  `toggle-keyframe`, and the standing question above.
 - **4.5c — the rig, and the tools the gate names.** The lab can carry packets
   and nothing else: there is no `sshd` in the robot image, no ROS 2 anywhere
   in the stack, and one robot. All three are prerequisites for the M4.5 gate,

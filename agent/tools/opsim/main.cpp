@@ -1549,6 +1549,19 @@ class Operator {
 
 std::string ms_str(std::int64_t us) { return std::to_string(us / 1000) + " ms"; }
 
+std::string agent_track_stats(Operator& op, std::string* err); // defined below, with the other /stats readers
+
+/// What the ROBOT says about the tracks, for a failure message about frames the operator did not
+/// decode. Without it, "no frames within 8 s" cannot distinguish a robot that sent nothing from a
+/// simulator too starved to decode what arrived — the two have opposite fixes, and telling them
+/// apart took a day of bisecting a machine rather than a program (slice 4.5b).
+std::string why_no_frames(Operator& op) {
+    if (op.introspect().empty()) return " (no --introspect: the robot's own view of these tracks would say which end starved)";
+    std::string err;
+    const std::string agent = agent_track_stats(op, &err);
+    return agent.empty() ? " (robot: " + err + ")" : " (robot: " + agent + ")";
+}
+
 /// connect + one assertion line.
 void connect_and_report(Operator& op) {
     op.connect();
@@ -1564,7 +1577,8 @@ void stream_and_assert(Operator& op, const std::string& track, const std::string
     const bool ok = op.select(track, true, tier);
     const bool first = ok && op.wait_frames(track, before, 1, 8000);
     r.check("first-frame " + track, first,
-            first ? "decoded " + ms_str(g_get_monotonic_time() - t0) + " after enable (" + tier + ")" : (ok ? "no decoded frame within 8 s" : "select-tracks failed"));
+            first ? "decoded " + ms_str(g_get_monotonic_time() - t0) + " after enable (" + tier + ")"
+                  : (ok ? "no decoded frame within 8 s" + why_no_frames(op) : "select-tracks failed"));
     if (!first) return;
     auto a = op.track_snapshot(track);
     op.sleep_ms(1000);
@@ -1869,7 +1883,9 @@ void scenario_hotplug(Operator& op) {
         const std::int64_t t0 = g_get_monotonic_time();
         const bool ok = op.select("test-second", true);
         const bool flows = ok && op.wait_frames("test-second", before, 10, 8000);
-        r.check("test-second-flows", flows, flows ? "10 decoded frames within " + ms_str(g_get_monotonic_time() - t0) + " of enable" : (ok ? "no frames within 8 s" : "select-tracks failed"));
+        r.check("test-second-flows", flows,
+                flows ? "10 decoded frames within " + ms_str(g_get_monotonic_time() - t0) + " of enable"
+                      : (ok ? "no frames within 8 s" + why_no_frames(op) : "select-tracks failed"));
         auto mm = op.mid_mismatches();
         std::string detail;
         for (const auto& m : mm) detail += m + "; ";
@@ -2295,26 +2311,33 @@ void scenario_congested_viewer(Operator& op) {
     Report& r = op.report();
     connect_and_report(op);
     const std::int64_t t0 = g_get_monotonic_time();
-    // The reply comes back over the impaired link (15 % loss, 100 ± 40 ms, behind whatever video is
-    // already queued): a control request needs a real budget here, and one retry.
-    bool ok = op.select("test-pattern", true, "active", 15000);
-    if (!ok) ok = op.select("test-pattern", true, "active", 15000);
-    r.check("enabled", ok, ok ? "select-tracks test-pattern active" : "select-tracks got no result within 15 s, twice");
+    // The reply comes back over the impaired link, and `bad` is the only docs/25 profile that can
+    // force a demotion at all (its 1.5 Mbit cap is what puts the estimate under the band), so this
+    // request pays for 15 % loss, 100 +/- 40 ms of jitter-induced reordering and a saturated pipe on
+    // a reliable-ordered channel. Two attempts were not enough — it stalled past 30 s in 2 of 5
+    // runs (slice 4.5b) — so it gets three. Enabling the track is this scenario's setup, not its
+    // assertion: the assertion is that a congested viewer is demoted, and that one is unchanged.
+    bool ok = false;
+    for (int attempt = 0; attempt < 3 && !ok; attempt++) ok = op.select("test-pattern", true, "active", 15000);
+    r.check("enabled", ok, ok ? "select-tracks test-pattern active" : "select-tracks got no result within 15 s, three times");
     if (!ok) return;
     auto tier_now = [&] {
         auto bw = latest_bandwidth(op, "test-pattern");
         return bw ? bw->value("effective_tier", "?") + " (estimate " + std::to_string(bw->value("estimate_bps", 0LL) / 1000) + " kbps)" : std::string("no bandwidth-stats yet");
     };
     // A session that starts *already* behind a bad link waits for transport-wide feedback to carry
-    // bitrates at all (3–4 s here) before the estimator has anything to judge, then 2 s below the
-    // band, then the 1 s stats sample: 8–9 s on this host. The browser gate measures the reaction of
-    // an established session (docs/23 slice 6a gate 1); this one asserts that it happens at all.
+    // bitrates at all before the estimator has anything to judge, then 2 s below the band, then the
+    // 1 s stats sample. The design adds up to 8-9 s; measurement does not agree, and the budget
+    // follows the measurement: 11.9-20.4 s over three runs with this viewer alone (slice 4.5b), and
+    // longer again when two other viewers share the encoder, which is exactly the case the browser
+    // gate builds. 40 s is ~2x the observed worst case. The assertion is still categorical — a
+    // congested viewer must be demoted — and only its patience changed.
     const bool demoted = op.wait_for(
         [&] {
             auto bw = latest_bandwidth_locked(op.sh(), "test-pattern");
             return bw && bw->value("effective_tier", "") == "thumbnail";
         },
-        25000);
+        40000);
     const std::int64_t t_demoted = g_get_monotonic_time();
     r.check("demoted", demoted,
             demoted ? "effective_tier=thumbnail " + ms_str(t_demoted - t0) + " after enable (docs/23: TWCC warm-up, then 2 s below the band, then the 1 s sample)" : "not demoted within 25 s: " + tier_now());
