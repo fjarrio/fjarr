@@ -191,7 +191,8 @@ TUN_OPERATOR ?= 100.64.0.1
 # what puts them on its tunnel address. Recreating the robot leaves them pointing at a namespace
 # that no longer exists — reachable enough to answer with a TCP reset, which reads as "nothing is
 # listening" rather than "your sidecar is stale" — so tun-up recreates them after it.
-ROBOT_SIDECARS ?= robot-services
+# `ROS=1` adds the ROS 2 participant to the sidecars tun-up brings up in order.
+ROBOT_SIDECARS ?= robot-services$(if $(ROS), robot-ros,)
 # The size of the file the docs/27 scp gate transfers. Passed explicitly rather than left to the
 # environment: `docker compose up` re-resolves a service's variables, so anything set only on an
 # earlier command is lost the next time the sidecar is recreated — the same trap that cost CI the
@@ -202,7 +203,7 @@ tun-up: ## Create the tunnel interfaces the installer creates on a real robot (d
 	@addr=$$(docker compose exec -T -e FJARR_ROBOT_ID=$(OPSIM_ROBOT) dev ./build/$(BUILD_PRESET)/agent/daemon/fjarr-agent --net-address | tail -1); \
 	  echo "tun-up: $(OPSIM_ROBOT) derives $$addr (docs/27#addressing)"; \
 	  FJARR_DEMO_NET=1 docker compose up -d demo-robot && \
-	  FJARR_DEMO_NET=1 FJARR_LAB_FILE_MB=$(LAB_FILE_MB) docker compose --profile demo up -d --force-recreate $(ROBOT_SIDECARS) && \
+	  FJARR_DEMO_NET=1 FJARR_LAB_FILE_MB=$(LAB_FILE_MB) docker compose --profile demo --profile ros up -d --no-deps --force-recreate $(ROBOT_SIDECARS) && \
 	  docker/lab/tundev.sh up demo-robot "$$addr" $(TUN_OPERATOR) $(TUN_DEV) && \
 	  docker/lab/tundev.sh up dev $(TUN_OPERATOR) "$$addr" $(TUN_DEV)
 	@echo "tun-up: the robot waited for its interface before starting — the ordering the whole design rests on (docs/27#lifecycle)"
@@ -221,6 +222,13 @@ tun-up: ## Create the tunnel interfaces the installer creates on a real robot (d
 	  docker compose exec -T -u root demo-robot sh -c 'ss -ltn 2>/dev/null | grep -q ":22 "' \
 	  || { echo "tun-up: nothing is serving ssh in the robot's namespace; docker compose logs robot-services"; exit 1; }
 	@echo "tun-up: the robot is online, attached, and serving ssh; 'make opsim-tunnel' will find it"
+	@if [ -n "$(ROS)" ]; then \
+	  docker compose --profile demo --profile ros up -d --no-deps operator-ros >/dev/null; \
+	  for i in $$(seq 60); do docker compose --profile demo --profile ros logs --no-color robot-ros 2>/dev/null | grep -q "publishing /fjarr" && break; sleep 1; done; \
+	  docker compose --profile demo --profile ros logs --no-color robot-ros 2>/dev/null | grep -q "publishing /fjarr" \
+	    && echo "tun-up: ROS 2 is publishing on the robot, after the interface existed (docs/27#lifecycle)" \
+	    || { echo "tun-up: the robot's ROS participant never started; docker compose logs robot-ros"; exit 1; }; \
+	fi
 
 .PHONY: tun-down
 tun-down: ## Remove the lab's tunnel interfaces and put the demo robot back to its usual state
@@ -231,9 +239,34 @@ tun-down: ## Remove the lab's tunnel interfaces and put the demo robot back to i
 opsim-tunnel: ## The docs/27 tunnel scenario: real IP over fjarr:stream:fjarr.net, from dev's own network namespace
 	$(MAKE) --no-print-directory opsim OPSIM_SCENARIO=tunnel OPSIM_IN=dev OPSIM_INTROSPECT=http://demo-robot:7381 OPSIM_EXTRA="--introspect-token $(INTROSPECT_TOKEN) $(OPSIM_EXTRA)"
 
+.PHONY: ros-up
+ros-up: ## Start ROS 2 on both ends of the link (docs/27#ros2). Prefer `make tun-up ROS=1`, which orders it correctly
+	@# --no-deps is not optional: without it compose recreates demo-robot as a dependency, which
+	@# takes the tunnel device with it and leaves every namespace-sharing sidecar pointing at a
+	@# container that no longer exists (found the hard way, slice 4.5d).
+	docker compose --profile demo --profile ros up -d --no-deps --force-recreate robot-ros operator-ros
+	@for i in $$(seq 60); do docker compose --profile demo --profile ros logs --no-color robot-ros 2>/dev/null | grep -q "publishing /fjarr" && break; sleep 1; done; \
+	  docker compose --profile demo --profile ros logs --no-color robot-ros 2>/dev/null | grep -q "publishing /fjarr" \
+	  || { echo "ros-up: the robot's participant never started; docker compose logs robot-ros"; exit 1; }
+	@echo "ros-up: both ends are running ROS 2"
+
+.PHONY: ros-down
+ros-down: ## Stop the ROS 2 sidecars
+	docker compose --profile demo --profile ros stop robot-ros operator-ros >/dev/null 2>&1 || true
+
+.PHONY: ros-topics
+ros-topics: ## What the operator's ROS 2 can see of the robot (docs/27#ros2 gate)
+	docker compose exec -T operator-ros bash -lc 'source /opt/ros/jazzy/setup.bash && timeout 20 ros2 topic list'
+
 .PHONY: tunnel-ssh
 tunnel-ssh: ## docs/27 gate: a shell on the robot over the link, through the tools a developer owns
 	$(MAKE) --no-print-directory opsim-tunnel OPSIM_EXTRA="--exec 'docker/lab/tunnel-checks.sh ssh' $(OPSIM_EXTRA)"
+
+.PHONY: tunnel-ros
+tunnel-ros: ## docs/27#ros2 gate: ros2 topic list and echo against the robot, with the direct path removed
+	@docker/lab/dds-isolate.sh on
+	$(MAKE) --no-print-directory opsim-tunnel OPSIM_EXTRA="--ice-policy relay --exec 'docker/lab/tunnel-checks.sh ros2' $(OPSIM_EXTRA)"; \
+	  rc=$$?; docker/lab/dds-isolate.sh off >/dev/null; exit $$rc
 
 .PHONY: tunnel-scp
 tunnel-scp: ## docs/27 gate: pull LAB_FILE_MB over the link and verify its sha256 (open question #27: it stalls ~40 % of the time)

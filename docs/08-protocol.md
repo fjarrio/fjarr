@@ -385,10 +385,12 @@ retransmission would fight TCP's and lose on a poor link.
   buffered amount is high. Queueing is forbidden: a queue delivers a burst
   of stale packets after congestion, which damages the round-trip estimate
   of every connection inside the tunnel more than the loss would have.
-- Both ends drop any packet whose destination is not their own tunnel
-  address, or whose source is not the expected peer
-  ([docs/27](27-network-tunnel.md#isolation)). These checks are normative:
-  they are what makes one robot unreachable from another.
+- Both ends drop any packet whose source is not the expected peer, and any
+  whose destination is neither their own tunnel address nor a multicast address
+  ([docs/27](27-network-tunnel.md#isolation),
+  [ADR-0026](adr/0026-multicast-over-the-tunnel.md)). These checks are normative:
+  the source check is what makes one robot unreachable from another, and the
+  multicast exception is what lets DDS discovery work at all.
 
 Control messages for the capability travel on `fjarr:control` as ordinary
 envelopes:

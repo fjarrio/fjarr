@@ -94,8 +94,17 @@ const char* verdict_name(Verdict v) {
     return "unknown";
 }
 
+/// 224.0.0.0/4 — every IPv4 multicast address.
+bool is_multicast(std::uint32_t a) { return (a & 0xf0000000u) == 0xe0000000u; }
+
 Verdict check(const PacketView& p, std::uint32_t expect_dst, std::uint32_t expect_src, const std::vector<std::uint16_t>& allow_ports) {
     if (!p.ipv4) return Verdict::NotIPv4;
+    // Multicast from the peer is allowed through (ADR-0026): the destination rule below cannot be
+    // satisfied by a multicast address, and DDS discovery is multicast, so the rule as first written
+    // made the tunnel's headline use case impossible — measured, not theorised (docs/27#ros2). The
+    // source rule still applies, nothing is forwarded, and a multicast datagram on a
+    // point-to-point link can only have come from the one peer at the other end.
+    if (is_multicast(p.dst)) return p.src == expect_src ? Verdict::Allow : Verdict::WrongSource;
     if (p.dst != expect_dst) return Verdict::WrongDestination;
     if (p.src != expect_src) return Verdict::WrongSource;
     if (allow_ports.empty()) return Verdict::Allow;

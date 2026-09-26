@@ -241,6 +241,37 @@ services:
     depends_on:
       - demo-robot
 
+  # ROS 2 on each end of the link, in sidecars sharing the namespace that owns the tunnel device
+  # (docs/27#ros2). Separate containers for the same reason sshd is one: on a robot, ROS 2 is the
+  # customer's software and `fjarr-agent` neither contains nor knows about it — and DDS binds its
+  # interfaces at participant creation, so what matters is only that these see `fjarr0`.
+  # `ros:jazzy-ros-base` is the image the spike measured (agent/spikes/ros2-tunnel).
+  robot-ros:
+    profiles: [ros]
+    image: ros:jazzy-ros-base
+    network_mode: "service:demo-robot"
+    environment:
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+    volumes:
+      - ./docker/lab:/lab:ro
+    command: ["bash", "/lab/ros-robot.sh"]
+    depends_on:
+      - demo-robot
+
+  operator-ros:
+    profiles: [ros]
+    image: ros:jazzy-ros-base
+    network_mode: "service:dev"
+    environment:
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+    volumes:
+      - ./docker/lab:/lab:ro
+    command: ["bash", "/lab/ros-operator.sh"]
+    depends_on:
+      - dev
+
   rtsp-sim:
     # A network camera stand-in for fjarr.camera's `rtsp` track (docs/06, slice 4): GStreamer's
     # RTSP server serving a test pattern as H.264 at rtsp://rtsp-sim:8554/pattern.

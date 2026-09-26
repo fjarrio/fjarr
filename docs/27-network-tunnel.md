@@ -177,14 +177,21 @@ lose on a bad link.
 Both pumps enforce the same two rules on every packet, in userspace, where
 they cannot be switched off by a sysctl:
 
-- **Destination must be this end's own tunnel address.** On the robot this
-  makes lateral movement into the robot's LAN impossible without changing
-  Fjarr's code. IP forwarding is never enabled.
+- **Destination must be this end's own tunnel address**, or a multicast address
+  ([ADR-0026](adr/0026-multicast-over-the-tunnel.md)). On the robot this makes
+  lateral movement into the robot's LAN impossible without changing Fjarr's code.
+  IP forwarding is never enabled. The multicast exception exists because DDS
+  discovery is multicast and a multicast destination can never be this end's own
+  address, so the rule as first written made ROS 2 over the link impossible —
+  measured, with the robot logging `refused reason=wrong-destination
+  dst=239.255.0.1`. Such a packet still reaches only this end's own stack.
 - **Source must be the expected peer.** On the operator host a packet
   arriving on robot A's channel is accepted only if it is from A and
   addressed to the operator. Nothing is ever forwarded from one link to
   another, so robot A cannot reach robot B, and neither learns the other
-  exists.
+  exists. **This is the rule that carries the isolation guarantee** — the
+  destination rule has an exception and this one does not, so it is the one to be
+  careful with.
 
 `allow_ports` optionally narrows the robot side to a port list. A packet
 carrying no port to read — ICMP, a later fragment — cannot satisfy a port
@@ -365,7 +372,13 @@ blocked so DDS could only reach the peer through the tunnel:
   sockets that joined the group on that interface. No relay, no discovery
   server, nothing on the robot.
 - **Fast DDS, the ROS 2 default, needs no configuration**, on the default
-  domain and on a set one. Discovery completed in 1.1–1.3 s.
+  domain and on a set one. Discovery completed in 1.1–1.3 s. Confirmed over a
+  real data channel in slice 4.5d — `ros2 topic list` finds the robot's topic and
+  `ros2 topic echo` receives a sample, with every direct path between the two ends
+  blocked — but **only after [ADR-0026](adr/0026-multicast-over-the-tunnel.md)**:
+  the isolation rule as first written dropped every discovery announcement,
+  because a multicast destination is never this end's own tunnel address. The
+  spike missed it because its throwaway pump applied no policy at all.
 - **Cyclone DDS needs a configuration file**, and with it serves the tunnel
   and the local network at the same time. Stock, it binds one interface
   chosen arbitrarily and usually the wrong one. Two elements are both
@@ -483,9 +496,15 @@ Per [docs/15](15-testing-strategy.md):
   link up and `FJARR_ADDR` set, the same shape as `fjarr-connect <robot> --
   <cmd>`. `make tunnel-ssh` asserts the shell; `make tunnel-scp` pulls the
   payload and verifies its sha256, and records rather than asserts while
-  [#28](18-open-questions.md) stands. `ros2 topic list` with Fast DDS
-  unconfigured and with the documented Cyclone file follows in 4.5d, and the
-  docs/25 network profiles after that.
+  [#28](18-open-questions.md) stands.
+- **ROS 2** (slice 4.5d): `make tunnel-ros` runs `ros2 topic list` and
+  `ros2 topic echo` from a sidecar on the operator's namespace against one on the
+  robot's, with `docker/lab/dds-isolate.sh` removing every direct path between the
+  two containers first — without that the two would discover each other over the
+  lab's own bridge and the test would prove nothing. The session uses the relay
+  (`--ice-policy relay`) because the direct path is exactly what was blocked. The
+  documented Cyclone file and `fjarr-agent net setup`'s offer to write it are
+  still owed, as are the docs/25 network profiles.
 
 ## Open questions
 

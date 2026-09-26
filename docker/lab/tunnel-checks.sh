@@ -37,5 +37,18 @@ scp)
   if [ "$got" != "$want" ]; then echo "tunnel-checks: HASH MISMATCH — wanted $want" >&2; exit 1; fi
   echo "tunnel-checks: hash verified end to end"
   ;;
-*) echo "usage: tunnel-checks.sh ssh|scp" >&2; exit 2 ;;
+ros2)
+  # ROS 2 lives in a sidecar on this namespace, so the query runs there; this container has the
+  # docker socket (docs/12) and the sidecar has the interface. What is being tested is whether DDS
+  # discovery and user traffic cross the link, with the direct path removed by dds-isolate.sh.
+  ros_env='set +u; source /opt/ros/jazzy/setup.bash; [ -s /tmp/fastdds-tunnel.xml ] && export FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/fastdds-tunnel.xml;'
+  out=$(docker compose exec -T operator-ros bash -lc "$ros_env timeout 25 ros2 topic list" 2>&1)
+  echo "tunnel-checks: ros2 topic list ->" $(echo "$out" | tr '\n' ' ')
+  case "$out" in *"/fjarr/robot_heartbeat"*) ;; *) echo "tunnel-checks: the robot's topic is not visible over the link" >&2; exit 1 ;; esac
+  msg=$(docker compose exec -T operator-ros bash -lc "$ros_env timeout 25 ros2 topic echo --once /fjarr/robot_heartbeat" 2>&1)
+  echo "tunnel-checks: ros2 topic echo ->" $(echo "$msg" | tr '\n' ' ')
+  case "$msg" in *demo-robot-01*) ;; *) echo "tunnel-checks: discovery worked but no sample arrived" >&2; exit 1 ;; esac
+  echo "tunnel-checks: ROS 2 discovery and data both crossed the link"
+  ;;
+*) echo "usage: tunnel-checks.sh ssh|scp|ros2" >&2; exit 2 ;;
 esac

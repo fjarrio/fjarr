@@ -430,6 +430,21 @@ written down). Two slices, and the letters after them shift:
   advertise the tunnel address, one created while attached does, and it keeps
   advertising across an agent restart. Those three are the measured facts the
   whole lifecycle rests on, and nothing has ever re-checked them.
+
+  **In progress 2026-09-26.** `ros2 topic list` and `ros2 topic echo` both cross
+  the link (`make tunnel-ros`), from a ROS 2 sidecar on each end's namespace, with
+  `docker/lab/dds-isolate.sh` removing every direct path first — without that the
+  two ends discover each other over the lab's own bridge and the test proves
+  nothing, which is the trap the spike fell into. Getting there needed
+  **[ADR-0026](adr/0026-multicast-over-the-tunnel.md)**: docs/27's isolation rule
+  said a packet's destination must be this end's own tunnel address, which a
+  multicast destination never is, so the tunnel dropped every DDS discovery
+  announcement and ROS 2 over the link could not work as specified. The rule now
+  admits multicast on the strength of its source, the source rule carries the
+  isolation guarantee alone, and docs/08, docs/10 and docs/27 say so. Stock Fast
+  DDS then needs no configuration, exactly as claimed. **Still owed:** the Cyclone
+  file, `fjarr-agent net setup`'s offer to write it, and the three ordering facts
+  as a regression.
 - **4.5e — `fjarr-protocol` and `fjarr-connect`**
   ([ADR-0024](adr/0024-native-operator-client.md)). The shared signaling types
   move into their own crate **here**, when a second consumer exists: the

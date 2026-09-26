@@ -49,6 +49,10 @@ PacketView inspect(std::span<const std::byte> packet);
 enum class Verdict : std::uint8_t { Allow, NotIPv4, WrongDestination, WrongSource, PortNotAllowed };
 const char* verdict_name(Verdict v);
 
+/// True for 224.0.0.0/4. Multicast is the one destination the rules below let through on the
+/// strength of its source alone (ADR-0026).
+bool is_multicast(std::uint32_t addr);
+
 /// The two rules of docs/27#isolation. They are the same rules in both directions, which is why
 /// they take the addresses rather than a side: inbound from the channel expects `dst` to be this
 /// end and `src` to be the peer; outbound from the interface expects the mirror. `allow_ports`

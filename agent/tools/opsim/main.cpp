@@ -1694,7 +1694,7 @@ class TunnelEnd {
             const std::span<const std::byte> packet(reinterpret_cast<const std::byte*>(bytes.data()), bytes.size());
             // The same two rules the robot applies, from this end (docs/27#isolation): a packet
             // arriving on this link is accepted only if it is for us and from the robot.
-            if (fjarr::net::check(fjarr::net::inspect(packet), self_, peer_, {}) != fjarr::net::Verdict::Allow) {
+            if (fjarr::net::check(fjarr::net::inspect(packet), self_, peer_, {}) != fjarr::net::Verdict::Allow) { // the same rule both ends, multicast included (ADR-0026)
                 refused_++;
                 return;
             }

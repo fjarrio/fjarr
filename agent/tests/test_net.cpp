@@ -151,6 +151,23 @@ TEST(NetPolicy, aPacketMustBeForThisEndAndFromThePeer) {
     EXPECT_EQ(net::check(v6, self, peer, {}), net::Verdict::NotIPv4);
 }
 
+TEST(NetPolicy, multicastFromThePeerIsAllowedAndFromAnyoneElseIsNot) {
+    // ADR-0026: DDS discovery is multicast, and a multicast destination can never be this end's own
+    // tunnel address, so the destination rule alone made ROS 2 impossible over the link. The source
+    // rule still decides, which is what keeps another robot's traffic out.
+    const std::uint32_t self = *net::parse_address("100.66.1.2"), peer = *net::parse_address("100.64.0.1");
+    EXPECT_TRUE(net::is_multicast(*net::parse_address("239.255.0.1")));
+    EXPECT_TRUE(net::is_multicast(*net::parse_address("224.0.0.22")));
+    EXPECT_FALSE(net::is_multicast(self));
+
+    // The real DDS discovery group, and the IGMP membership reports that go with it.
+    EXPECT_EQ(net::check(net::inspect(bytes_of(packet("100.64.0.1", "239.255.0.1", 17, 7400))), self, peer, {}), net::Verdict::Allow);
+    EXPECT_EQ(net::check(net::inspect(bytes_of(packet("100.64.0.1", "224.0.0.22", 2))), self, peer, {}), net::Verdict::Allow);
+    // From anyone but the peer it is refused, so two robots on one operator still cannot see each
+    // other's announcements.
+    EXPECT_EQ(net::check(net::inspect(bytes_of(packet("100.66.9.9", "239.255.0.1", 17, 7400))), self, peer, {}), net::Verdict::WrongSource);
+}
+
 TEST(NetPolicy, anAllowListNarrowsToNamedPortsAndRefusesWhatHasNoPort) {
     const std::uint32_t self = *net::parse_address("100.66.1.2"), peer = *net::parse_address("100.64.0.1");
     const std::vector<std::uint16_t> ssh_only{22};

@@ -89,6 +89,13 @@ would be local and the kernel would short-circuit the link it is meant to
 test. `make opsim-tunnel` runs from `dev` for that reason, as `opsim-netem`
 does.
 
+ROS 2 lives in sidecars on each end's network namespace, started in the right
+order by `make tun-up ROS=1` — a DDS participant created before the interface
+exists never sees it (docs/27#lifecycle), which is why the order matters and why
+the robot's sidecar waits. `make tunnel-ros` runs the gate;
+`docker/lab/dds-isolate.sh on|off|show` is what makes it mean anything, by taking
+away the direct path between the two containers.
+
 ## Opt-in overrides (conscious privilege grants)
 
 **Host desktop capture** — develop against your real screen:

@@ -47,3 +47,4 @@ options weighed, the choice, and its consequences — so future maintainers
 | [0023](0023-network-tunnel-virtual-interface.md) | The network tunnel is a virtual interface, not forwarded sockets | accepted |
 | [0024](0024-native-operator-client.md) | `fjarr-connect` — a native operator client, data channels only | accepted |
 | [0025](0025-encoder-families.md) | Four encoder families behind one adapter, and what each owes CI | accepted |
+| [0026](0026-multicast-over-the-tunnel.md) | Multicast crosses the tunnel, on the strength of its source — the destination rule made ROS 2 impossible | accepted |

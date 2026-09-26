@@ -113,6 +113,13 @@ treated as such:
   own tunnel address, in userspace. IP forwarding is never enabled, so the
   link reaches the robot and not the network behind it. An operator holding
   two links cannot route between them, and the robots cannot see each other.
+- **Multicast from the peer is accepted** even though its destination is not the
+  robot's own tunnel address ([ADR-0026](adr/0026-multicast-over-the-tunnel.md)):
+  DDS discovery is multicast, and the rule as first written made ROS 2 over the
+  link impossible. It reaches only the robot's own stack — forwarding is off — and
+  it is strictly less reach than the operator already has, since the grant exposes
+  every port the robot binds on that address. The source check is unchanged, so a
+  second robot's announcements are still refused.
 - **Optional port allow-list** (`capabilities."fjarr.net".allow_ports`) for deployments that want
   the surface narrower than "this robot's own address".
 - **No privilege gain.** The device is created once at install and the agent
