@@ -386,14 +386,49 @@ blocked so DDS could only reach the peer through the tunnel:
   the isolation rule as first written dropped every discovery announcement,
   because a multicast destination is never this end's own tunnel address. The
   spike missed it because its throwaway pump applied no policy at all.
-- **Cyclone DDS needs a configuration file**, and with it serves the tunnel
-  and the local network at the same time. Stock, it binds one interface
-  chosen arbitrarily and usually the wrong one. Two elements are both
-  required: `<Interfaces>` with explicit `priority` values, which stops the
-  arbitrary choice, and unicast `<Peers>`, which supplies the discovery that
-  multicast cannot carry across a point-to-point link. The exact file ships
-  in the docs, and `fjarr-agent net setup` offers to write it
-  ([docs/26](26-robot-install-and-drivers.md)).
+- **Cyclone DDS needs a configuration file**, and **is not yet verified over a
+  real link.** Stock, it binds one interface chosen arbitrarily; in slice 4.5d
+  stock Cyclone did not merely pick the wrong one, it left `ros2 topic list`
+  hanging with no output at all. The file below fixes that much — the command
+  returns and lists local topics — but discovery across the link still does not
+  complete, and it is not honest to call Cyclone supported on the strength of the
+  spike alone. What was measured: **78 discovery packets arrive** on the robot's
+  tunnel interface and its Cyclone does not answer usefully; pinning the operator
+  to the tunnel as its only interface makes it send almost nothing, so Cyclone
+  appears unwilling to use a point-to-point interface alone. **Fast DDS, the ROS 2
+  default, is the verified path and needs nothing.**
+
+  The file, generated per end by `docker/lab/cyclonedds-tunnel.sh`:
+
+  ```xml
+  <?xml version="1.0" encoding="UTF-8"?>
+  <CycloneDDS xmlns="https://cdds.io/config">
+    <Domain id="any">
+      <General>
+        <AllowMulticast>true</AllowMulticast>
+        <Interfaces>
+          <NetworkInterface name="fjarr0" priority="10" multicast="true"/>
+          <NetworkInterface name="eth0"   priority="1"  multicast="true"/>
+        </Interfaces>
+      </General>
+      <Discovery>
+        <ParticipantIndex>auto</ParticipantIndex>
+        <Peers>
+          <Peer address="100.64.0.1"/>       <!-- the operator, always this address -->
+          <Peer address="100.70.118.224"/>   <!-- this robot's derived address -->
+        </Peers>
+      </Discovery>
+    </Domain>
+  </CycloneDDS>
+  ```
+
+  Both elements are there for different reasons: `<Interfaces>` with explicit
+  priorities stops the arbitrary single-interface choice and keeps the local
+  network usable at the same time, and the unicast `<Peers>` supply the discovery
+  that a point-to-point link's multicast cannot bootstrap. `fjarr-agent net setup`
+  will offer to write it ([docs/26](26-robot-install-and-drivers.md)) **once it is
+  a file that is known to work** — offering to install an unverified one would be
+  worse than offering nothing.
 
 Topic-name collisions between two robots attached at once are a ROS 2
 concern, solved with namespaces or distinct domain ids. Fjarr does not

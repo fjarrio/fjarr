@@ -22,5 +22,12 @@ set +u
 source /opt/ros/jazzy/setup.bash
 set -u
 
+# Cyclone needs a file; Fast DDS needs nothing (docs/27#ros2, ADR-0026).
+if [ "${RMW_IMPLEMENTATION:-}" = rmw_cyclonedds_cpp ]; then
+  : "${FJARR_TUN_SELF:?Cyclone needs this end's tunnel address}" "${FJARR_TUN_PEER:?and the peer's}"
+  /lab/cyclonedds-tunnel.sh "$IFACE" "$FJARR_TUN_SELF" "$FJARR_TUN_PEER" > /tmp/cyclonedds.xml
+  export CYCLONEDDS_URI=file:///tmp/cyclonedds.xml
+  echo "robot-ros: Cyclone configured for $IFACE ($FJARR_TUN_SELF, peer $FJARR_TUN_PEER)"
+fi
 echo "robot-ros: publishing /fjarr/robot_heartbeat with $RMW_IMPLEMENTATION on domain $ROS_DOMAIN_ID"
 exec ros2 topic pub --rate 2 /fjarr/robot_heartbeat std_msgs/msg/String "{data: 'demo-robot-01'}"

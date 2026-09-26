@@ -8,5 +8,11 @@
 # claims and what ADR-0026 made true by letting multicast through.
 # spec: docs/27-network-tunnel.md#ros2
 set -euo pipefail
-echo "operator-ros: ready, stock Fast DDS (no profile — none is needed, ADR-0026)"
+if [ "${RMW_IMPLEMENTATION:-}" = rmw_cyclonedds_cpp ]; then
+  : "${FJARR_TUN_SELF:?Cyclone needs this end's tunnel address}" "${FJARR_TUN_PEER:?and the peer's}"
+  /lab/cyclonedds-tunnel.sh "${FJARR_TUN_DEV:-fjarr0}" "$FJARR_TUN_SELF" "$FJARR_TUN_PEER" > /tmp/cyclonedds.xml
+  echo "operator-ros: Cyclone configured for $FJARR_TUN_SELF, peer $FJARR_TUN_PEER"
+else
+  echo "operator-ros: ready, stock Fast DDS (no configuration — none is needed, ADR-0026)"
+fi
 exec sleep infinity

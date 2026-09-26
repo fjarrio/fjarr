@@ -447,8 +447,20 @@ written down). Two slices, and the letters after them shift:
   the agent is attached reaches the peer, one created while it is detached never
   does, and a working one survives an agent restart. The lab agent runs under a
   supervisor so that third fact is testable at all — restarting the container
-  would take the interface with it, which a real robot does not do. **Still
-  owed:** the Cyclone file and `fjarr-agent net setup`'s offer to write it.
+  would take the interface with it, which a real robot does not do.
+
+  The **Cyclone file now exists** (`docker/lab/cyclonedds-tunnel.sh`, and the exact
+  XML is in [docs/27](27-network-tunnel.md#ros2), which had promised it since the
+  spike) and its effect is measured: stock Cyclone leaves `ros2 topic list` hanging
+  with no output, the file fixes that, and **discovery across the link still does
+  not complete** — 78 discovery packets reach the robot and its Cyclone does not
+  answer usefully. Cyclone is therefore documented as **unverified over a real
+  link** rather than claimed as supported on the spike's word, and Fast DDS is the
+  verified path. **`fjarr-agent net setup` is deliberately not built yet:** its job
+  here is to offer to install that file, and offering an unverified one is worse
+  than offering nothing. It lands when Cyclone works or when the file changes to
+  something that does — that is the remaining 4.5d work, and it is a ROS 2
+  integration question rather than a tunnel one.
 - **4.5e — `fjarr-protocol` and `fjarr-connect`**
   ([ADR-0024](adr/0024-native-operator-client.md)). The shared signaling types
   move into their own crate **here**, when a second consumer exists: the

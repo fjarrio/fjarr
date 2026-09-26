@@ -41,7 +41,8 @@ ros2)
   # ROS 2 lives in a sidecar on this namespace, so the query runs there; this container has the
   # docker socket (docs/12) and the sidecar has the interface. What is being tested is whether DDS
   # discovery and user traffic cross the link, with the direct path removed by dds-isolate.sh.
-  ros_env='set +u; source /opt/ros/jazzy/setup.bash; [ -s /tmp/fastdds-tunnel.xml ] && export FASTRTPS_DEFAULT_PROFILES_FILE=/tmp/fastdds-tunnel.xml;'
+  # Cyclone reads its file through CYCLONEDDS_URI; Fast DDS is left stock on purpose (ADR-0026).
+  ros_env='set +u; source /opt/ros/jazzy/setup.bash; [ -s /tmp/cyclonedds.xml ] && export CYCLONEDDS_URI=file:///tmp/cyclonedds.xml;'
   out=$(docker compose exec -T operator-ros bash -lc "$ros_env timeout 25 ros2 topic list" 2>&1)
   echo "tunnel-checks: ros2 topic list ->" $(echo "$out" | tr '\n' ' ')
   case "$out" in *"/fjarr/robot_heartbeat"*) ;; *) echo "tunnel-checks: the robot's topic is not visible over the link" >&2; exit 1 ;; esac

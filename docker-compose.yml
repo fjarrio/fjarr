@@ -256,11 +256,15 @@ services:
   # `ros:jazzy-ros-base` is the image the spike measured (agent/spikes/ros2-tunnel).
   robot-ros:
     profiles: [ros]
-    image: ros:jazzy-ros-base
+    build: docker/ros-lab
+    image: fjarr-ros-lab
     network_mode: "service:demo-robot"
     environment:
       ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
       RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+      # Cyclone needs a config file naming both ends (docs/27#ros2); `make tun-up ROS=1` fills these.
+      FJARR_TUN_SELF: ${FJARR_TUN_SELF:-}
+      FJARR_TUN_PEER: ${FJARR_TUN_PEER:-}
     volumes:
       - ./docker/lab:/lab:ro
     command: ["bash", "/lab/ros-robot.sh"]
@@ -269,11 +273,15 @@ services:
 
   operator-ros:
     profiles: [ros]
-    image: ros:jazzy-ros-base
+    build: docker/ros-lab
+    image: fjarr-ros-lab
     network_mode: "service:dev"
     environment:
       ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
       RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+      # Mirror image of the robot's pair.
+      FJARR_TUN_SELF: ${FJARR_TUN_PEER:-}
+      FJARR_TUN_PEER: ${FJARR_TUN_SELF:-}
     volumes:
       - ./docker/lab:/lab:ro
     command: ["bash", "/lab/ros-operator.sh"]

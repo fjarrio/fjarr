@@ -203,7 +203,8 @@ tun-up: ## Create the tunnel interfaces the installer creates on a real robot (d
 	@addr=$$(docker compose exec -T -e FJARR_ROBOT_ID=$(OPSIM_ROBOT) dev ./build/$(BUILD_PRESET)/agent/daemon/fjarr-agent --net-address | tail -1); \
 	  echo "tun-up: $(OPSIM_ROBOT) derives $$addr (docs/27#addressing)"; \
 	  FJARR_DEMO_NET=1 docker compose up -d demo-robot && \
-	  FJARR_DEMO_NET=1 FJARR_LAB_FILE_MB=$(LAB_FILE_MB) docker compose --profile demo --profile ros up -d --no-deps --force-recreate $(ROBOT_SIDECARS) && \
+	  FJARR_DEMO_NET=1 FJARR_LAB_FILE_MB=$(LAB_FILE_MB) FJARR_TUN_SELF="$$addr" FJARR_TUN_PEER=$(TUN_OPERATOR) \
+	    docker compose --profile demo --profile ros up -d --no-deps --force-recreate $(ROBOT_SIDECARS) && \
 	  docker/lab/tundev.sh up demo-robot "$$addr" $(TUN_OPERATOR) $(TUN_DEV) && \
 	  docker/lab/tundev.sh up dev $(TUN_OPERATOR) "$$addr" $(TUN_DEV)
 	@echo "tun-up: the robot waited for its interface before starting — the ordering the whole design rests on (docs/27#lifecycle)"
@@ -223,7 +224,8 @@ tun-up: ## Create the tunnel interfaces the installer creates on a real robot (d
 	  || { echo "tun-up: nothing is serving ssh in the robot's namespace; docker compose logs robot-services"; exit 1; }
 	@echo "tun-up: the robot is online, attached, and serving ssh; 'make opsim-tunnel' will find it"
 	@if [ -n "$(ROS)" ]; then \
-	  docker compose --profile demo --profile ros up -d --no-deps operator-ros >/dev/null; \
+	  addr=$$(docker compose exec -T -e FJARR_ROBOT_ID=$(OPSIM_ROBOT) dev ./build/$(BUILD_PRESET)/agent/daemon/fjarr-agent --net-address | tail -1 | tr -d '\r'); \
+	  FJARR_TUN_SELF="$$addr" FJARR_TUN_PEER=$(TUN_OPERATOR) docker compose --profile demo --profile ros up -d --no-deps operator-ros >/dev/null; \
 	  for i in $$(seq 60); do docker compose --profile demo --profile ros logs --no-color robot-ros 2>/dev/null | grep -q "publishing /fjarr" && break; sleep 1; done; \
 	  docker compose --profile demo --profile ros logs --no-color robot-ros 2>/dev/null | grep -q "publishing /fjarr" \
 	    && echo "tun-up: ROS 2 is publishing on the robot, after the interface existed (docs/27#lifecycle)" \
