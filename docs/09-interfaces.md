@@ -335,6 +335,19 @@ that prints a grant, or take one directly, so no integration is ever blocked
 on building this ([docs/27](27-network-tunnel.md#discovery)). `demo-backend`
 and `demo-dashboard` implement it as the reference.
 
+### The wire types on their own (`fjarr-protocol`)
+
+The signaling message types are their own crate, depending on `serde` and one
+UUIDv7 call and nothing else. `fjarr-signaling` re-exports them at
+`fjarr_signaling::protocol`, so nothing that used them had to change.
+
+It exists so that something can speak the wire without linking a server:
+`fjarr-connect` ([ADR-0024](adr/0024-native-operator-client.md)) needs these types
+and none of axum, hyper, `jsonwebtoken`, `reqwest` or the HMAC stack that the
+server tier carries. Sharing the declarations rather than restating them is what
+makes wire drift a compile error instead of a test failure — and the same argument
+applies to any third party writing a Rust operator.
+
 ### The Rust crate beneath (`fjarr-signaling`)
 
 For Rust shops and as the substrate of both editions:

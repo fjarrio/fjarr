@@ -9,7 +9,10 @@
 //! ```
 
 pub mod hooks;
-pub mod protocol;
+/// The wire types, now their own crate so an operator client can depend on them without
+/// the server (ADR-0024). Re-exported at the old path: every consumer here and in
+/// `fjarr-server` says `protocol::…` and did not have to change.
+pub use fjarr_protocol as protocol;
 pub mod turn;
 
 mod state;

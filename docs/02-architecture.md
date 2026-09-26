@@ -156,6 +156,6 @@ peers, and Fjarr never makes it one.
 | Component | Language | Specs it implements |
 |---|---|---|
 | `agent/` (`libfjarr`, `fjarr-agent`) | C++20 | 05, 06, 07, 08, 09, 16 |
-| `signaling/` (`fjarr-signaling`, `fjarr-server`) | Rust | 08, 09, 10 |
+| `signaling/` (`fjarr-protocol`, `fjarr-signaling`, `fjarr-server`) | Rust | 08, 09, 10 |
 | `web/packages` (`@fjarr/core`, `@fjarr/react`) | TypeScript | 05, 08, 09 |
 | `demos/*` | C++/TS | 02 (demo rule), 09 |

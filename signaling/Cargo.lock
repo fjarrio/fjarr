@@ -229,6 +229,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e0f1c7c3a72c66fd80abe965175f7523475c0489a87d3ff9d6e8c87d87a9d2d"
 
 [[package]]
+name = "fjarr-protocol"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "fjarr-server"
 version = "0.0.1"
 dependencies = [
@@ -245,6 +254,7 @@ version = "0.0.1"
 dependencies = [
  "axum",
  "base64",
+ "fjarr-protocol",
  "futures-util",
  "hmac",
  "jsonwebtoken",

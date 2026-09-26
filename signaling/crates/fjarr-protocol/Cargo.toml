@@ -1,0 +1,19 @@
+# The signaling wire format on its own, so something can speak it without linking a server.
+# `fjarr-connect` (ADR-0024) is that something: it needs these types and nothing else from the
+# signaling tier, while fjarr-signaling carries axum, hyper, jsonwebtoken, reqwest and the HMAC
+# stack. Sharing the types rather than redeclaring them is what makes wire drift a compile error.
+# spec: docs/09-interfaces.md · docs/08-protocol.md#signaling
+[package]
+name = "fjarr-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Fjarr signaling wire types (docs/08)"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+# One call: `Common::new` mints the event_id as a UUIDv7 (docs/08#envelope). Pure and runtime-free,
+# so it costs an operator client nothing.
+uuid = { workspace = true }

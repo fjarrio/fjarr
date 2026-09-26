@@ -465,9 +465,10 @@ written down). Two slices, and the letters after them shift:
 - **4.5e — `fjarr-protocol` and `fjarr-connect`**
   ([ADR-0024](adr/0024-native-operator-client.md)). The shared signaling types
   move into their own crate **here**, when a second consumer exists: the
-  protocol module is 217 lines needing only serde, while the signaling crate
-  carries axum, hyper and the HMAC stack that an operator CLI has no business
-  linking. Then the client itself — signaling, one webrtc-rs peer connection,
+  protocol module is 217 lines needing serde and one UUIDv7 call, while the
+  signaling crate carries axum, hyper and the HMAC stack that an operator CLI has
+  no business linking. (This plan said "only serde"; extracting it turned up the
+  `uuid` call, which is equally runtime-free.) Then the client itself — signaling, one webrtc-rs peer connection,
   one stream channel, no media at all, the TUN/utun device with a /32 route
   per attached robot, `--grant <jwt>`, a link that lives in the terminal that
   started it, and `-- <command>` with `FJARR_ADDR` in its environment. Several

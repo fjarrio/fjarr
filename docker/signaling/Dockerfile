@@ -9,9 +9,11 @@ WORKDIR /src
 # Dependency-caching layer: build with empty sources first so the crates.io
 # graph is compiled once and cached across source-only changes.
 COPY Cargo.toml Cargo.lock* rust-toolchain.toml ./
+COPY crates/fjarr-protocol/Cargo.toml crates/fjarr-protocol/Cargo.toml
 COPY crates/fjarr-signaling/Cargo.toml crates/fjarr-signaling/Cargo.toml
 COPY crates/fjarr-server/Cargo.toml crates/fjarr-server/Cargo.toml
-RUN mkdir -p crates/fjarr-signaling/src crates/fjarr-server/src \
+RUN mkdir -p crates/fjarr-protocol/src crates/fjarr-signaling/src crates/fjarr-server/src \
+    && echo 'pub fn placeholder() {}' > crates/fjarr-protocol/src/lib.rs \
     && echo 'pub fn placeholder() {}' > crates/fjarr-signaling/src/lib.rs \
     && echo 'fn main() {}' > crates/fjarr-server/src/main.rs \
     && cargo build --release --locked 2>/dev/null || cargo build --release \
@@ -19,7 +21,7 @@ RUN mkdir -p crates/fjarr-signaling/src crates/fjarr-server/src \
 
 COPY crates/ crates/
 # Touch sources so cargo rebuilds them over the placeholder artifacts.
-RUN touch crates/fjarr-signaling/src/lib.rs crates/fjarr-server/src/main.rs \
+RUN touch crates/fjarr-protocol/src/lib.rs crates/fjarr-signaling/src/lib.rs crates/fjarr-server/src/main.rs \
     && cargo build --release
 
 FROM debian:bookworm-slim

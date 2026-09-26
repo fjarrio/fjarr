@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/fjarr-signaling", "crates/fjarr-server"]
+members = ["crates/fjarr-protocol", "crates/fjarr-signaling", "crates/fjarr-server"]
 
 [workspace.package]
 version = "0.0.1"
@@ -9,6 +9,7 @@ license = "AGPL-3.0-only"
 repository = "https://github.com/fjarrio/fjarr"
 
 [workspace.dependencies]
+fjarr-protocol = { path = "crates/fjarr-protocol" }
 axum = { version = "0.8", features = ["ws"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
 tracing = "0.1"
