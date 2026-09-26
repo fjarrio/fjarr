@@ -2081,14 +2081,25 @@ void scenario_socket_drop(Operator& op) {
     const std::uint64_t f1 = op.frames("test-pattern");
     r.check("media-stopped", f1 == f0, std::to_string(f1 - f0) + " frames decoded in the 1 s window starting 1 s after the drop (connection-state=" + op.conn_state() + ")");
     if (!op.introspect().empty()) {
-        // Census baseline (/memory) is slice 3c; the session must at least be gone from the live list of pipelines
-        // or retired (last_trigger=closing). Producers stay: they are shared and idle.
+        // Census baseline (/memory) is slice 3c; THIS session must be gone from the live list of
+        // pipelines or retired (last_trigger=closing). Producers stay: they are shared and idle.
+        // Scoped to our own session id: it used to count every session pipeline on the robot, so a
+        // neighbouring scenario whose teardown lagged — which on a 2-core runner it does — failed
+        // this one for someone else's work (found in CI, slice 4.5c).
         auto list = op.http_get("/pipelines");
         int live_sessions = 0;
+        std::string others;
         if (list)
-            for (const auto& p : list->value("pipelines", json::array()))
-                if (p.value("kind", "") == "session" && p.value("last_trigger", "") != "closing") live_sessions++;
-        r.check("census-baseline", list && live_sessions == 0, list ? std::to_string(live_sessions) + " session pipeline(s) not closing (/memory census is slice 3c)" : "GET /pipelines failed");
+            for (const auto& p : list->value("pipelines", json::array())) {
+                if (p.value("kind", "") != "session" || p.value("last_trigger", "") == "closing") continue;
+                if (p.value("id", "") == "session:" + op.session_id()) live_sessions++;
+                else others += p.value("id", "") + " ";
+            }
+        r.check("census-baseline", list && live_sessions == 0,
+                list ? (live_sessions == 0 ? "this session's pipeline is gone or closing" +
+                                                 (others.empty() ? "" : " (another scenario's is still winding down: " + others + ")")
+                                           : "this session's pipeline is still live (/memory census is slice 3c)")
+                     : "GET /pipelines failed");
     }
 }
 
