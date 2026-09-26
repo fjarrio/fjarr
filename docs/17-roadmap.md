@@ -363,8 +363,15 @@ session and ordered so every slice is provable when it lands:
   reports its own exit code 2 and the guard tested for 139 — measured directly,
   139 from `docker compose exec` against 2 through make. The loop now runs the
   command itself, and it retries only when the scenario printed a clean verdict
-  before dying; a crash *before* the verdict is not retried. Remaining: CI's
-  intermittent `toggle-keyframe`, and the standing question above.
+  before dying; a crash *before* the verdict is not retried.
+
+  The standing question is answered: `make agent-log-gate` fails a run whose
+  robot logged a GLib or GStreamer critical, and `agent-log-gate-selftest`
+  proves it can fire — validated the hard way by re-introducing the cd81195
+  double release, watching the terminal suite pass 4 of 4, and watching the gate
+  refuse the run with the three criticals CI had been carrying
+  ([docs/15](15-testing-strategy.md#log-gate)). Remaining: CI's intermittent
+  `toggle-keyframe`.
 - **4.5c — the rig, and the tools the gate names.** The lab can carry packets
   and nothing else: there is no `sshd` in the robot image, no ROS 2 anywhere
   in the stack, and one robot. All three are prerequisites for the M4.5 gate,

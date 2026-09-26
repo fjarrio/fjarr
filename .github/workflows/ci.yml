@@ -117,6 +117,14 @@ jobs:
         run: make opsim-all
       - name: "20-cycle soak (docs/15: the census returns to baseline every commit; 200 nightly)"
         run: make opsim-soak OPSIM_CYCLES=20
+      - name: "the robot logged no criticals (docs/15; the gate's selftest proves it can fire)"
+        # After the suites, not before: this asks whether anything they did made the agent log a
+        # critical. A GLib critical means a refcount or assertion was already violated, and the
+        # tests can still pass around it — which is exactly how a double-released fd watch rode
+        # along in this job's logs for weeks (cd81195, slice 4.5b).
+        run: |
+          make agent-log-gate-selftest
+          make agent-log-gate
       - name: the network tunnel end to end (docs/27 gate, slice 4.5a)
         # tun-up plays the installer: it creates the interfaces and restarts the robot with
         # fjarr.net on, so the device exists before the agent does — the ordering the design

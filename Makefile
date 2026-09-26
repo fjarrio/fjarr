@@ -79,6 +79,22 @@ agent-raii-gate: ## Refuse raw GObject/GLib refcount and source calls outside th
 	@bad=$$(grep -rnE '\b(g_object_ref|gst_object_ref|g_object_unref|gst_object_unref|gst_sample_unref|gst_buffer_unref|gst_promise_unref|g_source_remove|g_signal_connect)\s*\(' agent/src agent/daemon demos/demo-robot --include='*.cpp' --include='*.hpp' | grep -v 'agent/src/core/glib/' | grep -v 'NOLINT' || true); \
 	if [ -n "$$bad" ]; then echo "raw refcount/source calls outside agent/src/core/glib/ (use the RAII kit):"; echo "$$bad"; exit 1; fi; echo "agent-raii-gate: clean"
 
+# The log source, overridable so the gate's selftest can feed it a known-bad line.
+ROBOT_LOG ?= docker compose logs --no-color --tail 20000 demo-robot
+.PHONY: agent-log-gate
+agent-log-gate: ## Fail if the robot logged a GLib/GStreamer CRITICAL or a failed assertion (docs/15)
+	@bad=$$($(ROBOT_LOG) 2>&1 | grep -E 'CRITICAL \*\*|ERROR \*\*|assertion .* failed' || true); \
+	if [ -n "$$bad" ]; then \
+	  echo "agent-log-gate: the robot logged criticals, so this run is not green (docs/15):"; \
+	  echo "$$bad" | head -20; exit 1; fi; \
+	echo "agent-log-gate: clean"
+
+.PHONY: agent-log-gate-selftest
+agent-log-gate-selftest: ## The log gate must fire on a known-bad line (a gate that cannot fire is no gate)
+	@if $(MAKE) --no-print-directory agent-log-gate ROBOT_LOG='printf "%s\n" "(demo-robot:1): GLib-CRITICAL **: g_source_unref_internal: assertion failed"' >/dev/null 2>&1; then \
+	  echo "agent-log-gate-selftest: FAILED — the gate did not fire on the line that CI carried for weeks"; exit 1; fi; \
+	echo "agent-log-gate-selftest: the gate fires"
+
 .PHONY: agent-leaks-selftest
 agent-leaks-selftest: ## The leaks-tracer bracketing must catch a deliberate leak (docs/23 ladder layer 3; a gate that cannot fire is no gate)
 	@if ./build/$(BUILD_PRESET)/agent/tests/fjarr-tests --gtest_filter='LeaksGate.*' --gtest_also_run_disabled_tests >/tmp/fjarr-leaks-selftest.log 2>&1; then \

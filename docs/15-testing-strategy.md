@@ -108,6 +108,22 @@ regresses**:
   must; and it must keep advertising across an agent restart. These pin the
   three measured facts the tunnel lifecycle rests on.
 
+## The robot's log is a gate {#log-gate}
+
+`make agent-log-gate` fails a run whose robot logged a GLib or GStreamer
+**CRITICAL**, or a failed assertion. Those mean a refcount or an invariant was
+already violated, and a suite can pass straight through one: a double-released
+fd watch printed three criticals per lab job for weeks while every test stayed
+green, and was found by reading a log for an unrelated failure. Plain warnings
+are deliberately not fatal — GStreamer emits benign ones — so the gate stays
+worth obeying.
+
+`make agent-log-gate-selftest` feeds it that same historical line and fails if
+the gate stays quiet, because a gate that cannot fire is no gate. The same slice
+found `opsim-all`'s crash retry had never once fired for the same reason
+([docs/17](17-roadmap.md)), so every gate that tolerates something now has to
+show it can still refuse.
+
 ## Memory safety (C++) {#memory-safety-c}
 
 The agent wraps a C object system, so lifetime bugs get their own ladder
