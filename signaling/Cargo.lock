@@ -627,6 +627,8 @@ name = "fjarr-connect"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "bytes",
  "clap",
  "fjarr-protocol",
  "futures-util",

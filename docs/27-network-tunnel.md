@@ -226,6 +226,17 @@ requires `CAP_NET_ADMIN` to create its interface and add routes, granted by
 `setcap` at install or by running it under `sudo`, and uses no other
 privilege.
 
+Its ICE matches the rest of the stack rather than the usual desktop default.
+Candidates **trickle in both directions**: the agent's offer advertises
+`a=ice-options:trickle` and carries no candidate lines, so a client that waits to
+gather before answering leaves the agent with no path to check, and neither end
+connects. There is **no STUN server by default** — host candidates plus the
+session's minted TURN credentials are the path that needs no third party, the
+same starting point as the agent and `@fjarr/core`. An operator who wants a
+server-reflexive candidate passes `--stun <url>` (repeatable, or `FJARR_STUN`);
+baking a public STUN server into the binary would send every operator's address
+to a server the customer never chose.
+
 ## Finding a robot, and who authorizes it {#discovery}
 
 `fjarr-connect` is a dashboard without a screen. It discovers and authorizes

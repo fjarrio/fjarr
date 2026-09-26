@@ -8,6 +8,70 @@ use serde_json::Value;
 
 pub const PROTO_VERSION: u32 = 1;
 
+/// The largest a control or realtime envelope may be (docs/08#datachannel-topology).
+pub const MAX_ENVELOPE_BYTES: usize = 16 * 1024;
+
+/// One message addressed to a capability's namespace, as it travels on a control or realtime
+/// DataChannel (docs/08#envelope). The signaling server never looks inside these — they are
+/// end-to-end between an operator and an agent — but both ends of that conversation need the same
+/// shape, and an operator client that restated it would drift from the agent silently.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Envelope {
+    #[serde(default = "proto_version")]
+    pub v: u32,
+    pub cap: String,
+    #[serde(rename = "type")]
+    pub kind_of: String,
+    pub event_id: String,
+    /// `request` | `accept` | `feedback` | `result` | `event`.
+    pub kind: String,
+    #[serde(default)]
+    pub payload: Value,
+}
+
+fn proto_version() -> u32 {
+    PROTO_VERSION
+}
+
+impl Envelope {
+    /// A request, with a fresh correlation id to match its result against.
+    pub fn request(cap: &str, kind_of: &str, payload: Value) -> Self {
+        Self {
+            v: PROTO_VERSION,
+            cap: cap.to_string(),
+            kind_of: kind_of.to_string(),
+            event_id: uuid::Uuid::now_v7().to_string(),
+            kind: "request".to_string(),
+            payload,
+        }
+    }
+
+    /// Serialized, refusing anything over the docs/08 limit rather than letting the peer decide.
+    pub fn to_text(&self) -> Result<String, String> {
+        let text = serde_json::to_string(self).map_err(|e| e.to_string())?;
+        if text.len() > MAX_ENVELOPE_BYTES {
+            return Err(format!(
+                "{}/{}: envelope exceeds 16 KiB (docs/08)",
+                self.cap, self.kind_of
+            ));
+        }
+        Ok(text)
+    }
+
+    /// `payload.ok`, which every `result` carries (docs/08#envelope).
+    pub fn ok(&self) -> bool {
+        self.payload
+            .get("ok")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
+    /// `payload.error.code` when a result says no.
+    pub fn error_code(&self) -> Option<&str> {
+        self.payload.get("error")?.get("code")?.as_str()
+    }
+}
+
 /// Common fields carried by every signaling message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Common {

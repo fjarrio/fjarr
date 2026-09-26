@@ -19,6 +19,19 @@ pub struct Session {
 }
 
 /// What the agent offered: the SDP to answer, and what it says it has.
+/// What arrived on the signaling socket while the link was being brought up.
+#[derive(Debug)]
+pub enum Inbound {
+    /// A candidate the agent trickled. webrtcbin's offer carries none in the SDP, so these are the
+    /// only remote candidates there will ever be — they have to reach the peer connection.
+    Candidate {
+        candidate: String,
+        sdp_mline_index: u32,
+    },
+    Closed(String),
+    Other,
+}
+
 pub struct Offered {
     pub sdp: String,
     pub tracks: Vec<fjarr_protocol::TrackManifestEntry>,
@@ -104,9 +117,69 @@ impl Session {
         }
     }
 
+    /// The answer to the agent's offer.
+    pub async fn send_answer(&mut self, sdp: &str) -> Result<()> {
+        self.send(Body::Answer {
+            session_id: self.session_id.clone(),
+            sdp: sdp.to_string(),
+        })
+        .await
+    }
+
+    /// One of this end's candidates, on its way to the agent (docs/08#ice).
+    pub async fn send_candidate(&mut self, candidate: String, sdp_mline_index: u32) -> Result<()> {
+        self.send(Body::Ice {
+            session_id: self.session_id.clone(),
+            candidate,
+            sdp_mline_index,
+        })
+        .await
+    }
+
+    /// The next thing worth acting on from the socket, or `Other` for anything else. Bounded by
+    /// `within` so a caller can interleave it with its own work in a `select!`.
+    pub async fn next_inbound(&mut self, within: std::time::Duration) -> Result<Inbound> {
+        match tokio::time::timeout(within, next_message(&mut self.socket)).await {
+            Err(_) => Ok(Inbound::Other), // the caller's own deadline decides when to give up
+            Ok(Err(e)) => Err(e),
+            Ok(Ok(msg)) => Ok(classify(msg.body)),
+        }
+    }
+
+    async fn send(&mut self, body: Body) -> Result<()> {
+        let msg = Message::new(body);
+        let text = serde_json::to_string(&msg)?;
+        tracing::trace!(%text, "signaling frame out");
+        self.socket.send(Ws::Text(text)).await?;
+        Ok(())
+    }
+
     pub async fn close(&mut self) -> Result<()> {
         self.socket.close(None).await.ok();
         Ok(())
+    }
+}
+
+/// Which inbound bodies this client acts on. Pure, and tested, because the one thing that must not
+/// happen here is a body being classified as ignorable when it carries something the link needs —
+/// the first version of this dropped trickled candidates and no link ever came up.
+fn classify(body: Body) -> Inbound {
+    match body {
+        Body::Ice {
+            candidate,
+            sdp_mline_index,
+            ..
+        } => Inbound::Candidate {
+            candidate,
+            sdp_mline_index,
+        },
+        Body::SessionClose { reason, .. } => Inbound::Closed(reason),
+        Body::PeerGone { reason, .. } => Inbound::Closed(reason),
+        Body::Error { code, message, .. } => Inbound::Closed(format!("{code}: {message}")),
+        other => {
+            tracing::debug!(?other, "ignoring an inbound signaling message");
+            Inbound::Other
+        }
     }
 }
 
@@ -114,7 +187,10 @@ async fn next_message(socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>) -
     loop {
         match socket.next().await {
             Some(Ok(Ws::Text(text))) => {
-                return serde_json::from_str(&text).with_context(|| format!("parsing {text}"))
+                // Every frame, verbatim, at trace: the only way to tell "the peer never sent it"
+                // from "we never read it" without a packet capture (docs/25).
+                tracing::trace!(%text, "signaling frame in");
+                return serde_json::from_str(&text).with_context(|| format!("parsing {text}"));
             }
             Some(Ok(Ws::Ping(_) | Ws::Pong(_) | Ws::Binary(_) | Ws::Frame(_))) => continue,
             Some(Ok(Ws::Close(frame))) => bail!("the server closed the connection ({frame:?})"),
@@ -130,5 +206,82 @@ pub fn short(id: &str) -> &str {
         &id[id.len() - 8..]
     } else {
         id
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The regression that cost the first working link: webrtcbin's offer carries no candidates, so
+    /// a trickled one is the only remote candidate there will ever be. Classified as `Other` it is
+    /// silently dropped, and the connection fails with "no candidate pairs" 30 seconds later.
+    #[test]
+    fn a_trickled_candidate_is_never_ignorable() {
+        let body = Body::Ice {
+            session_id: "s".into(),
+            candidate: "candidate:4 1 UDP 2015363583 172.18.0.7 33220 typ host".into(),
+            sdp_mline_index: 0,
+        };
+        match classify(body) {
+            Inbound::Candidate {
+                candidate,
+                sdp_mline_index,
+            } => {
+                assert!(candidate.contains("typ host"));
+                assert_eq!(sdp_mline_index, 0);
+            }
+            other => panic!("a candidate must reach the peer connection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn every_way_a_session_ends_reads_as_closed() {
+        let cases = [
+            (
+                Body::SessionClose {
+                    session_id: "s".into(),
+                    reason: "operator-left".into(),
+                    retry: None,
+                },
+                "operator-left",
+            ),
+            (
+                Body::PeerGone {
+                    session_id: "s".into(),
+                    reason: "agent-gone".into(),
+                },
+                "agent-gone",
+            ),
+            (
+                Body::Error {
+                    code: "robot-offline".into(),
+                    message: "no such robot".into(),
+                    caused_by: None,
+                },
+                "robot-offline: no such robot",
+            ),
+        ];
+        for (body, want) in cases {
+            match classify(body) {
+                Inbound::Closed(reason) => assert_eq!(reason, want),
+                other => panic!("expected Closed({want}), got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn anything_else_is_ignorable() {
+        let body = Body::IceRestart {
+            session_id: "s".into(),
+        };
+        assert!(matches!(classify(body), Inbound::Other));
+    }
+
+    #[test]
+    fn short_is_the_last_eight_and_never_panics() {
+        assert_eq!(short("01a0e01b-31d7-7020-9223-5b10e5f7cd26"), "e5f7cd26");
+        assert_eq!(short("abc"), "abc");
+        assert_eq!(short(""), "");
     }
 }
