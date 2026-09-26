@@ -357,8 +357,14 @@ session and ordered so every slice is provable when it lands:
   clean viewers against the configured target, and setting budgets from
   measurement: 5 of 5 runs green, and the full `loopback` + `stack` suite 52/52.
   Measurements folded into [docs/16](16-performance-budgets.md) and the harness
-  rule into [docs/25](25-browser-lab.md). Remaining: CI's intermittent
-  `toggle-keyframe`, and the standing question above.
+  rule into [docs/25](25-browser-lab.md). CI then failed on a third thing, which
+  is the slice's own subject: `opsim-all`'s retry for a post-verdict SIGSEGV in
+  the simulator's teardown had never once fired, because a nested `$(MAKE)`
+  reports its own exit code 2 and the guard tested for 139 — measured directly,
+  139 from `docker compose exec` against 2 through make. The loop now runs the
+  command itself, and it retries only when the scenario printed a clean verdict
+  before dying; a crash *before* the verdict is not retried. Remaining: CI's
+  intermittent `toggle-keyframe`, and the standing question above.
 - **4.5c — the rig, and the tools the gate names.** The lab can carry packets
   and nothing else: there is no `sshd` in the robot image, no ROS 2 anywhere
   in the stack, and one robot. All three are prerequisites for the M4.5 gate,

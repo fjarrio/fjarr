@@ -136,18 +136,26 @@ OPSIM_SCENARIO ?= smoke
 OPSIM_IN ?= demo-robot
 # The endpoint as opsim reaches it: loopback inside the robot container; the demo's exposed port (with its token) from anywhere else.
 OPSIM_INTROSPECT ?= http://127.0.0.1:7381
+# One command, shared by both targets, because the exit code matters: a nested `$(MAKE) opsim`
+# reports its own 2 when the recipe dies of a signal, so opsim-all's retry guard below could never
+# see the 139 it was written for and had been dead since it was added (found in CI, slice 4.5b).
+OPSIM_RUN = docker compose exec -T $(OPSIM_IN) ./build/$(BUILD_PRESET)/agent/tools/fjarr-opsim --server $(OPSIM_SERVER) --robot $(OPSIM_ROBOT) --grant-secret $${FJARR_GRANT_HS256_SECRET:-dev-only-grant-secret} --introspect $(OPSIM_INTROSPECT) --timeout 90
 opsim: ## Run one fjarr-opsim scenario against the demo robot, from inside its container (OPSIM_SCENARIO=smoke|toggle|…)
-	docker compose exec -T $(OPSIM_IN) ./build/$(BUILD_PRESET)/agent/tools/fjarr-opsim --server $(OPSIM_SERVER) --robot $(OPSIM_ROBOT) --grant-secret $${FJARR_GRANT_HS256_SECRET:-dev-only-grant-secret} --scenario $(OPSIM_SCENARIO) --introspect $(OPSIM_INTROSPECT) --timeout 90 $(OPSIM_EXTRA)
+	$(OPSIM_RUN) --scenario $(OPSIM_SCENARIO) $(OPSIM_EXTRA)
 
 .PHONY: opsim-all
 opsim-all: ## Every CI opsim scenario (docs/23: all but soak and netem-*)
-	@for s in smoke toggle hotplug silent-operator no-answer socket-drop ice-restart deadman; do echo "== $$s"; \
-	  $(MAKE) --no-print-directory opsim OPSIM_SCENARIO=$$s; rc=$$?; \
+	@log=$$(mktemp); for s in smoke toggle hotplug silent-operator no-answer socket-drop ice-restart deadman; do echo "== $$s"; \
+	  $(OPSIM_RUN) --scenario $$s $(OPSIM_EXTRA) >$$log 2>&1; rc=$$?; cat $$log; \
 	  if [ $$rc -ge 128 ]; then \
-	    echo "opsim-all: $$s died of signal $$((rc - 128)) in the simulator's own peer teardown (the upstream DTLS race, docs/23 slice 5b notes) — one retry"; \
-	    $(MAKE) --no-print-directory opsim OPSIM_SCENARIO=$$s; rc=$$?; \
+	    if grep -q "SUMMARY $$s: .*, 0 failed" $$log; then \
+	      echo "opsim-all: $$s died of signal $$((rc - 128)) AFTER returning a clean verdict, in the simulator's own peer teardown (the upstream DTLS race, docs/23 slice 5b notes) — one retry"; \
+	      $(OPSIM_RUN) --scenario $$s $(OPSIM_EXTRA) >$$log 2>&1; rc=$$?; cat $$log; \
+	    else \
+	      echo "opsim-all: $$s died of signal $$((rc - 128)) BEFORE its verdict — that is a crash in the run, not in its teardown, and it is not retried"; \
+	    fi; \
 	  fi; \
-	  [ $$rc -eq 0 ] || exit 1; done
+	  [ $$rc -eq 0 ] || { rm -f $$log; exit 1; }; done; rm -f $$log
 
 OPSIM_CYCLES ?= 200
 .PHONY: opsim-soak
