@@ -63,7 +63,8 @@ the [slice-5b served viewer + agent image review](reviews/slice-5b-review.md)
 the [slice-6a repair + rate control review](reviews/slice-6a-review.md)
 the [slice-6b passthrough review](reviews/slice-6b-review.md)
 the [M1 gate review](reviews/m1-gate-review.md)
-and the [slice-4.5a network tunnel review](reviews/slice-4.5a-review.md).
+the [slice-4.5a network tunnel review](reviews/slice-4.5a-review.md)
+and the [slice-4.5b gates review](reviews/slice-4.5b-review.md).
 
 ## Reading paths
 
