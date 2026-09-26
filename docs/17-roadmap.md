@@ -315,19 +315,28 @@ session and ordered so every slice is provable when it lands:
   data channel; packets addressed into the robot's LAN refused and counted;
   tail-drop unit-tested against a refusing channel, including that what was
   dropped is gone rather than queued.
-- **4.5b — gates worth trusting.** Not tunnel work: two suites are red on the
-  development machine while green in CI, and the next slices measure media.
+- **4.5b — gates worth trusting.** Not tunnel work: CI's lab job is red on
+  `main` and two suites are additionally red on the development machine, and
+  the next slices measure media. In CI, `opsim toggle` fails
+  `toggle-keyframe`: 19 of 20 enables produced a keyframe and a decoded frame,
+  worst 2912 ms. Reading that job's log also turned up a GLib critical on
+  every session close that had opened a pty — an fd watch released twice,
+  fixed in cd81195 with the regression test the seam never had; it was a
+  passenger in a job failing for another reason, which is what a red gate
+  costs.
   `opsim hotplug` fails deterministically when it runs *after* `smoke` in
   `opsim-all` and passes standalone — determinism that specific is usually
   findable. `ratecontrol.spec.ts` reports 1.1 Mbps on a clean link where it
   asserts 3, with VA-API active and no qdisc left behind. Both reproduce with
-  4.5a's changes stashed, so neither is the tunnel's. This comes first because
+  4.5a's changes stashed, so neither is the tunnel's. All three come first because
   [question #23](18-open-questions.md) — whether a `scp` starves the camera —
   is answered by reading local media numbers, and numbers from a suite that
   fails for unknown reasons answer nothing. *Gate:* both green locally, or the
   cause understood and the assertion made honest about it — the precedent is
   `opsim netem wifi-ok`, which records loss rather than asserting it because
-  the receiver over-reports under jitter.
+  the receiver over-reports under jitter. And a standing question for the
+  slice: a critical in a robot's log should fail the run that produced it, not
+  wait for someone to read it.
 - **4.5c — the rig, and the tools the gate names.** The lab can carry packets
   and nothing else: there is no `sshd` in the robot image, no ROS 2 anywhere
   in the stack, and one robot. All three are prerequisites for the M4.5 gate,
