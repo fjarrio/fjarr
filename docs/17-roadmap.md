@@ -290,10 +290,13 @@ pulled ahead of M3 or M4 if a design partner needs field debugging sooner**,
 and the [spike](../agent/spikes/ros2-tunnel/README.md) already de-risked the
 unknowns.
 
-**Pulled forward, in two slices (planned 2026-09-25).** The installer is the
-only part that needs packaging; in the lab, compose creates the device the
+**Pulled forward (planned 2026-09-25, re-split 2026-09-26).** The installer is
+the only part that needs packaging; in the lab, compose creates the device the
 same way the installer will, so everything else is buildable and testable
-now:
+now. The plan was two slices; after 4.5a landed, what remained was too large
+for one — six gate items, a third WebRTC implementation, and a lab that cannot
+yet run `ssh`, `scp` or `ros2` at all. Split into five, each sized for one
+session and ordered so every slice is provable when it lands:
 
 - **4.5a — the agent side. Done 2026-09-25.** The core could not route
   inbound stream-class data at all: it assumed every binary channel was a
@@ -312,13 +315,68 @@ now:
   data channel; packets addressed into the robot's LAN refused and counted;
   tail-drop unit-tested against a refusing channel, including that what was
   dropped is gone rather than queued.
-- **4.5b — `fjarr-connect`** ([ADR-0024](adr/0024-native-operator-client.md))
-  and the real end-to-end: ssh, a hash-verified `scp`, `ros2 topic list`, and
-  two robots at once proving they cannot reach each other. The shared
-  signaling types move into their own crate **here**, when a second consumer
-  exists: the protocol module is 217 lines needing only serde, while the
-  signaling crate carries axum, hyper and the HMAC stack that an operator CLI
-  has no business linking.
+- **4.5b — gates worth trusting.** Not tunnel work: two suites are red on the
+  development machine while green in CI, and the next slices measure media.
+  `opsim hotplug` fails deterministically when it runs *after* `smoke` in
+  `opsim-all` and passes standalone — determinism that specific is usually
+  findable. `ratecontrol.spec.ts` reports 1.1 Mbps on a clean link where it
+  asserts 3, with VA-API active and no qdisc left behind. Both reproduce with
+  4.5a's changes stashed, so neither is the tunnel's. This comes first because
+  [question #23](18-open-questions.md) — whether a `scp` starves the camera —
+  is answered by reading local media numbers, and numbers from a suite that
+  fails for unknown reasons answer nothing. *Gate:* both green locally, or the
+  cause understood and the assertion made honest about it — the precedent is
+  `opsim netem wifi-ok`, which records loss rather than asserting it because
+  the receiver over-reports under jitter.
+- **4.5c — the rig, and the tools the gate names.** The lab can carry packets
+  and nothing else: there is no `sshd` in the robot image, no ROS 2 anywhere
+  in the stack, and one robot. All three are prerequisites for the M4.5 gate,
+  and none of them needs `fjarr-connect` — `fjarr-opsim` already pumps a
+  tunnel, so the robot side and the rig can be proven before the Rust client
+  exists, exactly as 4.5a proved the capability before the client. `sshd` goes
+  in the robot (forwarding is off, so the server must sit on the robot's own
+  tunnel address); a second `demo-robot` with its own id; ROS 2 as sidecars
+  with `network_mode: service:<end>`, which see `fjarr0` in the shared
+  namespace without putting ROS 2 in the agent image. Plus the documented
+  Cyclone DDS file and `fjarr-agent net setup`'s offer to write it. *Gate:*
+  `ssh` login and a hash-verified 1 GB `scp` over the link; `ros2 topic list`
+  with Fast DDS unconfigured and with the Cyclone file; the three ordering
+  facts of [docs/27](27-network-tunnel.md#lifecycle) as a regression — a
+  participant created while the agent is detached does not advertise the
+  tunnel address, one created while attached does, and it keeps advertising
+  across an agent restart; and **question #23 measured**, a camera streaming
+  while the `scp` runs.
+- **4.5d — `fjarr-protocol` and `fjarr-connect`**
+  ([ADR-0024](adr/0024-native-operator-client.md)). The shared signaling types
+  move into their own crate **here**, when a second consumer exists: the
+  protocol module is 217 lines needing only serde, while the signaling crate
+  carries axum, hyper and the HMAC stack that an operator CLI has no business
+  linking. Then the client itself — signaling, one webrtc-rs peer connection,
+  one stream channel, no media at all, the TUN/utun device with a /32 route
+  per attached robot, `--grant <jwt>`, a link that lives in the terminal that
+  started it, and `-- <command>` with `FJARR_ADDR` in its environment. Several
+  robots at once is what the single-interface design exists for, so address
+  collision detection and the **two-robot isolation regression** (docs/15
+  safety class, never removed) land with it rather than before. *Gate:* the
+  4.5c end-to-end repeated through `fjarr-connect` instead of `fjarr-opsim`;
+  two robots attached at once provably unable to reach each other in either
+  direction; a colliding pair refused by name with the `address` line that
+  fixes it.
+- **4.5e — discovery and login.** Without this the CLI is a debugging tool
+  rather than a product: the optional
+  [operator API](09-interfaces.md#operator-api) on the customer's backend, the
+  `FjarrCliLogin` handoff component in `@fjarr/react`
+  ([docs/21](21-web-client-architecture.md#cli-login)), both implemented in
+  `demo-backend` and `demo-dashboard` as the reference, and the CLI's own
+  `login`, `list`, picker, `--ssh-config` and the short-code path for a host
+  with no browser. *Gate:* `fjarr-connect login` through the demo dashboard,
+  then a list, a pick and a connect with nobody typing a robot id; the same on
+  a host with no browser; every open and close in the audit log as
+  `session.started`/`session.ended` with `fjarr.net` among the capabilities.
+
+macOS is ADR-0024's committed second platform and there is no macOS runner, so
+4.5d ships it cross-compiled and hand-checked, with the matrix honest about
+that until M5's packaging work says otherwise.
 
 **Gate:** [docs/06 `fjarr.net` criteria](06-capabilities.md) —
 `ssh` and a hash-verified 1 GB `scp` to a robot behind carrier NAT; `ros2
