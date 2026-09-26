@@ -65,7 +65,8 @@ the [slice-6b passthrough review](reviews/slice-6b-review.md)
 the [M1 gate review](reviews/m1-gate-review.md)
 the [slice-4.5a network tunnel review](reviews/slice-4.5a-review.md)
 the [slice-4.5b gates review](reviews/slice-4.5b-review.md)
-and the [slice-4.5c ssh-and-scp review](reviews/slice-4.5c-review.md).
+the [slice-4.5c ssh-and-scp review](reviews/slice-4.5c-review.md)
+and the [slice-4.5d ROS 2 review](reviews/slice-4.5d-review.md).
 
 ## Reading paths
 

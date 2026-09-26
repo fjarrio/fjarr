@@ -458,9 +458,10 @@ written down). Two slices, and the letters after them shift:
   link** rather than claimed as supported on the spike's word, and Fast DDS is the
   verified path. **`fjarr-agent net setup` is deliberately not built yet:** its job
   here is to offer to install that file, and offering an unverified one is worse
-  than offering nothing. It lands when Cyclone works or when the file changes to
-  something that does — that is the remaining 4.5d work, and it is a ROS 2
-  integration question rather than a tunnel one.
+  than offering nothing. **Both now sit in [question #29](18-open-questions.md)**
+  rather than holding the slice open: what is left is Cyclone's own locator
+  handling on a point-to-point interface, which a design partner who needs Cyclone
+  is the right trigger to spend more on. **4.5d is otherwise done 2026-09-26.**
 - **4.5e — `fjarr-protocol` and `fjarr-connect`**
   ([ADR-0024](adr/0024-native-operator-client.md)). The shared signaling types
   move into their own crate **here**, when a second consumer exists: the
