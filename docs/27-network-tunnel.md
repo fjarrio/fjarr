@@ -164,8 +164,13 @@ lose on a bad link.
   queue: a queue would deliver a burst of stale packets after congestion,
   which ruins TCP's round-trip estimate and confuses DDS more than loss does.
 - **No buffering while no peer is attached.** The robot's carrier is up
-  whenever the agent runs, so the kernel will hand the agent packets with
-  nobody to send them to. They are dropped and counted, never held.
+  whenever the agent runs, so something may address the tunnel with no
+  operator on the other end. Nothing reads the device between links, so the
+  kernel discards what it queued; whatever is still queued when a link opens
+  is discarded before the first forwarded packet and counted as
+  `dropped_no_peer`, so a link never begins by delivering stale traffic.
+  Packets that arrive on the channel for a session with no open link are
+  counted the same way.
 
 ## Policy and isolation {#isolation}
 
