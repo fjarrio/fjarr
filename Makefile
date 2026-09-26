@@ -236,8 +236,13 @@ docs-links: ## Internal link check (offline: files + anchors)
 
 # -------------------------------------------------------------- hygiene ---
 .PHONY: fmt
-fmt: ## Format everything
-	find agent demos/demo-robot -name '*.[ch]pp' 2>/dev/null | xargs -r clang-format-21 -i
+# The C++ is hand-formatted and there is no `.clang-format`, so this target used to
+# run clang-format with its LLVM defaults and rewrite every file in the agent: a 115-file diff
+# from asking for formatting. Machine-formatting the C++ is a fine idea, but it needs a
+# config that matches the code and a commit of its own; until then clang-format-21 is still in the
+# image for a deliberate `clang-format-21 -i <file>`. No web package defines a `format` script
+# yet, so that line is a no-op the day prettier or similar arrives.
+fmt: ## Format Rust (the C++ is hand-formatted, and no web package formats yet — see above)
 	cd signaling && cargo fmt
 	pnpm -r format 2>/dev/null || true
 
