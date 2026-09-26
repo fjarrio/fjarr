@@ -102,7 +102,7 @@ ENV HOME=/home/${USER_NAME} \
 # --- Rust toolchain (signaling tier). Exact version pinned by the repo's
 #     rust-toolchain.toml; this preinstalls a matching default. ------------
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-    | sh -s -- -y --profile minimal --default-toolchain 1.89.0 \
+    | sh -s -- -y --profile minimal --default-toolchain 1.98.0 \
          --component clippy --component rustfmt
 
 # Pre-create cache mount points so named volumes inherit dev ownership.

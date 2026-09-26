@@ -42,7 +42,7 @@ groups with comments.
 
 | Dependency | Version | Purpose | License | Ships |
 |---|---|---|---|---|
-| Rust toolchain | 1.89.0 (pinned) | build | MIT/Apache-2.0 | build-only |
+| Rust toolchain | 1.98.0 (pinned; bumped from 1.89.0 in slice 4.5e because webrtc-rs 0.21 uses `Ipv4Addr::from_octets`, stabilised after 1.89) | build | MIT/Apache-2.0 | build-only |
 | tokio | 1.x | async runtime | MIT | yes |
 | axum (+ `ws`) | 0.8 | HTTP + WebSocket | MIT | yes |
 | tracing / tracing-subscriber | 0.1/0.3 | structured logs | MIT | yes |

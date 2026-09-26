@@ -25,4 +25,6 @@ base64 = "0.22"
 subtle = "2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio-tungstenite = "0.24"
+# ADR-0024: the operator client's peer connection, data channels only, no media.
+webrtc = "0.21"
 futures-util = "0.3"

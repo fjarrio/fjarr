@@ -1,3 +1,6 @@
+# Bumped from 1.89.0 in slice 4.5e: webrtc-rs 0.21 (ADR-0024's peer connection) reaches
+# `Ipv4Addr::from_octets`, stabilised after 1.89. The pin stays exact — the point of it is
+# that CI and a laptop compile the same thing (docs/14).
 [toolchain]
-channel = "1.89.0"
+channel = "1.98.0"
 components = ["clippy", "rustfmt"]
