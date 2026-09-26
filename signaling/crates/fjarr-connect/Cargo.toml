@@ -1,0 +1,23 @@
+# fjarr-connect — the operator end of a network tunnel, and Fjarr's first non-browser operator.
+# Data channels only, no media, so it needs no GStreamer and ships as one binary (ADR-0024).
+# spec: docs/27-network-tunnel.md · docs/09-interfaces.md#operator-api
+[package]
+name = "fjarr-connect"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Fjarr operator client: a routable address for one robot (docs/27)"
+
+[dependencies]
+# The wire types, shared with the server rather than restated, so drift is a compile error.
+fjarr-protocol = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { version = "4", features = ["derive", "env"] }
+anyhow = "1"

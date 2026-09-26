@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/fjarr-protocol", "crates/fjarr-signaling", "crates/fjarr-server"]
+members = ["crates/fjarr-protocol", "crates/fjarr-signaling", "crates/fjarr-server", "crates/fjarr-connect"]
 
 [workspace.package]
 version = "0.0.1"

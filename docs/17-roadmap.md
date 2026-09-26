@@ -479,6 +479,15 @@ written down). Two slices, and the letters after them shift:
   two robots attached at once provably unable to reach each other in either
   direction; a colliding pair refused by name with the `address` line that
   fixes it.
+
+  **Started 2026-09-26.** `fjarr-protocol` is extracted, and `fjarr-connect`
+  exists as far as signaling: against the real server it takes a `--grant`, is
+  issued a session with TURN credentials, and reads the robot's offer — and an
+  offline robot fails with the server's own `robot-offline` rather than a timeout,
+  which is what docs/27 asks for. `--dry-run` is the only mode it has, and it says
+  so rather than pretending: the peer connection, the TUN device and
+  `-- <command>` are next. `docker/lab/mint-grant.sh` mints a lab grant so nothing
+  needs Node to get one.
 - **4.5f — discovery and login.** Without this the CLI is a debugging tool
   rather than a product: the optional
   [operator API](09-interfaces.md#operator-api) on the customer's backend, the

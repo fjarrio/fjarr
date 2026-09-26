@@ -68,9 +68,12 @@ ioctls.
 | tokio | 1.x | async runtime | MIT | yes |
 | a TUN/utun crate | pinned at implementation | the virtual interface on Linux and macOS; the candidate must be MIT or Apache-2.0 | MIT/Apache-2.0 required | yes |
 | clap | 4.x | the CLI surface | MIT/Apache-2.0 | yes |
-| `fjarr-signaling` (this repo) | workspace | shared signaling message types — the reason wire drift is a compile error | AGPL-3.0 | yes |
+| `fjarr-protocol` (this repo) | workspace | shared signaling message types — the reason wire drift is a compile error. Its own crate since slice 4.5e, so an operator client links the types without the server's axum/hyper/HMAC stack (ADR-0024) | AGPL-3.0 | yes |
 | reqwest (rustls) | 0.12 | webhook delivery | MIT/Apache-2.0 | yes |
-| tokio-tungstenite | 0.24 | e2e test WS client | MIT | dev-only |
+| tokio-tungstenite | 0.24 | the operator's signaling socket (`fjarr-connect`, slice 4.5e); also the e2e test WS client | MIT | **yes** (it was dev-only until `fjarr-connect` shipped one) |
+| futures-util | 0.3 | stream/sink combinators on that socket | MIT/Apache-2.0 | yes |
+| anyhow | 1.x | error context in the operator client, where a failure is a message to a developer rather than a value to match on | MIT/Apache-2.0 | yes |
+| tracing, tracing-subscriber | 0.1 / 0.3 | the operator client's logging | MIT | yes |
 
 ## Web (`@fjarr/core`, `@fjarr/react`) — ships to customer bundles
 

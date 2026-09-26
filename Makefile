@@ -270,6 +270,11 @@ tunnel-ros: ## docs/27#ros2 gate: ros2 topic list and echo against the robot, wi
 	$(MAKE) --no-print-directory opsim-tunnel OPSIM_EXTRA="--ice-policy relay --exec 'docker/lab/tunnel-checks.sh ros2' $(OPSIM_EXTRA)"; \
 	  rc=$$?; docker/lab/dds-isolate.sh off >/dev/null; exit $$rc
 
+.PHONY: connect-dry
+connect-dry: ## fjarr-connect against the demo robot as far as the offer (signaling only, slice 4.5e)
+	@grant=$$(docker/lab/mint-grant.sh $(OPSIM_ROBOT) fjarr.net); \
+	  docker compose exec -T -e FJARR_GRANT="$$grant" dev sh -c 'cd /workspace/signaling && cargo build -q -p fjarr-connect && ./target/debug/fjarr-connect $(OPSIM_ROBOT) --server $(OPSIM_SERVER) --dry-run'
+
 .PHONY: tunnel-ros-ordering
 tunnel-ros-ordering: ## The three docs/27#lifecycle facts as a regression: attached, detached, and across an agent restart
 	docker/lab/ros-ordering.sh

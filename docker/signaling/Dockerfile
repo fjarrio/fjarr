@@ -9,20 +9,25 @@ WORKDIR /src
 # Dependency-caching layer: build with empty sources first so the crates.io
 # graph is compiled once and cached across source-only changes.
 COPY Cargo.toml Cargo.lock* rust-toolchain.toml ./
+# Every workspace member's manifest has to be here for cargo to resolve the workspace at all, even
+# the ones this image does not build: `-p fjarr-server` below is what keeps the operator client's
+# dependencies out of the server image.
 COPY crates/fjarr-protocol/Cargo.toml crates/fjarr-protocol/Cargo.toml
 COPY crates/fjarr-signaling/Cargo.toml crates/fjarr-signaling/Cargo.toml
 COPY crates/fjarr-server/Cargo.toml crates/fjarr-server/Cargo.toml
-RUN mkdir -p crates/fjarr-protocol/src crates/fjarr-signaling/src crates/fjarr-server/src \
+COPY crates/fjarr-connect/Cargo.toml crates/fjarr-connect/Cargo.toml
+RUN mkdir -p crates/fjarr-protocol/src crates/fjarr-signaling/src crates/fjarr-server/src crates/fjarr-connect/src \
     && echo 'pub fn placeholder() {}' > crates/fjarr-protocol/src/lib.rs \
     && echo 'pub fn placeholder() {}' > crates/fjarr-signaling/src/lib.rs \
     && echo 'fn main() {}' > crates/fjarr-server/src/main.rs \
-    && cargo build --release --locked 2>/dev/null || cargo build --release \
+    && echo 'fn main() {}' > crates/fjarr-connect/src/main.rs \
+    && (cargo build --release --locked -p fjarr-server 2>/dev/null || cargo build --release -p fjarr-server) \
     && rm -rf crates/*/src
 
 COPY crates/ crates/
 # Touch sources so cargo rebuilds them over the placeholder artifacts.
 RUN touch crates/fjarr-protocol/src/lib.rs crates/fjarr-signaling/src/lib.rs crates/fjarr-server/src/main.rs \
-    && cargo build --release
+    && cargo build --release -p fjarr-server
 
 FROM debian:bookworm-slim
 RUN useradd -r -u 10001 fjarr
