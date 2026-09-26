@@ -177,7 +177,8 @@ tun-up: ## Create the tunnel interfaces the installer creates on a real robot (d
 	@# question. A recreate gives the container a fresh log, so an earlier line cannot match.
 	@for i in $$(seq 60); do docker compose logs --no-color demo-robot 2>/dev/null | grep -q "hello-ack: online" && break; sleep 1; done; \
 	  docker compose logs --no-color demo-robot 2>/dev/null | grep -q "hello-ack: online" \
-	  || { echo "tun-up: the robot never registered with the server — docker compose logs demo-robot"; exit 1; }
+	  || { echo "tun-up: the robot never registered with the server; its last lines were:"; \
+	       docker compose logs --no-color --tail 20 demo-robot; exit 1; }
 	@echo "tun-up: the robot is online and attached; 'make opsim-tunnel' will find it"
 
 .PHONY: tun-down

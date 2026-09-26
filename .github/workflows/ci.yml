@@ -69,21 +69,28 @@ jobs:
           # The dev image's user must own the checkout (the runner user is not uid 1000) and
           # share the docker socket's group, or nothing inside the container can build or exec.
           sed -i "s/^USER_UID=.*/USER_UID=$(id -u)/; s/^USER_GID=.*/USER_GID=$(id -g)/; s#^DOCKER_GID=.*#DOCKER_GID=$(stat -c %g /var/run/docker.sock)#" .env
-          grep -E "^(USER_UID|USER_GID|DOCKER_GID)=" .env
+          # The encoder belongs here, not on a `docker compose up` line, for the same reason TURN
+          # and the webhook URL do: any later `up` that recreates demo-robot re-resolves its
+          # environment, and a hosted runner has no VA-API, so `auto` refuses to start at all
+          # ("no silent fallback", docs/23). `make tun-up` recreates the robot, which is how this
+          # was found — the agent never came back and never registered.
+          echo "FJARR_MEDIA_ENCODER=software" >> .env
+          grep -E "^(USER_UID|USER_GID|DOCKER_GID|FJARR_MEDIA_ENCODER)=" .env
           # dev and demo-robot map /dev/dri (VA-API); a hosted runner has none. An empty
           # directory maps no device and the demo robot stays on the software encoder.
           # `-n` never prompts: harmless here (hosted sudo is passwordless) and it stops
           # this hanging forever if anyone ever points CI at a self-hosted machine.
           sudo -n mkdir -p /dev/dri || mkdir -p /dev/dri || true
-          # TURN and the webhook URL come from .env (copied above), NOT from this line: a
-          # later `docker compose up` without them recreates fjarr-server without them, and
-          # then relay sessions never connect and no webhook is ever delivered. That is
-          # exactly how both broke the first time.
+          # TURN, the webhook URL and the encoder all come from .env (written above), never from
+          # a `docker compose up` line: a later `up` re-resolves a service's environment, so
+          # anything passed inline is silently lost the next time that service is recreated.
+          # That is how TURN and the webhook broke the first time, and how the encoder broke the
+          # first time `make tun-up` recreated the robot.
           docker compose --profile lab --profile stack up -d --build --wait browser fjarr-server coturn
           docker compose build dev
           docker compose up -d dev
           docker compose exec -T dev make agent-build
-          FJARR_MEDIA_ENCODER=software docker compose --profile demo --profile stack up -d demo-backend demo-robot demo-dashboard
+          docker compose --profile demo --profile stack up -d demo-backend demo-robot demo-dashboard
           sleep 8 && docker compose logs --no-color demo-robot | tail -20
       - name: run the e2e suites (loopback + stack)
         env:
@@ -134,7 +141,7 @@ jobs:
           docker build -f docker/agent/Dockerfile --target runtime -t fjarr-agent .
           docker run --rm --entrypoint sh fjarr-agent -c '! gst-inspect-1.0 x264enc >/dev/null 2>&1 && fjarr-agent --help | grep -q ^fjarr-agent && ! ldd /usr/local/bin/fjarr-agent | grep -q "not found"'
           # The demo robot from the image (the embedder's topology): the same lab smoke as the dev-image robot.
-          FJARR_MEDIA_ENCODER=software docker compose -f docker-compose.yml -f docker-compose.image.yml --profile demo up -d --build demo-robot
+          docker compose -f docker-compose.yml -f docker-compose.image.yml --profile demo up -d --build demo-robot
           sleep 8 && docker compose logs --no-color demo-robot | tail -20
           pnpm --filter '@fjarr/e2e' exec playwright test tests/stack/viewer.spec.ts tests/stack/introspect.spec.ts tests/stack/dashboard.spec.ts
       - name: lab artifacts (summaries, captures, traces)
