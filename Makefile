@@ -268,6 +268,10 @@ tunnel-ros: ## docs/27#ros2 gate: ros2 topic list and echo against the robot, wi
 	$(MAKE) --no-print-directory opsim-tunnel OPSIM_EXTRA="--ice-policy relay --exec 'docker/lab/tunnel-checks.sh ros2' $(OPSIM_EXTRA)"; \
 	  rc=$$?; docker/lab/dds-isolate.sh off >/dev/null; exit $$rc
 
+.PHONY: tunnel-ros-ordering
+tunnel-ros-ordering: ## The three docs/27#lifecycle facts as a regression: attached, detached, and across an agent restart
+	docker/lab/ros-ordering.sh
+
 .PHONY: tunnel-scp
 tunnel-scp: ## docs/27 gate: pull LAB_FILE_MB over the link and verify its sha256 (open question #27: it stalls ~40 % of the time)
 	$(MAKE) --no-print-directory opsim-tunnel OPSIM_EXTRA="--exec 'docker/lab/tunnel-checks.sh scp' --timeout 300 $(OPSIM_EXTRA)"

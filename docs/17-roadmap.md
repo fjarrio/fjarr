@@ -442,9 +442,13 @@ written down). Two slices, and the letters after them shift:
   announcement and ROS 2 over the link could not work as specified. The rule now
   admits multicast on the strength of its source, the source rule carries the
   isolation guarantee alone, and docs/08, docs/10 and docs/27 say so. Stock Fast
-  DDS then needs no configuration, exactly as claimed. **Still owed:** the Cyclone
-  file, `fjarr-agent net setup`'s offer to write it, and the three ordering facts
-  as a regression.
+  DDS then needs no configuration, exactly as claimed. The **three ordering facts
+  are now a regression** (`make tunnel-ros-ordering`): a participant created while
+  the agent is attached reaches the peer, one created while it is detached never
+  does, and a working one survives an agent restart. The lab agent runs under a
+  supervisor so that third fact is testable at all — restarting the container
+  would take the interface with it, which a real robot does not do. **Still
+  owed:** the Cyclone file and `fjarr-agent net setup`'s offer to write it.
 - **4.5e — `fjarr-protocol` and `fjarr-connect`**
   ([ADR-0024](adr/0024-native-operator-client.md)). The shared signaling types
   move into their own crate **here**, when a second consumer exists: the

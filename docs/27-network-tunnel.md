@@ -141,6 +141,13 @@ Three rules follow:
    address straight through the restart. No ROS 2 restart is needed to
    upgrade the agent.
 
+All three are a regression now rather than a paragraph — `make
+tunnel-ros-ordering` (slice 4.5d) reproduces them against real participants on
+both ends of a real link, including the negative one: a participant created while
+the agent is detached stays blind to the interface afterwards, however long it
+runs. That is the fact the installer's job and the unit's ordering rest on, and
+before 4.5d nothing had re-checked it since the spike.
+
 The operator side has no equivalent constraint, because a developer starts
 `ros2` after connecting — and the single-interface design
 ([above](#the-shape)) removes it for the case where they do not.

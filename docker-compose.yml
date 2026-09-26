@@ -152,6 +152,11 @@ services:
     devices:
       - /dev/dri:/dev/dri
       - /dev/net/tun:/dev/net/tun # the robot end of the tunnel lab (docs/27)
+    # The agent runs under a tiny supervisor rather than as the container's own process, so it can
+    # be restarted the way systemd restarts it on a robot — leaving the container, and therefore the
+    # tunnel interface, in place. Without that, "the agent restarts and participants keep working"
+    # (docs/27#lifecycle) is untestable here, because restarting the container takes its network
+    # namespace and the device with it.
     command: >
       bash -c "test -x ./build/release/demos/demo-robot/demo-robot
       || { echo 'demo-robot not built yet — run: make agent-build'; sleep infinity; };
@@ -161,7 +166,10 @@ services:
       ip link show $${FJARR_DEMO_NET_INTERFACE:-fjarr0} >/dev/null 2>&1
       || echo 'no tunnel interface after 20 s — starting anyway, with fjarr.net unavailable. A container restart takes its
       network namespace with it, which a real robot does not do; run `make tun-up` again.'; fi;
-      exec ./build/release/demos/demo-robot/demo-robot"
+      while true; do
+      while [ -f /tmp/fjarr-agent-hold ]; do sleep 1; done;
+      ./build/release/demos/demo-robot/demo-robot; rc=$$?;
+      echo \"demo-robot: the agent exited ($$rc); the supervisor restarts it, as systemd would\"; sleep 1; done"
     depends_on:
       - robot-sim
       - fjarr-server
