@@ -405,6 +405,22 @@ written down). Two slices, and the letters after them shift:
   `scp` over the link, and **question #23 measured** — a camera streaming while
   the `scp` runs, which is the first time anything has pushed enough through a
   link to disturb the video beside it.
+
+  **Done 2026-09-26, with one item blocked.** `ssh` reaches a shell on the robot
+  in ~130 ms, reliably; a 1 GiB `scp` transfers and verifies its sha256 end to
+  end at 338 Mbps alone and 190-236 Mbps beside a streaming camera. **#23 is
+  closed**: the camera is unaffected by a saturating transfer (31-33 fps, no
+  lost frames, longest gap 55-70 ms against a 48-51 ms baseline), and the
+  transfer pays about 35 % of its throughput, so no separate PeerConnection for
+  bulk is needed on these grounds.
+  **What is blocked:** that transfer stalls in roughly 40 % of attempts, at the
+  onset of the flow, with every drop counter at zero on both ends — new
+  [question #28](18-open-questions.md), with video, transfer size, the MTU check,
+  the channel watermark and the operator's device writes all ruled out. CI
+  asserts the shell and records the transfer, because a gate that is red two runs
+  in five teaches people to ignore red. **The M4.5 gate cannot claim a reliable
+  `scp` until #28 is settled**, and settling it needs SCTP-level evidence rather
+  than more black-box runs.
 - **4.5d — ROS 2 over the link.** ROS 2 as sidecars on each end's namespace,
   `ros2 topic list` against the robot with Fast DDS unconfigured, the Cyclone DDS
   file written into docs/27 for the first time (the spike measured it; the spec

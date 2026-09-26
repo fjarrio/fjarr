@@ -39,6 +39,8 @@ services:
       - cargo-registry:/home/dev/.cargo/registry
       - pnpm-store:/home/dev/.local/share/pnpm
       - ccache:/home/dev/.cache/ccache
+      # The lab's throwaway ssh key, published by robot-services (docs/27 gate: ssh and scp).
+      - lab-key:/srv/fjarr-lab-key
     environment:
       DISPLAY: ":99" # the robot-sim display
       CCACHE_DIR: /home/dev/.cache/ccache
@@ -162,6 +164,80 @@ services:
       - fjarr-server
       - rtsp-sim
 
+  # A second robot, so 4.5e can prove that robot A cannot reach robot B (docs/15 safety class). It
+  # is a plain second agent with its own id: the isolation property is the operator's to enforce,
+  # and nothing here is special-cased for it.
+  demo-robot-2:
+    profiles: [demo]
+    image: fjarr-dev
+    volumes:
+      - .:/workspace:cached
+      - x11sock:/tmp/.X11-unix
+      # The viewer's build output (`make web-build`) where the fjarr-agent package will install it (docs/24, docs/26).
+      - ./web/apps/introspect-viewer/dist:/usr/share/fjarr/viewer:ro
+    environment:
+      DISPLAY: ":99"
+      FJARR_SERVER_URL: ws://fjarr-server:8080/ws
+      FJARR_ROBOT_ID: demo-robot-02
+      FJARR_DEV_DEVICE_TOKEN: ${FJARR_DEV_DEVICE_TOKEN:-dev-only-device-token}
+      # The demo drives fjarr.test's hooks (hot-plug, silence); a container has no systemd.
+      FJARR_TEST_HOOKS: "1"
+      FJARR_AGENT_ALLOW_UNSUPERVISED: "1"
+      # auto = VA-API through /dev/dri (docs/23 encoder policy); set software on machines without a GPU.
+      FJARR_MEDIA_ENCODER: ${FJARR_MEDIA_ENCODER:-auto}
+      FJARR_LOG_LEVEL: ${FJARR_LOG_LEVEL:-info}
+      # `make agent-leaks` recreates the robot with GStreamer's leaks tracer (docs/23 memory ladder).
+      GST_TRACERS: ${FJARR_GST_TRACERS:-}
+      # The introspection endpoint (docs/24) is loopback-only by default; the demo binds it on the
+      # container's interface with a dev token so `make introspect` and the lab browser reach the
+      # viewer at http://localhost:7381/ (published on the host's loopback only, below).
+      FJARR_INTROSPECT_BIND: "0.0.0.0"
+      FJARR_INTROSPECT_TOKEN: ${FJARR_INTROSPECT_TOKEN:-dev-only-introspect-token}
+      FJARR_INTROSPECT_VIEWER_DIR: /usr/share/fjarr/viewer
+      # fjarr.net (docs/27): on only once `make tun-up` has created the interface, which is the
+      # real ordering too — the device exists before the agent starts, never the other way round.
+      FJARR_DEMO_NET: ${FJARR_DEMO_NET_2:-0}
+    working_dir: /workspace
+    cap_add:
+      - NET_ADMIN   # tc netem for the browser lab's media-path profiles (docs/25); the tunnel
+                    # interface (docs/27) — used by `make tun-up`, never by the agent itself
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/net/tun:/dev/net/tun # the robot end of the tunnel lab (docs/27)
+    command: >
+      bash -c "test -x ./build/release/demos/demo-robot/demo-robot
+      || { echo 'demo-robot not built yet — run: make agent-build'; sleep infinity; };
+      if [ \"$$FJARR_DEMO_NET\" = 1 ]; then
+      echo 'waiting for the tunnel interface before starting the agent (docs/27#lifecycle: the device exists first, always)';
+      for i in $$(seq 20); do ip link show $${FJARR_DEMO_NET_INTERFACE_2:-fjarr0} >/dev/null 2>&1 && break; sleep 1; done;
+      ip link show $${FJARR_DEMO_NET_INTERFACE:-fjarr0} >/dev/null 2>&1
+      || echo 'no tunnel interface after 20 s — starting anyway, with fjarr.net unavailable. A container restart takes its
+      network namespace with it, which a real robot does not do; run `make tun-up` again.'; fi;
+      exec ./build/release/demos/demo-robot/demo-robot"
+    depends_on:
+      - robot-sim
+      - fjarr-server
+      - rtsp-sim
+
+  # The services the tunnel exists to reach, on the robot's own network stack (docs/27). A sidecar
+  # rather than part of the agent's image: on a real robot sshd is the integrator's package and the
+  # agent never knows about it, and sharing the namespace is what puts it on the robot's tunnel
+  # address. It has no network config of its own by design — `network_mode: service:` forbids it.
+  robot-services:
+    profiles: [demo]
+    build: docker/robot-services
+    image: fjarr-robot-services
+    network_mode: "service:demo-robot"
+    environment:
+      FJARR_LAB_FILE_MB: ${FJARR_LAB_FILE_MB:-1024}
+      # ssh refuses a private key others can read, so it is published to the operator's uid.
+      FJARR_LAB_KEY_UID: ${USER_UID:-1000}
+      FJARR_LAB_KEY_GID: ${USER_GID:-1000}
+    volumes:
+      - lab-key:/srv/fjarr-lab-key
+    depends_on:
+      - demo-robot
+
   rtsp-sim:
     # A network camera stand-in for fjarr.camera's `rtsp` track (docs/06, slice 4): GStreamer's
     # RTSP server serving a test pattern as H.264 at rtsp://rtsp-sim:8554/pattern.
@@ -245,6 +321,7 @@ services:
       - "49160-49200:49160-49200/udp"
 
 volumes:
+  lab-key: # the lab's throwaway ssh key, robot-services -> dev (docs/27)
   x11sock:
   cargo-registry:
   pnpm-store:

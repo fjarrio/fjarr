@@ -187,11 +187,22 @@ opsim-netem: ## Apply a docs/25 profile (NETEM_PROFILE=lan|wifi-ok|4g|lossy|bad)
 
 TUN_DEV ?= fjarr0
 TUN_OPERATOR ?= 100.64.0.1
+# Containers that share the robot's network namespace (`network_mode: service:demo-robot`), which is
+# what puts them on its tunnel address. Recreating the robot leaves them pointing at a namespace
+# that no longer exists — reachable enough to answer with a TCP reset, which reads as "nothing is
+# listening" rather than "your sidecar is stale" — so tun-up recreates them after it.
+ROBOT_SIDECARS ?= robot-services
+# The size of the file the docs/27 scp gate transfers. Passed explicitly rather than left to the
+# environment: `docker compose up` re-resolves a service's variables, so anything set only on an
+# earlier command is lost the next time the sidecar is recreated — the same trap that cost CI the
+# encoder setting (e739216) and TURN before it.
+LAB_FILE_MB ?= 1024
 .PHONY: tun-up
 tun-up: ## Create the tunnel interfaces the installer creates on a real robot (docs/27): fjarr0 on demo-robot and on dev, then restart the robot with fjarr.net on
 	@addr=$$(docker compose exec -T -e FJARR_ROBOT_ID=$(OPSIM_ROBOT) dev ./build/$(BUILD_PRESET)/agent/daemon/fjarr-agent --net-address | tail -1); \
 	  echo "tun-up: $(OPSIM_ROBOT) derives $$addr (docs/27#addressing)"; \
 	  FJARR_DEMO_NET=1 docker compose up -d demo-robot && \
+	  FJARR_DEMO_NET=1 FJARR_LAB_FILE_MB=$(LAB_FILE_MB) docker compose --profile demo up -d --force-recreate $(ROBOT_SIDECARS) && \
 	  docker/lab/tundev.sh up demo-robot "$$addr" $(TUN_OPERATOR) $(TUN_DEV) && \
 	  docker/lab/tundev.sh up dev $(TUN_OPERATOR) "$$addr" $(TUN_DEV)
 	@echo "tun-up: the robot waited for its interface before starting — the ordering the whole design rests on (docs/27#lifecycle)"
@@ -203,7 +214,13 @@ tun-up: ## Create the tunnel interfaces the installer creates on a real robot (d
 	  docker compose logs --no-color demo-robot 2>/dev/null | grep -q "hello-ack: online" \
 	  || { echo "tun-up: the robot never registered with the server; its last lines were:"; \
 	       docker compose logs --no-color --tail 20 demo-robot; exit 1; }
-	@echo "tun-up: the robot is online and attached; 'make opsim-tunnel' will find it"
+	@# The sidecars share the robot's namespace and are what the gate actually talks to, and the one
+	@# that serves ssh builds its payload file before it binds. Waiting for the agent alone left a
+	@# window where the link was up and port 22 answered with a reset.
+	@for i in $$(seq 60); do docker compose exec -T -u root demo-robot sh -c 'ss -ltn 2>/dev/null | grep -q ":22 "' && break; sleep 1; done; \
+	  docker compose exec -T -u root demo-robot sh -c 'ss -ltn 2>/dev/null | grep -q ":22 "' \
+	  || { echo "tun-up: nothing is serving ssh in the robot's namespace; docker compose logs robot-services"; exit 1; }
+	@echo "tun-up: the robot is online, attached, and serving ssh; 'make opsim-tunnel' will find it"
 
 .PHONY: tun-down
 tun-down: ## Remove the lab's tunnel interfaces and put the demo robot back to its usual state
@@ -213,6 +230,14 @@ tun-down: ## Remove the lab's tunnel interfaces and put the demo robot back to i
 .PHONY: opsim-tunnel
 opsim-tunnel: ## The docs/27 tunnel scenario: real IP over fjarr:stream:fjarr.net, from dev's own network namespace
 	$(MAKE) --no-print-directory opsim OPSIM_SCENARIO=tunnel OPSIM_IN=dev OPSIM_INTROSPECT=http://demo-robot:7381 OPSIM_EXTRA="--introspect-token $(INTROSPECT_TOKEN) $(OPSIM_EXTRA)"
+
+.PHONY: tunnel-ssh
+tunnel-ssh: ## docs/27 gate: a shell on the robot over the link, through the tools a developer owns
+	$(MAKE) --no-print-directory opsim-tunnel OPSIM_EXTRA="--exec 'docker/lab/tunnel-checks.sh ssh' $(OPSIM_EXTRA)"
+
+.PHONY: tunnel-scp
+tunnel-scp: ## docs/27 gate: pull LAB_FILE_MB over the link and verify its sha256 (open question #27: it stalls ~40 % of the time)
+	$(MAKE) --no-print-directory opsim-tunnel OPSIM_EXTRA="--exec 'docker/lab/tunnel-checks.sh scp' --timeout 300 $(OPSIM_EXTRA)"
 
 # -------------------------------------------------------------- signaling --
 .PHONY: signaling-run

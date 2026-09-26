@@ -391,7 +391,18 @@ From the probe, over the network profiles in [docs/25](25-browser-lab.md):
 | bad, 15 % loss | 212 ms | 14.4 s | did not complete |
 
 `scp` ran at 366 Mbps unimpaired, so the userspace packet path is not the
-limit. On the `bad` profile ssh still logs in, slowly, while DDS discovery
+limit. Over a real data channel (slice 4.5c) a 1 GiB `scp` runs at **338 Mbps**
+on its own and **190-236 Mbps beside a streaming camera**, and the camera is
+unaffected either way — 31-33 fps, no lost frames, longest gap 55-70 ms against
+a 48-51 ms idle baseline. That closes [question #23](18-open-questions.md): the
+tunnel and the video share one peer connection without a separate one for bulk.
+
+**A bulk transfer stalls in roughly 40 % of attempts**, at the onset of the
+flow, and nothing at this layer sees it happen — every drop counter at both ends
+stays zero. `ssh` and small requests over the same link never stall. It is
+[question #28](18-open-questions.md), it is independent of video and of transfer
+size, and it has to be settled before the M4.5 gate can claim a reliable
+`scp`. On the `bad` profile ssh still logs in, slowly, while DDS discovery
 does not finish — its handshakes are reliable exchanges that 15 % loss
 defeats. That is a property of DDS, not of the tunnel, and the honest
 statement is that ROS 2 tooling needs a usable link while `ssh` tolerates a
@@ -457,10 +468,17 @@ Per [docs/15](15-testing-strategy.md):
   does not advertise the tunnel address; created while attached, it does;
   and it keeps advertising across an agent restart. These three are the
   measured facts the whole lifecycle rests on.
-- **Integration**: the probe's rig promoted onto a real data channel — ssh
-  login, a 1 GB `scp` verified by hash, `ros2 topic list` with Fast DDS
-  unconfigured and with the documented Cyclone file, under each docs/25
-  network profile.
+- **Integration** (slice 4.5c for the shell and the transfer): the probe's rig
+  promoted onto a real data channel. `ssh` and `scp` reach the robot through
+  sidecars sharing its network namespace — which is what a robot looks like from
+  the far end of a link, sshd being the integrator's package and not the
+  agent's — and `fjarr-opsim --scenario tunnel --exec <cmd>` runs them with the
+  link up and `FJARR_ADDR` set, the same shape as `fjarr-connect <robot> --
+  <cmd>`. `make tunnel-ssh` asserts the shell; `make tunnel-scp` pulls the
+  payload and verifies its sha256, and records rather than asserts while
+  [#28](18-open-questions.md) stands. `ros2 topic list` with Fast DDS
+  unconfigured and with the documented Cyclone file follows in 4.5d, and the
+  docs/25 network profiles after that.
 
 ## Open questions
 

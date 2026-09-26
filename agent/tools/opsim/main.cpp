@@ -28,6 +28,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <sys/wait.h>
 #include <optional>
 #include <string>
 #include <thread>
@@ -75,6 +76,9 @@ struct Options {
     std::string introspect_token; // --introspect-token, else $FJARR_INTROSPECT_TOKEN (the demo exposes the endpoint with one, docs/24)
     int timeout_s = 60;
     int cycles = 200; // soak: connect/stream/close cycles
+    /// A command to run with the tunnel up, `FJARR_ADDR` set to the robot's tunnel address (the
+    /// shape `fjarr-connect robot -- <cmd>` will have, docs/27). Its exit status is an assertion.
+    std::string exec_cmd;
     /// What the minted grant claims. The tunnel is off unless explicitly claimed (docs/10), so a
     /// scenario that needs it says so rather than every session carrying it.
     std::vector<std::string> capabilities{"fjarr.test"};
@@ -86,6 +90,7 @@ void usage() {
                  "usage: fjarr-opsim --server ws://host:8080/ws --robot <id> --grant-secret <secret> --scenario <name>\n"
                  "                   [--json out.json] [--timeout 60] [--ice-policy all|relay] [--cycles 200]\n"
                  "                   [--introspect http://127.0.0.1:7381] [--introspect-token <t>] [--verbose]\n"
+                 "                   [--exec '<command>'] (tunnel: run it with the link up, $FJARR_ADDR set)\n"
                  "scenarios: smoke toggle hotplug silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer tunnel\n"
                  "           soak (--cycles N, needs --introspect)\n"
                  "           netem-{lan,wifi-ok,4g,lossy,bad} (the profile is applied externally: docker/lab/netem.sh)\n"
@@ -110,6 +115,8 @@ bool parse_args(int argc, char** argv, Options& o) {
             if (!need(o.robot)) return false;
         } else if (a == "--grant-secret") {
             if (!need(o.grant_secret)) return false;
+        } else if (a == "--exec" && i + 1 < argc) {
+            o.exec_cmd = argv[++i];
         } else if (a == "--scenario") {
             if (!need(o.scenario)) return false;
         } else if (a == "--json") {
@@ -1472,6 +1479,7 @@ class Operator {
     int pongs() { return locked<int>([this] { return sh_.pongs; }); }
     const std::string& introspect() const { return opts_.introspect; }
     const std::string& scenario() const { return opts_.scenario; }
+    const std::string& exec_cmd() const { return opts_.exec_cmd; }
     int cycles() const { return opts_.cycles; }
     std::string conn_state() { return locked<std::string>([this] { return sh_.conn_state; }); }
 
@@ -1549,7 +1557,15 @@ class Operator {
 
 std::string ms_str(std::int64_t us) { return std::to_string(us / 1000) + " ms"; }
 
+/// Single-quote for `sh -c`, so a command with spaces or quotes survives being handed to a shell.
+std::string shell_quote(const std::string& in) {
+    std::string out = "'";
+    for (const char c : in) out += (c == '\'') ? std::string("'\\''") : std::string(1, c);
+    return out + "'";
+}
+
 std::string agent_track_stats(Operator& op, std::string* err); // defined below, with the other /stats readers
+std::optional<json> last_link_stats(Operator& op);              // likewise
 
 /// What the ROBOT says about the tracks, for a failure message about frames the operator did not
 /// decode. Without it, "no frames within 8 s" cannot distinguish a robot that sent nothing from a
@@ -1672,7 +1688,11 @@ class TunnelEnd {
                 refused_++;
                 return;
             }
+            // A write into the device injects into the kernel's receive path and can fail under
+            // load (ENOBUFS on a full device queue). Counted, because a silent failure here looks
+            // exactly like a stalled transfer from the outside and nothing else records it.
             if (::write(fd_, bytes.data(), bytes.size()) > 0) rx_++;
+            else wr_fail_++;
         });
         // The pump runs on opsim's loop thread, so the scenario thread stays free to use the
         // tunnel — which is the only way a blocking HTTP request over it can work.
@@ -1695,6 +1715,14 @@ class TunnelEnd {
 
     unsigned long tx() const { return tx_; }
     unsigned long rx() const { return rx_; }
+    unsigned long dropped() const { return dropped_; }
+    unsigned long wr_fail() const { return wr_fail_; }
+    unsigned long refused() const { return refused_; }
+    std::string counters() const {
+        return std::to_string(tx_) + " out, " + std::to_string(rx_) + " in, " + std::to_string(dropped_) +
+               " dropped by a full channel, " + std::to_string(wr_fail_) + " failed writes into the device, " + std::to_string(refused_) +
+               " refused by policy";
+    }
     static constexpr const char* LABEL = "fjarr:stream:fjarr.net";
 
   private:
@@ -1703,7 +1731,7 @@ class TunnelEnd {
     int fd_ = -1;
     std::uint32_t self_ = 0, peer_ = 0;
     int mtu_ = 1280;
-    std::atomic<unsigned long> tx_{0}, rx_{0}, dropped_{0}, refused_{0};
+    std::atomic<unsigned long> tx_{0}, rx_{0}, dropped_{0}, refused_{0}, wr_fail_{0};
     glib::SourceGuard watch_;
 };
 
@@ -1754,6 +1782,56 @@ void scenario_tunnel(Operator& op) {
                                     std::to_string(tun.rx()) + " in)"
                               : "GET " + url + " -> " + (got.error.empty() ? "HTTP " + std::to_string(got.status) : got.error));
 
+    // Open question #23: tunnel traffic and video share one peer connection, and a bulk transfer
+    // has no application-level backpressure to lean on. Nothing had ever pushed enough through a
+    // link to find out what that costs the camera beside it, so the numbers are recorded here
+    // rather than asserted — the honest first step for an open question, and the same treatment
+    // `netem wifi-ok` gets. The floor is categorical: the video must not stop.
+    const bool watch_video = !op.exec_cmd().empty();
+    std::optional<TrackRx> before;
+    std::int64_t video_t0 = 0;
+    if (watch_video && op.select("test-pattern", true)) {
+        op.wait_frames("test-pattern", op.frames("test-pattern"), 1, 8000);
+        op.watch_reset("test-pattern");
+        op.sleep_ms(2000); // a baseline with the link idle
+        before = op.track_snapshot("test-pattern");
+        video_t0 = g_get_monotonic_time();
+        const double fps = before && before->frames ? before->frames * 1e6 / std::max<std::int64_t>(1, before->last_frame_us - before->first_frame_us) : 0;
+        r.check("video-before", before && before->frames > 10,
+                before ? "baseline " + std::to_string(before->frames) + " frames, " + std::to_string(static_cast<int>(fps)) +
+                             " fps, longest gap " + ms_str(before->max_gap_us) + ", " + std::to_string(before->bad_stamps) + " undecodable stamps"
+                       : "no frames before the transfer");
+        op.watch_reset("test-pattern");
+    }
+
+    // What the link is FOR: a command that knows nothing about Fjarr, run with the tunnel up and
+    // the robot's address in its environment. `fjarr-connect robot-024 -- ssh robot@$FJARR_ADDR`
+    // is the same idea in the shipped client (docs/27), so proving ssh and scp here settles the
+    // robot side before that client exists.
+    if (!op.exec_cmd().empty()) {
+        const std::string cmd = "FJARR_ADDR=" + robot_addr + " FJARR_PEER_ADDR=" + op_addr + " sh -c " + shell_quote(op.exec_cmd());
+        const std::int64_t t_cmd = g_get_monotonic_time();
+        logf("exec: %s", op.exec_cmd().c_str());
+        const int rc = std::system(cmd.c_str());
+        const int status = rc == -1 ? -1 : (WIFEXITED(rc) ? WEXITSTATUS(rc) : 128 + WTERMSIG(rc));
+        r.check("exec", status == 0,
+                "`" + op.exec_cmd() + "` exited " + std::to_string(status) + " after " + ms_str(g_get_monotonic_time() - t_cmd) +
+                    " with the link up; operator end: " + tun.counters());
+    }
+
+    // #23, measured: what the camera did while the link was saturated.
+    if (watch_video && before) {
+        const auto after = op.track_snapshot("test-pattern");
+        const double secs = (g_get_monotonic_time() - video_t0) / 1e6;
+        const double fps = after && secs > 0 ? after->frames / secs : 0;
+        r.check("video-during-transfer", after && after->frames > 0,
+                after ? std::to_string(after->frames) + " frames in " + std::to_string(static_cast<int>(secs)) + " s (" +
+                            std::to_string(static_cast<int>(fps)) + " fps), longest gap " + ms_str(after->max_gap_us) + ", largest counter step " +
+                            std::to_string(after->max_delta) + ", " + std::to_string(after->bad_stamps) +
+                            " undecodable stamps — recorded for open question #23, not asserted"
+                      : "the camera stopped while the link carried the transfer");
+    }
+
     // A packet the robot must refuse: addressed into its LAN rather than to its own tunnel
     // address. This is the rule that makes lateral movement impossible (docs/27#isolation).
     std::string bad(40, '\0');
@@ -1774,10 +1852,7 @@ void scenario_tunnel(Operator& op) {
     auto stats = op.wait_envelope(mark, "fjarr.net", "link-stats", "event", 4000,
                                   [](const Envelope& e) { return e.payload.value("dropped_policy", 0) >= 3; });
     r.check("refused-and-counted", stats.has_value(),
-            stats ? "dropped_policy=" + std::to_string(stats->payload.value("dropped_policy", 0)) +
-                        " tx=" + std::to_string(stats->payload.value("tx_packets", 0)) +
-                        " rx=" + std::to_string(stats->payload.value("rx_packets", 0)) +
-                        " dropped_queue=" + std::to_string(stats->payload.value("dropped_queue", 0))
+            stats ? "refusals counted; the robot's last sample: " + last_link_stats(op).value_or(json::object()).dump()
                   : "no link-stats within 4 s reporting the three refused packets");
 
     auto closed = op.request("fjarr.net", "close", json::object());
@@ -2286,6 +2361,17 @@ std::string agent_track_stats(Operator& op, std::string* err) {
     }
     *err = "session " + op.sid8() + " not in GET /stats";
     return "";
+}
+
+/// The last `fjarr.net` link-stats the robot sent. `wait_envelope` returns the FIRST match, which
+/// for a per-second event is a snapshot from the start of a run — fine for proving a refusal was
+/// counted, useless as a total, and I misread my own numbers that way once (slice 4.5c).
+std::optional<json> last_link_stats(Operator& op) {
+    return op.locked<std::optional<json>>([&]() -> std::optional<json> {
+        for (auto it = op.sh().inbox.rbegin(); it != op.sh().inbox.rend(); ++it)
+            if (it->cap == "fjarr.net" && it->type == "link-stats") return std::optional<json>(it->payload);
+        return std::nullopt;
+    });
 }
 
 /// The agent's latest `bandwidth-stats` entry for a track (docs/08#track-control), from an inbox

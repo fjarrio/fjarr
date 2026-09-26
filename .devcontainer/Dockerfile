@@ -72,6 +72,12 @@ RUN curl -fsSL -o /tmp/lychee.tar.gz \
          lychee-x86_64-unknown-linux-musl/lychee \
     && rm -f /tmp/lychee.tar.gz || echo "WARN: lychee install skipped"
 
+# The operator end of the tunnel lab (docs/27): `fjarr-opsim --scenario tunnel --exec` runs ssh and
+# scp from this container over fjarr0, which is the rehearsal of `fjarr-connect robot -- ssh`. Its
+# own layer so it does not invalidate the GStreamer install above.
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+
 # --- non-root user matching the host UID/GID ------------------------------
 # ubuntu:26.04 ships a default `ubuntu` user at UID 1000; replace it.
 RUN userdel -r ubuntu 2>/dev/null || true \
