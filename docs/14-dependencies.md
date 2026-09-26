@@ -101,6 +101,8 @@ ioctls.
 | valgrind, heaptrack | 3.26 / 1.5 | nightly memcheck and allocation profiling of the agent (docs/15 memory safety; GPL tools, dev-only, never linked) |
 | `@playwright/test` (`@fjarr/e2e`, never published) | 1.63.0 (pinned; the `browser` image tag follows it) | browser lab harness and `fjarr-lab` (Apache-2.0) |
 | `mcr.microsoft.com/playwright:v1.63.0-noble` (container) | 1.63.0 | the lab's headless Chromium with CDP (docs/25) |
+| openssh-client | 26.04 | the operator end of the tunnel lab: `make tunnel-ssh` / `tunnel-scp` run through it over `fjarr0` (docs/27 gate, slice 4.5c). BSD-2/ISC, dev image only — nothing in a shipped artifact links or invokes it |
+| openssh-server (`fjarr-robot-services` container) | 26.04 | the ssh daemon the tunnel gate reaches, in a sidecar on the robot's network namespace. BSD-2/ISC, dev-only fixture: on a real robot this is the integrator's own package and the agent never knows about it |
 | `docker-cli`, `docker-compose-v2` (dev image) | 26.04 | docker-outside-of-docker: the lab drives the compose stack from `dev` (Apache-2.0) |
 | `iproute2` (`tc`, dev image) | 26.04 | netem media-path profiles inside the robot container (GPL-2.0 tool, dev-only, never linked) |
 | coturn (container) | 4.6 | dev/self-host TURN (BSD-3) |
