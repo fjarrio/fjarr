@@ -171,6 +171,14 @@ tun-up: ## Create the tunnel interfaces the installer creates on a real robot (d
 	  docker/lab/tundev.sh up demo-robot "$$addr" $(TUN_OPERATOR) $(TUN_DEV) && \
 	  docker/lab/tundev.sh up dev $(TUN_OPERATOR) "$$addr" $(TUN_DEV)
 	@echo "tun-up: the robot waited for its interface before starting — the ordering the whole design rests on (docs/27#lifecycle)"
+	@# The robot was just recreated and boots only once the interface exists, so it registers with
+	@# the server a moment after this returns. Waiting here rather than in every caller: without it
+	@# a scenario starting immediately gets `robot-offline`, which is a true answer to the wrong
+	@# question. A recreate gives the container a fresh log, so an earlier line cannot match.
+	@for i in $$(seq 60); do docker compose logs --no-color demo-robot 2>/dev/null | grep -q "hello-ack: online" && break; sleep 1; done; \
+	  docker compose logs --no-color demo-robot 2>/dev/null | grep -q "hello-ack: online" \
+	  || { echo "tun-up: the robot never registered with the server — docker compose logs demo-robot"; exit 1; }
+	@echo "tun-up: the robot is online and attached; 'make opsim-tunnel' will find it"
 
 .PHONY: tun-down
 tun-down: ## Remove the lab's tunnel interfaces and put the demo robot back to its usual state
