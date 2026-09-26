@@ -131,6 +131,9 @@ services:
       FJARR_LOG_LEVEL: ${FJARR_LOG_LEVEL:-info}
       # `make agent-leaks` recreates the robot with GStreamer's leaks tracer (docs/23 memory ladder).
       GST_TRACERS: ${FJARR_GST_TRACERS:-}
+      # For looking inside the transport when the tunnel misbehaves (open question #28):
+      # FJARR_GST_DEBUG='sctp*:6,dtls*:5' docker compose up -d demo-robot
+      GST_DEBUG: ${FJARR_GST_DEBUG:-}
       # The introspection endpoint (docs/24) is loopback-only by default; the demo binds it on the
       # container's interface with a dev token so `make introspect` and the lab browser reach the
       # viewer at http://localhost:7381/ (published on the host's loopback only, below).

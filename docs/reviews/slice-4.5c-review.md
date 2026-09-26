@@ -46,8 +46,34 @@ description: Retrospective review of the slice that made the tunnel carry someth
 2. **Hash-verified 1 GiB `scp`** — met when it completes, integrity included; **its reliability is not met**, see #28. Recorded in CI rather than asserted, deliberately and visibly.
 3. **Question #23 measured** — met, and closed with numbers.
 
+## #28, investigated the same day
+
+The SCTP-level look happened immediately rather than being deferred, and it found
+the **mechanism of the invisible loss**: `GST_DEBUG=sctp*:3` shows usrsctp raising
+`SCTP_SEND_FAILED_EVENT` in bursts — it abandons messages asynchronously, after
+`send_binary` has returned true and with `buffered_amount` at 0. The tunnel's
+tail-drop rule watches the buffered amount, so it is blind to exactly this. That
+is worth having on its own: any design that reads "the send returned true" as
+delivery is building on a blind spot.
+
+What makes some runs unrecoverable is still open, and three candidate causes were
+measured and rejected rather than argued about:
+
+| Arm | Failures | Verdict |
+|---|---|---|
+| unreliable, unordered, unbounded read (as specified) | 5 of 8 | the baseline |
+| reliable-ordered channel | 2 of 8 | better, not a fix, and it contradicts docs/08's rationale for the class |
+| bounded read loop (32 packets per wakeup) | 7 of 20 | the same band; kept anyway, for the starvation hazard it fixes on its own |
+| `GST_DEBUG=sctp*:3` on the robot | 0 of 8 | **the fault is rate-sensitive: logging the SCTP layer suppresses it** |
+
+Two of those arms first looked like fixes on small samples — reliable at 8 of 8
+before the control arm also passed 8 of 8 with logging on, and bounded at 7 of 8
+before twelve more runs put it at 13 of 20. Both were written down as fixes for
+about a minute. The rule that caught them is the one 4.5b arrived at: a run of
+green is not evidence, and the control arm has to run under the same conditions.
+
 ## Deferred
 
-- **#28 needs SCTP-level evidence.** `GST_DEBUG=sctp*:6`, usrsctp association counters, and the channel's `buffered_amount` sampled during a stall would say whether the transport accepted and discarded, or the peer stopped reading. Black-box runs have given all they can.
+- **#28 remains open**, with the mechanism known and the ruled-out list recorded. The next lever is a capture at the SCTP layer, and 4.5e's `fjarr-connect` supplies a second, independent SCTP implementation for free — if webrtc-rs does not stall, the fault is usrsctp's. Either way, pacing or batching several packets per message are wire and design decisions that want an ADR, not a patch.
 - **The second robot exists and registers (`demo-robot-02`) but nothing uses it yet**; the isolation regression it is there for lands in 4.5e with the real operator client.
 - **The lab's ssh key is baked into the image** and published through a volume. Fine for a fixture, but it means a rebuilt image invalidates a running operator's copy — `tun-up` recreates both, so it self-heals, and this is noted only so the next confusing "permission denied" is short.

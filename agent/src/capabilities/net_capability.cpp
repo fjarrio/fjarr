@@ -308,9 +308,14 @@ void NetCapability::on_message(SessionContext& ctx, const Envelope& msg) {
         const SessionId sid = ctx.id();
         impl_->watch = ctx.watch_readable(impl_->tun_fd, [this, sid, ctxp = &ctx]() -> bool {
             if (impl_->link_session != sid) return false;
-            // Drain what is ready: the loop wakes once per readable state, not once per packet.
+            // Bounded batches, not "until the device is empty": a saturating flow can otherwise keep
+            // this handler running for as long as the kernel keeps supplying packets, and everything
+            // else on the core loop — the control channel, every other capability — waits behind it.
+            // GLib re-dispatches immediately while the fd stays readable, so nothing is left unread.
+            // This is NOT a fix for open question #28: measured at 7 failures in 20 against a
+            // baseline of roughly half, which is the same band (docs/18 #28).
             std::string buf(MAX_PACKET, '\0');
-            for (;;) {
+            for (int batch = 0; batch < 32; batch++) {
                 const ssize_t n = ::read(impl_->tun_fd, buf.data(), buf.size());
                 if (n <= 0) {
                     if (n < 0 && errno == EINTR) continue;

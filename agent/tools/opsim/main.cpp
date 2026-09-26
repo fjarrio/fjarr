@@ -634,6 +634,16 @@ class Peer {
         return true;
     }
 
+    /// How much the SCTP stack is holding for `label` but has not yet handed to the network.
+    std::uint64_t buffered(const std::string& label) {
+        std::lock_guard<std::mutex> lk(dc_mu_);
+        auto it = channels_.find(label);
+        if (it == channels_.end()) return 0;
+        guint64 v = 0;
+        g_object_get(it->second.get(), "buffered-amount", &v, nullptr);
+        return v;
+    }
+
     /// Called on the SCTP thread for every binary message on `label`.
     void on_binary(std::function<void(const std::string& label, const std::string& bytes)> fn) { on_binary_ = std::move(fn); }
 
@@ -1694,6 +1704,18 @@ class TunnelEnd {
             if (::write(fd_, bytes.data(), bytes.size()) > 0) rx_++;
             else wr_fail_++;
         });
+        // Open question #28: a bulk transfer stalls in ~40 % of attempts with every end-of-run
+        // counter at zero, so the question is which side stops first and whether the channel is
+        // holding what it accepted. One line a second answers both, and costs nothing when nothing
+        // goes wrong.
+        ticker_ = op_.loop().add_timeout(std::chrono::milliseconds(1000), [this] {
+            const unsigned long tx = tx_, rx = rx_;
+            logf("tunnel: tx=%lu (+%lu) rx=%lu (+%lu) dropped=%lu wr_fail=%lu buffered=%lu", tx, tx - last_tx_, rx, rx - last_rx_,
+                 dropped_.load(), wr_fail_.load(), static_cast<unsigned long>(op_.peer()->buffered(LABEL)));
+            last_tx_ = tx;
+            last_rx_ = rx;
+            return true;
+        });
         // The pump runs on opsim's loop thread, so the scenario thread stays free to use the
         // tunnel — which is the only way a blocking HTTP request over it can work.
         watch_ = op_.loop().add_fd_watch(fd_, [this] {
@@ -1733,6 +1755,8 @@ class TunnelEnd {
     int mtu_ = 1280;
     std::atomic<unsigned long> tx_{0}, rx_{0}, dropped_{0}, refused_{0}, wr_fail_{0};
     glib::SourceGuard watch_;
+    glib::SourceGuard ticker_;
+    unsigned long last_tx_ = 0, last_rx_ = 0;
 };
 
 /// docs/27 gate: IP reaches the robot over a real data channel, a packet not addressed to the

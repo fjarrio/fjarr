@@ -397,12 +397,19 @@ unaffected either way — 31-33 fps, no lost frames, longest gap 55-70 ms agains
 a 48-51 ms idle baseline. That closes [question #23](18-open-questions.md): the
 tunnel and the video share one peer connection without a separate one for bulk.
 
-**A bulk transfer stalls in roughly 40 % of attempts**, at the onset of the
-flow, and nothing at this layer sees it happen — every drop counter at both ends
-stays zero. `ssh` and small requests over the same link never stall. It is
+**A bulk transfer stalls in roughly half of attempts**, at the onset of the
+flow. `ssh` and small requests over the same link never stall. It is
 [question #28](18-open-questions.md), it is independent of video and of transfer
-size, and it has to be settled before the M4.5 gate can claim a reliable
-`scp`. On the `bad` profile ssh still logs in, slowly, while DDS discovery
+size, and it has to be settled before the M4.5 gate can claim a reliable `scp`.
+
+What is known: **usrsctp abandons messages and does not say so where the sender
+can see it.** `SCTP_SEND_FAILED_EVENT` arrives asynchronously, after
+`send_binary` has returned true and with `buffered_amount` at 0 — so the
+tail-drop rule above, which watches the buffered amount, is blind to the one
+failure that matters. Any design that treats "the send returned true" as
+delivery, or the buffered amount as the only measure of pressure, is building on
+that blind spot. The fault is also rate-sensitive enough that logging the SCTP
+layer suppresses it entirely, which is worth knowing before measuring it. On the `bad` profile ssh still logs in, slowly, while DDS discovery
 does not finish — its handshakes are reliable exchanges that 15 % loss
 defeats. That is a property of DDS, not of the tunnel, and the honest
 statement is that ROS 2 tooling needs a usable link while `ssh` tolerates a
