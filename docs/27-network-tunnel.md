@@ -452,7 +452,7 @@ Per [docs/15](15-testing-strategy.md):
 - **Isolation regression** (safety class, never removed): two robots
   attached at once, robot A cannot reach robot B in either direction, and no
   packet crosses between links. Needs two ends, so it lands with
-  `fjarr-connect` in 4.5b.
+  `fjarr-connect` in 4.5e.
 - **Ordering regression**: a participant created while the agent is detached
   does not advertise the tunnel address; created while attached, it does;
   and it keeps advertising across an agent restart. These three are the

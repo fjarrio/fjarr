@@ -381,25 +381,40 @@ session and ordered so every slice is provable when it lands:
   mechanism, the assertion stays categorical, and the floor is recorded in
   [docs/16](16-performance-budgets.md). **All three rows closed; every defect was
   in a gate or a rig, none in the agent.**
-- **4.5c — the rig, and the tools the gate names.** The lab can carry packets
-  and nothing else: there is no `sshd` in the robot image, no ROS 2 anywhere
-  in the stack, and one robot. All three are prerequisites for the M4.5 gate,
-  and none of them needs `fjarr-connect` — `fjarr-opsim` already pumps a
-  tunnel, so the robot side and the rig can be proven before the Rust client
-  exists, exactly as 4.5a proved the capability before the client. `sshd` goes
-  in the robot (forwarding is off, so the server must sit on the robot's own
-  tunnel address); a second `demo-robot` with its own id; ROS 2 as sidecars
-  with `network_mode: service:<end>`, which see `fjarr0` in the shared
-  namespace without putting ROS 2 in the agent image. Plus the documented
-  Cyclone DDS file and `fjarr-agent net setup`'s offer to write it. *Gate:*
-  `ssh` login and a hash-verified 1 GB `scp` over the link; `ros2 topic list`
-  with Fast DDS unconfigured and with the Cyclone file; the three ordering
-  facts of [docs/27](27-network-tunnel.md#lifecycle) as a regression — a
-  participant created while the agent is detached does not advertise the
-  tunnel address, one created while attached does, and it keeps advertising
-  across an agent restart; and **question #23 measured**, a camera streaming
-  while the `scp` runs.
-- **4.5d — `fjarr-protocol` and `fjarr-connect`**
+**Split again 2026-09-26, before starting.** What was one 4.5c carried the whole
+rig plus four gate items; reading the specs through, the rig and `ssh`/`scp` are
+one provable increment and ROS 2 is another, with its own spec work (the Cyclone
+file is promised in [docs/27](27-network-tunnel.md#ros2) but has never been
+written down). Two slices, and the letters after them shift:
+
+- **4.5c — the robot's services, and a link something else can use.** The lab
+  carries packets and nothing else: no `sshd`, one robot, and a tunnel that only
+  `fjarr-opsim`'s own assertions ever touch. None of this needs
+  `fjarr-connect` — the simulator already pumps a tunnel, so the robot side can
+  be proven before the Rust client exists, as 4.5a proved the capability before
+  the client. The services the tunnel is *for* live in sidecars sharing the
+  robot's network namespace rather than in the agent's image: that is what a real
+  robot looks like from the far end of a link (sshd and ROS 2 are separate
+  processes on the same network stack, not part of `fjarr-agent`), and it keeps
+  ROS 2 and an ssh daemon out of a container whose job is to be the agent. Plus a
+  second robot with its own id, ready for 4.5e's isolation regression. And the
+  piece that turns a link into something usable: `fjarr-opsim --scenario tunnel
+  --exec <cmd>` runs a command with the link up and `FJARR_ADDR` in its
+  environment, which is a rehearsal of `fjarr-connect robot -- ssh
+  robot@$FJARR_ADDR` (docs/27). *Gate:* `ssh` login and a hash-verified 1 GB
+  `scp` over the link, and **question #23 measured** — a camera streaming while
+  the `scp` runs, which is the first time anything has pushed enough through a
+  link to disturb the video beside it.
+- **4.5d — ROS 2 over the link.** ROS 2 as sidecars on each end's namespace,
+  `ros2 topic list` against the robot with Fast DDS unconfigured, the Cyclone DDS
+  file written into docs/27 for the first time (the spike measured it; the spec
+  only promises it) and `fjarr-agent net setup`'s offer to write it, and the
+  three ordering facts of [docs/27](27-network-tunnel.md#lifecycle) as a
+  regression — a participant created while the agent is detached does not
+  advertise the tunnel address, one created while attached does, and it keeps
+  advertising across an agent restart. Those three are the measured facts the
+  whole lifecycle rests on, and nothing has ever re-checked them.
+- **4.5e — `fjarr-protocol` and `fjarr-connect`**
   ([ADR-0024](adr/0024-native-operator-client.md)). The shared signaling types
   move into their own crate **here**, when a second consumer exists: the
   protocol module is 217 lines needing only serde, while the signaling crate
@@ -415,7 +430,7 @@ session and ordered so every slice is provable when it lands:
   two robots attached at once provably unable to reach each other in either
   direction; a colliding pair refused by name with the `address` line that
   fixes it.
-- **4.5e — discovery and login.** Without this the CLI is a debugging tool
+- **4.5f — discovery and login.** Without this the CLI is a debugging tool
   rather than a product: the optional
   [operator API](09-interfaces.md#operator-api) on the customer's backend, the
   `FjarrCliLogin` handoff component in `@fjarr/react`
@@ -428,7 +443,7 @@ session and ordered so every slice is provable when it lands:
   `session.started`/`session.ended` with `fjarr.net` among the capabilities.
 
 macOS is ADR-0024's committed second platform and there is no macOS runner, so
-4.5d ships it cross-compiled and hand-checked, with the matrix honest about
+4.5e ships it cross-compiled and hand-checked, with the matrix honest about
 that until M5's packaging work says otherwise.
 
 **Gate:** [docs/06 `fjarr.net` criteria](06-capabilities.md) —
