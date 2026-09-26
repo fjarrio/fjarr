@@ -317,9 +317,12 @@ session and ordered so every slice is provable when it lands:
   dropped is gone rather than queued.
 - **4.5b — gates worth trusting.** Not tunnel work: CI's lab job is red on
   `main` and two suites are additionally red on the development machine, and
-  the next slices measure media. In CI, `opsim toggle` fails
+  the next slices measure media. In CI, `opsim toggle` **intermittently** fails
   `toggle-keyframe`: 19 of 20 enables produced a keyframe and a decoded frame,
-  worst 2912 ms. Reading that job's log also turned up a GLib critical on
+  worst 2912 ms on 2e5759f, while the same assertion passed on e84ef64. One
+  enable in twenty missing its budget is a tail-latency question, not a broken
+  feature, so the slice has to decide whether the budget or the assertion is
+  wrong rather than hunt for a bug. Reading that job's log also turned up a GLib critical on
   every session close that had opened a pty — an fd watch released twice,
   fixed in cd81195 with the regression test the seam never had; it was a
   passenger in a job failing for another reason, which is what a red gate
