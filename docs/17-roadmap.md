@@ -370,8 +370,17 @@ session and ordered so every slice is provable when it lands:
   proves it can fire — validated the hard way by re-introducing the cd81195
   double release, watching the terminal suite pass 4 of 4, and watching the gate
   refuse the run with the three criticals CI had been carrying
-  ([docs/15](15-testing-strategy.md#log-gate)). Remaining: CI's intermittent
-  `toggle-keyframe`.
+  ([docs/15](15-testing-strategy.md#log-gate)).
+
+  CI's `toggle-keyframe` is answered too, and it was not a defect: keyframe
+  requests are throttled to one per second per producer tier and deferred inside
+  that window (docs/23), while `toggle` cycles faster than that by design, so an
+  enable can wait out the throttle and then a GOP. Worst per run measured at
+  757-949 ms here against ~2.9 s on CI's 2-core software encoder, which put one
+  enable in twenty over the scenario's 4 s patience. The patience now follows the
+  mechanism, the assertion stays categorical, and the floor is recorded in
+  [docs/16](16-performance-budgets.md). **All three rows closed; every defect was
+  in a gate or a rig, none in the agent.**
 - **4.5c — the rig, and the tools the gate names.** The lab can carry packets
   and nothing else: there is no `sshd` in the robot image, no ROS 2 anywhere
   in the stack, and one robot. All three are prerequisites for the M4.5 gate,

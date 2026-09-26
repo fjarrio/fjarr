@@ -1823,7 +1823,14 @@ void scenario_toggle(Operator& op) {
         const bool on = op.select(track, true);
         if (!on) continue;
         results_ok++;
-        const bool kf = op.wait_for([&] { return op.keyframes_unlocked(track) > kf_before && op.frames_unlocked(track) > f_before; }, 4000);
+        // Patience, not a budget: keyframe requests are rate-limited to >= 1 s per producer tier and
+        // deferred inside that window (docs/23 keyframe policy), and this loop toggles faster than
+        // that on purpose, so an enable can wait out the limit and then a GOP (2 s). Measured worst
+        // per run: 757-949 ms on 14 cores with VA-API, ~2.9 s on CI's 2-core software encoder, where
+        // one enable in twenty used to cross the old 4 s and fail the scenario for a machine rather
+        // than a defect. The assertion stays categorical — every enable must produce a keyframe —
+        // and the worst is printed on success so a real slowdown is still visible (slice 4.5b).
+        const bool kf = op.wait_for([&] { return op.keyframes_unlocked(track) > kf_before && op.frames_unlocked(track) > f_before; }, 8000);
         const std::int64_t took = g_get_monotonic_time() - t0;
         if (kf) {
             keyframe_ok++;

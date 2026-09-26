@@ -50,6 +50,16 @@ link is below the band is moved to the lower tier on its own, so one bad
 receiver never costs the others more than that band
 ([docs/23](23-agent-core-architecture.md#rate-control-and-tier-switching)).
 
+**Re-enabling a track waits on the keyframe rate limit.** Requests are
+throttled to one per second per producer tier and deferred inside that window
+([docs/23](23-agent-core-architecture.md#rate-control-and-tier-switching)), so a
+viewer that re-enables a track sooner than that waits the remainder, then the
+encoder's own latency, then the hub's start-at-a-keyframe rule. Measured over 20
+rapid enable/disable cycles: **worst 757-949 ms** on 14 cores with VA-API, and
+**~2.9 s** on a 2-core runner with the software encoder. The throttle is
+deliberate — it protects the encoder from a viewer toggling in a loop — so this
+is a floor to design around rather than a regression to chase.
+
 The ~2 s reaction above is the estimator's, measured from feedback that already
 carries a low rate. **Demoting a viewer that is behind a bad link from the
 moment it connects takes far longer**, because nothing can be judged until
