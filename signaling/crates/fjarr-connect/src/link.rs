@@ -18,7 +18,7 @@ use webrtc::peer_connection::PeerConnection;
 use crate::{peer, policy, signaling, tun};
 
 /// What a link carried, for the line printed when it closes.
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone)]
 pub struct Counts {
     pub tx_bytes: u64,
     pub rx_bytes: u64,
@@ -33,6 +33,9 @@ pub struct Counts {
     pub write_failed: u64,
     /// Packets larger than the MTU, which the interface should make impossible.
     pub oversize: u64,
+    /// The robot's last `link-stats` (docs/08): the one number in it the operator cannot count
+    /// itself is `abandoned`, the messages usrsctp threw away after accepting them.
+    pub robot: Option<serde_json::Value>,
 }
 
 impl Counts {
@@ -52,6 +55,16 @@ impl Counts {
         }
         if self.oversize > 0 {
             parts.push(format!("{} over the MTU", self.oversize));
+        }
+        if let Some(robot) = &self.robot {
+            let n = |k: &str| robot.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+            parts.push(format!(
+                "robot: {} abandoned by the transport (err {}), {} dropped at its queue bound, {} refused",
+                n("abandoned"),
+                n("abandoned_error"),
+                n("dropped_queue"),
+                n("dropped_policy")
+            ));
         }
         if parts.is_empty() {
             String::new()
@@ -284,6 +297,12 @@ impl<P: PeerConnection + Send + Sync + 'static> Opened<P> {
                         Some(peer::Event::Closed(why)) => {
                             println!("  {robot}: the robot's end went away ({why})");
                             break;
+                        }
+                        Some(peer::Event::Control(env)) => {
+                            if env.cap == "fjarr.net" && env.kind_of == "link-stats" {
+                                tracing::debug!(robot = %robot, stats = %env.payload, "link-stats");
+                                counts.robot = Some(env.payload);
+                            }
                         }
                         Some(_) => {}
                         None => break,

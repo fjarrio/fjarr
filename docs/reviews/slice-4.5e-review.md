@@ -67,3 +67,24 @@ slice, but it is one for M4.5.
 | the other eight compiler warnings — three GStreamer `-Wcast-function-type` at signal-connection sites, three `-Wmissing-field-initializers` in `introspect_capability`, one `-Wdangling-else`, one `-Wformat-truncation` in `log.cpp` | none is undefined behaviour, and silencing them in the same change as the crash fix would have mixed a cure with a cleanup. Full `-Werror` wants the GStreamer casts wrapped first |
 | the remaining half of [#28](../18-open-questions.md) | narrowed, not closed: the agent is healthy during the failure and the SCTP association is not carrying messages. The next arm is video **plus** a transfer through `fjarr-connect`, which separates usrsctp from the traffic pattern |
 | the VA driver's `alloc-dealloc-mismatch` under ASan (`iHD_drv_video.so`, malloc vs `operator delete` inside `vaDestroyContext`) | entirely inside Intel's driver, reached from the encoder probe. It blocks ASan runs of the demo robot until suppressed, which is worth an `asan.supp` entry beside the existing `lsan.supp` when ASan on the full stack becomes routine |
+
+## Follow-up, 2026-09-27
+
+Four workstreams agreed after the slice, before 4.5f, in the order they ran:
+
+| Workstream | Outcome |
+|---|---|
+| **Warnings are errors** | the eight standing warnings fixed at their cause (`G_SOURCE_FUNC`, a complete aggregate init, braces around gtest's if/else, a buffer sized for what `%d` can print); `COMPILE_WARNING_AS_ERROR` per shipped target rather than a global `-Werror` that would also bind the FetchContent'd validator. Release, ASan and TSan 107/107 |
+| **ROS ordering in CI** | nightly, after `tunnel-ros` as its positive control; the two 4.5d deferred rows closed |
+| **Abandonment made visible** | `SCTP_SEND_FAILED_EVENT` is log-only in gst-plugins-bad 1.28, so a log hook on `sctpassociation` at ERROR (level 1 — not the `sctp*:3` that hides the fault) feeds `abandoned` / `abandoned_error` on `link-stats`, opsim prints it per second and in the `exec` verdict, `fjarr-connect` prints it at close. Three tests pin the filter, and the negative ones only started testing anything once the category was *created* rather than looked up |
+| **#28** | one measurement with the counter (3 of 5 green, abandonment does not predict failure, a failure is a permanent bidirectional wedge of the whole association with ICE and DTLS up) and the discriminating arm: `fjarr-connect` + video 5 of 5. The far end is what differs — a lab tool on usrsctp wedges, a real operator on webrtc-rs does not — and #28 records the next step as reading both ends of a wedged association |
+
+What the harness found on the way, each of which invalidated a measurement before it was fixed:
+
+| Found by | Defect | Fix |
+|---|---|---|
+| the first run with the counter | the robot's `link-stats` had no `abandoned` field: `tun-up` does `up -d`, which leaves a running container alone, and its supervisor kept the agent process it had started hours earlier. Every measurement after a rebuild had been running stale code — the review's own finding 2, a third time | `tun-up` restarts the agent process onto what `build/` holds and waits for a *new* hello-ack by counting lines |
+| the first arm | `fjarr-connect` printed nothing in five runs: `fjarr.net open` was refused as `capability-denied`, the viewer session having taken the input lease, and my filter had no pattern for an error line | the arm runs both sessions as one operator (`GRANT_OPERATOR`), and the lease rule itself is [#31](../18-open-questions.md) |
+| the second arm | `Operation not permitted` adding an address the interface already had: `has_address` read `IFA_ADDRESS`, which on a point-to-point address is the *peer*, and `add_route` relied on `EEXIST`, which an unprivileged process never reaches because `EPERM` comes first. **The documented no-privilege attach had never worked for the installer's own address shape**, and the lab's setcap'd build had hidden it since the day it was written | both look before writing; `make connect-unprivileged` strips the capability and runs `ssh` over the link, and passes |
+
+The pattern across all three is the one this review already named: an instrument or a fixture that cannot fail passes, and a pass on a measurement nobody has seen fail is not evidence. Each fixture here was made to fail on purpose before its pass was believed.

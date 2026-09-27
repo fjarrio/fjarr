@@ -76,6 +76,10 @@ struct Options {
     std::string introspect_token; // --introspect-token, else $FJARR_INTROSPECT_TOKEN (the demo exposes the endpoint with one, docs/24)
     int timeout_s = 60;
     int cycles = 200; // soak: connect/stream/close cycles
+    /// `smoke --hold N`: keep every track subscribed for N seconds before closing — a viewer that
+    /// just watches, so something else (a transfer through `fjarr-connect`, say) can be measured
+    /// with video beside it (docs/18 #28).
+    int hold_s = 0;
     /// A command to run with the tunnel up, `FJARR_ADDR` set to the robot's tunnel address (the
     /// shape `fjarr-connect robot -- <cmd>` will have, docs/27). Its exit status is an assertion.
     std::string exec_cmd;
@@ -88,7 +92,7 @@ struct Options {
 void usage() {
     std::fprintf(stderr,
                  "usage: fjarr-opsim --server ws://host:8080/ws --robot <id> --grant-secret <secret> --scenario <name>\n"
-                 "                   [--json out.json] [--timeout 60] [--ice-policy all|relay] [--cycles 200]\n"
+                 "                   [--json out.json] [--timeout 60] [--ice-policy all|relay] [--cycles 200] [--hold 0]\n"
                  "                   [--introspect http://127.0.0.1:7381] [--introspect-token <t>] [--verbose]\n"
                  "                   [--exec '<command>'] (tunnel: run it with the link up, $FJARR_ADDR set)\n"
                  "scenarios: smoke toggle hotplug silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer tunnel\n"
@@ -117,6 +121,8 @@ bool parse_args(int argc, char** argv, Options& o) {
             if (!need(o.grant_secret)) return false;
         } else if (a == "--exec" && i + 1 < argc) {
             o.exec_cmd = argv[++i];
+        } else if (a == "--hold" && i + 1 < argc) {
+            o.hold_s = std::atoi(argv[++i]);
         } else if (a == "--scenario") {
             if (!need(o.scenario)) return false;
         } else if (a == "--json") {
@@ -1490,6 +1496,7 @@ class Operator {
     const std::string& introspect() const { return opts_.introspect; }
     const std::string& scenario() const { return opts_.scenario; }
     const std::string& exec_cmd() const { return opts_.exec_cmd; }
+    int hold_s() const { return opts_.hold_s; }
     int cycles() const { return opts_.cycles; }
     std::string conn_state() { return locked<std::string>([this] { return sh_.conn_state; }); }
 
@@ -1652,6 +1659,14 @@ void scenario_smoke(Operator& op) {
     r.check("heartbeat", op.pongs() > 0 && defect.empty(),
             op.pongs() > 0 ? (defect.empty() ? "pong echoes t0; best rtt " + std::to_string(static_cast<int>(op.best_rtt())) + " ms over " + std::to_string(op.pongs()) + " pong(s)" : defect)
                            : "no pong within 6 s");
+    if (op.hold_s() > 0) {
+        // Just watch. The predicate never becomes true; the timeout is the hold.
+        const auto frames_before = op.track_snapshot("test-pattern");
+        op.wait_for([] { return false; }, op.hold_s() * 1000);
+        const auto frames_after = op.track_snapshot("test-pattern");
+        const long got = frames_after && frames_before ? static_cast<long>(frames_after->frames) - static_cast<long>(frames_before->frames) : -1;
+        r.check("hold", got > 0, "held the subscription " + std::to_string(op.hold_s()) + " s; " + std::to_string(got) + " frames arrived meanwhile");
+    }
     close_and_assert(op);
 }
 

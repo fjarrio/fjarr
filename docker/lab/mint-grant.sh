@@ -13,12 +13,17 @@ ROBOT=${1:?robot id}; shift || true
 CAPS=("$@"); [ ${#CAPS[@]} -eq 0 ] && CAPS=(fjarr.net)
 SECRET=${FJARR_GRANT_HS256_SECRET:-dev-only-grant-secret}
 TTL=${GRANT_TTL:-300}
+# The input lease is per operator id (docs/10): the first session an operator opens takes it, and
+# every other operator's sessions are read-only until it ends — which is why a `fjarr-connect` run
+# beside an opsim viewer has to be the SAME operator, or `fjarr.net open` is refused as
+# `capability-denied`. Default matches the lab's own identity; override to share with opsim.
+OPERATOR=${GRANT_OPERATOR:-lab@fjarr.test}
 
 b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 caps_json=$(printf '{"name":"%s"},' "${CAPS[@]}"); caps_json="[${caps_json%,}]"
 header=$(printf '{"alg":"HS256","typ":"JWT"}' | b64url)
-claims=$(printf '{"iss":"fjarr-lab","aud":"fjarr","exp":%d,"tenant":"lab","robot_id":"%s","operator":{"id":"lab@fjarr.test","label":"Lab operator"},"capabilities":%s}' \
-  "$(( $(date +%s) + TTL ))" "$ROBOT" "$caps_json")
+claims=$(printf '{"iss":"fjarr-lab","aud":"fjarr","exp":%d,"tenant":"lab","robot_id":"%s","operator":{"id":"%s","label":"Lab operator"},"capabilities":%s}' \
+  "$(( $(date +%s) + TTL ))" "$ROBOT" "$OPERATOR" "$caps_json")
 body=$(printf '%s' "$claims" | b64url)
 sig=$(printf '%s.%s' "$header" "$body" | openssl dgst -sha256 -hmac "$SECRET" -binary | b64url)
 printf '%s.%s.%s\n' "$header" "$body" "$sig"
