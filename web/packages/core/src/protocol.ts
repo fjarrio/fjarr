@@ -21,7 +21,7 @@ export interface SignalingCommon {
 
 /** spec: docs/08-protocol.md#track-manifest */
 export interface MonitorInfo {
-  /** Stable identity (connector name, e.g. "HDMI-1") — never key on index. */
+  /** Stable identity: the EDID vendor-model-serial slug, e.g. "del-dell-u2720q-8xk2n13". Never key on index or connector. */
   id: string;
   index: number;
   primary?: boolean;
@@ -32,6 +32,8 @@ export interface MonitorInfo {
   scale: number;
   /** EDID model name when known. */
   name?: string;
+  /** Current connector name ("HDMI-1", "DP-5"): informational, changes on replug. */
+  connector?: string;
 }
 
 /** spec: docs/08-protocol.md#track-manifest */

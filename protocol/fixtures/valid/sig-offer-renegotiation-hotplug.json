@@ -4,7 +4,7 @@
   "event_id": "0192f3a1-offer0002",
   "ts": 1789503000000,
   "session_id": "s-01",
-  "sdp": "v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\n\u2026",
+  "sdp": "v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\n…",
   "tracks": [
     {
       "track_id": "cam-front",
@@ -17,7 +17,7 @@
       "mid": "0"
     },
     {
-      "track_id": "desk-DP-2",
+      "track_id": "desk-del-dell-u2422h-gk19rp3",
       "cap": "fjarr.desktop",
       "kind": "video",
       "label": "DP-2",
@@ -25,14 +25,15 @@
       "pt": 98,
       "mid": "2",
       "monitor": {
-        "id": "DP-2",
+        "id": "del-dell-u2422h-gk19rp3",
         "index": 0,
         "primary": true,
         "x": 0,
         "y": 0,
         "w": 2560,
         "h": 1440,
-        "scale": 1.0
+        "scale": 1.0,
+        "connector": "DP-2"
       }
     }
   ],

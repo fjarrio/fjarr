@@ -16,6 +16,7 @@ by revision (this document's history), never by renumbering.
 | M0 Docs & environment | **done** 2026-09-15 | doctor 0 failures, 3 tiers + 3 demos build, site builds |
 | M0.5 Public foundations | **done** 2026-09-16 | CI green, fjarr.io + fjarr.dev live, registrations, prior-art anonymization policy |
 | M1 Core + extension API (camera video) | **done** 2026-09-25 | slices 0–2 done and reviewed, 2.9 (baseline bump, [ADR-0022](adr/0022-baseline-ubuntu-2604-gstreamer-128.md)) done 2026-09-18, 3a (browser lab) 2026-09-19, 3b (agent core) 2026-09-20, 3c (introspection + memory ladder) 2026-09-20, **4 (`fjarr.camera` on real sources) 2026-09-20**, 5a/5b (blob frames, `fjarr.introspect`, the served viewer) 2026-09-21, 6a/6b (repair + rate control, passthrough) 2026-09-22, **7a/7b (the remaining fault rows, the latency harness) 2026-09-23/24 — every slice landed**; the [gate review](reviews/m1-gate-review.md) found the ADR-0015 webhook half had never run and that standard-form TURN URLs were silently ignored by the agent, and fixed both. **Gate met 2026-09-25**: CI green and the first fully green nightly on the self-hosted runner, which also recorded the first trustworthy latency numbers — clean 56/79 ms, lossy 82/100, relay 69/102 against budgets of 120/200, 200/350 and 250/450, at 46–52 decoded fps |
+| M2 Desktop spikes + `fjarr.terminal` | **done** 2026-09-27 | 2a terminal and 2c module loader 2026-09-25; 2b the desktop spikes on a dedicated Ryzen mini-PC, [ADR-0006](adr/0006-desktop-backend-selection.md) accepted with numbers (E for GNOME, C second, A for X11 kiosks, forced connectors for headless robots) |
 | M2.6 Encoder families | planned | added 2026-09-24 ([ADR-0025](adr/0025-encoder-families.md)): `nvcodec` and `nvv4l2` behind the existing adapter; closes open question #2 |
 | M4.5 Network tunnel | **done 2026-09-27** ([gate review](reviews/m45-gate-review.md)) | added 2026-09-23 after the [ROS 2 tunnel spike](../agent/spikes/ros2-tunnel/README.md) ([docs/27](27-network-tunnel.md), ADR-0023, ADR-0024); depends only on M2.5, so it can be pulled earlier if a design partner asks |
 | M2 – M8 | planned | revised 2026-09-17 after the slice-3 planning ([docs/23](23-agent-core-architecture.md)–[26](26-robot-install-and-drivers.md), ADR-0019–0022, the [webrtcbin spike](../agent/spikes/webrtcbin-probe/README.md), the [planning review](reviews/slice-3-planning-review.md)): new **M2.5 packaging** milestone; M3 lightened |
@@ -33,7 +34,7 @@ Builds, registrations (fjarr.io + fjarr.dev, npm org `@fjarr`, GitHub org
 `fjarrio` connected to crates.io). Prior-art sources anonymized across the
 tree, history and site ([docs/11](11-prior-art.md)).
 
-## M1 — Core + extension API, proven by `fjarr.camera` *(in progress)*
+## M1 — Core + extension API, proven by `fjarr.camera` *(done)*
 
 **Scope.** Agent core (session lifecycle, FrameHub, DC router, reconnect
 ladder; libsoup-3 signaling per ADR-0017); Rust signaling with grants,
@@ -247,7 +248,10 @@ pointer + keyboard with the full input pipeline (focus model,
 browser-reserved shortcuts + Keyboard Lock, no-auto-repeat, composed text,
 client-side release-all), local-cursor mode where the backend allows,
 `sharpness` preference and `latencyMode: interactive`, clipboard text;
-`release_all_input` safety; unattended-access test green on a real NUC;
+`release_all_input` safety; unattended-access test green on the spike machine
+(the Ryzen mini-PC from 2b); local cursor on Wayland through Fjarr's own
+PipeWire reader ([docs/22](22-remote-desktop-client.md#cursor-strategy));
+clipboard verified in both directions on every chosen backend (not yet spiked);
 **presentation mode** (multi-monitor fullscreen, one window per monitor)
 with the **portal-vs-route spike** that fixes the default per browser
 (open question #19).

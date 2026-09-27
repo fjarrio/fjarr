@@ -216,20 +216,34 @@ Sent inside `offer.tracks`, before any media flows:
 [
   {"track_id": "cam-front", "cap": "fjarr.camera", "kind": "video",
    "label": "Front", "codec": "H264", "pt": 96, "mid": "0", "monitor": null},
-  {"track_id": "desk-HDMI-1", "cap": "fjarr.desktop", "kind": "video",
-   "label": "HDMI-1 (Dell U2720Q)", "codec": "H264", "pt": 97, "mid": "1",
-   "monitor": {"id": "HDMI-1", "index": 0, "primary": true,
+  {"track_id": "desk-del-dell-u2720q-8xk2n13", "cap": "fjarr.desktop",
+   "kind": "video", "label": "Dell U2720Q (HDMI-1)", "codec": "H264",
+   "pt": 97, "mid": "1",
+   "monitor": {"id": "del-dell-u2720q-8xk2n13", "connector": "HDMI-1",
+               "index": 0, "primary": true,
                "x": 0, "y": 0, "w": 1920, "h": 1080, "scale": 1.0,
                "name": "Dell U2720Q"}}
 ]
 ```
 
-`monitor.id` is the **stable identity** (the connector name, e.g. `HDMI-1`,
-`eDP-1`; virtual outputs use the backend's stable name) and desktop
-`track_id`s derive from it (`desk-<id>`), so a monitor keeps its identity
-across unplug/replug and across sessions. `index`, `primary` and the `x`/`y`
-placement are informational and change freely; `name` is the EDID model when
-known. Never key anything on `index`.
+`monitor.id` is the **stable identity**. It is the monitor's EDID vendor,
+model and serial, lowercased, with every run of other characters replaced by
+one `-` (`del-dell-u2720q-8xk2n13`). Desktop `track_id`s derive from it
+(`desk-<id>`), so a monitor keeps its identity across unplug and replug, across
+sessions, and on whichever connector it is plugged into. **Connector names are
+not identities.** A replug of a DisplayPort MST chain renamed DP-4, DP-6 and
+DP-8 to DP-5, DP-9 and DP-11 on the spike machine
+([ADR-0006](adr/0006-desktop-backend-selection.md)). The current connector
+travels in `connector`, for display only.
+
+Two cases are weaker, and the spec says so rather than hiding it. A monitor
+whose EDID has no serial, or one whose identity collides with another's in the
+current set, uses its connector name instead, and keeps it only as long as the
+connector does. A virtual monitor (created for a headless robot or sized to an
+operator's window) gets `virtual-<n>`, unique within the session and nothing
+more. `index`, `primary`, `connector` and the `x`/`y` placement are
+informational and change freely; `name` is the EDID model when known. Never key
+anything on `index` or `connector`.
 
 `kind` is `"video"` or `"audio"` (audio tracks: docs/06 `fjarr.audio`).
 `track_id` is stable across renegotiations. `mid` is the SDP media

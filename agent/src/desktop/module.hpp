@@ -23,7 +23,9 @@ struct ModuleV1 {
 };
 
 /// The one exported symbol. The version is in the NAME, not a field: a module built against an
-/// older seam is then simply not found, instead of being loaded and misread.
+/// older seam is then simply not found, instead of being loaded and misread. V1 was amended in
+/// place once (2026-09-27, ADR-0006's findings) because no module had shipped; from the first
+/// released module (M2.5) on, any change to ModuleV1 or DesktopBackend bumps the name.
 using EntryV1 = const ModuleV1* (*)();
 inline constexpr const char* ENTRY_SYMBOL_V1 = "fjarr_desktop_module_v1";
 

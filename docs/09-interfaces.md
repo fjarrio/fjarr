@@ -160,15 +160,43 @@ namespace fjarr {
 class DesktopBackend {
 public:
   virtual ~DesktopBackend() = default;
-  virtual std::vector<Monitor> monitors() = 0;          // stable connector ids, geometry
+  virtual Features features() = 0;  // local_cursor, virtual_monitors, desktop_audio, clipboard
+  // Monitors carry an identity (EDID vendor, model, serial) and the wire id
+  // derived from it (docs/08#track-manifest); the connector name is only
+  // informational, because a replug can change it.
+  virtual std::vector<Monitor> monitors() = 0;
   // Hot-plug: fires on connect/disconnect/mode change with the full new set;
-  // the capability diffs it and calls SessionContext::update_tracks
+  // the capability diffs it BY IDENTITY and calls SessionContext::update_tracks
   // (docs/08#renegotiation). Backends without native events poll.
   virtual void on_monitors_changed(std::function<void(std::vector<Monitor>)>) = 0;
-  virtual CaptureSource start_capture(MonitorId) = 0;   // yields a GstElement/bin
+  // A capture can end without anyone asking: its monitor went away, the
+  // source stopped, the session ended. Mutter ends a stream whose monitor was
+  // unplugged by delivering nothing and saying nothing, so the backend must
+  // detect it, not just relay a signal. The capability then drops or rebuilds
+  // that track.
+  virtual void on_capture_lost(std::function<void(MonitorId, CaptureLost)>) = 0;
+  // Returns immediately and never waits for a first frame. Capture may be
+  // variable-rate: a still screen produces no frames, not even a first one.
+  // The backend provokes a first frame where it can; the media plane repeats
+  // the last frame to the encoder.
+  virtual CaptureSource start_capture(MonitorId, CaptureOptions) = 0;  // {cursor_in_video}
   virtual void stop_capture(MonitorId) = 0;             // never disturbs other captures
+  // Virtual monitors: headless robots, or a monitor sized to the operator's
+  // window. The size must be asked for (unasked, mutter made it 1x1). It lives
+  // until destroyed or the session ends, and its id is only unique within the
+  // session. Returns an invalid id when unsupported.
+  virtual MonitorId create_virtual_monitor(int width, int height) = 0;
+  virtual void destroy_virtual_monitor(MonitorId) = 0;
+  // Desktop audio: what the robot's speakers play (the default sink's
+  // monitor). Returns an invalid source when unsupported.
+  virtual CaptureSource start_audio_capture() = 0;
+  virtual void stop_audio_capture() = 0;
+  // Local-cursor mode (docs/22#cursor-strategy): the shape, on every change,
+  // for captures started without the cursor in the video.
+  virtual void on_cursor_shape(std::function<void(const CursorShape&)>) = 0;
   // Input: absolute normalized coordinates within one monitor's region —
-  // the Wayland mapping_id model; X11 implements INTO this shape.
+  // the Wayland mapping_id model; X11 implements INTO this shape. Measured
+  // correct on a non-primary monitor and at 200% scale (ADR-0006).
   virtual void pointer_motion(MonitorId, double nx, double ny) = 0;
   virtual void pointer_button(MouseButton, bool down) = 0;
   virtual void pointer_wheel(double dx, double dy) = 0;

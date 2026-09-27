@@ -129,7 +129,7 @@
                 "id": {
                   "type": "string",
                   "minLength": 1,
-                  "description": "stable identity: connector name (HDMI-1, eDP-1) or the backend's stable virtual-output name; never key on index"
+                  "description": "stable identity: EDID vendor-model-serial slug (docs/08#track-manifest); the connector name only when the EDID has no serial or collides; virtual-<n> for a virtual monitor; never key on index or connector"
                 },
                 "index": {
                   "type": "integer",
@@ -159,6 +159,10 @@
                 "name": {
                   "type": "string",
                   "description": "EDID model name when known"
+                },
+                "connector": {
+                  "type": "string",
+                  "description": "current connector name (HDMI-1, DP-5), informational only: it can change on replug"
                 }
               }
             }

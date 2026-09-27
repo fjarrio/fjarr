@@ -57,7 +57,9 @@ Peer consumer. Ports the proven camera-streamer v3 model ([prior art](11-prior-a
   ```
 
   Unplugging a camera removes its track through the same renegotiation
-  as a monitor hot-plug; replugging restores the same `track_id`.
+  as a monitor hot-plug; replugging restores the same `track_id`. (A monitor
+  keeps its `track_id` because it is keyed by the monitor's EDID identity,
+  not its connector name, which a replug can change: docs/08.)
 
 **Passthrough** (`passthrough = true` in the *source*, slice 6b): for
 cameras with an on-board encoder the track carries the source's

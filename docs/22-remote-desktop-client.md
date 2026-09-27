@@ -37,8 +37,9 @@ minimal elements; the toolbar is a slot the host fills.
 ## Monitors and geometry
 
 The manifest carries one video track per monitor with
-`monitor: {id, index, primary, x, y, w, h, scale, name}` (docs/08). **`id`
-is the stable identity** (connector name) and `track_id` is `desk-<id>`;
+`monitor: {id, index, primary, x, y, w, h, scale, name, connector}` (docs/08).
+**`id` is the stable identity**: the EDID vendor-model-serial slug, not the
+connector name, which a replug can change. `track_id` is `desk-<id>`;
 `index` is display order only and changes when other monitors come and go
 — nothing in the client keys on it. `useMonitors(session)` is reactive: it
 reflects the `monitors` event immediately and the manifest after
@@ -63,7 +64,9 @@ being informational only — normalized coordinates make it irrelevant.
 Monitors connect, disconnect, re-plug and change mode during sessions;
 the client must make this boring:
 
-- `<DesktopView monitorId="HDMI-1">` binds to the **stable id**. If that
+- `<DesktopView monitorId="del-dell-u2422h-gk19rp3">` binds to the **stable
+  id**. A host app offering a monitor picker shows `name` and `connector`
+  and stores `id`. If that
   monitor disappears the view stays mounted and shows a "monitor
   disconnected" placeholder (its track handle is kept, demand released);
   when the monitor returns — same `track_id` — the view rebinds
@@ -237,10 +240,22 @@ Two modes, chosen per session by the operator (default: local):
 
 | Mode | How | Trade-off |
 |---|---|---|
-| **Local cursor** | agent captures without the cursor drawn in the video and sends `cursor {shape_id, hotspot, png?}` events when the shape changes (docs/08); the client draws the shape at the *local* pointer position | cursor feels instant (no round trip); needs cursor-shape access per backend (docs/07 criterion: XFixes cursor image on X11, PipeWire cursor metadata on Wayland) |
+| **Local cursor** | agent captures without the cursor drawn in the video and sends `cursor {shape_id, hotspot, png?}` events when the shape changes (docs/08); the client draws the shape at the *local* pointer position | cursor feels instant (no round trip); needs cursor-shape access per backend: XFixes cursor image on X11, PipeWire cursor metadata on Wayland (below) |
 | **Embedded cursor** | cursor rendered into the video by the agent; client sets `cursor: none` over the surface | works everywhere; cursor lags by the full glass-to-glass latency |
 
 Local mode is why remote desktops *feel* fast; embedded is the fallback.
+
+**On Wayland, the cursor comes from Fjarr's own PipeWire reader.** Mutter and
+the portal deliver the cursor as metadata on the PipeWire stream (cursor mode
+"metadata": shape, hotspot and position beside frames drawn without it). But
+GStreamer's `pipewiresrc` drops that metadata: its most verbose trace shows no
+cursor handling ([ADR-0006](adr/0006-desktop-backend-selection.md)). So the
+Wayland backends read the stream's `SPA_META_Cursor` themselves, with
+libpipewire (already a dependency of `fjarr-desktop-wayland`, docs/14). They
+turn shape changes into `cursor` events and hand frames on to the media plane.
+It is built in M3, and local cursor is the default on Wayland as everywhere
+else. X11 needs nothing new: XFixes reports shape changes, and `ximagesrc
+show-pointer=false` captures without the cursor.
 
 ## Latency knobs (desktop-specific)
 

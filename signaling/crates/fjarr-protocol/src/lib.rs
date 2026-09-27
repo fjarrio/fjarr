@@ -169,7 +169,8 @@ pub struct TrackManifestEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitorInfo {
-    /// Stable identity (connector name) — never key on `index`.
+    /// Stable identity: the EDID vendor-model-serial slug — never key on `index` or `connector`.
+    /// spec: docs/08-protocol.md#track-manifest
     pub id: String,
     pub index: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -183,6 +184,9 @@ pub struct MonitorInfo {
     pub scale: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Current connector name: informational, changes on replug.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connector: Option<String>,
 }
 
 /// Message bodies, discriminated by `type`. Unknown fields inside known

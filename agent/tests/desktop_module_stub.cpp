@@ -15,10 +15,17 @@ namespace {
 
 class StubBackend final : public DesktopBackend {
   public:
+    Features features() override { return {}; }
     std::vector<Monitor> monitors() override { return {}; }
     void on_monitors_changed(std::function<void(std::vector<Monitor>)>) override {}
-    CaptureSource* start_capture(MonitorId) override { return nullptr; }
+    void on_capture_lost(std::function<void(MonitorId, CaptureLost)>) override {}
+    CaptureSource* start_capture(MonitorId, CaptureOptions) override { return nullptr; }
     void stop_capture(MonitorId) override {}
+    MonitorId create_virtual_monitor(int, int) override { return INVALID_MONITOR; }
+    void destroy_virtual_monitor(MonitorId) override {}
+    CaptureSource* start_audio_capture() override { return nullptr; }
+    void stop_audio_capture() override {}
+    void on_cursor_shape(std::function<void(const CursorShape&)>) override {}
     void pointer_motion(MonitorId, double, double) override {}
     void pointer_button(MouseButton, bool) override {}
     void pointer_wheel(double, double) override {}
