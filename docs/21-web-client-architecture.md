@@ -463,8 +463,17 @@ handoff as a component the host mounts on one **authenticated** route, so
 their work is adding a route rather than building a flow:
 
 ```tsx
-<FjarrCliLogin mintOperatorCredential={() => api.post("/me/fjarr-cli-token")} />
+<FjarrCliLogin
+  mintOperatorCredential={() => api.post("/me/fjarr-cli-token")}
+  approveCode={(code, credential) => api.put(`/fjarr/cli-codes/${code}`, { credential })}
+/>
 ```
+
+It reads which shape the CLI asked for from the page's query string — `?port=&state=`
+for loopback, `?code=` for a code, or nothing, in which case it offers a field to
+type a code — and the host can pass `request={{...}}` to override that. Every
+`FjarrCliLogin` string is a prop with a plain-English default, so the host can
+translate or rebrand without forking it.
 
 It renders inside the host's app and therefore inherits the signed-in user;
 the host supplies one function that returns a credential for that user, which

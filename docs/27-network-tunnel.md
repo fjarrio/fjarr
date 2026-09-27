@@ -323,9 +323,14 @@ The page itself ships as a drop-in `@fjarr/react` component
 is mounting a route rather than building a flow.
 
 **With no browser to open** — a workstation reached over ssh, which in
-robotics is the common case, not the exception — the CLI prints a URL and a
-short code, you approve it wherever a browser exists, and the CLI polls until
-you do.
+robotics is the common case, not the exception — the CLI asks the backend for a
+code (`POST /fjarr/cli-codes`, [docs/09](09-interfaces.md#operator-api)), prints
+the dashboard's login URL and the code, and polls with a separate poll token until
+the human, wherever a browser exists, opens that URL, confirms the code on screen
+matches the terminal, and approves it. The credential comes back through the
+poll exactly once; the code is single-use and lives ten minutes. `login --code`
+forces this path; without the flag the CLI tries to open a browser and falls back
+to the code when it cannot.
 
 Credential lifetime is the **customer's** choice, because it is their
 identity system. Fjarr does not dictate it and does not refresh it; expiry

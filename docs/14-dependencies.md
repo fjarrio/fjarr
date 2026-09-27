@@ -69,6 +69,9 @@ ioctls.
 | libc | 0.2 | the virtual interface, with no wrapper crate: `TUNSETIFF` plus one unbuffered read and write per packet is three calls, and a TUN crate would bring its own I/O model to sit beside tokio's. Interface, address and route setup shells out to `ip`, which is on every host that has a TUN device (slice 4.5e; the macOS `utun` path is the same three calls against a different socket family) | MIT/Apache-2.0 | yes |
 | rtnetlink (with netlink-packet-core / -route / -utils, netlink-proto, netlink-sys, nix) | 0.23 | the interface's address, MTU and per-robot routes, **in process**. A file capability is not inherited by a child, so shelling out to `ip` cannot work under the `setcap` install docs/27 promises — and speaking netlink here also means the binary needs no `iproute2` on the host (slice 4.5e) | MIT | yes |
 | clap | 4.x | the CLI surface | MIT/Apache-2.0 | yes |
+| dialoguer | 0.11 | the robot picker — type to filter, enter to connect (docs/27#what-it-feels-like) — rather than a hand-rolled terminal UI (slice 4.5f) | MIT | yes |
+| toml, dirs | 0.8, 6 | `~/.config/fjarr/config.toml` and the 0600 credential cache beside it (slice 4.5f) | MIT/Apache-2.0 | yes |
+| reqwest (rustls) | 0.12 | the operator API calls — robots, grants, login codes (docs/09#operator-api); already in the tree for the server's webhooks | MIT/Apache-2.0 | yes |
 | `fjarr-protocol` (this repo) | workspace | shared signaling message types — the reason wire drift is a compile error. Its own crate since slice 4.5e, so an operator client links the types without the server's axum/hyper/HMAC stack (ADR-0024) | AGPL-3.0 | yes |
 | reqwest (rustls) | 0.12 | webhook delivery | MIT/Apache-2.0 | yes |
 | tokio-tungstenite | 0.24 | the operator's signaling socket (`fjarr-connect`, slice 4.5e); also the e2e test WS client | MIT | **yes** (it was dev-only until `fjarr-connect` shipped one) |

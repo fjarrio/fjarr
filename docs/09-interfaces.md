@@ -318,6 +318,23 @@ else:
 |---|---|
 | `GET /fjarr/robots` | the robots *this human* may reach: `robot_id`, `label`, `status`, `last_seen` — their fleet table, plus the presence they already receive on the `robot.online`/`robot.offline` webhooks of (b) |
 | `POST /fjarr/grants` | a session grant for one `robot_id` — the same JWT as (a), minted by the same code |
+| `POST /fjarr/cli-codes` | for a terminal with no browser: creates a pending login code and returns `{code, poll_token, expires_in}`; the human approves it in the dashboard, and the CLI polls |
+| `PUT /fjarr/cli-codes/{code}` | called by the dashboard, inside the signed-in app, with `{credential}` for the user approving it: marks the code approved, once |
+| `GET /fjarr/cli-codes/{poll_token}` | the CLI's poll: `{status: "pending"}`, `{status: "approved", credential}` (returned exactly once, then the code is gone), or `{status: "expired"}` |
+
+All three need the caller's identity only on the `PUT`: creating a code and
+polling it are unauthenticated by design, since the terminal doing them has no
+credential yet. A code is eight characters from an unambiguous alphabet, lives ten
+minutes, and the `poll_token` is separate from the `code` so that knowing what the
+human typed does not let anyone collect the credential. The dashboard shows the
+code back to the human before approving, and a code that was never shown cannot be
+approved by guessing: 8 characters from 32 is 2^40, and the backend rate-limits the
+`PUT`.
+
+The credential itself is opaque to Fjarr — a bearer token the customer's backend
+mints for a signed-in user (`POST /me/fjarr-cli-token` in the demo, but whatever
+they already have) and checks on `GET /fjarr/robots` and `POST /fjarr/grants`. Its
+lifetime is theirs.
 
 Why here and not on `fjarr-server`: the server knows which robots are
 connected, but only the customer's backend knows **who the caller is**, so
