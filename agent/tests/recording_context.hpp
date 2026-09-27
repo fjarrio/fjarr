@@ -33,10 +33,8 @@ struct RecordingContext final : SessionContext {
     int blob_seq = 0;
 
     const SessionId &id() const override { return sid; }
-    const OperatorInfo &operator_info() const override {
-        static OperatorInfo o;
-        return o;
-    }
+    OperatorInfo op;
+    const OperatorInfo &operator_info() const override { return op; }
     const nlohmann::json &granted_params(std::string_view) const override {
         static nlohmann::json j = nlohmann::json::object();
         return j;
@@ -74,6 +72,11 @@ struct RecordingContext final : SessionContext {
     void fail(const Envelope &r, std::string_view code, std::string_view message) override {
         sent.push_back(
             {"result", r.type, nlohmann::json{{"ok", false}, {"error", {{"code", std::string(code)}, {"message", std::string(message)}}}}});
+    }
+    void fail(const Envelope &r, std::string_view code, std::string_view message, nlohmann::json data) override {
+        sent.push_back({"result", r.type,
+                        nlohmann::json{{"ok", false},
+                                       {"error", {{"code", std::string(code)}, {"message", std::string(message)}, {"data", std::move(data)}}}}});
     }
     void event(std::string_view type, nlohmann::json p) override { sent.push_back({"event", std::string(type), std::move(p)}); }
     blob::BlobRef send_blob(std::string bytes, std::string media_type, std::function<void(bool)> done) override {

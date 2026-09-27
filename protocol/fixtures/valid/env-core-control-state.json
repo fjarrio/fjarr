@@ -1,0 +1,25 @@
+{
+  "v": 1,
+  "cap": "fjarr.core",
+  "type": "control-state",
+  "event_id": "0192f3a1-cstate",
+  "kind": "event",
+  "payload": {
+    "domains": {
+      "desktop": {
+        "holder": {
+          "id": "anna@example.com",
+          "label": "Anna"
+        },
+        "since": 1790000000000,
+        "you": false,
+        "view_only": false
+      },
+      "motion": {
+        "holder": null,
+        "you": false,
+        "view_only": true
+      }
+    }
+  }
+}

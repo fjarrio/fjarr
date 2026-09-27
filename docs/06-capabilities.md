@@ -112,7 +112,7 @@ detail is incorporated here).
 - **Presentation mode**: the operator's screens become the robot's screens
   — one fullscreen browser window per robot monitor with Keyboard Lock,
   automated on Chromium via the Window Management API, manual (drag, then
-  fullscreen) elsewhere; one session and one ownership lease behind all
+  fullscreen) elsewhere; one session and one `desktop` control claim behind all
   windows ([docs/22](22-remote-desktop-client.md#presentation-mode)).
 - Pointer: absolute normalized coordinates per monitor, lossy channel;
   buttons/wheel reliable. Keyboard: physical `KeyboardEvent.code` →
@@ -229,8 +229,8 @@ so it proves the extension API generalizes beyond video.
   ```
 
 - **The pty dies with the session, always** — `release_all_input` closes it,
-  so a dropped connection leaves no orphan shell. Input-bearing, so it takes
-  the ownership lease. Every open and close is audited with the operator
+  so a dropped connection leaves no orphan shell. Input-bearing, but in no
+  control domain: each session has its own pty. Every open and close is audited with the operator
   identity; an I/O recording hook exists from day one but stores nothing by
   itself ([open question #4](18-open-questions.md)).
 
@@ -378,8 +378,9 @@ Messages (envelopes, `cap: "fjarr.test"`):
 | `drive` | event | realtime | `{"v": number, "seq": number}` | the deadman-armed consumer: the capability arms `SessionContext::arm_deadman(500 ms)` on the first `drive`; each `drive` feeds it |
 | `deadman` | event (agent → operator) | control | `{"state": "armed" \| "expired" \| "fed", "ms_since_feed"}` | emitted on every transition, so a test can assert that `drive` silence of 500 ms expires the deadman and that session end expires it too |
 
-`fjarr.test` is **input-bearing** for the docs/10 ownership lease (one
-driver at a time) and implements `release_all_input` by expiring the
+`fjarr.test` is **input-bearing** and its `drive` is the demo's `motion`
+[control domain](10-security.md#session-ownership) (one driver at a time;
+`echo`, `hotplug` and `silence` claim nothing). It implements `release_all_input` by expiring the
 deadman and emitting `deadman{state:"expired"}` — which is how the docs/15
 "release on session end" regression test observes the behaviour without a
 real actuator.

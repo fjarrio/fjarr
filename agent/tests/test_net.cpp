@@ -192,14 +192,15 @@ TEST(NetPolicy, anAllowListNarrowsToNamedPortsAndRefusesWhatHasNoPort) {
 
 // ----------------------------------------------------------------- the capability
 
-TEST(NetCapability, declaresARawStreamChannelAndTakesTheInputLease) {
+TEST(NetCapability, declaresARawStreamChannelAndNoControlDomain) {
     NetCapability cap{"demo-robot-01"};
     const auto m = cap.manifest();
     EXPECT_EQ(m.name, "fjarr.net");
     ASSERT_EQ(m.channels.size(), 2u);
     EXPECT_EQ(m.channels[1].channel, ChannelClass::Stream);
     EXPECT_EQ(m.channels[1].framing, BulkFraming::Raw);
-    EXPECT_TRUE(m.input_bearing) << "granting net is granting network access to the robot (docs/10)";
+    EXPECT_TRUE(m.input_bearing) << "released first on every detach path (docs/15)";
+    EXPECT_EQ(m.control_domain, "") << "docs/10: a link is refused as busy, never gated by a control domain";
 }
 
 TEST(NetCapability, withoutTheInterfaceItIsUnavailableAndNamesTheFix) {
@@ -232,16 +233,25 @@ TEST(NetCapability, openReportsTheAddressesAndThatNothingIsForwarded) {
     EXPECT_FALSE(p["policy"]["forwarding"].get<bool>());
 }
 
-TEST(NetCapability, aSecondSessionCannotTakeTheLinkFromTheFirst) {
+TEST(NetCapability, aSecondSessionCannotTakeTheLinkFromTheFirstAndIsToldWhoHasIt) {
     Rig rig;
+    rig.ctx.op = OperatorInfo{"anna@example.com", "Anna"};
+    const auto before = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     rig.open();
     RecordingContext other;
+    other.op = OperatorInfo{"bob@example.com", "Bob"};
     other.sid = "01a0-other-session";
     rig.cap.session_attached(other, nlohmann::json::object());
     rig.cap.on_message(other, Envelope{"fjarr.net", "open", "e2", "request", nlohmann::json::object()});
     const auto *r = other.last_result();
     ASSERT_NE(r, nullptr);
     EXPECT_EQ(r->payload["error"]["code"], "busy");
+    // docs/08#fjarr-net: the refusal names the holder and since when.
+    const auto& data = r->payload["error"]["data"];
+    EXPECT_EQ(data["holder"]["id"], "anna@example.com");
+    EXPECT_EQ(data["holder"]["label"], "Anna");
+    EXPECT_GE(data["since"].get<std::int64_t>(), before);
+    EXPECT_NE(r->payload["error"]["message"].get<std::string>().find("Anna"), std::string::npos);
 }
 
 TEST(NetCapability, outboundPacketsReachTheChannelAndInboundReachTheKernel) {

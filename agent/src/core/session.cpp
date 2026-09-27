@@ -7,6 +7,7 @@
 #include <fjarr/blob.hpp>
 #include <fjarr/errors.hpp>
 
+#include "control_domains.hpp"
 #include "log.hpp"
 
 namespace fjarr::core {
@@ -200,9 +201,14 @@ void SessionContextImpl::result(const Envelope& request, nlohmann::json payload)
     session_.send_control(protocol::make_envelope(request.cap, request.type, "result", std::move(payload), request.event_id));
 }
 void SessionContextImpl::fail(const Envelope& request, std::string_view code, std::string_view message) {
+    fail(request, code, message, nullptr);
+}
+
+void SessionContextImpl::fail(const Envelope& request, std::string_view code, std::string_view message, nlohmann::json data) {
     if (request.kind != "request") throw FjarrError("payload-invalid", "fail() on a non-request envelope");
-    session_.send_control(protocol::make_envelope(request.cap, request.type, "result",
-                                                  nlohmann::json{{"ok", false}, {"error", {{"code", std::string(code)}, {"message", std::string(message)}}}},
+    nlohmann::json error{{"code", std::string(code)}, {"message", std::string(message)}};
+    if (!data.is_null()) error["data"] = std::move(data);
+    session_.send_control(protocol::make_envelope(request.cap, request.type, "result", nlohmann::json{{"ok", false}, {"error", std::move(error)}},
                                                   request.event_id));
 }
 blob::BlobRef SessionContextImpl::send_blob(std::string bytes, std::string media_type, std::function<void(bool)> done) {
@@ -261,9 +267,9 @@ const char* Session::state_name(State s) {
 }
 
 Session::Session(SessionDeps deps, SessionId id, OperatorInfo op, std::vector<protocol::CapabilityGrant> grants,
-                 std::optional<protocol::TurnCredentials> turn, bool input_owner)
+                 std::optional<protocol::TurnCredentials> turn)
     : deps_(std::move(deps)), id_(std::move(id)), sid8_(log::short_id(id_)), operator_(std::move(op)), grants_(std::move(grants)),
-      turn_(std::move(turn)), input_owner_(input_owner) {
+      turn_(std::move(turn)) {
     glib::ObjectCensus::instance().sessions++;
     denied_ = std::make_unique<DeniedSender>();
 }
@@ -585,6 +591,10 @@ void Session::on_channel_data(const std::string& label, const std::string& bytes
     // Registration refuses a `framed` stream channel (ADR-0018's chunker is not built), so a
     // stream message here is always one self-contained datagram.
     if (ch->cls == ChannelClass::Stream) framing = BulkFraming::Raw;
+    if (!control_gate(*cap, nullptr)) {
+        dropped_binary_++;
+        return;
+    }
     const std::span<const std::byte> view(reinterpret_cast<const std::byte*>(bytes.data()), bytes.size());
     try {
         if (framing == BulkFraming::Raw) {
@@ -653,6 +663,7 @@ void Session::maybe_connected() {
         rate_tick();
         return true;
     });
+    send_control_state(); // docs/08#fjarr-core: at session start
     if (deps_.emit) deps_.emit(SessionEvent{"started", id_, operator_, "", ""});
 }
 
@@ -697,12 +708,7 @@ void Session::route(const Envelope& env, const std::string& label) {
         handle_select_tracks(env, *cap);
         return;
     }
-    if (cap->manifest.input_bearing && !input_owner_) {
-        // docs/10: later owners are read-only until transfer.
-        if (env.kind == "request") reply_error(env, error_codes::capability_denied, "input is owned by another operator");
-        dropped_envelopes_++;
-        return;
-    }
+    if (!control_gate(*cap, &env)) return;
     (void)label;
     try {
         cap->capability->on_message(*contexts_[env.cap], env);
@@ -725,7 +731,77 @@ void Session::handle_core(const Envelope& env) {
         const std::int64_t t0 = env.payload.contains("t0") && env.payload["t0"].is_number() ? env.payload["t0"].get<std::int64_t>() : 0;
         nlohmann::json p{{"ok", true}, {"t0", t0}, {"t1", t1}, {"t2", protocol::now_ms()}};
         send_control(protocol::make_envelope("fjarr.core", env.type == "ping" ? "pong" : "time-sync", "result", std::move(p), env.event_id));
+        return;
     }
+    if (env.type == "take-control" || env.type == "release-control") {
+        // docs/08#fjarr-core: the SessionManager owns the claims; the session only answers.
+        const auto& d = env.payload.value("domain", nlohmann::json());
+        if (!d.is_string() || !ControlDomains::known(d.get<std::string>())) {
+            reply_error(env, error_codes::payload_invalid, "domain must be \"desktop\" or \"motion\"");
+            return;
+        }
+        std::optional<std::pair<std::string, std::string>> err;
+        if (deps_.control_request) err = deps_.control_request(*this, env.type, d.get<std::string>());
+        if (err) reply_error(env, err->first, err->second);
+        else reply(env, nlohmann::json{{"ok", true}});
+    }
+}
+
+bool Session::view_only(const AttachedCapability& cap) const {
+    const auto it = cap.params.find("view_only");
+    return it != cap.params.end() && it->is_boolean() && it->get<bool>();
+}
+
+bool Session::control_gate(const AttachedCapability& cap, const Envelope* env) {
+    // spec: docs/10-security.md#session-ownership. `env` null = a binary message.
+    const auto& m = cap.manifest;
+    if (m.control_domain.empty()) return true;
+    const auto& inputs = m.control_inputs;
+    if (!inputs.empty() && (!env || std::find(inputs.begin(), inputs.end(), env->type) == inputs.end())) return true;
+    const bool request = env && env->kind == "request";
+    if (view_only(cap)) {
+        dropped_control_++;
+        if (request) reply_error(*env, error_codes::capability_denied, "this grant is view-only");
+        return false;
+    }
+    if (!deps_.control_input) return true;
+    auto held = deps_.control_input(*this, m.control_domain);
+    if (!held) return true;
+    dropped_control_++;
+    if (request) {
+        const std::string label = (*held)["holder"].value("label", std::string());
+        reply_error(*env, error_codes::control_held, m.control_domain + " is held by " + label, std::move(*held));
+    }
+    return false;
+}
+
+std::set<std::string> Session::domains() const {
+    std::set<std::string> out;
+    for (const auto& c : caps_)
+        if (!c.manifest.control_domain.empty()) out.insert(c.manifest.control_domain);
+    return out;
+}
+
+bool Session::can_claim(const std::string& domain) const {
+    for (const auto& c : caps_)
+        if (c.manifest.control_domain == domain && !view_only(c)) return true;
+    return false;
+}
+
+void Session::release_domain_input(const std::string& domain) {
+    for (auto& c : caps_) {
+        if (c.manifest.control_domain != domain || !c.manifest.input_bearing) continue;
+        try {
+            c.capability->release_all_input(id_);
+        } catch (const std::exception& e) {
+            log::error("session", "release_all_input threw", {{"session", sid8_}, {"cap", c.manifest.name}, {"error", e.what()}});
+        }
+    }
+}
+
+void Session::send_control_state() {
+    if (!deps_.control_state || domains().empty()) return;
+    send_control(protocol::make_envelope("fjarr.core", "control-state", "event", deps_.control_state(*this)));
 }
 
 void Session::handle_select_tracks(const Envelope& env, const AttachedCapability& cap) {
@@ -926,10 +1002,12 @@ void Session::reply(const Envelope& request, nlohmann::json payload) {
     send_control(protocol::make_envelope(request.cap, request.type, "result", std::move(payload), request.event_id));
 }
 
-void Session::reply_error(const Envelope& request, std::string_view code, std::string_view message) {
+void Session::reply_error(const Envelope& request, std::string_view code, std::string_view message, nlohmann::json data) {
     // Error text may echo operator input: clamp it so the reply itself stays under the envelope limit.
     const std::string msg(message.substr(0, 256));
-    reply(request, nlohmann::json{{"ok", false}, {"error", {{"code", std::string(code)}, {"message", msg}}}});
+    nlohmann::json error{{"code", std::string(code)}, {"message", msg}};
+    if (!data.is_null()) error["data"] = std::move(data);
+    reply(request, nlohmann::json{{"ok", false}, {"error", std::move(error)}});
 }
 
 ChannelSender& Session::sender(ChannelClass cls, const std::string& cap) {
@@ -1043,7 +1121,8 @@ void Session::test_silence(bool pings, bool media, milliseconds ms) {
 
 nlohmann::json Session::describe() const {
     return nlohmann::json{{"session_id", id_}, {"state", state_name(state_)}, {"operator", {{"id", operator_.id}, {"label", operator_.label}}},
-                          {"manifest_version", manifest_version_}, {"input_owner", input_owner_}, {"dropped_envelopes", dropped_envelopes_}};
+                          {"manifest_version", manifest_version_}, {"domains", domains()}, {"dropped_envelopes", dropped_envelopes_},
+                          {"dropped_control", dropped_control_}};
 }
 
 std::size_t Session::buffered_bytes() const {

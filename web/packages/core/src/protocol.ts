@@ -205,10 +205,21 @@ export interface Envelope<P = unknown> {
   payload: P;
 }
 
+/**
+ * `result.payload.error`. `data` is code-specific and optional
+ * (`control-held`, `busy`: who holds it); a client ignores data it does not know.
+ * spec: docs/08-protocol.md#errors
+ */
+export interface ResultError {
+  code: ErrorCode;
+  message: string;
+  data?: Record<string, unknown>;
+}
+
 /** `result.payload` always carries `ok`; on failure also `error`. */
 export interface ResultPayload {
   ok: boolean;
-  error?: { code: ErrorCode; message: string };
+  error?: ResultError;
   [key: string]: unknown;
 }
 
@@ -222,6 +233,50 @@ export interface PongPayload extends ResultPayload {
   t0: number;
   t1: number;
   t2: number;
+}
+
+// -------------------------------------------------------- control domains
+
+/**
+ * A control domain: at most one holder each, independent of one another.
+ * Append-only like error codes, so an unknown domain still parses.
+ * spec: docs/10-security.md#session-ownership
+ */
+// eslint-disable-next-line @typescript-eslint/ban-types
+export type ControlDomain = "desktop" | "motion" | (string & {});
+
+/** Who holds a domain: the operator identity from their grant. */
+export interface ControlHolder {
+  id: string;
+  label: string;
+}
+
+/** `fjarr.core/take-control` and `release-control` request payload (docs/08#fjarr-core). */
+export interface ControlRequestPayload {
+  domain: ControlDomain;
+}
+
+/** One domain's entry in `control-state` as it arrives on the wire. */
+export interface DomainControlWire {
+  holder: ControlHolder | null;
+  /** Unix ms on the agent's clock; absent when free. */
+  since?: number;
+  /** True for every session of the holding operator. */
+  you: boolean;
+  /** This session can never claim the domain (its grant is `view_only`). Absent from older agents: treat as false. */
+  view_only?: boolean;
+}
+
+/** `fjarr.core/control-state` event payload: only domains this session's grant has a capability in. */
+export interface ControlStatePayload {
+  domains: Partial<Record<ControlDomain, DomainControlWire>>;
+}
+
+/** `error.data` of `control-held` (with `domain`) and of `fjarr.net/open` `busy` (without). */
+export interface HeldByData {
+  domain?: ControlDomain;
+  holder: ControlHolder;
+  since: number;
 }
 
 /** spec: docs/06-capabilities.md (fjarr.camera select-tracks) */
@@ -384,6 +439,46 @@ export function isEnvelope(x: unknown): x is Envelope {
     KINDS.has(x.kind) &&
     isRecord(x.payload)
   );
+}
+
+export function isControlHolder(x: unknown): x is ControlHolder {
+  return isRecord(x) && isStr(x.id) && isStr(x.label);
+}
+
+const isUnixMs = (x: unknown): x is number => isInt(x) && x >= 0;
+
+/** Payload of `take-control` / `release-control`. */
+export function isControlRequestPayload(x: unknown): x is ControlRequestPayload {
+  return isRecord(x) && isNonEmptyStr(x.domain);
+}
+
+/** One `control-state` domain entry; extra fields are allowed (docs/08#versioning). */
+export function isDomainControlWire(x: unknown): x is DomainControlWire {
+  return (
+    isRecord(x) &&
+    (x.holder === null || isControlHolder(x.holder)) &&
+    (x.since === undefined || isUnixMs(x.since)) &&
+    typeof x.you === "boolean" &&
+    (x.view_only === undefined || typeof x.view_only === "boolean")
+  );
+}
+
+/** `control-state` payload: every listed domain must be well-formed. */
+export function isControlStatePayload(x: unknown): x is ControlStatePayload {
+  return isRecord(x) && isRecord(x.domains) && Object.values(x.domains).every(isDomainControlWire);
+}
+
+/** `error.data` naming a holder (`control-held`, `busy`). */
+export function isHeldByData(x: unknown): x is HeldByData {
+  return isRecord(x) && isControlHolder(x.holder) && isUnixMs(x.since) && (x.domain === undefined || isNonEmptyStr(x.domain));
+}
+
+/** A `result` payload: `ok`, and on failure a well-formed `error` (with optional object `data`). */
+export function isResultPayload(x: unknown): x is ResultPayload {
+  if (!isRecord(x) || typeof x.ok !== "boolean") return false;
+  if (x.error === undefined) return x.ok;
+  const e = x.error;
+  return isRecord(e) && isStr(e.code) && isStr(e.message) && (e.data === undefined || isRecord(e.data));
 }
 
 /** Parse a signaling text frame; `null` for anything we must ignore. */

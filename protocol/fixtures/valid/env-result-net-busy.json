@@ -1,0 +1,21 @@
+{
+  "v": 1,
+  "cap": "fjarr.net",
+  "type": "open",
+  "event_id": "0192f3a1-busy",
+  "kind": "result",
+  "payload": {
+    "ok": false,
+    "error": {
+      "code": "busy",
+      "message": "Anna holds the link; the robot's interface is point-to-point",
+      "data": {
+        "holder": {
+          "id": "anna@example.com",
+          "label": "Anna"
+        },
+        "since": 1790000000000
+      }
+    }
+  }
+}

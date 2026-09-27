@@ -301,9 +301,11 @@ the picker when none is given; `--grant` takes one grant directly.
   no raw mode to set, and its end stops the reading but not the session, which
   ends when the shell does: `echo 'exit 3' | fjarr-connect shell robot-024`
   exits 3. The size is then the output's, if that is a terminal, or 80×24.
-- **Grants and audit as in the browser.** The terminal is input-bearing, so it
-  takes the ownership lease; every open and close is audited. The operator is
-  given `fjarr.terminal` only if their backend allows it.
+- **Grants and audit as in the browser.** The terminal is input-bearing but
+  never exclusive: each session has its own pty, so shells run side by side
+  ([docs/10](10-security.md#terminal)); every open and close is audited. The
+  operator is given `fjarr.terminal` only if their backend allows it, and a
+  `view_only` grant is refused as `capability-denied` like a grant without it.
 
 ssh over the link remains for what the ssh ecosystem brings (VS Code
 Remote-SSH, rsync, port forwarding). `shell` is for the operator who wants a
@@ -562,7 +564,7 @@ It is a pattern Fjarr documents, not a feature it ships, and it has costs the
 engineer should see up front:
 
 - **It is a second door.** The RDP or VNC server has its own password. Fjarr's
-  grants, input lease, audit record and view-only mode govern the link, not
+  grants, audit record and view-only mode govern the link, not
   what happens inside it. Granting the link already means granting network
   access to the robot ([docs/10](10-security.md#network-tunnel)); an RDP server
   makes that access a full desktop.

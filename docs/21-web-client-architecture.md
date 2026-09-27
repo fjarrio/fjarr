@@ -160,6 +160,10 @@ for await (const fb of session.requestStream("fjarr.files", "file-offer", payloa
 
 `request()` resolves on `result`, rejects with a typed `FjarrError(code)`;
 `requestStream()` yields `accept`/`feedback*` then returns the `result`.
+When the refusal carries `error.data` ([docs/08](08-protocol.md#errors)) the
+error keeps it as `FjarrError.data`; `heldBy(error)` reads the holder of a
+`control-held` or `busy` refusal as `{ domain, holder: {id, label}, since }`
+(or `null`), so a client can say who to ask.
 
 **Domain state stays in the host.** The library ships no
 `systemHealth`/`battery` concepts. A host builds its own
@@ -211,6 +215,35 @@ and a terminal:
 const pty = session.channel("fjarr.terminal");   // reliable-ordered per its manifest
 term.onData((keys) => pty.write(encoder.encode(keys)));
 ```
+
+## Control domains {#control-domains}
+
+Input-bearing capabilities share a robot by taking turns per control domain
+(`desktop`, `motion`; [docs/10](10-security.md#session-ownership)). The session
+keeps who holds each domain as state, from the agent's
+`fjarr.core/control-state` ([docs/08](08-protocol.md#fjarr-core)):
+
+| API | Semantics |
+|---|---|
+| `session.control: ReadonlyStore<ControlState \| null>` | `{ domains: { [domain]: { holder: {id, label} \| null, since: number \| null, you: boolean, viewOnly: boolean } } }`. Only the domains this session's grant has a capability in. Each event replaces the last; an unchanged domain keeps its object identity. `null` until the agent's first `control-state` on this connection, and again after any disconnect (the next connection's event is the truth). A malformed domain entry is dropped with a `warning`; unknown fields and domains are kept or ignored per [docs/08](08-protocol.md#versioning) |
+| `session.takeControl(domain)` | `take-control` request; resolves on `ok`, rejects with `FjarrError` (`capability-denied` for a `view_only` grant or a grant without that domain) |
+| `session.releaseControl(domain)` | `release-control` request; idempotent |
+| `useControl(session, domain)` | `{ known, holder, since, you, free, viewOnly, takeControl, releaseControl }`; re-renders only when that domain changes. `known` means `control-state` lists the domain; `free` is known and unheld |
+
+`since` is unix ms on the **agent's** clock: add `timeSync.offsetMs` to a
+local timestamp before subtracting ("Anna (3 min)"). `viewOnly` comes from
+the domain's `view_only` in `control-state`: this session can never claim the
+domain, so a client renders no input surface and no take-control button. It
+is `false` when an older agent omits it, and such an agent refuses a
+`take-control` from a `view_only` grant with `capability-denied`. The library
+does not update the state optimistically on a successful `takeControl`: the
+agent sends `control-state` before the result, so the new holder is already
+in `session.control` when the promise resolves.
+
+Claims happen on the first input in a domain, so a client whose deadman
+publisher keeps re-sending after it lost control would re-claim the domain
+the moment it frees. A driving component releases its publisher when `you`
+turns false (the demo dashboard remounts its teleop panel).
 
 ## Media: demand-driven track delivery
 

@@ -9,11 +9,13 @@
  *  - three robots can be open at once, each with its own state chip;
  *  - VideoGrid/FloatingVideo demand tracks only while on screen;
  *  - the host's own RobotStatusProvider built on useTelemetry (~30 lines);
- *  - a teleop publisher with a deadman, released when the panel unmounts;
+ *  - a teleop publisher with a deadman, released when the panel unmounts,
+ *    driving `fjarr.test`'s `drive` (the `motion` control domain): who holds
+ *    it, and a take-control button unless control-state says view-only (docs/10);
  *  - a Diagnostics tab: the robot's live pipeline graphs through
  *    `fjarr.introspect`, which only the developer role is granted (docs/24).
  */
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ConnectButton,
   ConnectionQuality,
@@ -22,12 +24,16 @@ import {
   SessionStatus,
   VideoGrid,
   createFjarrClient,
+  heldBy,
+  isFjarrError,
+  useControl,
   useFjarrClient,
   usePublisher,
   useSession,
   useSessionState,
   useStore,
   useTelemetry,
+  useTimeSync,
   type Session,
 } from "@fjarr/react";
 import { RobotStatusProvider, useRobotStatus } from "./robot-status.tsx";
@@ -170,6 +176,15 @@ function RemoteView() {
   const session = useSession();
   const state = useSessionState(session);
   const status = useRobotStatus();
+  // Losing `motion` (someone took control) remounts the teleop panel: that releases its publisher, so our
+  // deadman heartbeat stops and cannot re-claim the domain the moment the new driver releases it.
+  const motion = useControl(session, "motion");
+  const [driveEpoch, setDriveEpoch] = useState(0);
+  const wasDriving = useRef(false);
+  useEffect(() => {
+    if (wasDriving.current && !motion.you) setDriveEpoch((e) => e + 1);
+    wasDriving.current = motion.you;
+  }, [motion.you]);
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <Panel title="Robot status (host-owned, built on useTelemetry)">
@@ -179,8 +194,9 @@ function RemoteView() {
         <VideoGrid session={session} />
         {state !== "connected" && <small style={{ color: "#8b93a1" }}>waiting for media — session is {state}</small>}
       </Panel>
-      <Panel title="Teleop (publisher with deadman; unmounting stops the robot)">
-        <TeleopPanel session={session} />
+      <Panel title="Teleop (fjarr.test drive: publisher with deadman; unmounting stops the robot; one driver at a time)">
+        <MotionControl session={session} />
+        <TeleopPanel key={driveEpoch} session={session} />
       </Panel>
       <Panel title="Diagnostics (fjarr.introspect — the developer role's grant; an operator sees capability-denied)">
         <Diagnostics session={session} />
@@ -192,14 +208,70 @@ function RemoteView() {
   );
 }
 
+/**
+ * Who drives (the `motion` control domain, docs/10#session-ownership). Motion never frees on idle: the
+ * holder keeps it until they release it, disconnect, or someone takes control (which stops the robot first).
+ */
+function MotionControl({ session }: { session: Session }) {
+  const motion = useControl(session, "motion");
+  const clock = useTimeSync(session);
+  const [now, setNow] = useState(() => Date.now());
+  const [error, setError] = useState<string | null>(null);
+  const [denied, setDenied] = useState(false);
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(t);
+  }, []);
+  // `since` is on the robot's clock; the heartbeat's offset brings it to ours.
+  const minutes = motion.since === null ? 0 : Math.max(0, Math.floor((now + (clock?.offsetMs ?? 0) - motion.since) / 60_000));
+  // The agent says so in control-state (docs/08 `view_only`); the refusal is the fallback for an older agent.
+  const viewOnly = motion.viewOnly || denied;
+  if (!motion.known) return <p style={{ fontSize: 12, color: "#8b93a1", margin: "0 0 8px" }}>driver: — (no control-state yet)</p>;
+  const who = motion.you ? "You" : motion.holder ? `${motion.holder.label} (${minutes} min)` : "free";
+  const act = (fn: () => Promise<void>) => {
+    setError(null);
+    fn().catch((e: unknown) => {
+      if (isFjarrError(e) && e.code === "capability-denied") setDenied(true); // a view-only grant: waiting would not help
+      const held = heldBy(e);
+      setError(held ? `${held.holder.label} is driving` : e instanceof Error ? e.message : String(e));
+    });
+  };
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "0 0 8px", fontSize: 13 }} data-demo-motion={motion.you ? "you" : motion.free ? "free" : "held"}>
+      <span>
+        driver: <b>{who}</b>
+      </span>
+      {!viewOnly && !motion.you && <button onClick={() => act(motion.takeControl)}>Take control</button>}
+      {motion.you && <button onClick={() => act(motion.releaseControl)}>Release</button>}
+      {viewOnly && <small style={{ color: "#8b93a1" }}>view only</small>}
+      {!motion.you && !motion.free && !viewOnly && <small style={{ color: "#8b93a1" }}>your drive commands are ignored until you take control</small>}
+      {error && <small style={{ color: "#cf222e" }}>{error}</small>}
+    </div>
+  );
+}
+
 function TeleopPanel({ session }: { session: Session }) {
-  const drive = usePublisher<{ linear: number; angular: number }>(session, "com.acme.teleop", "cmd_vel", { maxHz: 20, deadman: { intervalMs: 200 } });
+  // fjarr.test's `drive` (docs/06): realtime, deadman-armed at 500 ms on the robot; the publisher re-sends
+  // the last value every 200 ms while held. Driving when `motion` is free claims it (docs/10).
+  const drive = usePublisher<{ v: number; seq: number }>(session, "fjarr.test", "drive", { maxHz: 20, deadman: { intervalMs: 200 } });
+  const seq = useRef(0);
   const [speed, setSpeed] = useState(0.5);
-  const btn = (label: string, linear: number, angular: number) => (
+  const pressed = useRef(false);
+  const send = (v: number) => drive({ v, seq: ++seq.current });
+  // Only a press (and the stop after it) is input: merely hovering past a button must not claim `motion`.
+  const stop = () => {
+    if (!pressed.current) return;
+    pressed.current = false;
+    send(0);
+  };
+  const btn = (label: string, direction: number) => (
     <button
-      onPointerDown={() => drive({ linear: linear * speed, angular })}
-      onPointerUp={() => drive({ linear: 0, angular: 0 })}
-      onPointerLeave={() => drive({ linear: 0, angular: 0 })}
+      onPointerDown={() => {
+        pressed.current = true;
+        send(direction * speed);
+      }}
+      onPointerUp={stop}
+      onPointerLeave={stop}
       style={{ padding: "8px 14px" }}
     >
       {label}
@@ -207,10 +279,8 @@ function TeleopPanel({ session }: { session: Session }) {
   );
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-      {btn("◀", 0, 1)}
-      {btn("▲", 1, 0)}
-      {btn("▼", -1, 0)}
-      {btn("▶", 0, -1)}
+      {btn("▲", 1)}
+      {btn("▼", -1)}
       <label style={{ fontSize: 12 }}>
         speed <input type="range" min={0.1} max={1} step={0.1} value={speed} onChange={(e) => setSpeed(Number(e.target.value))} />
       </label>

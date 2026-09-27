@@ -1,0 +1,22 @@
+{
+  "v": 1,
+  "cap": "com.example.teleop",
+  "type": "goto",
+  "event_id": "0192f3a1-held",
+  "kind": "result",
+  "payload": {
+    "ok": false,
+    "error": {
+      "code": "control-held",
+      "message": "motion is held by Anna",
+      "data": {
+        "domain": "motion",
+        "holder": {
+          "id": "anna@example.com",
+          "label": "Anna"
+        },
+        "since": 1790000000000
+      }
+    }
+  }
+}

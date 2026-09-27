@@ -63,6 +63,10 @@ struct CapabilityManifest {
   std::string control_domain;            // "desktop" | "motion" | "" (docs/10): one holder
                                          // per domain, claimed on first input; "" = never
                                          // exclusive (terminal, net, files)
+  std::vector<std::string> control_inputs; // the message types that are input in that
+                                           // domain (claim it, gated by it); empty = every
+                                           // message. fjarr.test: {"drive"}, so `echo` never
+                                           // claims motion
 };
 
 // Sending surface with mandatory backpressure (docs/08#backpressure — F3):

@@ -69,7 +69,11 @@ CapabilityManifest TestCapability::manifest() const {
                                      {"properties", {{"enabled", {{"type", "boolean"}}}, {"test_hooks", {{"type", "boolean"}}}}},
                                      {"additionalProperties", false}};
     m.consumers = {.peer = true, .backend = false};
-    m.input_bearing = true; // the deadman-armed `drive` consumer takes the docs/10 lease
+    m.input_bearing = true; // the deadman-armed `drive` consumer
+    // docs/10: `drive` steers the (pretend) robot, so it is the demo's motion domain; echo,
+    // hotplug and silence are not input and claim nothing.
+    m.control_domain = "motion";
+    m.control_inputs = {"drive"};
     return m;
 }
 

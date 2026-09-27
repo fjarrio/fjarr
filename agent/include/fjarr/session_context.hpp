@@ -101,6 +101,8 @@ class SessionContext {
     virtual void feedback(const Envelope& request, nlohmann::json payload) = 0;
     virtual void result(const Envelope& request, nlohmann::json payload) = 0; // payload.ok required
     virtual void fail(const Envelope& request, std::string_view code, std::string_view message) = 0;
+    /// With `error.data` (docs/08#errors), e.g. who holds what a `busy` refused.
+    virtual void fail(const Envelope& request, std::string_view code, std::string_view message, nlohmann::json data) = 0;
     virtual void event(std::string_view type, nlohmann::json payload) = 0;    // kind=event on control
 
     // Blobs (docs/08#blob-frames): the core chunks `bytes` onto this capability's `blob`-framed

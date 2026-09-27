@@ -123,7 +123,7 @@ components, no extra code path — only the automation is missing. The
 toolbar copy says so ("drag this window to the screen, then fullscreen").
 
 **Design (primary): one session, portaled views.** The dashboard page keeps
-the one session, the one grant and the one docs/10 ownership lease; each
+the one session, the one grant and the one docs/10 `desktop` claim; each
 popup document is just a rendering surface. `usePresentation(session)`:
 
 1. On the operator's click, requests `window-management` if needed, reads
@@ -163,7 +163,7 @@ or a future process-isolation change that breaks cross-document
 acquires only its monitor's track. Demand-driven delivery means no
 duplicated video and FrameHub means no extra encode; the cost is N
 signaling/ICE/DTLS setups and N grants. Input from the extra windows is
-legitimate because the docs/10 lease is keyed on the **operator identity in
+legitimate because a docs/10 control claim is keyed on the **operator identity in
 the grant**, not the session — the same operator's windows share one
 claim. `usePresentation({ mode: "portal" | "route" })` selects; the demo
 dashboard exercises both, and the **M3 spike** decides the default per
@@ -305,6 +305,9 @@ the `desktop` domain):
   it in the first place, and shows why.
 - A grant with `view_only: true` renders without an input surface and without
   the button.
+
+The web library exposes this as `session.control`, `useControl(session,
+"desktop")` and `heldBy(error)` ([docs/21](21-web-client-architecture.md#control-domains)).
 
 ## Core requirements for slice 2 (so M3 needs no core change)
 

@@ -88,7 +88,9 @@ thing take turns; everyone else works side by side.**
   is told who holds each domain whenever that changes (`control-state`), so a
   client can show "Anna has been controlling the desktop for 3 min".
 - Claims still **fail open on staleness**: a holder with no live session, or
-  with no heartbeat for 30 s, loses the claim (logged). A dead process must
+  with no heartbeat for 30 s, loses the claim (logged). A session closed to be
+  retried (a media or ICE restart) keeps its operator's claim across the gap,
+  still bounded by the 30 s. A dead process must
   never leave a robot uncontrollable.
 
 **What the lease does not cover.** A terminal or a tunnel can move a robot
@@ -206,7 +208,8 @@ tunnel it shares the top of the risk table, and the same treatment:
 - **Explicit claim** in the session grant, refused otherwise.
 - **Audited** at open and close with the operator identity, and an I/O
   recording hook for deployments that need the transcript.
-- **Input-bearing**, so it takes the ownership lease like desktop input.
+- **Input-bearing** but in no control domain: every session has its own pty,
+  so terminals run side by side ([session ownership](#session-ownership)).
 - **No orphan shells**: the pty is closed by `release_all_input` on any
   session end, which is a safety behaviour with a regression test
   ([docs/15](15-testing-strategy.md#safety-behaviors)), not a best effort.

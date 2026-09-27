@@ -2,6 +2,7 @@
 #include <fjarr/net_capability.hpp>
 
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <map>
 #include <string>
@@ -85,6 +86,8 @@ struct NetCapability::Impl {
     std::map<SessionId, SessionContext*> sessions;
     /// One link at a time: the robot's device is point-to-point with exactly one peer.
     SessionId link_session;
+    OperatorInfo link_holder;       // who holds it, named in `busy` (docs/08#fjarr-net)
+    std::int64_t link_since_ms = 0; // unix ms
     std::unique_ptr<FdWatch> watch;
     std::unique_ptr<Timer> stats_timer;
     Counters counters;
@@ -191,8 +194,8 @@ CapabilityManifest NetCapability::manifest() const {
     // would fight TCP's and lose on a bad link (docs/08#net-packets).
     m.channels = {{ChannelClass::Control}, {ChannelClass::Stream, BulkFraming::Raw}};
     m.consumers.peer = true;
-    // docs/10: granting `net` is granting network access to the robot from inside, so it takes the
-    // ownership lease and is released first on every detach path, like the terminal.
+    // docs/10: no control domain (the link is refused as `busy` while another session holds it,
+    // naming who); released first on every detach path, like the terminal.
     m.input_bearing = true;
     m.config_schema = nlohmann::json{
         {"type", "object"},
@@ -311,9 +314,12 @@ void NetCapability::on_message(SessionContext& ctx, const Envelope& msg) {
 
     if (msg.type == "open") {
         if (impl_->link_open()) {
+            // docs/10: the refusal names who holds the link, so the operator knows who to ask.
+            const auto& h = impl_->link_holder;
             ctx.fail(msg, error_codes::busy,
                      impl_->link_session == ctx.id() ? "this session already has the link open"
-                                                     : "another session holds the link; the robot's interface is point-to-point");
+                                                     : (h.label.empty() ? h.id : h.label) + " holds the link; the robot's interface is point-to-point",
+                     nlohmann::json{{"holder", {{"id", h.id}, {"label", h.label}}}, {"since", impl_->link_since_ms}});
             return;
         }
         const std::string why = impl_->unavailable_reason();
@@ -325,6 +331,8 @@ void NetCapability::on_message(SessionContext& ctx, const Envelope& msg) {
         impl_->counters = Counters{};
         impl_->abandoned_at_open = sctp_watch::abandoned();
         impl_->link_session = ctx.id();
+        impl_->link_holder = ctx.operator_info();
+        impl_->link_since_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         const SessionId sid = ctx.id();
         impl_->watch = ctx.watch_readable(impl_->tun_fd, [this, sid, ctxp = &ctx]() -> bool {
             if (impl_->link_session != sid) return false;

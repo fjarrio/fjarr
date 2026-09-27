@@ -130,10 +130,16 @@ pub async fn open(
         early_bytes,
     } = up;
     if !result.ok() {
-        let code = result.error_code().unwrap_or("unknown").to_string();
+        let why = refusal(
+            robot,
+            result.error().as_ref(),
+            &result.payload,
+            fjarr_protocol::now_ms(),
+        );
         peer.close().await.ok();
         session.close().await.ok();
-        anyhow::bail!("{robot} refused the link: {code} ({})", result.payload);
+        // Up to main as an error: printed as the reason, exit non-zero (docs/27#shell).
+        anyhow::bail!(why);
     }
 
     let field = |k: &str| {
@@ -159,6 +165,58 @@ pub async fn open(
         session,
         events,
     })
+}
+
+/// The line printed when a robot says no to `fjarr.net open`. A `busy` with `data.holder` names who
+/// holds the point-to-point link and for how long, so the operator knows who to ask
+/// (docs/08#net-packets, docs/10#session-ownership); anything less falls back to the robot's own
+/// message. Pure, so the wording is tested rather than eyeballed.
+pub fn refusal(
+    robot: &str,
+    error: Option<&fjarr_protocol::ResultError>,
+    payload: &serde_json::Value,
+    now_ms: i64,
+) -> String {
+    let Some(error) = error else {
+        return format!("{robot} refused the link: {payload}");
+    };
+    if error.code == "busy" {
+        if let Some(holder) = error.holder() {
+            let who = match (holder.label.trim(), holder.id.trim()) {
+                ("", id) => id.to_string(),
+                (label, id) if id.is_empty() || label == id => label.to_string(),
+                (label, id) => format!("{label} ({id})"),
+            };
+            let held = error
+                .since_ms()
+                .filter(|&since| since > 0 && since <= now_ms)
+                .map(|since| format!(" for {}", held_for(now_ms - since)))
+                .unwrap_or_default();
+            return format!("{robot} link busy: held by {who}{held} — ask them to disconnect");
+        }
+    }
+    if error.message.is_empty() {
+        format!("{robot} refused the link: {}", error.code)
+    } else {
+        format!(
+            "{robot} refused the link: {}: {}",
+            error.code, error.message
+        )
+    }
+}
+
+/// A holding time the way a person says it: seconds, minutes, hours and minutes, then days.
+fn held_for(ms: i64) -> String {
+    let s = ms / 1000;
+    match s {
+        0..=59 => format!("{s} s"),
+        60..=3599 => format!("{} min", s / 60),
+        3600..=172_799 => match (s / 3600, (s % 3600) / 60) {
+            (h, 0) => format!("{h} h"),
+            (h, m) => format!("{h} h {m} min"),
+        },
+        _ => format!("{} days", s / 86_400),
+    }
 }
 
 impl<P: PeerConnection + Send + Sync + 'static> Opened<P> {
@@ -308,5 +366,113 @@ impl Link {
         let counts = self.task.await.unwrap_or_default();
         tun::drop_route(device.name(), self.robot_addr).await;
         counts
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fjarr_protocol::ResultError;
+    use serde_json::json;
+
+    const NOW: i64 = 1_790_000_000_000;
+
+    fn busy(data: Option<serde_json::Value>) -> ResultError {
+        ResultError {
+            code: "busy".into(),
+            message: "Anna holds the link; the robot's interface is point-to-point".into(),
+            data,
+        }
+    }
+
+    fn holder_since(since: serde_json::Value) -> Option<serde_json::Value> {
+        Some(json!({"holder": {"id": "anna@example.com", "label": "Anna"}, "since": since}))
+    }
+
+    fn say(err: &ResultError) -> String {
+        refusal("r1", Some(err), &json!({}), NOW)
+    }
+
+    #[test]
+    fn busy_with_data_names_the_holder_and_how_long() {
+        let err = busy(holder_since(json!(NOW - 3 * 60_000 - 5_000)));
+        assert_eq!(
+            say(&err),
+            "r1 link busy: held by Anna (anna@example.com) for 3 min — ask them to disconnect"
+        );
+        let err = busy(holder_since(json!(NOW - 42_000)));
+        assert!(say(&err).contains("for 42 s —"));
+        let err = busy(holder_since(json!(NOW - (2 * 3600 + 5 * 60) * 1000)));
+        assert!(say(&err).contains("for 2 h 5 min —"));
+        let err = busy(holder_since(json!(NOW - 3 * 86_400_000)));
+        assert!(say(&err).contains("for 3 days —"));
+    }
+
+    #[test]
+    fn busy_without_data_falls_back_to_the_message() {
+        assert_eq!(
+            say(&busy(None)),
+            "r1 refused the link: busy: Anna holds the link; the robot's interface is point-to-point"
+        );
+    }
+
+    #[test]
+    fn busy_with_malformed_data_falls_back_to_the_message() {
+        for data in [
+            json!({"holder": "Anna"}),
+            json!({"holder": {"label": "Anna"}}),
+            json!("nope"),
+            json!(null),
+        ] {
+            assert!(
+                say(&busy(Some(data.clone()))).starts_with("r1 refused the link: busy: "),
+                "{data}"
+            );
+        }
+        // A holder without a usable `since` is still named, just without a duration.
+        let err = busy(Some(
+            json!({"holder": {"id": "anna@example.com", "label": "Anna"}, "since": "x"}),
+        ));
+        assert_eq!(
+            say(&err),
+            "r1 link busy: held by Anna (anna@example.com) — ask them to disconnect"
+        );
+    }
+
+    #[test]
+    fn since_in_the_future_or_zero_omits_the_duration() {
+        for since in [json!(0), json!(NOW + 60_000), json!(-5)] {
+            assert_eq!(
+                say(&busy(holder_since(since.clone()))),
+                "r1 link busy: held by Anna (anna@example.com) — ask them to disconnect",
+                "{since}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_holder_without_a_label_is_named_by_id() {
+        let err = busy(Some(
+            json!({"holder": {"id": "anna@example.com", "label": ""}, "since": NOW}),
+        ));
+        assert_eq!(
+            say(&err),
+            "r1 link busy: held by anna@example.com for 0 s — ask them to disconnect"
+        );
+    }
+
+    #[test]
+    fn other_codes_and_unparseable_errors_keep_their_reason() {
+        let err = ResultError {
+            code: "unavailable".into(),
+            message: "create fjarr0".into(),
+            data: None,
+        };
+        assert_eq!(say(&err), "r1 refused the link: unavailable: create fjarr0");
+        let payload = json!({"ok": false});
+        assert_eq!(
+            refusal("r1", None, &payload, NOW),
+            "r1 refused the link: {\"ok\":false}"
+        );
     }
 }

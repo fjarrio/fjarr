@@ -7,3 +7,7 @@ leak:g_quark_from_static_string
 leak:gst_registry_
 leak:gst_plugin_
 leak:g_object_new_with_properties
+# libnice's UPnP-IGD thread (gupnp-igd → gssdp) leaks one GInetAddress when a session is closed
+# while its discovery is still running; no fjarr frame on the stack. Seen when test_control.cpp
+# closes sessions milliseconds after opening them. Same library tsan.supp already lists.
+leak:libgssdp-1.6.so

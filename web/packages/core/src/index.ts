@@ -6,7 +6,7 @@
  * spec: docs/21-web-client-architecture.md · docs/09-interfaces.md#3-dashboard-tier--fjarrcore--fjarrreact
  */
 export * from "./protocol.js";
-export { FjarrError, NotImplementedError, isFjarrError, type ClientErrorCode } from "./errors.js";
+export { FjarrError, NotImplementedError, heldBy, isFjarrError, type ClientErrorCode, type HeldBy } from "./errors.js";
 export { createStore, Emitter, type ReadonlyStore, type Store } from "./store.js";
 export { Backoff, backoffDelay, DEFAULT_BACKOFF, type BackoffPolicy } from "./backoff.js";
 export { webSocketFactory, type SignalingSocket, type SocketFactory } from "./transport.js";
@@ -77,7 +77,7 @@ export {
   type VideoTrackStats,
 } from "./stats.js";
 export { FocusRegistry, type FocusOptions, type FocusRegistration, type WindowLike } from "./focus.js";
-export { createSession, type AudioUplink, type Session, type SessionDeps, type SessionEvent, type SessionInfo, type SessionOptions, type SessionState, type TrackApi } from "./session.js";
+export { createSession, type AudioUplink, type ControlState, type DomainControl, type Session, type SessionDeps, type SessionEvent, type SessionInfo, type SessionOptions, type SessionState, type TrackApi } from "./session.js";
 export { createFjarrClient, type FjarrClient, type FjarrClientConfig, type PersistenceAdapter, type SessionManager } from "./client.js";
 export type { WireEvent } from "./wire.js";
 export {

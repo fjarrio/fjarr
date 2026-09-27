@@ -113,7 +113,7 @@ struct Agent::Impl {
             }
         }
         return nlohmann::json{{"robot_id", config.agent.robot_id}, {"sessions", sessions ? sessions->stats() : nlohmann::json::array()},
-                              {"lease", sessions ? sessions->describe().value("lease", nlohmann::json::object()) : nlohmann::json::object()},
+                              {"control", sessions ? sessions->describe().value("control", nlohmann::json::object()) : nlohmann::json::object()},
                               {"hub", hub}, {"producers", producers}, {"encoder", plane ? plane->encoder().name : ""}};
     }
 

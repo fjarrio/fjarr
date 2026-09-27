@@ -135,7 +135,7 @@ Agent (public, pImpl)
      │   ├─ SourceRegistry            type name → VideoSource factory (built-in + customer-registered)
      │   ├─ Producer (per output/tier) VideoSource bin → tee → EncoderAdapter → appsink → FrameHub
      │   └─ ConsumerPipeline (per session) appsrc/valve/payloader per track + one webrtcbin
-     ├─ SessionManager               session_id → Session; ownership leases (docs/10)
+     ├─ SessionManager               session_id → Session; control domains (docs/10)
      │   └─ Session
      │       ├─ generation, state, operator, granted capabilities
      │       ├─ PeerConnection       webrtcbin wrapper: offer builder, renegotiation queue,
@@ -281,8 +281,8 @@ exact API sequences):
   the operator opens a new session immediately and the agent builds a fresh
   peer connection. It is a new session: capabilities see `session_detached`
   then `session_attached`, the operator's demand is re-flushed, and the
-  docs/10 ownership lease — keyed on the operator identity and 30 s
-  fail-open — carries across the gap, so no other operator can take control
+  docs/10 control claims — keyed on the operator identity and 30 s
+  fail-open — carry across the gap, so no other operator can take control
   during a restart. The wrapper keeps a `supports_ice_restart()`
   probe so a stack that gains it ([open question #21](18-open-questions.md))
   switches to the in-place re-offer with no protocol change.
@@ -404,6 +404,42 @@ negotiates caps, prints the resolved format/size/fps and memory type,
 runs for two seconds and reports frame rate and any bus error — so a
 customer can validate a new camera on the robot without a browser or a
 server. The doctor gains a row per configured source.
+
+### The desktop descriptor handover (ADR-0028) {#desktop-descriptor-handover}
+
+On GNOME the desktop backend module receives its PipeWire and EIS descriptors
+from `fjarr-desktop-session` ([ADR-0028](adr/0028-desktop-session-helper.md)).
+It never opens the desktop user's bus. **This handover is measured, not
+assumed.** On the spike machine on 2026-09-28 (GNOME 50.1, PipeWire 1.6.2, libei
+1.5.0; [spikes/desktop-helper](../spikes/desktop-helper/README.md)),
+a process ran under its own system account, from a system unit with no session
+environment. It could not reach the user's bus or PipeWire socket itself. It
+accepted the helper after the `SO_PEERCRED` check, captured the oracle's magenta
+through `pipewiresrc fd=`, and injected two keys and a click through libei that
+the oracle logged. It rejected root and non-members. The ADR stands as written.
+
+What the module and the package take from it:
+
+- **PipeWire.** The helper hands over a connection it opened, so the server
+  has already taken the helper's credentials. The agent passes the descriptor
+  to `pipewiresrc fd=` together with the stream's node id. As the spike did it,
+  the connection carries **all** of the desktop user's PipeWire rights,
+  microphones included. The helper therefore narrows its client to the granted
+  node before handing it over, as the portal's `OpenPipeWireRemote` does. The
+  stream is damage-driven, so a static screen yields almost no buffers, and the
+  source must not treat silence as capture loss.
+- **EIS.** The helper calls `ConnectToEIS` after `Start()`. mutter then offers
+  one keyboard device and one absolute pointer device with buttons. The
+  pointer's region is the monitor's logical rectangle, so the module maps a
+  track-local point to the stream's `position` plus that point. Keys are evdev
+  codes. Input lands on the focused surface; the handover does nothing about
+  focus.
+- **The socket's group.** The agent has to be in `fjarr-desktop`
+  (`SupplementaryGroups=` in the unit) to give `/run/fjarr/desktop.sock` that
+  group, unless a `.socket` unit creates the socket. Adding the desktop account
+  to the group takes effect only at its **next login**, because the running
+  `systemd --user` keeps its old groups. The installer restarts the session
+  or says that it must.
 
 ### Encoders and tiers
 
@@ -1148,7 +1184,16 @@ the text above left open, or learned from the lab:
   input; `motion` only on release, disconnect or takeover, and a takeover runs
   the capability's `release_all_input` first. Claims fail open after 30 s
   without the holder's heartbeat. Capabilities without a domain (terminal, net,
-  files) are never gated.
+  files) are never gated. As built: the rules live in `ControlDomains`, pure
+  bookkeeping with the time passed in, and the SessionManager turns each change
+  of holder into releases and `control-state`. A manifest's `control_inputs`
+  names the message types that are input (`fjarr.test`: `drive`), so `echo`
+  never claims `motion`. The old holder's `release_all_input` runs on every
+  change away from them — takeover, release, stale — in `desktop` too, so no
+  key stays down; a desktop freed by idleness is released only when someone
+  else claims it, since the idle holder may be mid-drag. Any ping from any of
+  the operator's sessions is the heartbeat. `view_only` input is dropped, or
+  answered `capability-denied`, and never reaches the SessionManager.
 - *Closing has a flush window.* `release_all_input` runs synchronously and
   what it emits on `fjarr:control` (`deadman{expired}`) must reach the
   operator; a NULL state change in the same loop turn discarded it. The

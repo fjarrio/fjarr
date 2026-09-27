@@ -126,7 +126,9 @@ CapabilityManifest TerminalCapability::manifest() const {
     m.version = {0, 1, 0};
     m.channels = {{ChannelClass::Control}, {ChannelClass::Bulk, BulkFraming::Raw}};
     m.consumers.peer = true;
-    m.input_bearing = true; // docs/10: the ownership lease, and release_all_input first on detach
+    // docs/10: no control domain — each session has its own pty, so terminals run side by side;
+    // release_all_input still runs first on detach.
+    m.input_bearing = true;
     m.config_schema = nlohmann::json{
         {"type", "object"},
         {"additionalProperties", false},

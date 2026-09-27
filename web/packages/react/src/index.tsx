@@ -10,6 +10,7 @@ export { FjarrProvider, SessionScope, useFjarrClient, useSession, type FjarrProv
 export {
   useBeforeUnloadWhileConnected,
   useCommand,
+  useControl,
   useInputFocus,
   useLatest,
   useMessage,
@@ -27,6 +28,7 @@ export {
   useTrackStats,
   useTracks,
   type CommandState,
+  type ControlBinding,
   type TelemetryReader,
 } from "./hooks.js";
 export { useFeedStatus, usePipelineBody, usePipelineFeed, usePipelines, usePipelineSnapshot, type PipelineBody } from "./pipelines.js";
@@ -53,9 +55,14 @@ export {
 } from "./components.js";
 
 // Core surface hosts need without a second import.
-export { createFjarrClient, FjarrError, NotImplementedError, isFjarrError } from "@fjarr/core";
+export { createFjarrClient, FjarrError, NotImplementedError, heldBy, isFjarrError } from "@fjarr/core";
 export type {
   AcquireOptions,
+  ControlDomain,
+  ControlHolder,
+  ControlState,
+  DomainControl,
+  HeldBy,
   Envelope,
   EnvelopeHandler,
   FjarrClient,

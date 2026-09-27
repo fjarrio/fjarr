@@ -42,11 +42,12 @@ Envelope request(const std::string& type, nlohmann::json payload = nlohmann::jso
 }
 } // namespace
 
-TEST(TerminalCapability, declaresARawBulkChannelAndTakesTheInputLease) {
+TEST(TerminalCapability, declaresARawBulkChannelAndNoControlDomain) {
     TerminalCapability cap;
     const auto m = cap.manifest();
     EXPECT_EQ(m.name, "fjarr.terminal");
-    EXPECT_TRUE(m.input_bearing) << "docs/10: the terminal takes the ownership lease";
+    EXPECT_TRUE(m.input_bearing) << "docs/15: release_all_input runs first on detach";
+    EXPECT_EQ(m.control_domain, "") << "docs/10: every session has its own pty, so terminals are never exclusive";
     bool raw_bulk = false;
     for (const auto& c : m.channels)
         if (c.channel == ChannelClass::Bulk && c.framing == BulkFraming::Raw) raw_bulk = true;
@@ -106,8 +107,7 @@ TEST(TerminalCapability, opensOnePtyPerSessionAndRefusesASecond) {
 }
 
 TEST(TerminalCapability, keystrokesForASessionWithNoPtyAreDropped) {
-    // This is also what keeps a read-only operator out: `open` is denied to non-owners by the
-    // lease, so they never have a pty, and their bytes reach nothing.
+    // A session that never opened a pty has nothing for its bytes to reach.
     TerminalCapability cap;
     Sources sources;
     cap.configure(nlohmann::json{{"enabled", true}, {"user", me()}}, sources.reg);

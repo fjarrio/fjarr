@@ -6,6 +6,8 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type {
   AgentTrackStats,
+  ControlDomain,
+  ControlHolder,
   Envelope,
   EnvelopeHandler,
   FjarrClient,
@@ -182,6 +184,46 @@ export function useSessionHealth(session?: Session): SessionHealth {
 
 export function useTimeSync(session?: Session): TimeSyncEstimate | null {
   return useStore(useSession(session).timeSync);
+}
+
+export interface ControlBinding {
+  /** The agent's `control-state` names this domain for this session (its grant has a capability in it). */
+  known: boolean;
+  holder: ControlHolder | null;
+  /** When the holder claimed it: unix ms on the agent's clock; `null` when free or unknown. */
+  since: number | null;
+  /** This operator holds it. */
+  you: boolean;
+  /** Known and nobody holds it: the next input claims it. */
+  free: boolean;
+  /** This session can never claim it (a `view_only` grant): render no input surface and no take-control button. */
+  viewOnly: boolean;
+  /** `fjarr.core/take-control`; rejects with `FjarrError` (`capability-denied` for a view-only grant). */
+  takeControl(): Promise<void>;
+  /** `fjarr.core/release-control`; idempotent. */
+  releaseControl(): Promise<void>;
+}
+
+/**
+ * Who holds one control domain, re-rendering only when that domain changes.
+ * spec: docs/10-security.md#session-ownership · docs/21-web-client-architecture.md#control-domains
+ */
+export function useControl(session: Session | undefined, domain: ControlDomain): ControlBinding {
+  const s = useSession(session);
+  const store = s.control;
+  const get = useCallback(() => store.getSnapshot()?.domains[domain], [store, domain]);
+  const entry = useSyncExternalStore(store.subscribe, get, get);
+  const holder = entry?.holder ?? null;
+  const since = entry?.since ?? null;
+  const you = entry?.you ?? false;
+  const known = entry !== undefined;
+  const viewOnly = entry?.viewOnly ?? false;
+  const takeControl = useCallback(() => s.takeControl(domain), [s, domain]);
+  const releaseControl = useCallback(() => s.releaseControl(domain), [s, domain]);
+  return useMemo(
+    () => ({ known, holder, since, you, free: known && holder === null, viewOnly, takeControl, releaseControl }),
+    [known, holder, since, you, viewOnly, takeControl, releaseControl],
+  );
 }
 
 /**
