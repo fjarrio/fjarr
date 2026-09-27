@@ -263,8 +263,11 @@ browser-reserved shortcuts + Keyboard Lock, no-auto-repeat, composed text,
 client-side release-all), local-cursor mode where the backend allows,
 `sharpness` preference and `latencyMode: interactive`, clipboard text;
 `release_all_input` safety; `fjarr-desktop-session` and the descriptor
-handover, proven first with the agent running as its own account
-([ADR-0028](adr/0028-desktop-session-helper.md));
+handover (proven on the spike machine 2026-09-28,
+[docs/23](23-agent-core-architecture.md#desktop-descriptor-handover)), **with
+the handed PipeWire connection narrowed to the granted stream**, so that the
+agent cannot open the desktop user's microphones (not yet verified; it gates
+M3) ([ADR-0028](adr/0028-desktop-session-helper.md));
 unattended-access test green on the spike machine
 (the Ryzen mini-PC from 2b); local cursor on Wayland through Fjarr's own
 PipeWire reader ([docs/22](22-remote-desktop-client.md#cursor-strategy));
