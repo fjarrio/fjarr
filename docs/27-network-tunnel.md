@@ -279,8 +279,8 @@ robot.
 - **The local terminal is restored on every way out**: the shell exiting, the
   link dropping, a signal. It is in raw mode while attached, so a client that
   leaks raw mode leaves the operator's own terminal unusable.
-- **Grants and audit as in the browser.** The terminal is input-bearing, so it
-  takes the ownership lease; every open and close is audited. `login` asks the
+- **Grants and audit as in the browser.** The terminal is input-bearing but
+  never exclusive (each session has its own pty, docs/10); every open and close is audited. `login` asks the
   operator API for a grant that carries `fjarr.terminal`, which the operator is
   given only if their backend allows it.
 
@@ -541,7 +541,7 @@ It is a pattern Fjarr documents, not a feature it ships, and it has costs the
 engineer should see up front:
 
 - **It is a second door.** The RDP or VNC server has its own password. Fjarr's
-  grants, input lease, audit record and view-only mode govern the link, not
+  grants, audit record and view-only mode govern the link, not
   what happens inside it. Granting the link already means granting network
   access to the robot ([docs/10](10-security.md#network-tunnel)); an RDP server
   makes that access a full desktop.

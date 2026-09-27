@@ -92,7 +92,12 @@ regresses**:
 - input silence deadman on actuation-bearing channels;
 - `release_all_input()` on any session end (no stuck modifiers — test:
   disconnect mid-keydown, assert keyup injected);
-- ownership lease expiry (fail-open) under media-plane hang;
+- control-domain claims ([docs/10](10-security.md#session-ownership)) fail
+  open after 30 s without the holder's heartbeat, and end at once with the
+  holder's last session; a `motion` takeover, a release or a stale claim runs
+  the old holder's `release_all_input` before the new holder's first command
+  (`test_control_domains.cpp` pins the rules in virtual time,
+  `test_control.cpp` through the real SessionManager and router);
 - heartbeat teardown timings;
 - **tunnel isolation** ([docs/27](27-network-tunnel.md#testing)): with two
   robots attached at once, no packet crosses from one link to the other in

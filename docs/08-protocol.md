@@ -68,7 +68,7 @@ JSON text frames on the WSS connection. Common fields on **every** message:
 | `session-close` | any | `session_id`, `reason`, `retry?` (bool, default false) | orderly teardown; `retry: true` means the closer expects the operator to open a **new session immediately** (agent media-plane restart, the ICE-restart fallback below) — the client treats it as a reconnection rung, never as a terminal close |
 | `peer-gone` | server→other side | `session_id`, `reason` | server-side last-will: socket death is announced, never inferred *(camera-streamer last-will lesson)* |
 | `backend-stream` | agent↔server | `capability`, `payload` (envelope) | backend-consumer envelope transport |
-| `session-peers` *(planned, M5)* | server→all parties | `session_id`, `peers: [{operator, role: "owner" \| "viewer"}]` | multi-operator presence from the docs/10 ownership leases; emitted on every change |
+| `session-peers` *(planned, M5)* | server→all parties | `session_id`, `peers: [{operator, role: "owner" \| "viewer"}]` | multi-operator presence alongside the docs/10 control domains; emitted on every change |
 | `error` | server→client | `code`, `message`, `caused_by` (the offending message's `event_id`) | see [error codes](#errors) |
 
 ### Reconnection {#reconnection}
@@ -144,9 +144,9 @@ Rules:
 | `pong` | result (echoes the `ping`'s `event_id`) | `{"ok": true, "t0", "t1", "t2"}` | `t1` = agent receive time, `t2` = agent send time, agent clock |
 | `time-sync` | request / result (result `type` is `time-sync`; only `ping` is answered as `pong`) | same payloads as `ping`/`pong` | an explicit on-demand probe (latency harness); heartbeats already keep the estimate fresh |
 | `ice-restart` | — | — | not an envelope: it is a [signaling message](#signaling), because it must work while the media path is down |
-| `take-control` | request → result | `{"domain": "desktop" \| "motion"}` | claim a control domain now, from whoever holds it ([docs/10](10-security.md#session-ownership)). `result{ok:true}`; `error{code:"capability-denied"}` for a `view_only` grant or one without a capability in that domain. For `motion`, the previous holder's input is released (the robot stops) before this result is sent |
+| `take-control` | request → result | `{"domain": "desktop" \| "motion"}` | claim a control domain now, from whoever holds it ([docs/10](10-security.md#session-ownership)). `result{ok:true}`; `error{code:"capability-denied"}` for a `view_only` grant or one without a capability in that domain. The previous holder's input is released (for `motion`, the robot stops) and every session in the domain is sent `control-state`, both before this result is sent |
 | `release-control` | request → result | `{"domain": ...}` | give a held domain up at once. Idempotent |
-| `control-state` | event (agent → operator) | `{"domains": {"desktop": {"holder": {"id", "label"} \| null, "since"?: ms, "you": bool}, "motion": {...}}}` | sent at session start and on every change of holder, to every session whose grant has a capability in that domain |
+| `control-state` | event (agent → operator) | `{"domains": {"desktop": {"holder": {"id", "label"} \| null, "since"?: ms, "you": bool, "view_only": bool}, "motion": {...}}}` | sent at session start and on every change of holder, to every session whose grant has a capability in that domain. `domains` lists only those domains; `since` is unix ms and absent when free; `you` is true for every session of the holding operator; `view_only` is true when this session can never claim the domain (its grant says so), so the client renders no input surface and no take-control button |
 
 `t0`..`t3` are unix milliseconds (an agent using `g_get_real_time` divides
 by 1000). Clock offset and RTT follow NTP: with `t3` = the operator's receive time,
@@ -190,7 +190,7 @@ All control/backend messages share one JSON shape:
 
 `kind` ∈ `request` | `accept` | `feedback` | `result` | `event` (unsolicited).
 `accept/feedback/result` echo the request's `event_id`. `result.payload`
-always carries `ok: bool` and, on failure, `error: {code, message}`. A
+always carries `ok: bool` and, on failure, `error: {code, message, data?}` (`data` is code-specific, see [errors](#errors)). A
 request to a capability not attached to the session is answered
 `result{ok:false, error:{code:"capability-denied"}}` when the agent has
 that capability but the grant did not include it, and
@@ -302,7 +302,7 @@ Control-channel input messages (all `cap: "fjarr.desktop"`):
 | `key` | `{"code": "KeyA", "down": bool}` | `code` = `KeyboardEvent.code` (physical key), mapped to Linux keycodes agent-side; clients MUST NOT forward browser auto-repeat — the held key repeats natively |
 | `key-combo` | `{"codes": ["ControlLeft", "AltLeft", "Delete"]}` | atomic press-and-release for combos the browser cannot capture |
 | `text` | `{"text": "åäö"}` | composed/IME/pasted text the physical-key path cannot express; agent injects as Unicode typing |
-| `release-all` | `{}` | client-initiated on focus loss; the agent MUST also release everything on `session-close` |
+| `release-all` | `{}` | client-initiated on focus loss; the agent MUST also release everything on `session-close`. The one input message that is not input in the `desktop` [control domain](10-security.md#session-ownership): it never claims it, so a viewer's window losing focus cannot take control |
 | `cursor` *(agent → client, realtime class)* | `{"shape_id", "hotspot": {x, y}, "png"?: base64}` | cursor shape changes for local-cursor rendering ([docs/22](22-remote-desktop-client.md#cursor-strategy)); `png` only when a new `shape_id` appears |
 | `monitors` *(agent → client, event)* | `{"monitors": [monitor…], "reason": "hotplug" \| "mode-change" \| "initial"}` | emitted immediately on any change with the full current set, *before* the renegotiation completes, so UIs can show placeholders/arrangements at once; the offer's manifest remains the source of truth for tracks |
 
@@ -384,8 +384,9 @@ actually needs it, not now.
 The pty dies with the session, always: `release_all_input` on session end
 closes it ([docs/15](15-testing-strategy.md#safety-behaviors)), so a dropped
 connection cannot leave an orphan shell holding the robot's resources. The
-capability is **input-bearing**, so it takes the ownership lease like any
-other ([docs/10](10-security.md#session-ownership)).
+capability is **input-bearing** but in no control domain: every session has
+its own pty, so terminals run side by side
+([docs/10](10-security.md#session-ownership)).
 
 ### Network packets (fjarr.net) {#net-packets}
 
@@ -414,7 +415,7 @@ envelopes:
 
 | `type` | kind | payload | semantics |
 |---|---|---|---|
-| `open` | request → result | `{}` | brings the link up. `result{ok:true, address, peer_address, mtu, policy:{forwarding:false, allow_ports}}` — `address` is the robot's tunnel address, `peer_address` the operator's, and `mtu` is the interface's own, which governs whatever the config says. `error{code:"unavailable", message}` when the tunnel is not enabled or the interface is absent, naming what to create ([docs/26](26-robot-install-and-drivers.md)); `error{code:"busy"}` when another session holds the link, because the robot's interface is point-to-point. A grant without `fjarr.net` never reaches the capability at all: the core answers `capability-denied` first ([errors](#errors)) |
+| `open` | request → result | `{}` | brings the link up. `result{ok:true, address, peer_address, mtu, policy:{forwarding:false, allow_ports}}` — `address` is the robot's tunnel address, `peer_address` the operator's, and `mtu` is the interface's own, which governs whatever the config says. `error{code:"unavailable", message}` when the tunnel is not enabled or the interface is absent, naming what to create ([docs/26](26-robot-install-and-drivers.md)); `error{code:"busy", data:{holder:{id, label}, since}}` when another session holds the link, because the robot's interface is point-to-point: the data names who holds it and since when (unix ms), so the client can say who to ask ([docs/10](10-security.md#session-ownership)). A grant without `fjarr.net` never reaches the capability at all: the core answers `capability-denied` first ([errors](#errors)) |
 | `close` | request → result | `{}` | stops the flow; the interface itself stays, since it is persistent by design. `error{code:"unavailable"}` when this session has no open link |
 | `link-stats` | event (agent → operator) | `{"interval_ms": 1000, "tx_packets", "rx_packets", "tx_bytes", "rx_bytes", "dropped_no_peer", "dropped_policy", "dropped_queue", "dropped_mtu", "abandoned", "abandoned_error"}` | once per second while the link is open; the four drop counters are what a support engineer reads first. `abandoned` is the fifth and the only one the sender could not have refused: messages usrsctp threw away *after* the channel accepted them, counted since the link opened, with `abandoned_error` usrsctp's reason for the latest ([docs/27](27-network-tunnel.md#testing)). A transfer that dies with the four at zero and this one climbing is the transport, not the pump |
 
@@ -434,7 +435,10 @@ violation, not a style issue.
 `control-held` answers an input-bearing request from a session that does not
 hold that capability's control domain. Its `error.data` is
 `{"domain", "holder": {"id", "label"}, "since": ms}`, so the client can say who
-to ask ([docs/10](10-security.md#session-ownership)).
+to ask ([docs/10](10-security.md#session-ownership)). An input request from a
+`view_only` grant is answered `capability-denied` instead: waiting would not
+help. Other codes may carry `error.data` too (`busy` on `fjarr.net/open`);
+a client ignores data it does not know.
 
 ## Versioning {#versioning}
 

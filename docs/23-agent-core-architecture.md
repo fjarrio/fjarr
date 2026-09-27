@@ -135,7 +135,7 @@ Agent (public, pImpl)
      │   ├─ SourceRegistry            type name → VideoSource factory (built-in + customer-registered)
      │   ├─ Producer (per output/tier) VideoSource bin → tee → EncoderAdapter → appsink → FrameHub
      │   └─ ConsumerPipeline (per session) appsrc/valve/payloader per track + one webrtcbin
-     ├─ SessionManager               session_id → Session; ownership leases (docs/10)
+     ├─ SessionManager               session_id → Session; control domains (docs/10)
      │   └─ Session
      │       ├─ generation, state, operator, granted capabilities
      │       ├─ PeerConnection       webrtcbin wrapper: offer builder, renegotiation queue,
@@ -281,8 +281,8 @@ exact API sequences):
   the operator opens a new session immediately and the agent builds a fresh
   peer connection. It is a new session: capabilities see `session_detached`
   then `session_attached`, the operator's demand is re-flushed, and the
-  docs/10 ownership lease — keyed on the operator identity and 30 s
-  fail-open — carries across the gap, so no other operator can take control
+  docs/10 control claims — keyed on the operator identity and 30 s
+  fail-open — carry across the gap, so no other operator can take control
   during a restart. The wrapper keeps a `supports_ice_restart()`
   probe so a stack that gains it ([open question #21](18-open-questions.md))
   switches to the in-place re-offer with no protocol change.
@@ -1184,7 +1184,16 @@ the text above left open, or learned from the lab:
   input; `motion` only on release, disconnect or takeover, and a takeover runs
   the capability's `release_all_input` first. Claims fail open after 30 s
   without the holder's heartbeat. Capabilities without a domain (terminal, net,
-  files) are never gated.
+  files) are never gated. As built: the rules live in `ControlDomains`, pure
+  bookkeeping with the time passed in, and the SessionManager turns each change
+  of holder into releases and `control-state`. A manifest's `control_inputs`
+  names the message types that are input (`fjarr.test`: `drive`), so `echo`
+  never claims `motion`. The old holder's `release_all_input` runs on every
+  change away from them — takeover, release, stale — in `desktop` too, so no
+  key stays down; a desktop freed by idleness is released only when someone
+  else claims it, since the idle holder may be mid-drag. Any ping from any of
+  the operator's sessions is the heartbeat. `view_only` input is dropped, or
+  answered `capability-denied`, and never reaches the SessionManager.
 - *Closing has a flush window.* `release_all_input` runs synchronously and
   what it emits on `fjarr:control` (`deadman{expired}`) must reach the
   operator; a NULL state change in the same loop turn discarded it. The
