@@ -250,8 +250,10 @@ decision in [ADR-0023](adr/0023-network-tunnel-virtual-interface.md).
 
 **Accepted when:** `fjarr-connect robot-42` brings a link up in under 3 s
 and `ssh` logs in; a 1 GB `scp` completes to a verified hash; `ros2 topic
-list` shows the robot's topics with Fast DDS unconfigured and with the
-documented Cyclone file; a second robot attached at the same time is
+list` shows the robot's topics with Fast DDS unconfigured (Cyclone DDS is
+[question #29](18-open-questions.md): its documented file fixes the hang but
+discovery does not complete across the link, which is a ROS 2 integration
+question rather than a tunnel one, and is not claimed); a second robot attached at the same time is
 unreachable from the first, in both directions; the agent restarts without
 the robot's ROS stack restarting; every open and close is audit-logged.
 

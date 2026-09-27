@@ -17,7 +17,7 @@ by revision (this document's history), never by renumbering.
 | M0.5 Public foundations | **done** 2026-09-16 | CI green, fjarr.io + fjarr.dev live, registrations, prior-art anonymization policy |
 | M1 Core + extension API (camera video) | **done** 2026-09-25 | slices 0–2 done and reviewed, 2.9 (baseline bump, [ADR-0022](adr/0022-baseline-ubuntu-2604-gstreamer-128.md)) done 2026-09-18, 3a (browser lab) 2026-09-19, 3b (agent core) 2026-09-20, 3c (introspection + memory ladder) 2026-09-20, **4 (`fjarr.camera` on real sources) 2026-09-20**, 5a/5b (blob frames, `fjarr.introspect`, the served viewer) 2026-09-21, 6a/6b (repair + rate control, passthrough) 2026-09-22, **7a/7b (the remaining fault rows, the latency harness) 2026-09-23/24 — every slice landed**; the [gate review](reviews/m1-gate-review.md) found the ADR-0015 webhook half had never run and that standard-form TURN URLs were silently ignored by the agent, and fixed both. **Gate met 2026-09-25**: CI green and the first fully green nightly on the self-hosted runner, which also recorded the first trustworthy latency numbers — clean 56/79 ms, lossy 82/100, relay 69/102 against budgets of 120/200, 200/350 and 250/450, at 46–52 decoded fps |
 | M2.6 Encoder families | planned | added 2026-09-24 ([ADR-0025](adr/0025-encoder-families.md)): `nvcodec` and `nvv4l2` behind the existing adapter; closes open question #2 |
-| M4.5 Network tunnel | planned | added 2026-09-23 after the [ROS 2 tunnel spike](../agent/spikes/ros2-tunnel/README.md) ([docs/27](27-network-tunnel.md), ADR-0023, ADR-0024); depends only on M2.5, so it can be pulled earlier if a design partner asks |
+| M4.5 Network tunnel | **done 2026-09-27** ([gate review](reviews/m45-gate-review.md)) | added 2026-09-23 after the [ROS 2 tunnel spike](../agent/spikes/ros2-tunnel/README.md) ([docs/27](27-network-tunnel.md), ADR-0023, ADR-0024); depends only on M2.5, so it can be pulled earlier if a design partner asks |
 | M2 – M8 | planned | revised 2026-09-17 after the slice-3 planning ([docs/23](23-agent-core-architecture.md)–[26](26-robot-install-and-drivers.md), ADR-0019–0022, the [webrtcbin spike](../agent/spikes/webrtcbin-probe/README.md), the [planning review](reviews/slice-3-planning-review.md)): new **M2.5 packaging** milestone; M3 lightened |
 
 ## M0 — Documentation & environment *(done)*
@@ -552,12 +552,18 @@ that until M5's packaging work says otherwise.
 
 **Gate:** [docs/06 `fjarr.net` criteria](06-capabilities.md) —
 `ssh` and a hash-verified 1 GB `scp` to a robot behind carrier NAT; `ros2
-topic list` against it with Fast DDS unconfigured and with the documented
-Cyclone file; `fjarr-connect login` through the demo dashboard followed by a
+topic list` against it with Fast DDS unconfigured (Cyclone is
+[#29](18-open-questions.md), amended out of the gate 2026-09-27 and not claimed); `fjarr-connect login` through the demo dashboard followed by a
 list, a pick and a connect without anyone typing a robot id, and the same on
 a host with no browser; two robots attached at once provably unable to reach
 each other; the agent upgraded without restarting the robot's ROS stack; every
 open and close in the audit log.
+
+**Met 2026-09-27** — `make m45-gate`, every claim through `fjarr-connect`
+relay-only with the direct path removed; the evidence, criterion by criterion,
+is the [M4.5 gate review](reviews/m45-gate-review.md). Carried out of the
+milestone: [#28](18-open-questions.md) for the lab's usrsctp-to-usrsctp operator,
+and [#29](18-open-questions.md) for Cyclone.
 
 ## M5 — Hardening + Fjarr Cloud alpha
 
