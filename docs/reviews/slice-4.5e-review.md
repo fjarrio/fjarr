@@ -19,6 +19,7 @@ description: Retrospective review of fjarr-connect — the link the ICE design c
 | the same transfer on debug and ASan builds | no abort, but the session ended with `reason="heartbeat"` at about 100 MB, every time. docs/08 requires a `ping` on control every 5 s and the agent ends the session when three are missed; `fjarr-connect` sent none. Every short check — `ssh`, a `curl`, the `open` handshake — fits inside the budget and passed, so the gap was invisible until a transfer outlived it | a 5 s heartbeat in the pump's `select!`, plus `--no-heartbeat` as a deliberate fault-injection switch (docs/15) so the agent's close-under-load path can be exercised on purpose. That switch is what made the abort reproducible 3 for 3 |
 | `setcap cap_net_admin+ep` on the client, exactly as docs/27 promises | the second robot's route was still refused with `Operation not permitted`. **A file capability is not inherited by a child process**, and the client shelled out to `ip` — so the documented install could never have worked, only `sudo` could. The spec promised something the implementation could not do, and a lab that had only ever used `sudo`-created interfaces would never have noticed | address, MTU and routes are set over netlink in the client's own process. It also removes an undocumented dependency on `iproute2` from a binary whose whole point is to be one static file |
 | writing the two-robot isolation check the obvious way | it passed, and it proved nothing: neither robot had a route to the other's tunnel address, so the packet left down `eth0`, died on the docker bridge, and the timeout was read as isolation. This is [slice 4.5d](slice-4.5d-review.md)'s mistake, in a slice that had just recorded it | the check forces a route into the sending robot's tunnel and verifies it is there before believing any negative, and the script says in its own comments why. The positive controls — each robot reachable from the operator — run first, so a broken link cannot masquerade as a working rule |
+| the macOS cross-check, on its first run | `drop_route` was defined twice for macOS — the Linux one had no `#[cfg]`, so it compiled on Linux only because the macOS copy was cfg'd out. Exactly the class of error a second platform written blind produces, caught within a minute of the check existing | the missing `#[cfg]`, and the check runs in CI on every change. It type-checks `tun.rs` alone rather than the binary, because webrtc-rs pulls `ring`, whose build script wants the Apple SDK |
 | running the gate five times instead of once | the first green run would have closed [#28](../18-open-questions.md) on one sample. Repeated, the gate was green 1 time in 5 | the abort is fixed and measured A/B; the remaining flakiness is recorded as still open, with core-loop starvation ruled out by measurement rather than by argument |
 
 ## Reviewer findings
@@ -49,12 +50,15 @@ description: Retrospective review of fjarr-connect — the link the ICE design c
 | Core-loop health during two failing runs | the introspect endpoint, on that same loop, answered 261 of 261 polls, worst case 1.4 ms |
 | Two robots on one interface (`make tunnel-isolation`) | operator reaches both; neither reaches the other with the route forced into its tunnel and verified there |
 | A colliding pair (`make tunnel-collision`) | refused by name before either link is routed, with the `address` line that fixes it |
+| macOS platform code | type-checks for `aarch64-apple-darwin`; does not link, and has never run on macOS hardware (docs/04 says so in those words) |
 
 ## Remaining
 
-The slice's gate (docs/17) is met apart from macOS: the `utun` path and its
-cross-compile check. [#28](../18-open-questions.md)'s remaining half is not a gate
-item for this slice but is one for M4.5.
+The slice's gate (docs/17) is met, with macOS honest rather than claimed: the `utun`
+path is written and type-checked for `aarch64-apple-darwin` in CI, and
+[docs/04](../04-supported-platforms.md) records that nothing has run on macOS
+hardware. [#28](../18-open-questions.md)'s remaining half is not a gate item for this
+slice, but it is one for M4.5.
 
 ## Deferred
 

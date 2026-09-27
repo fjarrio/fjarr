@@ -76,6 +76,18 @@ present or missing.
 | Safari 17+ | Best-effort | test at M3; known WebRTC quirks; no Window Management API |
 | Mobile browsers | Not targeted for M≤6 | dashboard responsive layouts still apply |
 
+## Operator — `fjarr-connect` (the network tunnel)
+
+A native client, because a browser cannot create a network interface
+([docs/27](27-network-tunnel.md), [ADR-0024](adr/0024-native-operator-client.md)).
+
+| | Status | Notes |
+|---|---|---|
+| **Linux x86-64** | **Primary** | run in the lab against real robots every slice: interface, per-robot /32 routes, `ssh`, a hash-verified 1 GiB `scp`, `ros2 topic list`. Configures the interface over netlink in-process, so `setcap cap_net_admin+ep` is enough and no `iproute2` is needed |
+| Linux arm64 | Expected to work, unverified | same code paths, no arm64 runner yet |
+| **macOS (Apple silicon)** | **Written, type-checked, never run** | `utun` instead of `/dev/net/tun`, a 4-byte address-family header on every packet, `ifconfig`/`route` under `sudo` because macOS has no `setcap` equivalent. CI type-checks it for `aarch64-apple-darwin` on every change (`make connect-macos-check`); it does **not** link the binary — webrtc-rs pulls `ring`, whose build script needs the Apple SDK — and nothing has run on macOS hardware. Until it has, treat this row as an intention with a compiler behind it, not as support |
+| Windows | Not targeted | WSL2 is the free answer; native Wintun is [question #24](18-open-questions.md) |
+
 ## Network requirements
 
 | Path | Requirement |

@@ -314,6 +314,11 @@ tunnel-isolation: ## docs/15 safety class: two robots on one operator interface 
 	    --server $(OPSIM_SERVER) --dev $(TUN_DEV) --grant "$$grant_a" --grant "$$grant_b" \
 	    -- docker/lab/two-robot-isolation.sh
 
+.PHONY: connect-macos-check
+connect-macos-check: ## Type-check fjarr-connect's platform code for macOS, its committed second platform (ADR-0024)
+	@docker compose exec -T dev bash -lc 'rustup target list --installed | grep -q aarch64-apple-darwin || rustup target add aarch64-apple-darwin'
+	@docker compose exec -T dev bash docker/lab/macos-check.sh /workspace/signaling/crates/fjarr-connect/src
+
 .PHONY: tunnel-collision
 tunnel-collision: ## Two robots claiming one address: the operator must refuse the pair by name (docs/27#addressing)
 	$(MAKE) --no-print-directory tun-up

@@ -66,7 +66,18 @@ impl Tun {
         // SAFETY: `buf` is valid for `buf.len()` bytes, and the fd is owned by this struct.
         let n = unsafe { libc::read(self.fd.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len()) };
         if n >= 0 {
-            return Ok(Some(n as usize));
+            let n = n as usize;
+            #[cfg(target_os = "macos")]
+            {
+                // utun hands over a 4-byte address family first; the channel carries bare packets.
+                if n < AF_HEADER {
+                    return Ok(Some(0));
+                }
+                buf.copy_within(AF_HEADER..n, 0);
+                return Ok(Some(n - AF_HEADER));
+            }
+            #[cfg(not(target_os = "macos"))]
+            return Ok(Some(n));
         }
         let err = std::io::Error::last_os_error();
         match err.kind() {
@@ -79,6 +90,16 @@ impl Tun {
     /// full device queue), which the caller counts: a silent failure here looks exactly like a
     /// stalled transfer from the outside and nothing else records it.
     pub fn try_write(&self, packet: &[u8]) -> Result<bool> {
+        // utun expects the address family in front of every packet; Linux's IFF_NO_PI does not.
+        #[cfg(target_os = "macos")]
+        let framed = {
+            let mut framed = Vec::with_capacity(AF_HEADER + packet.len());
+            framed.extend_from_slice(&(libc::AF_INET as u32).to_be_bytes());
+            framed.extend_from_slice(packet);
+            framed
+        };
+        #[cfg(target_os = "macos")]
+        let packet = framed.as_slice();
         // SAFETY: `packet` is valid for `packet.len()` bytes, and the fd is owned by this struct.
         let n = unsafe { libc::write(self.fd.as_raw_fd(), packet.as_ptr().cast(), packet.len()) };
         if n > 0 {
@@ -344,12 +365,192 @@ async fn del_route(name: &str, robot: Ipv4Addr) -> Result<()> {
 
 /// Best-effort route removal for the teardown path, where a failure must not mask the reason the
 /// link ended.
+#[cfg(target_os = "linux")]
 pub async fn drop_route(name: &str, robot: Ipv4Addr) {
     if let Err(e) = del_route(name, robot).await {
         tracing::debug!(error = %e, %robot, "the route outlived the link");
     }
 }
 
+// ------------------------------------------------------------------- macOS --
+//
+// **Written against Apple's documented interfaces and cross-compiled, never run on macOS hardware**
+// (docs/04, docs/17 4.5e). Three things differ from Linux and each one is a place this could be
+// wrong on a real machine:
+//
+// 1. There is no `/dev/net/tun`. A utun interface is a `PF_SYSTEM` control socket, and its name is
+//    chosen by the kernel from the unit number — `utun3` is unit 4 — so `--dev utunN` selects a unit
+//    rather than naming a device, and unit 0 asks the kernel for the first free one.
+// 2. **Every read and write carries a 4-byte address-family header**, which Linux's `IFF_NO_PI`
+//    removes. The channel carries bare IP packets (docs/27#the-packet-path), so that header is
+//    stripped on the way out and prepended on the way in.
+// 3. There are no file capabilities, so there is no `setcap` equivalent: configuring an interface
+//    needs root, and under `sudo` a child process inherits it. `ifconfig` and `route` are therefore
+//    the honest mechanism here, unlike on Linux where using them would have broken the documented
+//    install.
+#[cfg(target_os = "macos")]
+const AF_HEADER: usize = 4;
+
+#[cfg(target_os = "macos")]
+fn attach(name: &str) -> Result<Tun> {
+    let unit = utun_unit(name)?;
+    let fd = open_utun(unit)?;
+    set_nonblocking(fd.as_raw_fd())?;
+    Ok(Tun {
+        fd: AsyncFd::new(fd)?,
+        name: format!("utun{}", unit - 1),
+    })
+}
+
+/// `utun3` is unit 4; `utun` on its own means "whichever is free".
+#[cfg(target_os = "macos")]
+fn utun_unit(name: &str) -> Result<u32> {
+    let digits = name.trim_start_matches("utun");
+    if !name.starts_with("utun") {
+        bail!("on macOS the interface has to be a utun, not {name:?} — pass --dev utun9 or --dev utun");
+    }
+    if digits.is_empty() {
+        return Ok(0);
+    }
+    let n: u32 = digits
+        .parse()
+        .map_err(|_| anyhow!("{name:?} is not a utun number"))?;
+    Ok(n + 1)
+}
+
+#[cfg(target_os = "macos")]
+fn open_utun(unit: u32) -> Result<OwnedFd> {
+    const UTUN_CONTROL_NAME: &[u8] = b"com.apple.net.utun_control\0";
+    const CTLIOCGINFO: libc::c_ulong = 0xc064_4e03;
+
+    #[repr(C)]
+    struct CtlInfo {
+        id: u32,
+        name: [u8; 96],
+    }
+
+    // SAFETY: a plain socket call; the constants are Apple's documented values.
+    let raw = unsafe { libc::socket(libc::PF_SYSTEM, libc::SOCK_DGRAM, libc::SYSPROTO_CONTROL) };
+    if raw < 0 {
+        return Err(std::io::Error::last_os_error()).context("opening a PF_SYSTEM control socket");
+    }
+    // SAFETY: `raw` is a fresh, owned descriptor.
+    let fd = unsafe { OwnedFd::from_raw_fd(raw) };
+
+    let mut info = CtlInfo {
+        id: 0,
+        name: [0; 96],
+    };
+    info.name[..UTUN_CONTROL_NAME.len()].copy_from_slice(UTUN_CONTROL_NAME);
+    // SAFETY: `info` is the shape CTLIOCGINFO expects, with a nul-terminated name.
+    if unsafe { libc::ioctl(fd.as_raw_fd(), CTLIOCGINFO, &mut info) } < 0 {
+        return Err(std::io::Error::last_os_error()).context("resolving the utun control id");
+    }
+
+    let addr = libc::sockaddr_ctl {
+        sc_len: std::mem::size_of::<libc::sockaddr_ctl>() as u8,
+        sc_family: libc::AF_SYSTEM as u8,
+        ss_sysaddr: libc::AF_SYS_CONTROL as u16,
+        sc_id: info.id,
+        sc_unit: unit,
+        sc_reserved: [0; 5],
+    };
+    // SAFETY: a correctly sized sockaddr_ctl for a PF_SYSTEM socket.
+    if unsafe {
+        libc::connect(
+            fd.as_raw_fd(),
+            &addr as *const libc::sockaddr_ctl as *const libc::sockaddr,
+            std::mem::size_of::<libc::sockaddr_ctl>() as libc::socklen_t,
+        )
+    } < 0
+    {
+        let err = std::io::Error::last_os_error();
+        return Err(err).context(
+            "attaching to the utun unit (creating one needs root: run under sudo — macOS has no \
+             setcap equivalent)",
+        );
+    }
+    Ok(fd)
+}
+
+/// Run a configuration command. Shelling out is correct on macOS and only on macOS: there are no file
+/// capabilities to fail to inherit, so a process that can configure an interface at all is root, and
+/// its children are too.
+#[cfg(target_os = "macos")]
+fn run(program: &str, args: &[&str]) -> Result<()> {
+    let out = std::process::Command::new(program)
+        .args(args)
+        .output()
+        .with_context(|| format!("running `{program} {}`", args.join(" ")))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        bail!("`{program} {}` failed: {stderr}", args.join(" "));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+async fn ensure_device(name: &str, address: Ipv4Addr, mtu: usize) -> Result<Provenance> {
+    // A utun exists only while something holds its socket, so there is no persistent device to find
+    // and no unprivileged attach to a device someone else made: the process that attaches is the
+    // process that creates. `Created` is the only honest answer here.
+    let unit = utun_unit(name)?;
+    let fd = open_utun(unit)?;
+    let dev = format!("utun{}", unit.saturating_sub(1));
+    // A point-to-point address whose peer is this machine: the same shape `tundev.sh` gives the lab's
+    // Linux interface, and what the /32 routes below hang off.
+    run(
+        "ifconfig",
+        &[
+            &dev,
+            "inet",
+            &address.to_string(),
+            &address.to_string(),
+            "netmask",
+            "255.255.255.255",
+            "mtu",
+            &mtu.to_string(),
+            "up",
+        ],
+    )?;
+    // Held open until the pump attaches its own: dropping it now would take the interface with it.
+    std::mem::forget(fd);
+    Ok(Provenance::Created)
+}
+
+#[cfg(target_os = "macos")]
+async fn add_route(name: &str, robot: Ipv4Addr) -> Result<()> {
+    run(
+        "route",
+        &["-n", "add", "-host", &robot.to_string(), "-interface", name],
+    )
+}
+
+#[cfg(target_os = "macos")]
+async fn del_route(name: &str, robot: Ipv4Addr) -> Result<()> {
+    run(
+        "route",
+        &[
+            "-n",
+            "delete",
+            "-host",
+            &robot.to_string(),
+            "-interface",
+            name,
+        ],
+    )
+}
+
+#[cfg(target_os = "macos")]
+pub async fn drop_route(name: &str, robot: Ipv4Addr) {
+    if let Err(e) = del_route(name, robot).await {
+        tracing::debug!(error = %e, %robot, "the route outlived the link");
+    }
+}
+
+/// Only the Linux privilege hint needs this: macOS has no `setcap` equivalent, so its advice is
+/// "run under sudo" and does not depend on who you are.
+#[cfg(target_os = "linux")]
 fn current_user() -> String {
     // SAFETY: getuid cannot fail.
     let uid = unsafe { libc::getuid() };

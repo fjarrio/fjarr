@@ -26,4 +26,8 @@ bytes = "1"
 # The TUN ioctl and the two unbuffered device reads/writes; no wrapper crate for three calls.
 libc = "0.2"
 async-trait = "0.1"
+
+# Linux's network configuration is netlink; macOS's is ioctls and a PF_ROUTE socket, so neither
+# platform links the other's mechanism.
+[target.'cfg(target_os = "linux")'.dependencies]
 rtnetlink = "0.23.0"

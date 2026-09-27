@@ -188,6 +188,12 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      # macOS is fjarr-connect's committed second platform (ADR-0024) and there is no macOS runner,
+      # so the platform code is type-checked for it here. This does not link the binary — webrtc-rs
+      # pulls `ring`, whose build script needs the Apple SDK — and nothing runs on macOS hardware
+      # (docs/04).
+      - run: rustup target add aarch64-apple-darwin
+      - run: bash ../docker/lab/macos-check.sh crates/fjarr-connect/src
 
   cpp:
     name: Agent + demo-robot build (Ubuntu 26.04 / GStreamer 1.28)

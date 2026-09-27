@@ -500,8 +500,22 @@ written down). Two slices, and the letters after them shift:
   aborting inside glibc's allocator in every saturating transfer** because the packet
   pump's fd-watch callback fell off the end of a `-> bool` function — one cause of
   [#28](18-open-questions.md), fixed, measured A/B, and now a build error rather than
-  a warning nobody read. Still to do for the gate: the two-robot isolation
-  regression, collision detection, macOS, and a `--release` throughput number.
+  a warning nobody read.
+
+  **Gate met 2026-09-27**, with macOS honest rather than claimed. `make
+  tunnel-isolation` is the docs/15 safety-class regression: two robots on one
+  interface, each reachable from the operator, neither reachable from the other with
+  a route forced into its tunnel and verified there — written the obvious way it had
+  passed while measuring the lab's own bridge, which is slice 4.5d's mistake
+  repeated. `make tunnel-collision` pins the second robot to the first's address and
+  the operator refuses the pair by name. The client moves 1 GiB at 246-253 Mbps
+  against opsim's 264. Two more spec promises turned out to be unkeepable and were
+  fixed rather than reworded: `setcap` could never have worked while the client
+  shelled out to `ip` (a file capability is not inherited by a child), so the
+  interface, its address and its routes are now set over netlink in-process; and
+  "several robots at once" needed `--grant` per robot, since a grant names one robot.
+  macOS is written, type-checked for `aarch64-apple-darwin` in CI, and recorded in
+  [docs/04](04-supported-platforms.md) as never having run on macOS hardware.
 - **4.5f — discovery and login.** Without this the CLI is a debugging tool
   rather than a product: the optional
   [operator API](09-interfaces.md#operator-api) on the customer's backend, the
