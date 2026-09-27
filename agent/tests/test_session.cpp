@@ -85,7 +85,7 @@ struct Harness {
     void attach() {
         loop.call_sync([&] {
             session = std::make_shared<Session>(deps, "01a0test-0000-7000-8000-000000000001", OperatorInfo{"a", "A"},
-                                                std::vector<protocol::CapabilityGrant>{{"com.test.input", {}}}, std::nullopt, true);
+                                                std::vector<protocol::CapabilityGrant>{{"com.test.input", {}}}, std::nullopt);
             session->attach({AttachedCapability{&cap, cap.manifest(), nlohmann::json::object()}});
         });
     }

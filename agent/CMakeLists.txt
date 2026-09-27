@@ -39,6 +39,7 @@ add_library(fjarr STATIC
   src/core/blob_pump.cpp
   src/core/session.cpp
   src/core/session_manager.cpp
+  src/core/control_domains.cpp
   src/media/frame_stamp.cpp
   src/media/sources.cpp
   src/media/frame_hub.cpp

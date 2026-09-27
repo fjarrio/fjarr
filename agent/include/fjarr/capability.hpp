@@ -84,9 +84,16 @@ struct CapabilityManifest {
     ConsumerKinds consumers;
     /// Names of capabilities this one requires (F4).
     std::vector<std::string> dependencies;
-    /// Takes the docs/10 ownership lease; release_all_input() is called on
-    /// every detach path, first. spec: docs/15-testing-strategy.md#safety-behaviors
+    /// release_all_input() is called on every detach path, first.
+    /// spec: docs/15-testing-strategy.md#safety-behaviors
     bool input_bearing = false;
+    /// docs/10 control domain: "desktop" | "motion" | "" (never exclusive: terminal, net, files).
+    /// One holder per domain, claimed on the first input; a non-holder's input is refused.
+    /// spec: docs/10-security.md#session-ownership
+    std::string control_domain;
+    /// The message types that are input in `control_domain` (they claim it and are gated by
+    /// it); empty = every message, binary included.
+    std::vector<std::string> control_inputs;
 };
 
 /// One control/realtime/backend message addressed to a capability's namespace.

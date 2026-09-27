@@ -19,6 +19,8 @@ add_executable(fjarr-tests
   test_passthrough.cpp
   test_introspect_capability.cpp
   test_session.cpp
+  test_control_domains.cpp
+  test_control.cpp
   test_loop_media.cpp
   test_introspect.cpp
   test_sources.cpp

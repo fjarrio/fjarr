@@ -38,6 +38,8 @@ struct AttachedCapability {
     nlohmann::json params;
 };
 
+class Session;
+
 struct SessionDeps {
     CoreLoop* loop = nullptr;
     media::MediaPlane* plane = nullptr;
@@ -48,16 +50,22 @@ struct SessionDeps {
     std::function<void(GstBin*, const std::string& trigger)> snapshot;
     /// Called once the session is closed and may be forgotten.
     std::function<void(const SessionId&)> on_closed;
-    /// Lease refresh (docs/10): pings from an input-owning session.
+    /// Heartbeat (docs/10): every ping keeps its operator's control claims alive.
     std::function<void(const SessionId&)> on_ping;
+    /// docs/10 control domains, answered by the SessionManager. `control_input`: this session sends
+    /// input in `domain` — claims it when free; returns the control-held error.data when someone
+    /// else holds it. `control_request`: take-control / release-control; returns an error code
+    /// and message, or nullopt for ok. `control_state`: this session's control-state payload.
+    std::function<std::optional<nlohmann::json>(Session&, const std::string& domain)> control_input;
+    std::function<std::optional<std::pair<std::string, std::string>>(Session&, const std::string& type, const std::string& domain)>
+        control_request;
+    std::function<nlohmann::json(const Session&)> control_state;
     /// Test hooks enabled (fjarr.test silence).
     bool test_hooks = false;
     /// Is this capability registered on the agent at all? A registered-but-ungranted capability is
     /// answered `capability-denied`, an unknown one `capability-unknown` (docs/08#envelope).
     std::function<bool(const std::string&)> known_capability;
 };
-
-class Session;
 
 /// The per-(session, capability) handle.
 class SessionContextImpl final : public SessionContext {
@@ -78,6 +86,7 @@ class SessionContextImpl final : public SessionContext {
     void feedback(const Envelope& request, nlohmann::json payload) override;
     void result(const Envelope& request, nlohmann::json payload) override;
     void fail(const Envelope& request, std::string_view code, std::string_view message) override;
+    void fail(const Envelope& request, std::string_view code, std::string_view message, nlohmann::json data) override;
     void event(std::string_view type, nlohmann::json payload) override;
     blob::BlobRef send_blob(std::string bytes, std::string media_type, std::function<void(bool ok)> done) override;
     void cancel_blob(std::string_view blob_id) override;
@@ -102,7 +111,7 @@ class Session : public std::enable_shared_from_this<Session> {
     static const char* state_name(State s);
 
     Session(SessionDeps deps, SessionId id, OperatorInfo op, std::vector<protocol::CapabilityGrant> grants,
-            std::optional<protocol::TurnCredentials> turn, bool input_owner);
+            std::optional<protocol::TurnCredentials> turn);
     ~Session();
 
     const SessionId& id() const { return id_; }
@@ -110,9 +119,18 @@ class Session : public std::enable_shared_from_this<Session> {
     State state() const { return state_; }
     Generation generation() const { return generation_; }
     const OperatorInfo& operator_info() const { return operator_; }
-    bool input_owner() const { return input_owner_; }
-    void set_input_owner(bool v) { input_owner_ = v; }
+    /// docs/10: the control domains this session's attached capabilities are in.
+    std::set<std::string> domains() const;
+    /// May this session claim `domain`: a capability in it whose grant is not `view_only`.
+    bool can_claim(const std::string& domain) const;
+    /// Safety (docs/15): release_all_input on every capability in `domain` — the previous holder's
+    /// half of a takeover, a release or a stale claim.
+    void release_domain_input(const std::string& domain);
+    /// Send `control-state` now (a no-op until fjarr:control is open).
+    void send_control_state();
     std::chrono::steady_clock::time_point attached_at() const { return attached_at_; }
+    /// Closing to be retried (media or ICE restart): the operator will be back (docs/23).
+    bool closing_retry() const { return closing_retry_; }
 
     /// requested → building → offered. `caps` are the granted, enabled capabilities.
     void attach(std::vector<AttachedCapability> caps);
@@ -152,6 +170,7 @@ class Session : public std::enable_shared_from_this<Session> {
     struct Deadman;
 
   private:
+    friend struct SessionTestAccess; // tests route envelopes and read replies without a peer
     struct ControlSender;
     struct RealtimeSender;
     struct BulkSender;
@@ -190,7 +209,11 @@ class Session : public std::enable_shared_from_this<Session> {
     void unsubscribe_all();
     AttachedCapability* attached(std::string_view cap);
     void reply(const Envelope& request, nlohmann::json payload);
-    void reply_error(const Envelope& request, std::string_view code, std::string_view message);
+    void reply_error(const Envelope& request, std::string_view code, std::string_view message,
+                     nlohmann::json data = nullptr);
+    /// docs/10: is this message input in its capability's control domain, and may it pass?
+    bool control_gate(const AttachedCapability& cap, const Envelope* env);
+    bool view_only(const AttachedCapability& cap) const;
 
     SessionDeps deps_;
     SessionId id_;
@@ -198,7 +221,6 @@ class Session : public std::enable_shared_from_this<Session> {
     OperatorInfo operator_;
     std::vector<protocol::CapabilityGrant> grants_;
     std::optional<protocol::TurnCredentials> turn_;
-    bool input_owner_;
     State state_ = State::Requested;
     Generation generation_ = 1;
     std::chrono::steady_clock::time_point attached_at_{};
@@ -237,6 +259,7 @@ class Session : public std::enable_shared_from_this<Session> {
     std::vector<std::weak_ptr<Deadman>> deadmans_;
     unsigned long dropped_envelopes_ = 0;
     unsigned long dropped_binary_ = 0;
+    unsigned long dropped_control_ = 0; // input refused by a control domain (docs/10)
     nlohmann::json last_stats_ = nlohmann::json::object();
     bool closed_sent_ = false;
 };

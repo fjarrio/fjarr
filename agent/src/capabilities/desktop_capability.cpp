@@ -32,7 +32,11 @@ CapabilityManifest DesktopCapability::manifest() const {
     m.version = {0, 1, 0};
     m.channels = {{ChannelClass::Control}, {ChannelClass::Realtime}};
     m.consumers.peer = true;
-    m.input_bearing = true; // docs/10: pointer and keyboard take the ownership lease
+    m.input_bearing = true;
+    m.control_domain = "desktop"; // docs/10: one pointer, one keyboard — one holder at a time
+    // docs/08#input-events-fjarrdesktop. Not `release-all`: a viewer's window losing focus sends
+    // it, and that must never claim a free desktop.
+    m.control_inputs = {"pointer", "button", "wheel", "key", "key-combo", "text"};
     m.config_schema = nlohmann::json{
         {"type", "object"},
         {"additionalProperties", false},
