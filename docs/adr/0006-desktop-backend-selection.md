@@ -190,7 +190,8 @@ same length, in % of one core.
 | Session ends | LightDM shows its greeter (after a 90 s SIGKILL, because Openbox ignores SIGTERM); still reachable as root | as A | GDM shows its greeter; unreachable until `systemctl restart gdm`, which auto-logs in again in <10 s | as C | as C |
 | Spike size (non-comment lines) | 30 | 30 + 11 helper | 73 | 29 + 11 helper | 74 |
 | Future-proofing | Xorg in maintenance; GNOME has no X11 session | as A | the cross-desktop standard, but the unattended grant is GNOME's private format | as C | GNOME-private interface; gnome-remote-desktop depends on it |
-| Multi-monitor, hot-plug | **not measured**: one monitor, and forcing the connector through sysfs reaches neither mutter nor Xorg | | | | |
+| Multi-monitor (3 × 1920×1080, DP MST) | not measured (one global root; RandR gives the offsets) | as A | **correct**, including 200% scale (below) | as C | **correct**, including 200% scale (below) |
+| Hot-plug | not measured | as A | follows the monitor's identity across a replug | as C | a stream silently dies with its monitor (below) |
 
 Every latency difference is under the decision rule's 20 ms p50 noise line. X11
 paint→capture is lower because nothing composites; input→photon, the number an
@@ -233,5 +234,45 @@ What surprised us:
   no privileged helper. B's uinput gains nothing over XTest here.
 - **D is dropped.** It pairs portal consent with a root helper and gains nothing
   in return.
-- Before this ADR is accepted, multi-monitor and hot-plug still need a second
-  physical monitor and a cable pull. Neither can be simulated on this machine.
+- E's backend must own hot-plug: watch `MonitorsChanged`, rebuild streams
+  whose monitor went away, and key them by monitor identity, never by
+  connector name.
+
+## Findings — multi-monitor and hot-plug (2026-09-27)
+
+Three Dell U2422H monitors on one DisplayPort MST chain, side by side at
+1920×1080. The user pulled and replugged the cables. Forcing a connector
+through sysfs, tried first, reaches neither mutter nor Xorg, so hot-plug cannot
+be simulated on this hardware.
+
+- **Pointer mapping is correct on a non-primary monitor, and at mixed DPI.**
+  With the oracle on the rightmost monitor (x = 3840), E, targeting that
+  monitor's connector, and C, targeting the monitor its grant names, clicked at a
+  point in that monitor's stream coordinates. The oracle logged exactly that
+  point. At 200% scale the stream stays in physical pixels (1920×1080), and the
+  same clicks arrived at half those coordinates in the window's logical space,
+  which is the same physical pixel. Stream-relative coordinates need no
+  translation by the agent.
+- **Removing another monitor does not disturb a stream.** An E stream on the
+  primary dipped for one second at each of the unplug and the replug of the last
+  monitor in the chain, then carried on. Mutter announced each change with a
+  burst of `MonitorsChanged` (six at the unplug, two at the replug).
+- **A stream that loses its own monitor dies silently.** When every monitor was
+  unplugged, the E stream dropped to 0 fps. After the replug it stayed at
+  0 fps while the pointer moved over its monitor, and mutter sent no `Closed` on
+  the stream or the session. A new session on the same monitor delivered 29–36
+  fps at once.
+- **Connector names are not stable; monitor identity is.** After one replug of
+  the chain, DP-4, DP-6 and DP-8 came back as DP-5, DP-9 and DP-11. GNOME also
+  rebuilt the layout in a different order, with a different primary, instead of
+  restoring the old arrangement. C's grant, keyed to vendor, model and serial,
+  kept capturing the same physical monitor wherever it moved. E, asked for "the
+  primary" or a connector name, captured whatever now held that name.
+- **GNOME Shell 50.1 crashed once in four unplugs of every monitor.** It
+  crashed with SIGSEGV 3 s after KMS page-flip failures, and the auto-login
+  session ended. The machine went to the GDM login screen, and
+  `systemctl restart gdm` recovered it. Capture was running in one of the two
+  runs with a live stream and in neither of the other two, so the crash is not
+  attributable to capture. The crash report is kept on the spike machine
+  (`/var/crash/_usr_bin_gnome-shell.1001.crash`). This is the second reason, after
+  a session that simply ends, for the GDM watchdog.
