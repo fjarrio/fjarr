@@ -122,7 +122,7 @@ written API-fit review for the remaining capabilities.
 
 ## M2 — Desktop backend spikes + `fjarr.terminal`
 
-The four spikes per [docs/07](07-desktop-backends.md) close ADR-0006 with
+The five spikes per [docs/07](07-desktop-backends.md) close ADR-0006 with
 measurements — unattended access is the hard gate; cursor metadata,
 desktop-audio capture and monitor hot-plug events are measured per
 backend for M3. The winning backends are built as the runtime modules of
@@ -168,6 +168,15 @@ independent, so they land in this order for the reason each gives):
   written and startable; it waits on a host, not on a decision. **2c runs
   first instead**, which changes nothing about it: the loader is
   backend-agnostic, so it does not depend on which combination wins.
+- **2b ✔** (2026-09-27) **on a dedicated spike machine**: a Ryzen mini-PC on
+  Ubuntu 26.04.1, which also answered the Intel/NVIDIA caveat because it runs
+  Mesa. Stock 26.04 turned out to have no X11 session, which added a fifth
+  candidate, E (mutter's own interfaces). Phase 1 passed every combination for
+  the appliance case in its own session type; none reaches GNOME's login
+  screen. Phase 2 measured latency, cost, cursor, audio, failure modes, three
+  monitors, cable hot-plug and headless robots. *Gate met:* ADR-0006 accepted
+  with numbers. E for stock Ubuntu, C second, A for X11 kiosks, and a forced
+  connector for robots without a display.
 - **2c ✔** (2026-09-25) **the module loader.** A backend loads at runtime
   from a separate package
   ([ADR-0021](adr/0021-desktop-backends-as-runtime-modules.md)) and the

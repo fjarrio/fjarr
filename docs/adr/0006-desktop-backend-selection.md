@@ -2,7 +2,7 @@
 title: "ADR 0006: Desktop backend selection"
 ---
 
-- **Status**: **proposed** — closed by the M2 spikes
+- **Status**: **accepted** (2026-09-27, after the M2 spikes; findings below)
 - **Date**: 2026-09-15
 
 ## Context
@@ -28,13 +28,44 @@ spike protocol, and the decision rule
 
 ## Decision
 
-Deferred to evidence. The `DesktopBackend` interface (docs/09) is designed
-Wayland-first so whichever combo wins is swappable per deployment.
+Decided on the spike machine's measurements (findings below):
+
+- **Stock Ubuntu (GNOME on Wayland): E**, mutter's own `ScreenCast` and
+  `RemoteDesktop` D-Bus interfaces. It is the first backend in
+  `fjarr-desktop-wayland`. It is unattended with nothing written and no root.
+  It ships with a watchdog that restarts GDM when no user session holds the
+  seat, and it owns hot-plug: it rebuilds streams on `MonitorsChanged`, keys
+  them by monitor identity, and never waits for a first frame.
+- **C, the portal**, is the second backend in the same package: for non-GNOME
+  compositors, and as E's fallback on GNOME. Unattended use needs a grant
+  written at provisioning that names the real monitor.
+- **X11 kiosks: A**, `ximagesrc` and XTest, in `fjarr-desktop-x11`. The kiosk
+  ships its own output layout and a RandR listener that re-runs it.
+- **D is dropped**, and B is not built: uinput adds a privileged helper for
+  nothing XTest or E lacks.
+- **Robots without a display** get a connector forced on from the kernel
+  command line, with an EDID the installer supplies. E's virtual monitors are
+  the zero-provisioning alternative on GNOME.
+- **Nothing reaches GNOME's login screen.** Unattended on stock Ubuntu means an
+  appliance auto-login session.
+
+The `DesktopBackend` interface (docs/09) stays Wayland-first. Stream-relative
+coordinates were correct on every monitor and at mixed scale, so the interface
+needs no global-coordinate concept.
 
 ## Consequences
 
-M2 carries four small throwaway spikes; this ADR gains a findings appendix
-per spike and flips to accepted with the data attached.
+- M3 builds E first, then C, then A, as runtime modules (ADR-0021).
+- The installer (docs/26) gains the appliance pieces: the auto-login account,
+  the GDM watchdog, the forced connector for headless robots, and C's grant
+  when C is chosen.
+- docs/10 records that on GNOME the session user's account is the security
+  boundary. Anything running as that user can capture and drive the screen,
+  through E directly or by writing itself a portal grant.
+- `fjarr-inputd` (ADR-0009) is not needed by any chosen backend. It stays
+  designed and unbuilt until a backend needs uinput.
+- Mutter's interfaces and GNOME's grant format are private. A GNOME upgrade is a
+  re-run of the phase 1 probes before it reaches robots.
 
 ## Findings — phase 1, step 1: GNOME on Wayland under GDM (2026-09-27)
 
@@ -218,7 +249,7 @@ What surprised us:
   to any other account, so an agent outside the session needs the `render`
   group.
 
-## Recommendation (for acceptance)
+## Recommendation (as proposed, accepted as the decision above)
 
 - **Stock Ubuntu (GNOME Wayland): E**, as the backend `fjarr-desktop-wayland`
   ships first. It is the only candidate that is unattended with nothing written

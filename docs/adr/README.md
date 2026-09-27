@@ -27,7 +27,7 @@ options weighed, the choice, and its consequences — so future maintainers
 | [0003](0003-polyglot-monorepo.md) | Polyglot monorepo | accepted |
 | [0004](0004-rust-signaling.md) | Rust for the signaling server | accepted |
 | [0005](0005-web-library-split.md) | TS core + React bindings + demo split | accepted |
-| [0006](0006-desktop-backend-selection.md) | Desktop backend selection | proposed (M2 spikes) |
+| [0006](0006-desktop-backend-selection.md) | Desktop backend selection | accepted |
 | [0007](0007-webrtcbin-vs-webrtcsink.md) | webrtcbin+FrameHub vs webrtcsink | proposed (M1 spike) |
 | [0008](0008-datachannel-topology.md) | DataChannel topology & reliability classes | accepted |
 | [0009](0009-privilege-separation.md) | Privilege separation on the robot | proposed |

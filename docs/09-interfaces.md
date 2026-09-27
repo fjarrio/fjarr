@@ -180,9 +180,12 @@ public:
 } // namespace fjarr
 ```
 
-Implementations: `X11DesktopBackend` (XTest), `WaylandDesktopBackend`
-(portals/libei), `UinputInjector` (composable injection override) — chosen by
-config after [ADR-0006](adr/0006-desktop-backend-selection.md).
+Implementations, per [ADR-0006](adr/0006-desktop-backend-selection.md):
+`MutterDesktopBackend` (GNOME: mutter's ScreenCast and RemoteDesktop),
+`PortalDesktopBackend` (the ScreenCast/RemoteDesktop portals with libei), and
+`X11DesktopBackend` (`ximagesrc` and XTest). They are chosen by config and by
+what the running session offers. `UinputInjector` stays a designed override
+that no chosen backend needs.
 
 ### The video source contract {#the-video-source-contract}
 

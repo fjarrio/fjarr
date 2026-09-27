@@ -153,6 +153,14 @@ M2 spikes verify this works on Xvfb and it becomes the docs/15 hot-plug
 test fixture; the Wayland equivalent (a headless compositor with
 configurable outputs) is a spike question in its own right.
 
+## Decision (2026-09-27)
+
+[ADR-0006](adr/0006-desktop-backend-selection.md) is accepted on the spikes'
+measurements. **E** is the backend for stock Ubuntu, **C** is second (for
+non-GNOME compositors and as E's fallback), and **A** is for X11 kiosks. D is
+dropped and B is not built. Headless robots get a forced connector. The
+hypotheses below are kept as they were written.
+
 ## Working hypotheses (to be falsified, not trusted)
 
 - ~~A (X11+XTest) will win the MVP on simplicity and unattended behavior.~~

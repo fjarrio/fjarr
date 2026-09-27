@@ -93,6 +93,16 @@ fjarr-agent            unprivileged user "fjarr"
 The privileged surface is auditable in one sitting (< 500 lines target). It
 validates ranges, rate-limits, and refuses when no session claim exists.
 
+**On GNOME, the session user's account is the boundary**
+([ADR-0006](adr/0006-desktop-backend-selection.md)). Mutter's `RemoteDesktop`
+and `ScreenCast` interfaces ask for no consent from a process on the session
+bus. The portal's consent is a record in the user's permission store, which the
+same user can write. So anything running as the auto-login user can watch and
+drive the screen. The desktop backend therefore runs as that user and nothing
+else does. The auto-login account runs no other network-facing software. The
+installer creates it without a password (auto-login needs none) and without
+remote login. None of the chosen backends needs `fjarr-inputd`.
+
 ## Network tunnel ([docs/27](27-network-tunnel.md)) {#network-tunnel}
 
 `fjarr.net` gives an operator a routable address for one robot. **Granting

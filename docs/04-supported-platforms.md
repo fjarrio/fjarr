@@ -46,8 +46,9 @@ Both X11 and Wayland are evaluated head-to-head before committing
 | Capture | `ximagesrc` (+XDamage/XFixes) | PipeWire + ScreenCast portal |
 | Input | XTest | libei / RemoteDesktop portal |
 | Input (below compositor) | uinput | uinput |
-| Unattended after reboot | straightforward in the session; unreachable at GDM's login screen, which is Wayland | portal permission model is the hard part; mutter's own interfaces may avoid it (docs/07, candidate E) |
+| Unattended after reboot | in an auto-login kiosk session (the kiosk lays out its own outputs); reachable at LightDM's X11 login screen as root, never at GDM's | in an auto-login session via mutter's interfaces (E) with no consent step, or the portal (C) with a grant written at provisioning; GNOME's login screen is unreachable (ADR-0006) |
 | Ubuntu 26.04 stock | **not available** — GNOME 50 is Wayland-only; X11 only via a kiosk (Xorg + a small window manager) or a non-GNOME desktop the robot chooses | the default and only GNOME session |
+| No display attached | a forced connector (kernel `video=…e` plus an installer-supplied EDID) or a dummy plug | the same forced connector; or, for E only, a mutter virtual monitor created per session |
 
 ## Robot — optional platform packages
 
