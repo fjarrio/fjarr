@@ -12,10 +12,17 @@ Wayland portals/PipeWire) and three injection paths (XTest, libei, uinput).
 Unattended access after reboot is the make-or-break industrial requirement,
 and the honest answer for Wayland portals is unknown until tested.
 
+**Revised 2026-09-27**, on the spike machine: stock Ubuntu 26.04 ships GNOME 50,
+which has **no X11 session**. X11 exists only in a kiosk or non-GNOME desktop a
+robot chooses to run, and under GDM the login screen is always Wayland. GNOME's
+own remote desktop reaches sessions through mutter's D-Bus interfaces without the
+portal, which adds a fifth option.
+
 ## Options considered
 
-Four combos (A: X11+XTest, B: X11+uinput, C: portals+libei, D:
-portals+uinput) — criteria, spike protocol, and the decision rule
+Five combos (A: X11+XTest, B: X11+uinput, C: portals+libei, D:
+portals+uinput, E: mutter's own ScreenCast/RemoteDesktop interfaces) — criteria,
+spike protocol, and the decision rule
 (unattended access is a hard gate; then lowest operational complexity;
 <20 ms p50 latency differences are noise) are specified in docs/07.
 

@@ -1,13 +1,22 @@
 ---
 title: Desktop Backends
-description: The four-way X11/Wayland × XTest-libei/uinput evaluation that closes ADR-0006.
+description: The X11/Wayland × injection evaluation that closes ADR-0006 — including the finding that stock Ubuntu 26.04 has no X11 session at all.
 ---
 
 The remote desktop capability needs a **capture** path and an **injection**
-path on Ubuntu 26.04. We do not pre-commit: four combinations are spiked and
+path on Ubuntu 26.04. We do not pre-commit: five combinations are spiked and
 measured in M2, closing [ADR-0006](adr/0006-desktop-backend-selection.md)
-with data. All four hide behind the same `DesktopBackend` interface
+with data. All five hide behind the same `DesktopBackend` interface
 ([docs/09](09-interfaces.md)) so the choice is swappable per deployment.
+
+**Stock Ubuntu 26.04 has no X11 session.** Its desktop is GNOME 50, which is
+Wayland-only: there is no GNOME-on-Xorg session to choose, and the package that
+provided one does not exist in 26.04 (checked on the spike machine, 2026-09-27).
+GDM itself can still launch an Xorg session for *another* desktop
+(`gdm-x-session` ships), and Xorg, its drivers, Openbox, Xfce and LightDM are all
+in the archive. So X11 is a real robot configuration — a kiosk (Xorg plus a
+small window manager, common on industrial machines) or a non-GNOME desktop —
+but it is never the default, and a robot on stock Ubuntu is on Wayland.
 
 ## The candidates
 
@@ -17,6 +26,7 @@ with data. All four hide behind the same `DesktopBackend` interface
 | B | X11 `ximagesrc` | uinput virtual devices | Injection below the display server |
 | C | Wayland: ScreenCast portal → PipeWire (`pipewiresrc`, DMA-BUF) | libei via RemoteDesktop portal | The blessed modern path |
 | D | Wayland: ScreenCast portal → PipeWire | uinput | Portal capture, kernel-level input |
+| E | Wayland: mutter's own `org.gnome.Mutter.ScreenCast` → PipeWire | mutter's `org.gnome.Mutter.RemoteDesktop` (libei) | GNOME's compositor interfaces, **without the portal** — what gnome-remote-desktop uses. GNOME-only, and not a promised-stable API |
 
 Notes:
 
@@ -30,6 +40,14 @@ Notes:
   user dialog; persistent sessions/restore tokens exist but are designed
   around an interactive user. Unattended access after reboot is the make-or-
   break question for C/D.
+- E exists because GNOME already solved unattended access for itself:
+  gnome-remote-desktop (installed on stock 26.04, disabled by default) reaches
+  a session through mutter's D-Bus interfaces directly, and in its system mode
+  creates a headless session from the login screen via GDM's remote-display
+  interface. That is prior art and a candidate mechanism at once. The price is
+  a GNOME-only backend on an interface GNOME may change between releases.
+- A and B run in an **X11 kiosk session**, not GNOME: Openbox under GDM, and
+  Xfce under LightDM (below).
 
 Whichever combinations win ship as **runtime modules in separate
 packages** (`fjarr-desktop-x11`, `fjarr-desktop-wayland`, plus the
@@ -42,8 +60,8 @@ install when none matches the running display server.
 
 | Criterion | How measured |
 |---|---|
-| Unattended access after reboot | robot-sim (and one real NUC) rebooted, no local interaction; can a session start? |
-| Login screen (GDM) reachability | can we see/control before any login? |
+| Unattended access after reboot | the spike machine rebooted, no local interaction; can a session start? |
+| Login screen reachability | can we see/control before any login? Under GDM the login screen is always Wayland, so for X11 this is only answerable under LightDM |
 | Glass-to-glass latency | frame-stamp harness ([docs/15](15-testing-strategy.md)), p50/p95 |
 | Input-to-photon latency | click → pixel change, p50/p95 |
 | Multi-monitor correctness | absolute pointer lands on the right monitor at the right pixel, mixed-DPI |
@@ -66,21 +84,16 @@ in be captured and driven at all? Phase 2 fills the criteria table, and only
 for what survived. If all four survive, phase 1 cost one round trip and we
 are no worse off.
 
-**Where.** The `gpu-desktop` self-hosted runner (decided 2026-09-25): a real
-machine running Xorg and GNOME that reboots under its owner's control, which
-is what the gate needs and what no container can give. Xvfb in `robot-sim`
-still carries everything that does not depend on a real session — latency,
-multi-monitor geometry, hot-plug via RandR virtual monitors. The Wayland
-combinations need a Wayland session on that machine alongside the Xorg one,
-which is itself part of phase 1's answer.
-
-> **Blocked on hardware, 2026-09-25.** Access to the `gpu-desktop` machine
-> was lost, and phase 1 is the one part of this that a container cannot
-> stand in for — its whole question is what a real machine does after a real
-> reboot. The protocol below is complete and startable; it is waiting on a
-> host, not on a decision. **Do not soften it to fit a container**: an
-> unattended answer measured without an unattended machine would be worth
-> less than no answer, because it would be believed.
+**Where.** A dedicated spike machine (from 2026-09-27): an AMD Ryzen 7 5700U
+mini-PC with Radeon graphics on a fresh Ubuntu 26.04.1, kernel 7.0, GNOME 50
+on GDM — the project's baseline, reached over ssh, rebooted at will. Its GPU
+runs Mesa, the same driver stack as Intel, so its Wayland findings stand
+without the NVIDIA caveat the lost `gpu-desktop` runner carried. Xvfb in
+`robot-sim` still carries everything that does not depend on a real session —
+latency, multi-monitor geometry, hot-plug via RandR virtual monitors. **Do not
+soften phase 1 to fit a container**: an unattended answer measured without an
+unattended machine would be worth less than no answer, because it would be
+believed.
 
 ### Phase 1 in detail (decided 2026-09-25)
 
@@ -93,12 +106,16 @@ because they answer different product questions and have different answers:
 | **Appliance** | a dedicated `fjarr-spike` account with auto-login enabled | whether a robot that ships with an auto-login session can be reached — the case docs/04 says an appliance may legitimately pin |
 | **Login screen** | auto-login off, nobody logged in | whether a robot can be reached *before* anyone logs in, which is what "unattended" means when the appliance trick is not available |
 
-Both are run per combination, on the `gpu-desktop` runner, with a dedicated
-account and auto-login toggled between runs. The Wayland combinations use a
-GNOME-on-Wayland session on the same machine — with the caveat written down
-now rather than discovered later: that machine has an **NVIDIA** GPU, and a
-Wayland session there can behave differently from the Intel hardware robots
-actually run, so a Wayland finding is provisional until it is seen on Intel.
+Both are run per combination, with the dedicated account and auto-login
+toggled between runs, in three sessions. The GDM steps come first because
+they share a login manager; LightDM replaces GDM, so it runs last and GDM is
+restored after it:
+
+| Step | Session | Candidates | Login-screen sub-case |
+|---|---|---|---|
+| 1 | GNOME on Wayland, GDM (stock) | C, D, E | measured — the greeter is Wayland |
+| 2 | Openbox on Xorg, under GDM | A, B | **structurally no**: GDM's greeter is Wayland, so an X11 backend cannot reach it. Recorded as a result of the architecture, not skipped |
+| 3 | Xfce on Xorg, under LightDM | A, B | measured — LightDM's greeter runs on X11; this is the one setup where X11 can reach "before anyone logs in" |
 
 **The injection oracle.** Injection must be *verified*, not assumed, without
 a human watching: the session autostarts a recorder that appends what it
@@ -138,11 +155,15 @@ configurable outputs) is a spike question in its own right.
 
 ## Working hypotheses (to be falsified, not trusted)
 
-- A (X11+XTest) will win the MVP on simplicity and unattended behavior; an
-  appliance can legitimately pin Xorg + auto-login ([platforms](04-supported-platforms.md)).
-- C is the long-term destination; its unattended story on stock GNOME is the
-  research question. If portals block, D (portal capture + uinput injection)
-  may be the pragmatic Wayland bridge.
+- ~~A (X11+XTest) will win the MVP on simplicity and unattended behavior.~~
+  **Falsified as written, 2026-09-27**: it assumed stock Ubuntu offered an X11
+  session, and 26.04 does not. A remains the likely answer for robots that
+  ship an X11 kiosk; it is not an answer for a robot on stock Ubuntu.
+- On stock Ubuntu the question is therefore Wayland's unattended story. C is
+  the standards-based destination and its consent model is the risk; **E is the
+  most likely unattended answer on GNOME** because GNOME's own remote desktop
+  already depends on it; D (portal capture + uinput injection) is the bridge if
+  the portal allows capture but not input.
 - The `DesktopBackend` interface must not leak X11 assumptions (e.g. global
   coordinates); Wayland's region/mapping model is the more general shape —
   design the interface Wayland-first, implement X11 into it.

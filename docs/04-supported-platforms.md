@@ -46,8 +46,8 @@ Both X11 and Wayland are evaluated head-to-head before committing
 | Capture | `ximagesrc` (+XDamage/XFixes) | PipeWire + ScreenCast portal |
 | Input | XTest | libei / RemoteDesktop portal |
 | Input (below compositor) | uinput | uinput |
-| Unattended after reboot | straightforward | portal permission model is the hard part |
-| Ubuntu 24.04 default | available | default session |
+| Unattended after reboot | straightforward in the session; unreachable at GDM's login screen, which is Wayland | portal permission model is the hard part; mutter's own interfaces may avoid it (docs/07, candidate E) |
+| Ubuntu 26.04 stock | **not available** — GNOME 50 is Wayland-only; X11 only via a kiosk (Xorg + a small window manager) or a non-GNOME desktop the robot chooses | the default and only GNOME session |
 
 ## Robot — optional platform packages
 
