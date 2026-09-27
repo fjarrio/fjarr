@@ -214,10 +214,20 @@ spike machine, also try two things over `fjarr.net` and record the results in
 [docs/27](27-network-tunnel.md#byo-remote-desktop) (noted 2026-09-27,
 unverified): an RDP client to the robot's own gnome-remote-desktop, and
 Nautilus mounting the robot over sftp (`sftp://<user>@<tunnel address>/`).
-**Gate:** a fresh Ubuntu 26.04 machine goes from `curl … | sh` to a test
-pattern in the dashboard with no hand-written config; `apt install
-fjarr-desktop-wayland` adds remote desktop to it; the package set builds
-for amd64 and arm64 in CI.
+Decided 2026-09-28 ([ADR-0031](adr/0031-distribution-apt-and-containers-first.md),
+[docs/26](26-robot-install-and-drivers.md#packages)): apt and containers now,
+built once and packaged twice; Pixi, Nix and Yocto per customer as renderings
+of the same system profile; debhelper packages in a signed static repository on
+Cloudflare R2; one version for every artifact; tag → `testing` → a manual
+promotion to `stable` without a rebuild.
+**Gate:** a fresh Ubuntu 26.04 machine (the spike machine, reinstalled) goes
+from `curl … | sh` to a test pattern in the dashboard with no hand-written
+config; `apt install fjarr-desktop-wayland` plus `setup desktop` gives remote
+desktop, and `setup --undo desktop` restores the machine; a containerized
+robot runs from the reference compose file, tunnel and desktop included;
+`--check` reports a correct profile on both; the package set and images build
+for amd64 and arm64 in CI; a release goes tag → `testing` → `stable` without a
+rebuild.
 
 ## M2.6 — The encoder beyond Intel
 

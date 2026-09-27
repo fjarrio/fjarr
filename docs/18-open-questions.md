@@ -21,7 +21,7 @@ answered. Nothing here blocks the current milestone unless marked ⚠.
 | 11 | Separate PeerConnection for bulk transfers? | docs/16 | M4 measurement | only if isolation budget fails |
 | 12 | `@fjarr/core` for non-React frameworks (Vue/Svelte wrappers)? | delivery model | demand-driven | core is framework-agnostic by design |
 | 13 | CLA tooling + legal review of AGPL/commercial dual licensing | ADR-0011 | before first external PR | ⚠ before accepting outside code |
-| 14 | Docs site versioning scheme (per release vs latest+next) | docs/19 | M1 release process | Starlight supports versions via plugin |
+| 14 | **Answered 2026-09-28**: `main` as the development version plus a frozen `/vX.Y/` snapshot per release ([docs/19](19-website-and-publishing.md)). Docs site versioning scheme (per release vs latest+next) | docs/19 | M1 release process | Starlight supports versions via plugin |
 | 15 | ~~Tie `@fjarr/core` TS types to the golden fixtures~~ **closed 2026-09-16** (slice 2): `web/packages/core/test/fixtures.test.ts` replays every fixture through the runtime guards | slice-1 review | [docs/21 testing](21-web-client-architecture.md#testing-docs15) | all three implementations are now conformance-checked against `protocol/fixtures` |
 | 16 | Point clouds / depth: stream class (ADR-0018) vs depth-as-video per sensor type? | docs/21 review | first sensor-streaming capability (M4+) | decision matrix in [docs/06](06-capabilities.md#sensor-transport); the spike runs in **M4**; the ADR-0018 chunker is built only when a capability picks the stream class |
 | 17 | Audio uplink default: push-to-talk everywhere, or open-mic allowed per grant param? | fjarr.audio planning | fjarr.audio spec | PTT default is written; the grant-param escape hatch is the question |

@@ -103,8 +103,10 @@ broken docs never reach `main`.
 
 Until v1: single "latest" tracking `main`, with the status column in
 [docs/README](README.md) as the maturity signal. From the first versioned
-release: evaluate Starlight's versioning plugin
-([open question #14](18-open-questions.md)); ADRs and the business plan stay
+release: the site keeps showing `main`, marked as the development version, and
+each release freezes a snapshot at `/vX.Y/` with Starlight's versioning plugin;
+release notes link to the snapshot (decided 2026-09-28, answering
+[open question #14](18-open-questions.md)). ADRs and the business plan stay
 unversioned (they are history, not reference).
 
 ## Landing page content model
