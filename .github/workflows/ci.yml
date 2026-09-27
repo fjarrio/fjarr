@@ -154,11 +154,9 @@ jobs:
           # 4.5f: login through the dashboard in the lab browser, list, pick by label, connect, and the
           # session in the audit log with fjarr.net among its capabilities (docs/27#logging-in).
           make tunnel-login
-          # The transfer is recorded, not asserted, while open question #28 stands: it stalls in
-          # ~40 % of attempts with every drop counter at zero on both ends, and a gate that is red
-          # two runs in five teaches people to ignore red. Its verdict is in the log either way,
-          # and #28 blocks the M4.5 gate's claim of a reliable scp until it is understood.
-          make tunnel-scp || echo "CI: the tunnel scp did not complete — open question #28, not a regression"
+          # Asserted since ADR-0027: at an MTU of one SCTP chunk the transfer went 20 of 20 where it
+          # had been red in half of runs for three slices (open question #28, closed).
+          make tunnel-scp
       - name: tunnel interfaces down
         if: always()
         run: make tun-down

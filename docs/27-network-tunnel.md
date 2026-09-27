@@ -160,12 +160,17 @@ IP packet**, no header, unordered and never retransmitted. TCP inside the
 tunnel does its own recovery; an outer retransmission would fight it and
 lose on a bad link.
 
-- **MTU 1280**, fixed and configurable. It is the IPv6 minimum and a
-  well-tested floor. UDP, DTLS and SCTP add roughly 80 bytes, so a 1280-byte
-  inner packet sits well inside a 1500-byte path and keeps sitting there
-  behind a relay or someone else's tunnel, without inner fragmentation. It
-  is not adaptive: the interface's MTU is fixed at creation and everything
-  binds to it.
+- **MTU 1184: one SCTP chunk** ([ADR-0027](adr/0027-tunnel-mtu-one-sctp-chunk.md)).
+  Every WebRTC stack runs SCTP with a 1200-byte path MTU, so the largest packet
+  that travels as a single DATA chunk is 1200 − 16. At the 1280 this document
+  used to specify — sized against the UDP path, never against SCTP's own — every
+  full-size packet was a two-chunk message on a channel that never retransmits,
+  and a usrsctp receiver wedged in about half of all bulk transfers
+  ([#28](18-open-questions.md), measured as a one-byte edge). It is not
+  adaptive: the interface's MTU is fixed at creation and everything binds to it,
+  and an agent attached to a larger device says so in its log. IPv6 inside the
+  tunnel ([#22](18-open-questions.md)) would need 1280, and with it a larger
+  SCTP path MTU.
 - **Bounded queue, tail-drop.** The pump respects the channel's buffered
   amount and drops when it is full, counting the drop. It never grows a
   queue: a queue would deliver a burst of stale packets after congestion,
@@ -359,7 +364,7 @@ $ fjarr-connect
   robot-031  Packer 4 · Malmo   offline
 
 $ fjarr-connect robot-024
-robot-024  100.66.18.203  mtu 1280  up in 1.2 s  via relay
+robot-024  100.66.18.203  mtu 1184  up in 1.2 s  via relay
   ssh robot@100.66.18.203
 ^C  link closed · 41 MB up / 3 MB down
 ```
@@ -497,10 +502,18 @@ rather than either pump. The client has to be built `--release` before any such
 number is believed: unoptimised it manages 53 Mbps, which is the build and not
 the design.
 
-**A bulk transfer stalls in roughly half of attempts**, at the onset of the
-flow. `ssh` and small requests over the same link never stall. It is
-[question #28](18-open-questions.md), it is independent of video and of transfer
-size, and it has to be settled before the M4.5 gate can claim a reliable `scp`.
+**A bulk transfer used to stall in roughly half of attempts**
+([question #28](18-open-questions.md), closed). The cause was the MTU: at 1280,
+every full-size packet fragmented into two SCTP chunks on this no-retransmit
+channel, and a usrsctp receiver wedged — the robot→operator direction of the
+association stopping for good while the other kept delivering. The failure
+switched on at exactly one byte past a single chunk (1184 green in 10 of 10, 1185
+in 4 of 10), and the default is now that chunk ([ADR-0027](adr/0027-tunnel-mtu-one-sctp-chunk.md)):
+20 of 20 hash-verified 1 GiB transfers at it, against 5 of 10 at 1280 in the same
+session. The lesson worth keeping is how long it hid: it was investigated through
+three slices by black-box arms on the SCTP side, and found in an afternoon by
+capturing the plaintext IP on both tunnel devices, which touched nothing in the
+path it was measuring.
 
 What is known: **usrsctp abandons messages and does not say so where the sender
 can see it.** `SCTP_SEND_FAILED_EVENT` arrives asynchronously, after
@@ -539,7 +552,7 @@ enabled = false              # off unless explicitly turned on
 interface = "fjarr0"         # attached to, never created (see the ordering rule above)
 range = "100.64.0.0/10"      # both ends must agree
 address = "auto"             # derived from the robot id; pin to override
-mtu = 1280                   # the interface's own MTU wins if they disagree
+mtu = 1184                   # one SCTP chunk (ADR-0027); the interface's own MTU wins
 allow_ports = []             # empty = every port on this robot's own address
 ```
 

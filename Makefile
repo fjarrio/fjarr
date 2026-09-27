@@ -188,7 +188,7 @@ opsim-netem: ## Apply a docs/25 profile (NETEM_PROFILE=lan|wifi-ok|4g|lossy|bad)
 TUN_DEV ?= fjarr0
 TUN_OPERATOR ?= 100.64.0.1
 # The interfaces' MTU. The agent reads it from its device and reports it on `open`, so both ends agree.
-TUN_MTU ?= 1280
+TUN_MTU ?= 1184
 # Containers that share the robot's network namespace (`network_mode: service:demo-robot`), which is
 # what puts them on its tunnel address. Recreating the robot leaves them pointing at a namespace
 # that no longer exists — reachable enough to answer with a TCP reset, which reads as "nothing is
@@ -429,7 +429,7 @@ tunnel-ros-ordering: ## The three docs/27#lifecycle facts as a regression: attac
 	docker/lab/ros-ordering.sh
 
 .PHONY: tunnel-scp
-tunnel-scp: ## docs/27 gate: pull LAB_FILE_MB over the link and verify its sha256 (open question #27: it stalls ~40 % of the time)
+tunnel-scp: ## docs/27 gate: pull LAB_FILE_MB over the link and verify its sha256 (asserted since ADR-0027 closed #28)
 	$(MAKE) --no-print-directory opsim-tunnel OPSIM_EXTRA="--exec 'docker/lab/tunnel-checks.sh scp' --timeout 300 $(OPSIM_EXTRA)"
 
 # -------------------------------------------------------------- signaling --
