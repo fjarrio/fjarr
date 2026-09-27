@@ -341,9 +341,21 @@ connect-unprivileged: ## docs/27's promise that an existing, addressed interface
 	@docker compose exec -T -u root dev setcap cap_net_admin+ep /workspace/signaling/target/release/fjarr-connect
 	@echo "connect-unprivileged: PASS"
 
-.PHONY: connect-macos-check
-connect-macos-check: ## Type-check fjarr-connect's platform code for macOS, its committed second platform (ADR-0024)
-	@docker compose exec -T dev bash docker/lab/macos-check.sh /workspace/signaling/crates/fjarr-connect/src
+.PHONY: connect-shell
+connect-shell: ## docs/27#shell gate: the robot's terminal in a pty — round trip, stty size, a resize, exit status, termios restored after exit, a killed link and SIGTERM
+	@# A copy of the binary, because `cp` drops the file capability connect-build grants: the shell
+	@# must work with no privilege at all, and this is where that is proved (docs/27#shell). Until the
+	@# control domains (#31) land the terminal takes the old input lease, so both grants are the lab's
+	@# one operator identity, and nothing else in the lab should hold the robot's input meanwhile.
+	@docker compose exec -T dev sh -c 'cd /workspace/signaling && cargo build -q --release -p fjarr-connect && cp target/release/fjarr-connect /tmp/fjarr-connect-shell'
+	@grant=$$(docker/lab/mint-grant.sh $(OPSIM_ROBOT) fjarr.terminal); \
+	  denied=$$(docker/lab/mint-grant.sh $(OPSIM_ROBOT) fjarr.test); \
+	  docker compose exec -T -e SHELL_GRANT="$$grant" -e SHELL_GRANT_DENIED="$$denied" dev \
+	    python3 docker/lab/shell-checks.py /tmp/fjarr-connect-shell $(OPSIM_ROBOT) $(OPSIM_SERVER)
+
+.PHONY: connect-platform-check
+connect-platform-check: ## Type-check fjarr-connect's platform code for macOS (tunnel + shell) and Windows (shell), which nothing here runs (docs/04)
+	@docker compose exec -T dev bash docker/lab/platform-check.sh /workspace/signaling/crates/fjarr-connect/src
 
 .PHONY: tunnel-collision
 tunnel-collision: ## Two robots claiming one address: the operator must refuse the pair by name (docs/27#addressing)

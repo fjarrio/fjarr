@@ -6,10 +6,13 @@
 //! claiming an address the first already has is refused by name rather than silently routed to
 //! whichever link was started last (docs/27#the-shape, ADR-0024).
 //!
-//! Three commands (docs/27#what-it-feels-like): `login` obtains an operator credential from the
-//! customer's dashboard, `list` shows the robots this human may reach, and the default — a robot
-//! name or two, or nothing for the picker — connects. `--grant` still takes a grant directly, which
-//! is what the first day of any integration looks like.
+//! Four commands (docs/27#what-it-feels-like): `login` obtains an operator credential from the
+//! customer's dashboard, `list` shows the robots this human may reach, `shell` opens a robot's
+//! terminal in this one with no tunnel at all (docs/27#shell), and the default — a robot name or
+//! two, or nothing for the picker — connects. `--grant` still takes a grant directly, which is what
+//! the first day of any integration looks like.
+//!
+//! The tunnel is Linux and macOS only (docs/04); everything else, `shell` included, builds anywhere.
 //!
 //! spec: docs/27-network-tunnel.md · docs/09-interfaces.md#operator-api
 use anyhow::{bail, Context, Result};
@@ -17,12 +20,18 @@ use clap::{Args as ClapArgs, Parser, Subcommand};
 
 mod addressing;
 mod config;
+mod connection;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 mod link;
 mod login;
 mod operator_api;
 mod peer;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 mod policy;
+mod shell;
 mod signaling;
+mod term;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 mod tun;
 
 #[derive(Parser, Debug)]
@@ -67,14 +76,23 @@ enum Command {
         #[arg(long)]
         ssh_config: bool,
     },
+    /// The robot's terminal in this one: no tunnel, no interface, no privilege (docs/27#shell).
+    /// Exits with the shell's own status, or 255 when that is unknown.
+    Shell {
+        /// The robot: an id, or any part of an id or label. None: the picker.
+        robot: Option<String>,
+        /// A session grant carrying `fjarr.terminal`, used as given. Without this the operator API is
+        /// asked for one carrying the terminal alone, or the configured `grant_command` is run.
+        #[arg(long, env = "FJARR_GRANT")]
+        grant: Option<String>,
+        #[command(flatten)]
+        session: SessionArgs,
+    },
 }
 
+/// How to reach a robot, for anything that opens a session.
 #[derive(ClapArgs, Debug)]
-struct ConnectArgs {
-    /// The robots to reach: an id, or any part of an id or label — `packer3` finds "Packer 3 ·
-    /// Malmo" — so nobody memorises identifiers. None: the picker.
-    robots: Vec<String>,
-
+struct SessionArgs {
     /// The signaling endpoint.
     #[arg(
         long,
@@ -83,18 +101,7 @@ struct ConnectArgs {
     )]
     server: String,
 
-    /// A session grant, minted by the customer's backend, repeated once per robot and in the same
-    /// order. A grant names one robot (docs/09#a-session-grants), so several robots need several
-    /// grants. Without this the grant comes from `login`'s credential or the configured
-    /// `grant_command` (docs/27#discovery).
-    #[arg(long, env = "FJARR_GRANT")]
-    grant: Vec<String>,
-
-    /// Stop after reading the robot's offer, without answering it.
-    #[arg(long)]
-    dry_run: bool,
-
-    /// How long to wait for the link to come up, in seconds.
+    /// How long to wait for the connection to come up, in seconds.
     #[arg(long, default_value_t = 30)]
     timeout: u64,
 
@@ -108,17 +115,38 @@ struct ConnectArgs {
     #[arg(long, env = "FJARR_RELAY_ONLY")]
     relay_only: bool,
 
+    /// Fault injection (docs/15): stop sending heartbeats, so the agent's liveness budget ends the
+    /// session under a live transfer or shell. This is how the close-under-load path and the
+    /// terminal's restore-on-a-dead-link get exercised on purpose; it is never useful otherwise.
+    #[arg(long, hide = true)]
+    no_heartbeat: bool,
+}
+
+#[derive(ClapArgs, Debug)]
+struct ConnectArgs {
+    /// The robots to reach: an id, or any part of an id or label — `packer3` finds "Packer 3 ·
+    /// Malmo" — so nobody memorises identifiers. None: the picker.
+    robots: Vec<String>,
+
+    /// A session grant, minted by the customer's backend, repeated once per robot and in the same
+    /// order. A grant names one robot (docs/09#a-session-grants), so several robots need several
+    /// grants. Without this the grant comes from `login`'s credential or the configured
+    /// `grant_command` (docs/27#discovery).
+    #[arg(long, env = "FJARR_GRANT")]
+    grant: Vec<String>,
+
+    /// Stop after reading the robot's offer, without answering it.
+    #[arg(long)]
+    dry_run: bool,
+
+    #[command(flatten)]
+    session: SessionArgs,
+
     /// The tunnel interface. One interface carries every attached robot as a /32 route, so this is
     /// the same device for every link and rarely worth changing (docs/27#the-shape). Defaults to
     /// `[net] interface` in the config, then `fjarr0`.
     #[arg(long, env = "FJARR_TUN_DEV")]
     dev: Option<String>,
-
-    /// Fault injection (docs/15): stop sending heartbeats, so the agent's liveness budget ends the
-    /// session mid-transfer. This is how the agent's close-under-load path gets exercised on
-    /// purpose; it is never useful otherwise.
-    #[arg(long, hide = true)]
-    no_heartbeat: bool,
 
     /// A command to run with the link up, after `--`. It gets `FJARR_ADDR` in its environment (and
     /// `FJARR_ADDRS`, space separated, when several robots are attached), and the links are torn down
@@ -129,17 +157,28 @@ struct ConnectArgs {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let cli = Cli::parse();
+    // A shell's screen is the robot's: progress lines would land in the middle of it, and a log line
+    // written in raw mode has no carriage return. So `shell` logs nothing of its libraries' and only
+    // this crate's errors, unless FJARR_LOG asks — webrtc-rs reports a TURN retry as an ERROR, which
+    // is noise to a person typing at a prompt. What ends a shell is printed, not logged.
+    let quiet = matches!(cli.command, Some(Command::Shell { .. }));
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_env("FJARR_LOG")
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_env("FJARR_LOG").unwrap_or_else(|_| {
+                if quiet {
+                    "off,fjarr_connect=error"
+                } else {
+                    "info"
+                }
+                .into()
+            }),
         )
         .with_target(false)
         // Colour on a terminal only: a log piped into a file or a lab check should not carry
         // escape codes between a field's name and its value.
         .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
         .init();
-    let cli = Cli::parse();
     let cfg = config::load()?;
 
     match cli.command {
@@ -164,6 +203,11 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Some(Command::List { ssh_config }) => do_list(&cfg, ssh_config).await,
+        Some(Command::Shell {
+            robot,
+            grant,
+            session,
+        }) => std::process::exit(do_shell(&cfg, robot, grant, session).await),
         None => do_connect(&cfg, cli.connect).await,
     }
 }
@@ -289,32 +333,31 @@ fn ago(ms: Option<u64>) -> String {
 
 /// Which robots, and a grant for each: from `--grant`, the configured command, or the operator API
 /// — in that order of directness, which is also the order of how much the integrator had to build.
+/// `capabilities` narrows what the operator API is asked for (docs/09#operator-api); a grant given
+/// directly or printed by a command is used as it is.
 async fn resolve_targets(
     cfg: &config::Config,
-    args: &ConnectArgs,
+    wanted: &[String],
+    grants: &[String],
+    capabilities: Option<&[&str]>,
 ) -> Result<Vec<(String, String)>> {
-    if !args.grant.is_empty() {
-        if args.grant.len() != args.robots.len() {
+    if !grants.is_empty() {
+        if grants.len() != wanted.len() {
             bail!(
                 "{} robot(s) but {} grant(s): a grant names one robot, so pass --grant once per robot, in \
                  the same order (docs/09#a-session-grants)",
-                args.robots.len(),
-                args.grant.len()
+                wanted.len(),
+                grants.len()
             );
         }
-        return Ok(args
-            .robots
-            .iter()
-            .cloned()
-            .zip(args.grant.iter().cloned())
-            .collect());
+        return Ok(wanted.iter().cloned().zip(grants.iter().cloned()).collect());
     }
     if let Some(template) = &cfg.backend.grant_command {
-        if args.robots.is_empty() {
+        if wanted.is_empty() {
             bail!("with a grant_command there is no list to pick from: name the robot (docs/27#discovery)");
         }
         let mut out = Vec::new();
-        for r in &args.robots {
+        for r in wanted {
             out.push((r.clone(), login::grant_from_command(template, r)?));
         }
         return Ok(out);
@@ -322,11 +365,11 @@ async fn resolve_targets(
 
     let api = api_client(cfg)?;
     let robots = api.robots().await?;
-    let chosen: Vec<operator_api::Robot> = if args.robots.is_empty() {
+    let chosen: Vec<operator_api::Robot> = if wanted.is_empty() {
         vec![pick_among(&robots, "")?]
     } else {
         let mut chosen = Vec::new();
-        for needle in &args.robots {
+        for needle in wanted {
             let hits: Vec<operator_api::Robot> = robots
                 .iter()
                 .filter(|r| r.matches(needle))
@@ -354,7 +397,7 @@ async fn resolve_targets(
             // signaling would say robot-offline after a wait; this says it now, with the last sighting.
             bail!("{} is offline (last seen {})", r.robot_id, ago(r.last_seen));
         }
-        let grant = api.grant(&r.robot_id).await?;
+        let grant = api.grant(&r.robot_id, capabilities).await?;
         out.push((r.robot_id, grant));
     }
     Ok(out)
@@ -388,16 +431,52 @@ fn pick_among(robots: &[operator_api::Robot], prefill: &str) -> Result<operator_
     Ok(robots[selection].clone())
 }
 
+async fn do_shell(
+    cfg: &config::Config,
+    robot: Option<String>,
+    grant: Option<String>,
+    s: SessionArgs,
+) -> i32 {
+    let wanted: Vec<String> = robot.into_iter().collect();
+    let grants: Vec<String> = grant.into_iter().collect();
+    // The terminal and nothing else: a session that could also open the tunnel is a larger grant
+    // than a shell needs (docs/27#shell).
+    let target = match resolve_targets(cfg, &wanted, &grants, Some(&["fjarr.terminal"])).await {
+        Ok(mut t) => t.remove(0),
+        Err(e) => {
+            eprintln!("fjarr-connect: {e:#}");
+            return shell::UNKNOWN;
+        }
+    };
+    let opts = shell::Options {
+        server: &s.server,
+        stun: &s.stun,
+        relay_only: s.relay_only,
+        timeout: std::time::Duration::from_secs(s.timeout),
+        heartbeat: !s.no_heartbeat,
+    };
+    shell::run(&target.0, &target.1, &opts).await
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+async fn do_connect(_cfg: &config::Config, _args: ConnectArgs) -> Result<()> {
+    bail!(
+        "the tunnel needs Linux or macOS (docs/04); `fjarr-connect shell <robot>` works here, and needs no tunnel"
+    )
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 async fn do_connect(cfg: &config::Config, args: ConnectArgs) -> Result<()> {
     let dev = args
         .dev
         .clone()
         .unwrap_or_else(|| cfg.net.interface.clone());
-    let targets = resolve_targets(cfg, &args).await?;
+    let targets = resolve_targets(cfg, &args.robots, &args.grant, None).await?;
+    let s = &args.session;
 
     if args.dry_run {
         for (robot, grant) in &targets {
-            let mut session = signaling::Session::open(&args.server, grant)
+            let mut session = signaling::Session::open(&s.server, grant)
                 .await
                 .with_context(|| format!("no session for {robot}"))?;
             let offer = session.wait_for_offer().await?;
@@ -416,11 +495,11 @@ async fn do_connect(cfg: &config::Config, args: ConnectArgs) -> Result<()> {
     for (robot, grant) in &targets {
         let one = link::open(
             robot,
-            &args.server,
+            &s.server,
             grant,
-            &args.stun,
-            args.relay_only,
-            std::time::Duration::from_secs(args.timeout),
+            &s.stun,
+            s.relay_only,
+            std::time::Duration::from_secs(s.timeout),
         )
         .await?;
         if let Some(clash) = opened
@@ -469,7 +548,7 @@ async fn do_connect(cfg: &config::Config, args: ConnectArgs) -> Result<()> {
             );
         }
         addrs.push(one.robot_addr);
-        links.push(one.start(device.clone(), !args.no_heartbeat).await?);
+        links.push(one.start(device.clone(), !s.no_heartbeat).await?);
     }
 
     let outcome = pump(&device, &links, &addrs, self_addr, &args).await;
@@ -495,6 +574,7 @@ async fn do_connect(cfg: &config::Config, args: ConnectArgs) -> Result<()> {
 }
 
 /// Where a packet from the device goes.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[derive(Debug, PartialEq, Eq)]
 enum Route {
     /// The one link whose robot the packet is addressed to.
@@ -507,6 +587,7 @@ enum Route {
     Nowhere,
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn route_for(view: &policy::PacketView, addrs: &[std::net::Ipv4Addr], self_u32: u32) -> Route {
     if view.src != self_u32 {
         return Route::Nowhere; // not from this end: the rules refuse it on every link
@@ -524,6 +605,7 @@ fn route_for(view: &policy::PacketView, addrs: &[std::net::Ipv4Addr], self_u32: 
 /// to every link. This is the only place that sees more than one link, and all it does is choose:
 /// there is no path from a packet that arrived on one link to another link's route
 /// (docs/27#isolation).
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 async fn pump(
     device: &tun::Tun,
     links: &[link::Link],
@@ -607,6 +689,7 @@ async fn pump(
 }
 
 /// Resolve when the child exits, or never when there is no child.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 async fn wait_for(
     child: Option<&mut tokio::process::Child>,
 ) -> Result<Option<std::process::ExitStatus>> {
@@ -625,6 +708,7 @@ fn now_ms() -> i64 {
 
 /// Bytes in the unit they are actually in. A small transfer rounding to "0 kB" reads as a link that
 /// carried nothing, which is the opposite of what it means.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn human(bytes: u64) -> String {
     const K: f64 = 1024.0;
     const M: f64 = K * 1024.0;
@@ -645,6 +729,7 @@ fn human(bytes: u64) -> String {
 mod tests {
     use super::*;
 
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn bytes_are_reported_in_the_unit_they_are_in() {
         assert_eq!(human(0), "0 B");
@@ -655,6 +740,7 @@ mod tests {
     }
 
     /// The closing line stays silent when nothing went wrong, and names each thing that did.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn the_closing_line_only_mentions_what_happened() {
         assert_eq!(link::Counts::default().note(), "");
@@ -701,6 +787,7 @@ mod tests {
     /// link (ADR-0026 — DDS discovery is addressed to a group), and nothing for anything else. This
     /// is the decision that, made by destination alone, dropped every discovery packet and broke
     /// ROS 2 over fjarr-connect while it worked over opsim.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn multicast_goes_to_every_link_and_unicast_to_its_own() {
         let a = std::net::Ipv4Addr::new(100, 70, 118, 224);

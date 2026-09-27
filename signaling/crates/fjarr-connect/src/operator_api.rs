@@ -114,7 +114,10 @@ impl Client {
         self.read("listing robots", res).await
     }
 
-    pub async fn grant(&self, robot_id: &str) -> Result<String> {
+    /// A grant for one robot. `capabilities` narrows it to those names — the backend grants the
+    /// intersection with what this human may open, never more (docs/09#operator-api) — and `None`
+    /// asks for whatever the backend would grant anyway.
+    pub async fn grant(&self, robot_id: &str, capabilities: Option<&[&str]>) -> Result<String> {
         #[derive(Deserialize)]
         struct Reply {
             grant: String,
@@ -122,7 +125,7 @@ impl Client {
         let req = self.authed(
             self.http
                 .post(format!("{}/fjarr/grants", self.base))
-                .json(&serde_json::json!({ "robot_id": robot_id })),
+                .json(&grant_request(robot_id, capabilities)),
         )?;
         let res = req
             .send()
@@ -155,9 +158,31 @@ impl Client {
     }
 }
 
+fn grant_request(robot_id: &str, capabilities: Option<&[&str]>) -> serde_json::Value {
+    let mut body = serde_json::json!({ "robot_id": robot_id });
+    if let Some(names) = capabilities {
+        body["capabilities"] = serde_json::json!(names);
+    }
+    body
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A backend that predates the field must see exactly what it always did, and `shell` must ask
+    /// for the terminal alone (docs/09#operator-api, docs/27#shell).
+    #[test]
+    fn a_grant_request_names_capabilities_only_when_narrowing() {
+        assert_eq!(
+            grant_request("robot-024", None),
+            serde_json::json!({ "robot_id": "robot-024" })
+        );
+        assert_eq!(
+            grant_request("robot-024", Some(&["fjarr.terminal"])),
+            serde_json::json!({ "robot_id": "robot-024", "capabilities": ["fjarr.terminal"] })
+        );
+    }
 
     fn robot(id: &str, label: &str) -> Robot {
         Robot {

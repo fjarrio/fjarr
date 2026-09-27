@@ -206,13 +206,13 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
-      # macOS is fjarr-connect's committed second platform (ADR-0024) and there is no macOS runner,
-      # so the platform code is type-checked for it here. This does not link the binary — webrtc-rs
-      # pulls `ring`, whose build script needs the Apple SDK — and nothing runs on macOS hardware
-      # (docs/04).
+      # macOS is fjarr-connect's committed second platform (ADR-0024), and `shell` builds for Windows
+      # too (docs/27#shell); there is no runner for either, so the platform code is type-checked for
+      # both here. This does not link the binary — webrtc-rs pulls `ring`, whose build script needs
+      # each platform's SDK — and nothing runs on macOS or Windows (docs/04).
       # The script installs the target on the pinned toolchain itself, because its scratch crate sits
       # outside the workspace and would otherwise pick up whichever toolchain rustup defaults to.
-      - run: bash ../docker/lab/macos-check.sh crates/fjarr-connect/src
+      - run: bash ../docker/lab/platform-check.sh crates/fjarr-connect/src
 
   cpp:
     name: Agent + demo-robot build (Ubuntu 26.04 / GStreamer 1.28)

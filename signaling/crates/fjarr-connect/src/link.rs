@@ -15,7 +15,7 @@ use tokio::sync::mpsc;
 
 use webrtc::peer_connection::PeerConnection;
 
-use crate::{peer, policy, signaling, tun};
+use crate::{connection, peer, policy, signaling, tun};
 
 /// What a link carried, for the line printed when it closes.
 #[derive(Default, Debug, Clone)]
@@ -109,88 +109,26 @@ pub async fn open(
     timeout: std::time::Duration,
 ) -> Result<Opened<impl PeerConnection>> {
     let started = std::time::Instant::now();
-    let mut session = signaling::Session::open(server, grant)
-        .await
-        .with_context(|| format!("no session for {robot}"))?;
-    let offer = session.wait_for_offer().await?;
-    tracing::info!(
+    let mut up = connection::establish(
         robot,
-        session = signaling::short(&session.session_id),
-        manifest_version = offer.manifest_version.unwrap_or(0),
-        tracks = offer.tracks.len(),
-        turn = session.turn.is_some(),
-        "the robot offered"
-    );
-    tracing::trace!(sdp = %offer.sdp, "the offer, verbatim");
-
-    // Answer it, and trickle candidates both ways (docs/08). The agent creates the channels; this
-    // end only receives them.
-    let (peer, answer_sdp, mut events) =
-        peer::answer(&offer.sdp, session.turn.as_ref(), stun, relay_only).await?;
-    session.send_answer(&answer_sdp).await?;
-
-    let deadline = tokio::time::Instant::now() + timeout;
-    let (mut control_open, mut stream_open) = (false, false);
-    let mut early_bytes = 0usize;
-    let mut late_candidates: Vec<(String, u32)> = Vec::new();
-    while !(control_open && stream_open) {
-        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if left.is_zero() {
-            anyhow::bail!(
-                "{robot}: the link did not come up within {timeout:?} (control={control_open}, tunnel={stream_open})"
-            );
-        }
-        tokio::select! {
-            ev = events.recv() => match ev {
-                Some(peer::Event::ChannelOpen(label)) => {
-                    tracing::debug!(robot, %label, "channel open");
-                    control_open |= label == peer::CONTROL;
-                    stream_open |= label == peer::NET_STREAM;
-                }
-                Some(peer::Event::Closed(why)) => anyhow::bail!("{robot}: the connection closed before the link was up ({why})"),
-                Some(peer::Event::Candidate { candidate, sdp_mline_index }) => {
-                    session.send_candidate(candidate, sdp_mline_index).await?;
-                }
-                Some(peer::Event::Packet(bytes)) => early_bytes += bytes.len(),
-                Some(_) => {}
-                None => anyhow::bail!("{robot}: the peer connection ended"),
-            },
-            inbound = session.next_inbound(left) => match inbound? {
-                // The agent's offer carries no candidates — these are the only ones there are.
-                signaling::Inbound::Candidate { candidate, sdp_mline_index } => {
-                    tracing::debug!(robot, %candidate, sdp_mline_index, "a candidate from the robot");
-                    if let Err(e) = peer.add_remote_candidate(candidate, sdp_mline_index).await {
-                        tracing::warn!(error = %e, "the peer connection would not take a candidate");
-                    }
-                }
-                signaling::Inbound::Other => {}
-                signaling::Inbound::Closed(reason) => anyhow::bail!("{robot}: the session ended: {reason}"),
-            },
-        }
-    }
-
-    // The link is a capability request, not a side effect of connecting (docs/08#net-packets).
-    let request = fjarr_protocol::Envelope::request("fjarr.net", "open", serde_json::json!({}));
-    peer.send_control(&request).await?;
-    let result = peer::await_result(
-        &mut events,
-        &request.event_id,
-        |ev| match ev {
-            peer::Event::Packet(bytes) => early_bytes += bytes.len(),
-            // The link is up by now, so these are late arrivals — kept rather than dropped, because
-            // a candidate silently discarded is how the first version of this failed.
-            peer::Event::Candidate {
-                candidate,
-                sdp_mline_index,
-            } => late_candidates.push((candidate, sdp_mline_index)),
-            _ => {}
-        },
-        std::time::Duration::from_secs(10),
+        server,
+        grant,
+        stun,
+        relay_only,
+        timeout,
+        &[peer::CONTROL, peer::NET_STREAM],
     )
     .await?;
-    for (candidate, mline) in late_candidates.drain(..) {
-        session.send_candidate(candidate, mline).await?;
-    }
+    // The link is a capability request, not a side effect of connecting (docs/08#net-packets).
+    let result = up
+        .request("fjarr.net", "open", serde_json::json!({}))
+        .await?;
+    let connection::Established {
+        mut session,
+        peer,
+        events,
+        early_bytes,
+    } = up;
     if !result.ok() {
         let code = result.error_code().unwrap_or("unknown").to_string();
         peer.close().await.ok();

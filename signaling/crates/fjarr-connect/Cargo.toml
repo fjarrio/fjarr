@@ -23,8 +23,11 @@ webrtc = { workspace = true }
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
 bytes = "1"
-# The TUN ioctl and the two unbuffered device reads/writes; no wrapper crate for three calls.
+# The TUN ioctl and the two unbuffered device reads/writes; no wrapper crate for three calls. Also
+# termios and the window size for `shell` on Unix (docs/27#shell).
 libc = "0.2"
+# The loopback login's `state`, from the OS on every platform `shell` builds for (docs/14).
+getrandom = "0.3"
 async-trait = "0.1"
 # The operator API (docs/09#operator-api): robots, grants, login codes. Same rustls build as the server.
 reqwest = { workspace = true }
@@ -41,3 +44,8 @@ sha2 = "0.10"
 # platform links the other's mechanism.
 [target.'cfg(target_os = "linux")'.dependencies]
 rtnetlink = "0.23.0"
+
+# `shell`'s raw mode and window size on Windows: the console API, with virtual-terminal input so
+# keys arrive as the escape sequences the robot's pty expects (docs/27#shell, docs/04).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }

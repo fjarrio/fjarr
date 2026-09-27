@@ -223,14 +223,20 @@ const server = createServer(async (req, res) => {
 
   // …and a grant for one of them: the same JWT, the same code, with what this role may open. The
   // tunnel is as consequential as a shell (docs/10#network-tunnel), so it rides with the terminal
-  // on the developer role and nowhere else.
+  // on the developer role and nowhere else. A caller may narrow the grant to named capabilities —
+  // `fjarr-connect shell` asks for the terminal alone — and gets the intersection with the role:
+  // asking can only ever remove, never add (docs/09#operator-api).
   if (url.pathname === "/api/fjarr/grants" && req.method === "POST") {
     const who = bearer(req);
     if (!who) return respond(401, { error: "operator credential required (fjarr-connect login)" });
     const body = await jsonBody(req);
     const robotId = typeof body.robot_id === "string" ? body.robot_id : "";
     if (!robots.some((r) => r.id === robotId)) return respond(404, { error: `unknown robot ${robotId || "(none)"}` });
-    const names = [...ROLES[who.role]!, ...(who.role === "developer" ? ["fjarr.net"] : [])];
+    const asked = body.capabilities;
+    if (asked !== undefined && !(Array.isArray(asked) && asked.every((n) => typeof n === "string")))
+      return respond(400, { error: "capabilities must be a list of capability names" });
+    const allowed = [...ROLES[who.role]!, ...(who.role === "developer" ? ["fjarr.net"] : [])];
+    const names = asked === undefined ? allowed : allowed.filter((n) => (asked as string[]).includes(n));
     const capabilities = names.map((name) => ({ name }));
     return respond(200, { grant: mintGrant(robotId, who.operator, capabilities), robot_id: robotId, capabilities });
   }

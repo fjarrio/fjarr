@@ -26,11 +26,10 @@ pub fn default_login_url(api_base: &str) -> String {
 }
 
 fn random_state() -> String {
-    // 128 bits from the OS, hex: enough that a stray POST cannot guess it, and no dependency.
+    // 128 bits from the OS, hex: enough that a stray POST cannot guess it. Through `getrandom`
+    // rather than the Linux syscall, because this binary also builds where `shell` runs (docs/04).
     let mut buf = [0u8; 16];
-    // SAFETY: getrandom writes at most `buf.len()` bytes into a buffer that long.
-    let n = unsafe { libc::getrandom(buf.as_mut_ptr().cast(), buf.len(), 0) };
-    if n != buf.len() as isize {
+    if getrandom::fill(&mut buf).is_err() {
         // Fall back to the clock rather than fail: `state` guards against a stray post on
         // loopback, not against an attacker who already runs code as this user.
         let t = std::time::SystemTime::now()

@@ -1,6 +1,7 @@
 //! The operator's peer connection: data channels only, no media (ADR-0024). It answers the agent's
-//! offer and hands back the two channels the tunnel needs — `fjarr:control` for the capability's
-//! requests and `fjarr:stream:fjarr.net` for the packets. The agent creates both; this end only
+//! offer and hands back the channels a caller reads — `fjarr:control` for the capabilities'
+//! requests, `fjarr:stream:fjarr.net` for the tunnel's packets and `fjarr:bulk:fjarr.terminal` for
+//! `shell`'s bytes. The agent creates them, and only for what the grant carries; this end only
 //! receives them.
 //!
 //! webrtc-rs 0.21 is a sans-IO design: events arrive through a `PeerConnectionEventHandler` and
@@ -32,6 +33,7 @@ use webrtc::runtime::{default_runtime, Runtime};
 
 pub const CONTROL: &str = "fjarr:control";
 pub const NET_STREAM: &str = "fjarr:stream:fjarr.net";
+pub const TERMINAL: &str = "fjarr:bulk:fjarr.terminal";
 
 /// What the connection reports as it happens.
 #[derive(Debug)]
@@ -40,6 +42,8 @@ pub enum Event {
     Control(Envelope),
     /// One IP packet off the tunnel's stream channel.
     Packet(Vec<u8>),
+    /// Output from the robot's pty: bytes, with no header of ours (docs/08#terminal).
+    Terminal(Vec<u8>),
     ChannelOpen(String),
     Closed(String),
     /// A local candidate to trickle to the agent (docs/08#ice).
@@ -99,7 +103,7 @@ impl PeerConnectionEventHandler for Handler {
         // handle to one makes the crate's driver log `Failed to get data_channel` for each of its
         // events. Only ours get a polling task below.
         self.channels.lock().await.push((label.clone(), dc.clone()));
-        if label != CONTROL && label != NET_STREAM {
+        if label != CONTROL && label != NET_STREAM && label != TERMINAL {
             return;
         }
         let events = self.events.clone();
@@ -107,6 +111,7 @@ impl PeerConnectionEventHandler for Handler {
         self.runtime.spawn(Box::pin(async move {
             let _ = events.send(Event::ChannelOpen(label.clone())).await;
             let is_control = label == CONTROL;
+            let is_terminal = label == TERMINAL;
             while let Some(event) = dc.poll().await {
                 match event {
                     DataChannelEvent::OnMessage(msg) if is_control => match serde_json::from_slice::<Envelope>(&msg.data) {
@@ -117,6 +122,11 @@ impl PeerConnectionEventHandler for Handler {
                         }
                         Err(e) => tracing::warn!(error = %e, "undecodable envelope on the control channel"),
                     },
+                    DataChannelEvent::OnMessage(msg) if is_terminal => {
+                        if events.send(Event::Terminal(msg.data.to_vec())).await.is_err() {
+                            break;
+                        }
+                    }
                     // One binary message is exactly one IP packet (docs/08#net-packets).
                     DataChannelEvent::OnMessage(msg) => {
                         if events.send(Event::Packet(msg.data.to_vec())).await.is_err() {
@@ -226,7 +236,8 @@ pub async fn answer(
 }
 
 impl<P: PeerConnection> Peer<P> {
-    async fn channel(&self, label: &str) -> Option<Arc<dyn DataChannel>> {
+    /// A channel the agent created, for a caller that sends on it from its own task.
+    pub async fn channel(&self, label: &str) -> Option<Arc<dyn DataChannel>> {
         self.channels
             .lock()
             .await
@@ -293,6 +304,23 @@ impl<P: PeerConnection> Peer<P> {
         self.pc.close().await?;
         Ok(())
     }
+}
+
+/// Bytes onto a reliable channel, waiting while it holds more than `high_water` unsent.
+///
+/// The bulk class is reliable and ordered, so nothing may be dropped (docs/08#datachannel-topology);
+/// the bound is what keeps a large paste from growing this process without limit. webrtc-rs
+/// configures no send-buffer limit by default, so `send` itself never waits and the pacing is here.
+pub async fn send_reliable(
+    dc: &Arc<dyn DataChannel>,
+    bytes: &[u8],
+    high_water: usize,
+) -> Result<()> {
+    while dc.outstanding_bytes().await.unwrap_or(0) >= high_water {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    dc.send(bytes::BytesMut::from(bytes)).await?;
+    Ok(())
 }
 
 /// Wait for a `result` matching `event_id`; everything else goes to `other`.
