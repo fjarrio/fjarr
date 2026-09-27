@@ -135,6 +135,17 @@ jobs:
         # tun-up plays the installer: it creates the interfaces and restarts the robot with
         # fjarr.net on, so the device exists before the agent does — the ordering the design
         # rests on. The scenario then carries real IP over a real data channel.
+        # The login gate is a browser suite that runs while the tunnel is still up, so this step
+        # carries the same lab environment the browser-suite steps do: without it the suite's
+        # compose-network defaults (`browser:9222`) cannot resolve on the runner.
+        env:
+          E2E_BROWSER: http://localhost:9222
+          E2E_PAGE_ORIGIN: http://host.docker.internal:5174
+          E2E_SERVER_WS: ws://fjarr-server:8080/ws
+          E2E_SERVER_HTTP: http://localhost:8080
+          E2E_DASHBOARD_HTTP: http://localhost:5173
+          E2E_INTROSPECT_HTTP: http://localhost:7381
+          CI: "true"
         run: |
           make tun-up LAB_FILE_MB=64
           make opsim-tunnel
