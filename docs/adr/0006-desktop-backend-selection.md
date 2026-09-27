@@ -316,4 +316,5 @@ LightDM. The user pulled and replugged the cables.
   back. The kernel logged only a normal MST link setup, and Xorg logged no error.
   After a reboot, the same layout step lit all three. So on this driver, a
   hot-plugged MST branch needs an X server restart. GNOME, which drives KMS
-  itself, brought all three back after every replug.
+  itself, listed all three monitors in its layout after every replug, and
+  none was reported dark. That was not checked monitor by monitor.
