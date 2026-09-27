@@ -6,11 +6,20 @@
 //! claiming an address the first already has is refused by name rather than silently routed to
 //! whichever link was started last (docs/27#the-shape, ADR-0024).
 //!
+//! Three commands (docs/27#what-it-feels-like): `login` obtains an operator credential from the
+//! customer's dashboard, `list` shows the robots this human may reach, and the default — a robot
+//! name or two, or nothing for the picker — connects. `--grant` still takes a grant directly, which
+//! is what the first day of any integration looks like.
+//!
 //! spec: docs/27-network-tunnel.md · docs/09-interfaces.md#operator-api
-use anyhow::{Context, Result};
-use clap::Parser;
+use anyhow::{bail, Context, Result};
+use clap::{Args as ClapArgs, Parser, Subcommand};
 
+mod addressing;
+mod config;
 mod link;
+mod login;
+mod operator_api;
 mod peer;
 mod policy;
 mod signaling;
@@ -19,13 +28,51 @@ mod tun;
 #[derive(Parser, Debug)]
 #[command(
     name = "fjarr-connect",
-    about = "A routable address for one robot (docs/27)",
-    version
+    about = "A routable address for a robot (docs/27)",
+    version,
+    args_conflicts_with_subcommands = true
 )]
-struct Args {
-    /// The robots to reach, one or more. Optional in the finished client — without any it shows a
-    /// picker (docs/27#what-it-feels-like) — and required until discovery exists.
-    #[arg(required = true)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+
+    /// The default: connect.
+    #[command(flatten)]
+    connect: ConnectArgs,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Obtain an operator credential from the customer's dashboard (docs/27#logging-in).
+    Login {
+        /// The dashboard's login route, or the site — `https://fleet.acme.com` — from which the
+        /// route and the operator API are derived. Remembered for `list` and `connect`.
+        url: Option<String>,
+        /// Print a code to approve wherever a browser exists, instead of opening one here.
+        #[arg(long)]
+        code: bool,
+        /// Where the operator API is mounted, when it is not `<site>/api`.
+        #[arg(long)]
+        api: Option<String>,
+        /// How long to wait for the approval, in seconds.
+        #[arg(long, default_value_t = 600)]
+        timeout: u64,
+    },
+    /// Forget the operator credential on this machine.
+    Logout,
+    /// The robots this human may reach.
+    List {
+        /// Print `~/.ssh/config` stanzas instead: addresses are derived and never change, so they
+        /// are worth writing once (docs/27#what-it-feels-like).
+        #[arg(long)]
+        ssh_config: bool,
+    },
+}
+
+#[derive(ClapArgs, Debug)]
+struct ConnectArgs {
+    /// The robots to reach: an id, or any part of an id or label — `packer3` finds "Packer 3 ·
+    /// Malmo" — so nobody memorises identifiers. None: the picker.
     robots: Vec<String>,
 
     /// The signaling endpoint.
@@ -38,9 +85,9 @@ struct Args {
 
     /// A session grant, minted by the customer's backend, repeated once per robot and in the same
     /// order. A grant names one robot (docs/09#a-session-grants), so several robots need several
-    /// grants; `login` fetching them per robot is docs/27#discovery and comes later. This flag is the
-    /// one that works on the first day of any integration.
-    #[arg(long, env = "FJARR_GRANT", required = true)]
+    /// grants. Without this the grant comes from `login`'s credential or the configured
+    /// `grant_command` (docs/27#discovery).
+    #[arg(long, env = "FJARR_GRANT")]
     grant: Vec<String>,
 
     /// Stop after reading the robot's offer, without answering it.
@@ -57,9 +104,10 @@ struct Args {
     stun: Vec<String>,
 
     /// The tunnel interface. One interface carries every attached robot as a /32 route, so this is
-    /// the same device for every link and rarely worth changing (docs/27#the-shape).
-    #[arg(long, env = "FJARR_TUN_DEV", default_value = "fjarr0")]
-    dev: String,
+    /// the same device for every link and rarely worth changing (docs/27#the-shape). Defaults to
+    /// `[net] interface` in the config, then `fjarr0`.
+    #[arg(long, env = "FJARR_TUN_DEV")]
+    dev: Option<String>,
 
     /// Fault injection (docs/15): stop sending heartbeats, so the agent's liveness budget ends the
     /// session mid-transfer. This is how the agent's close-under-load path gets exercised on
@@ -83,19 +131,264 @@ async fn main() -> Result<()> {
         )
         .with_target(false)
         .init();
-    let args = Args::parse();
+    let cli = Cli::parse();
+    let cfg = config::load()?;
 
-    if args.grant.len() != args.robots.len() {
-        anyhow::bail!(
-            "{} robot(s) but {} grant(s): a grant names one robot, so pass --grant once per robot, in \
-             the same order (docs/09#a-session-grants)",
-            args.robots.len(),
-            args.grant.len()
+    match cli.command {
+        Some(Command::Login {
+            url,
+            code,
+            api,
+            timeout,
+        }) => {
+            do_login(
+                &cfg,
+                url,
+                code,
+                api,
+                std::time::Duration::from_secs(timeout),
+            )
+            .await
+        }
+        Some(Command::Logout) => {
+            config::forget_credential()?;
+            println!("logged out: the credential on this machine is gone");
+            Ok(())
+        }
+        Some(Command::List { ssh_config }) => do_list(&cfg, ssh_config).await,
+        None => do_connect(&cfg, cli.connect).await,
+    }
+}
+
+// --------------------------------------------------------------------- login / list
+
+/// The site's login route and API base from what the user typed: a site, a route, or an API URL.
+fn resolve_backend(
+    cfg: &config::Config,
+    url: Option<String>,
+    api: Option<String>,
+) -> Result<(String, String)> {
+    let typed = url
+        .or_else(|| cfg.backend.login_url.clone())
+        .or_else(|| cfg.backend.url.clone())
+        .ok_or_else(|| {
+            anyhow::anyhow!("which dashboard? `fjarr-connect login https://fleet.acme.com`")
+        })?;
+    let typed = typed.trim_end_matches('/').to_string();
+    let site = typed
+        .strip_suffix("/cli-login")
+        .or_else(|| typed.strip_suffix("/api"))
+        .unwrap_or(&typed)
+        .to_string();
+    let api_base = api
+        .or_else(|| cfg.backend.url.clone())
+        .unwrap_or_else(|| format!("{site}/api"));
+    // The route is on the site the user named, whatever host the API turns out to be on: a demo
+    // serves its dashboard and its backend from two containers, and a deployment behind one
+    // hostname is the special case, not the rule.
+    let login_url = if typed.ends_with("/cli-login") {
+        typed
+    } else if typed.ends_with("/api") {
+        cfg.backend
+            .login_url
+            .clone()
+            .unwrap_or_else(|| login::default_login_url(&api_base))
+    } else {
+        format!("{site}/cli-login")
+    };
+    Ok((login_url, api_base))
+}
+
+async fn do_login(
+    cfg: &config::Config,
+    url: Option<String>,
+    code: bool,
+    api: Option<String>,
+    timeout: std::time::Duration,
+) -> Result<()> {
+    let (login_url, api_base) = resolve_backend(cfg, url, api)?;
+    let client = operator_api::Client::new(&api_base, None)?;
+    let credential = if code {
+        login::code(&client, &login_url, timeout).await?
+    } else {
+        login::loopback(&login_url, timeout).await?
+    };
+    // Prove it before storing it: a credential the backend will not honour is worse than none.
+    let check = operator_api::Client::new(&api_base, Some(credential.clone()))?;
+    let robots = check
+        .robots()
+        .await
+        .context("the credential arrived but the operator API did not accept it")?;
+    let path = config::store_credential(&credential)?;
+    config::remember_backend(&api_base, &login_url)?;
+    println!(
+        "signed in · {} robot(s) reachable · credential at {}",
+        robots.len(),
+        path.display()
+    );
+    Ok(())
+}
+
+fn api_client(cfg: &config::Config) -> Result<operator_api::Client> {
+    let base = cfg.backend.url.clone().ok_or_else(|| {
+        anyhow::anyhow!("no backend configured — run `fjarr-connect login <dashboard url>` first, or pass --grant")
+    })?;
+    operator_api::Client::new(&base, config::credential()?)
+}
+
+async fn do_list(cfg: &config::Config, ssh_config: bool) -> Result<()> {
+    let robots = api_client(cfg)?.robots().await?;
+    if ssh_config {
+        // The address is derived from the id and never changes (docs/27#addressing), which is
+        // what makes a permanent stanza honest. `connect` still takes what the robot reports.
+        let range = cfg.net.range()?;
+        for r in &robots {
+            println!(
+                "Host {}\n  # {}\n  HostName {}\n",
+                r.robot_id,
+                r.label,
+                addressing::derive_address(&r.robot_id, &range)
+            );
+        }
+        return Ok(());
+    }
+    println!("{:<14} {:<28} {:<8} LAST SEEN", "ROBOT", "LABEL", "STATUS");
+    for r in &robots {
+        println!(
+            "{:<14} {:<28} {:<8} {}",
+            r.robot_id,
+            r.label,
+            r.status,
+            ago(r.last_seen)
         );
     }
+    Ok(())
+}
+
+fn ago(ms: Option<u64>) -> String {
+    let Some(ms) = ms else { return "-".into() };
+    let now = now_ms().max(0) as u64;
+    let secs = now.saturating_sub(ms) / 1000;
+    match secs {
+        0..=59 => "just now".into(),
+        60..=3599 => format!("{}m ago", secs / 60),
+        3600..=86_399 => format!("{}h ago", secs / 3600),
+        _ => format!("{}d ago", secs / 86_400),
+    }
+}
+
+// ------------------------------------------------------------------------- connect
+
+/// Which robots, and a grant for each: from `--grant`, the configured command, or the operator API
+/// — in that order of directness, which is also the order of how much the integrator had to build.
+async fn resolve_targets(
+    cfg: &config::Config,
+    args: &ConnectArgs,
+) -> Result<Vec<(String, String)>> {
+    if !args.grant.is_empty() {
+        if args.grant.len() != args.robots.len() {
+            bail!(
+                "{} robot(s) but {} grant(s): a grant names one robot, so pass --grant once per robot, in \
+                 the same order (docs/09#a-session-grants)",
+                args.robots.len(),
+                args.grant.len()
+            );
+        }
+        return Ok(args
+            .robots
+            .iter()
+            .cloned()
+            .zip(args.grant.iter().cloned())
+            .collect());
+    }
+    if let Some(template) = &cfg.backend.grant_command {
+        if args.robots.is_empty() {
+            bail!("with a grant_command there is no list to pick from: name the robot (docs/27#discovery)");
+        }
+        let mut out = Vec::new();
+        for r in &args.robots {
+            out.push((r.clone(), login::grant_from_command(template, r)?));
+        }
+        return Ok(out);
+    }
+
+    let api = api_client(cfg)?;
+    let robots = api.robots().await?;
+    let chosen: Vec<operator_api::Robot> = if args.robots.is_empty() {
+        vec![pick_among(&robots, "")?]
+    } else {
+        let mut chosen = Vec::new();
+        for needle in &args.robots {
+            let hits: Vec<operator_api::Robot> = robots
+                .iter()
+                .filter(|r| r.matches(needle))
+                .cloned()
+                .collect();
+            match hits.len() {
+                0 => bail!(
+                    "no robot matches {needle:?}; `fjarr-connect list` shows the {} you may reach",
+                    robots.len()
+                ),
+                1 => chosen.push(hits[0].clone()),
+                // Several match: an exact id wins, otherwise ask, with the filter prefilled.
+                _ => match hits.iter().find(|r| r.robot_id == *needle) {
+                    Some(exact) => chosen.push(exact.clone()),
+                    None => chosen.push(pick_among(&hits, needle)?),
+                },
+            }
+        }
+        chosen
+    };
+    let mut out = Vec::new();
+    for r in chosen {
+        if r.status == "offline" {
+            // Fail fast and specifically (docs/27#what-it-feels-like): the grant would be valid and
+            // signaling would say robot-offline after a wait; this says it now, with the last sighting.
+            bail!("{} is offline (last seen {})", r.robot_id, ago(r.last_seen));
+        }
+        let grant = api.grant(&r.robot_id).await?;
+        out.push((r.robot_id, grant));
+    }
+    Ok(out)
+}
+
+fn pick_among(robots: &[operator_api::Robot], prefill: &str) -> Result<operator_api::Robot> {
+    if robots.is_empty() {
+        bail!("no robots are reachable for this account");
+    }
+    if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        bail!(
+            "no terminal to pick from: name the robot — {}",
+            robots
+                .iter()
+                .map(|r| r.robot_id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    let items: Vec<String> = robots
+        .iter()
+        .map(|r| format!("{:<14} {:<28} {}", r.robot_id, r.label, r.status))
+        .collect();
+    let selection = dialoguer::FuzzySelect::new()
+        .with_prompt("which robot  (type to filter, enter to connect)")
+        .items(&items)
+        .with_initial_text(prefill)
+        .default(0)
+        .interact()
+        .context("no robot chosen")?;
+    Ok(robots[selection].clone())
+}
+
+async fn do_connect(cfg: &config::Config, args: ConnectArgs) -> Result<()> {
+    let dev = args
+        .dev
+        .clone()
+        .unwrap_or_else(|| cfg.net.interface.clone());
+    let targets = resolve_targets(cfg, &args).await?;
 
     if args.dry_run {
-        for (robot, grant) in args.robots.iter().zip(&args.grant) {
+        for (robot, grant) in &targets {
             let mut session = signaling::Session::open(&args.server, grant)
                 .await
                 .with_context(|| format!("no session for {robot}"))?;
@@ -112,7 +405,7 @@ async fn main() -> Result<()> {
     // Open every link before routing any of them, so a colliding pair is refused with nothing left
     // half-attached.
     let mut opened = Vec::new();
-    for (robot, grant) in args.robots.iter().zip(&args.grant) {
+    for (robot, grant) in &targets {
         let one = link::open(
             robot,
             &args.server,
@@ -125,7 +418,7 @@ async fn main() -> Result<()> {
             .iter()
             .find(|o: &&link::Opened<_>| o.robot_addr == one.robot_addr)
         {
-            anyhow::bail!(
+            bail!(
                 "{} and {} both claim {} — two robots cannot share one address on one interface.\n\
                  Pin one of them to a free address in its agent config and restart it:\n  \
                  [capabilities.\"fjarr.net\"]\n  address = \"100.x.y.z\"\n\
@@ -143,7 +436,7 @@ async fn main() -> Result<()> {
     // and a packet arriving before its route exists has nothing to reach.
     let self_addr = opened[0].self_addr;
     let mtu = opened[0].mtu;
-    let (device, provenance) = tun::Tun::open(&args.dev, self_addr, mtu).await?;
+    let (device, provenance) = tun::Tun::open(&dev, self_addr, mtu).await?;
     let device = std::sync::Arc::new(device);
     if provenance == tun::Provenance::Created {
         println!("  created {} {self_addr}", device.name());
@@ -193,7 +486,7 @@ async fn pump(
     links: &[link::Link],
     addrs: &[std::net::Ipv4Addr],
     self_addr: std::net::Ipv4Addr,
-    args: &Args,
+    args: &ConnectArgs,
 ) -> Result<()> {
     let self_u32 = policy::to_u32(self_addr);
     let mut buf = vec![0u8; 65536];
@@ -329,5 +622,43 @@ mod tests {
             c.note(),
             " · 3 dropped at the queue bound, 1 refused by policy"
         );
+    }
+
+    #[test]
+    fn a_site_a_route_or_an_api_url_all_resolve_to_the_same_pair() {
+        let cfg = config::Config::default();
+        for typed in [
+            "https://fleet.acme.com",
+            "https://fleet.acme.com/",
+            "https://fleet.acme.com/cli-login",
+            "https://fleet.acme.com/api",
+        ] {
+            let (login, api) = resolve_backend(&cfg, Some(typed.into()), None).unwrap();
+            assert_eq!(login, "https://fleet.acme.com/cli-login", "{typed}");
+            assert_eq!(api, "https://fleet.acme.com/api", "{typed}");
+        }
+        // Two hosts, as the demo has: the route stays on the site that was named.
+        let (login, api) = resolve_backend(
+            &cfg,
+            Some("http://demo-dashboard:5173".into()),
+            Some("http://demo-backend:9090/api".into()),
+        )
+        .unwrap();
+        assert_eq!(login, "http://demo-dashboard:5173/cli-login");
+        assert_eq!(api, "http://demo-backend:9090/api");
+        assert!(
+            resolve_backend(&cfg, None, None).is_err(),
+            "nothing typed and nothing remembered is a question, not a default"
+        );
+    }
+
+    #[test]
+    fn last_seen_is_relative_and_never_panics() {
+        assert_eq!(ago(None), "-");
+        let now = now_ms() as u64;
+        assert_eq!(ago(Some(now)), "just now");
+        assert_eq!(ago(Some(now - 5 * 60_000)), "5m ago");
+        assert_eq!(ago(Some(now - 3 * 3_600_000)), "3h ago");
+        assert_eq!(ago(Some(now + 60_000)), "just now"); // a clock ahead of ours is not an error
     }
 }

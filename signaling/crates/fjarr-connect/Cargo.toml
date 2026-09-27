@@ -26,6 +26,16 @@ bytes = "1"
 # The TUN ioctl and the two unbuffered device reads/writes; no wrapper crate for three calls.
 libc = "0.2"
 async-trait = "0.1"
+# The operator API (docs/09#operator-api): robots, grants, login codes. Same rustls build as the server.
+reqwest = { workspace = true }
+# The picker — type to filter, enter to connect (docs/27#what-it-feels-like).
+dialoguer = { version = "0.11", features = ["fuzzy-select"] }
+# ~/.config/fjarr/config.toml and the 0600 credential beside it (docs/27#configuration).
+toml = "0.8"
+dirs = "6"
+# The address derivation (docs/27#addressing), so `list --ssh-config` can print a stanza a robot
+# will actually answer at. Pinned by test vectors against the agent's own derivation.
+sha2 = "0.10"
 
 # Linux's network configuration is netlink; macOS's is ioctls and a PF_ROUTE socket, so neither
 # platform links the other's mechanism.
