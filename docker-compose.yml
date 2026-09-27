@@ -208,6 +208,9 @@ services:
       # fjarr.net (docs/27): on only once `make tun-up` has created the interface, which is the
       # real ordering too — the device exists before the agent starts, never the other way round.
       FJARR_DEMO_NET: ${FJARR_DEMO_NET_2:-0}
+      # Pinned only by `make tunnel-collision`, which makes this robot claim the first robot's
+      # address on purpose so the operator has a colliding pair to refuse (docs/27#addressing).
+      FJARR_DEMO_NET_ADDRESS: ${FJARR_DEMO_NET_ADDRESS_2:-auto}
     working_dir: /workspace
     cap_add:
       - NET_ADMIN   # tc netem for the browser lab's media-path profiles (docs/25); the tunnel

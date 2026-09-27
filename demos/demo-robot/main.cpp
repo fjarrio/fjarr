@@ -71,7 +71,12 @@ int main() {
     // fjarr.net (docs/27): off unless the lab created the tunnel interface (`make tun-up`), so
     // the demo robot behaves like a real one — the device exists before the agent starts, and the
     // agent attaches to it with no CAP_NET_ADMIN of its own.
+    // `address` is normally left derived — a robot knows its own address at boot without asking
+    // anyone (docs/27#addressing). Pinning it is the documented escape hatch for the one case the
+    // derivation cannot solve, two robots hashing to the same address, and the lab pins it on purpose
+    // to prove the operator refuses such a pair (`make tunnel-collision`).
     config.capabilities["fjarr.net"] = {{"enabled", std::string(env_or("FJARR_DEMO_NET", "0")) == "1"},
+                                        {"address", std::string(env_or("FJARR_DEMO_NET_ADDRESS", "auto"))},
                                         {"interface", std::string(env_or("FJARR_DEMO_NET_INTERFACE", "fjarr0"))}};
     config.apply_env(); // FJARR_SERVER_URL, FJARR_DEV_DEVICE_TOKEN, FJARR_MEDIA_ENCODER, FJARR_ROBOT_ID …
     try {

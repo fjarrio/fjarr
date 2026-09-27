@@ -275,6 +275,69 @@ connect-dry: ## fjarr-connect against the demo robot as far as the offer (signal
 	@grant=$$(docker/lab/mint-grant.sh $(OPSIM_ROBOT) fjarr.net); \
 	  docker compose exec -T -e FJARR_GRANT="$$grant" dev sh -c 'cd /workspace/signaling && cargo build -q -p fjarr-connect && ./target/debug/fjarr-connect $(OPSIM_ROBOT) --server $(OPSIM_SERVER) --dry-run'
 
+OPSIM_ROBOT_2 ?= demo-robot-02
+.PHONY: tun-up-2
+tun-up-2: ## Bring the second robot up with its own tunnel interface, for the two-robot isolation regression
+	@addr=$$(docker compose exec -T -e FJARR_ROBOT_ID=$(OPSIM_ROBOT_2) dev ./build/$(BUILD_PRESET)/agent/daemon/fjarr-agent --net-address | tail -1 | tr -d '\r'); \
+	  echo "tun-up-2: $(OPSIM_ROBOT_2) derives $$addr (docs/27#addressing)"; \
+	  FJARR_DEMO_NET_2=1 docker compose --profile demo up -d --no-deps demo-robot-2 >/dev/null && \
+	  docker/lab/tundev.sh up demo-robot-2 "$$addr" $(TUN_OPERATOR) $(TUN_DEV)
+	@# This robot has no supervisor, so it cannot be restarted onto a device that appears later: it
+	@# waits 20 s for one at boot, and the line above creates it inside that window. That ordering is
+	@# the same one a real robot's systemd unit enforces (docs/27#lifecycle).
+	@for i in $$(seq 60); do docker compose logs --no-color demo-robot-2 2>/dev/null | grep -q "hello-ack: online" && break; sleep 1; done; \
+	  docker compose exec -T demo-robot-2 sh -c 'ip link show $(TUN_DEV) >/dev/null 2>&1' \
+	  || { echo "tun-up-2: the second robot has no $(TUN_DEV); docker compose logs demo-robot-2"; exit 1; }
+	@echo "tun-up-2: the second robot is online with its own interface"
+
+.PHONY: connect-build
+connect-build: ## Build fjarr-connect --release and grant it CAP_NET_ADMIN the way the installer does
+	@docker compose exec -T dev sh -c 'cd /workspace/signaling && cargo build -q --release -p fjarr-connect'
+	@# The same grant docs/27 describes for a real install: the capability lives on the client binary,
+	@# never on the agent, and never on the whole container's user. Without it the client can still
+	@# attach an interface somebody else created — it just cannot add the second robot's route.
+	@docker compose exec -T -u root dev setcap cap_net_admin+ep /workspace/signaling/target/release/fjarr-connect
+	@docker compose exec -T dev getcap /workspace/signaling/target/release/fjarr-connect
+
+.PHONY: tunnel-isolation
+tunnel-isolation: ## docs/15 safety class: two robots on one operator interface cannot reach each other, either way
+	$(MAKE) --no-print-directory tun-up
+	$(MAKE) --no-print-directory tun-up-2
+	@a=$$(docker compose exec -T -e FJARR_ROBOT_ID=$(OPSIM_ROBOT) dev ./build/$(BUILD_PRESET)/agent/daemon/fjarr-agent --net-address | tail -1 | tr -d '\r'); \
+	  b=$$(docker compose exec -T -e FJARR_ROBOT_ID=$(OPSIM_ROBOT_2) dev ./build/$(BUILD_PRESET)/agent/daemon/fjarr-agent --net-address | tail -1 | tr -d '\r'); \
+	  docker/lab/tundev.sh up dev $(TUN_OPERATOR) "$$a" $(TUN_DEV) >/dev/null; \
+	  grant_a=$$(docker/lab/mint-grant.sh $(OPSIM_ROBOT) fjarr.net); \
+	  grant_b=$$(docker/lab/mint-grant.sh $(OPSIM_ROBOT_2) fjarr.net); \
+	  $(MAKE) --no-print-directory connect-build && \
+	  docker compose exec -T -e FJARR_LOG=warn dev \
+	    ./signaling/target/release/fjarr-connect $(OPSIM_ROBOT) $(OPSIM_ROBOT_2) \
+	    --server $(OPSIM_SERVER) --dev $(TUN_DEV) --grant "$$grant_a" --grant "$$grant_b" \
+	    -- docker/lab/two-robot-isolation.sh
+
+.PHONY: tunnel-collision
+tunnel-collision: ## Two robots claiming one address: the operator must refuse the pair by name (docs/27#addressing)
+	$(MAKE) --no-print-directory tun-up
+	@a=$$(docker compose exec -T -e FJARR_ROBOT_ID=$(OPSIM_ROBOT) dev ./build/$(BUILD_PRESET)/agent/daemon/fjarr-agent --net-address | tail -1 | tr -d '\r'); \
+	  echo "tunnel-collision: pinning $(OPSIM_ROBOT_2) to $$a, which $(OPSIM_ROBOT) already derives"; \
+	  FJARR_DEMO_NET_2=1 FJARR_DEMO_NET_ADDRESS_2="$$a" docker compose --profile demo up -d --no-deps --force-recreate demo-robot-2 >/dev/null && \
+	  docker/lab/tundev.sh up demo-robot-2 "$$a" $(TUN_OPERATOR) $(TUN_DEV) >/dev/null && \
+	  for i in $$(seq 60); do docker compose logs --no-color demo-robot-2 2>/dev/null | grep -q "hello-ack: online" && break; sleep 1; done; \
+	  $(MAKE) --no-print-directory connect-build >/dev/null && \
+	  grant_a=$$(docker/lab/mint-grant.sh $(OPSIM_ROBOT) fjarr.net); \
+	  grant_b=$$(docker/lab/mint-grant.sh $(OPSIM_ROBOT_2) fjarr.net); \
+	  out=$$(docker compose exec -T -e FJARR_LOG=error dev \
+	    ./signaling/target/release/fjarr-connect $(OPSIM_ROBOT) $(OPSIM_ROBOT_2) \
+	    --server $(OPSIM_SERVER) --dev $(TUN_DEV) --grant "$$grant_a" --grant "$$grant_b" \
+	    -- true 2>&1); rc=$$?; \
+	  echo "$$out" | grep -viE "pingAllCandidates|remote_addr|refusing first|TURN transaction|Failed to connect TCP"; \
+	  if [ $$rc -eq 0 ]; then echo "tunnel-collision: FAIL the operator attached a colliding pair"; exit 1; fi; \
+	  echo "$$out" | grep -q "both claim $$a" \
+	    && echo "tunnel-collision: PASS refused by name, with the address line that fixes it" \
+	    || { echo "tunnel-collision: FAIL it failed for some other reason than the collision"; exit 1; }
+	@# Put the second robot back to a derived address, so the isolation regression is not left looking
+	@# at a robot pinned to its neighbour's address.
+	@FJARR_DEMO_NET_2=1 docker compose --profile demo up -d --no-deps --force-recreate demo-robot-2 >/dev/null 2>&1 || true
+
 .PHONY: tunnel-ros-ordering
 tunnel-ros-ordering: ## The three docs/27#lifecycle facts as a regression: attached, detached, and across an agent restart
 	docker/lab/ros-ordering.sh

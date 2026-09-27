@@ -223,8 +223,23 @@ It speaks the ordinary signaling and session protocol and uses **data
 channels only, no media**, which is why it needs no GStreamer and ships as
 one static binary ([ADR-0024](adr/0024-native-operator-client.md)). It
 requires `CAP_NET_ADMIN` to create its interface and add routes, granted by
-`setcap` at install or by running it under `sudo`, and uses no other
-privilege.
+`setcap cap_net_admin+ep` at install or by running it under `sudo`, and uses no
+other privilege. Every such change is made **in the client's own process**, over
+netlink: a file capability is not inherited by a child process, so a client that
+shelled out to `ip` would work under `sudo` and fail under `setcap` with
+`Operation not permitted`. Doing it in-process also means the binary needs no
+`iproute2` on the host, which is the point of shipping one static file.
+
+An interface it creates is **persistent and owned by the user who created it**
+(`TUNSETPERSIST`, `TUNSETOWNER`), for the same reason the robot's is: the interface
+and its address outliving any one link is what lets a long-running ROS 2 node keep
+working ([above](#the-shape)), and it means every later run attaches with no
+privilege at all.
+
+A grant names one robot
+([docs/09](09-interfaces.md#a-session-grants-customer-backend--operator-client)), so
+attaching several robots takes `--grant` once per robot in the same order, until
+`login` fetches them per robot ([below](#discovery)).
 
 Its ICE matches the rest of the stack rather than the usual desktop default.
 Candidates **trickle in both directions**: the agent's offer advertises
@@ -363,7 +378,9 @@ fjarr-connect robot-024 -- scp robot@$FJARR_ADDR:/var/log/robot.log .
 ```
 
 One mechanism, no per-tool wrappers, and it composes with anything already
-installed.
+installed. With several robots attached, `FJARR_ADDR` is the first one's address and
+`FJARR_ADDRS` carries all of them, space separated, in the order they were
+attached.
 
 **Offline robots fail fast and specifically.** The grant is valid, so the
 refusal comes from signaling as `robot-offline`
@@ -463,6 +480,14 @@ unaffected either way — 31-33 fps, no lost frames, longest gap 55-70 ms agains
 a 48-51 ms idle baseline. That closes [question #23](18-open-questions.md): the
 tunnel and the video share one peer connection without a separate one for bulk.
 
+`fjarr-connect` measures the same: **246-253 Mbps** for a hash-verified 1 GiB
+`scp` (slice 4.5e), against 264 Mbps for `fjarr-opsim` on the same link and
+payload. Two implementations of the operator end, one C++ on a GLib loop and one
+Rust on tokio, land within 7 % of each other, so the ceiling is the transport
+rather than either pump. The client has to be built `--release` before any such
+number is believed: unoptimised it manages 53 Mbps, which is the build and not
+the design.
+
 **A bulk transfer stalls in roughly half of attempts**, at the onset of the
 flow. `ssh` and small requests over the same link never stall. It is
 [question #28](18-open-questions.md), it is independent of video and of transfer
@@ -525,7 +550,12 @@ Per [docs/15](15-testing-strategy.md):
   read does not pass one; tail-drop at the queue bound, and that what was
   dropped is gone rather than queued; MTU enforcement. The packet pump runs
   against a socketpair, so the rules are tested with no device and no
-  privileges. Collision detection is the operator's, and lands with it.
+  privileges. The saturating case is a unit test too: a full batch of 32 reads
+  must keep the watch and lose no packet — the path whose missing return value
+  aborted the agent in every bulk transfer (slice 4.5e, [#28](18-open-questions.md)).
+  The operator end carries the same two rules in Rust (`policy::tests`, slice 4.5e),
+  case for case, because an operator that trusted what arrived on a channel would
+  carry one robot's packets into another's route.
 - **End to end** (slice 4.5a, `fjarr-opsim --scenario tunnel`): the simulator
   attaches to its own persistent interface and pumps real IP over
   `fjarr:stream:fjarr.net` — an HTTP request to the robot's own introspection
@@ -550,6 +580,19 @@ Per [docs/15](15-testing-strategy.md):
   <cmd>`. `make tunnel-ssh` asserts the shell; `make tunnel-scp` pulls the
   payload and verifies its sha256, and records rather than asserts while
   [#28](18-open-questions.md) stands.
+- **Two robots at once** (slice 4.5e, `make tunnel-isolation`, docs/15 safety
+  class — never removed): two robots attached to one operator interface, each
+  reachable from the operator over its own link, neither reachable from the other.
+  The negative half **forces a route into the sending robot's tunnel first** and
+  verifies it is there: without that the packet leaves down the robot's default
+  route, the attempt times out for a reason that has nothing to do with isolation,
+  and the check passes while measuring nothing. What refuses it with the route
+  forced is the sending robot's own outbound rule; the operator's mirror of that
+  rule cannot be reached by an honest agent, which is why it is a unit test in all
+  three implementations rather than a live one.
+- **A colliding pair** (slice 4.5e, `make tunnel-collision`): the second robot is
+  pinned to the first robot's address on purpose, and the operator refuses the pair
+  by name with the `address` line that fixes it, before either link is routed.
 - **ROS 2** (slice 4.5d): `make tunnel-ros` runs `ros2 topic list` and
   `ros2 topic echo` from a sidecar on the operator's namespace against one on the
   robot's, with `docker/lab/dds-isolate.sh` removing every direct path between the

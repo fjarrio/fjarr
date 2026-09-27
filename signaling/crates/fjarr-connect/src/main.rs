@@ -1,13 +1,16 @@
-//! fjarr-connect — a routable IP address for one robot, for the tools a developer already owns.
+//! fjarr-connect — a routable IP address for a robot, for the tools a developer already owns.
 //!
-//! This is the first slice of it: signaling only, so `--grant` and the path to an offer can be
-//! exercised against a real server before any transport exists. The peer connection, the tunnel
-//! device and `-- <command>` follow (docs/27, ADR-0024).
+//! One interface, a /32 route per attached robot, and a link that lives in the terminal that started
+//! it. Several robots at once is what the single-interface design exists for, and it is also what
+//! makes an address collision detectable: the links are all in one process, so a second robot
+//! claiming an address the first already has is refused by name rather than silently routed to
+//! whichever link was started last (docs/27#the-shape, ADR-0024).
 //!
 //! spec: docs/27-network-tunnel.md · docs/09-interfaces.md#operator-api
 use anyhow::{Context, Result};
 use clap::Parser;
 
+mod link;
 mod peer;
 mod policy;
 mod signaling;
@@ -20,9 +23,10 @@ mod tun;
     version
 )]
 struct Args {
-    /// The robot to reach. Optional in the finished client — without one it shows a picker
-    /// (docs/27#what-it-feels-like) — and required until discovery exists.
-    robot: String,
+    /// The robots to reach, one or more. Optional in the finished client — without any it shows a
+    /// picker (docs/27#what-it-feels-like) — and required until discovery exists.
+    #[arg(required = true)]
+    robots: Vec<String>,
 
     /// The signaling endpoint.
     #[arg(
@@ -32,11 +36,12 @@ struct Args {
     )]
     server: String,
 
-    /// A session grant, minted by the customer's backend. The alternative paths — `login`, or a
-    /// configured command that prints one — are docs/27#discovery and come later; this flag is the
+    /// A session grant, minted by the customer's backend, repeated once per robot and in the same
+    /// order. A grant names one robot (docs/09#a-session-grants), so several robots need several
+    /// grants; `login` fetching them per robot is docs/27#discovery and comes later. This flag is the
     /// one that works on the first day of any integration.
-    #[arg(long, env = "FJARR_GRANT")]
-    grant: String,
+    #[arg(long, env = "FJARR_GRANT", required = true)]
+    grant: Vec<String>,
 
     /// Stop after reading the robot's offer, without answering it.
     #[arg(long)]
@@ -62,8 +67,9 @@ struct Args {
     #[arg(long, hide = true)]
     no_heartbeat: bool,
 
-    /// A command to run with the link up, after `--`. It gets `FJARR_ADDR` in its environment, and
-    /// the link is torn down when it exits (docs/27#what-it-feels-like).
+    /// A command to run with the link up, after `--`. It gets `FJARR_ADDR` in its environment (and
+    /// `FJARR_ADDRS`, space separated, when several robots are attached), and the links are torn down
+    /// when it exits (docs/27#what-it-feels-like).
     #[arg(last = true)]
     command: Vec<String>,
 }
@@ -79,278 +85,137 @@ async fn main() -> Result<()> {
         .init();
     let args = Args::parse();
 
-    let started = std::time::Instant::now();
-    let mut session = signaling::Session::open(&args.server, &args.grant)
-        .await
-        .with_context(|| format!("no session for {}", args.robot))?;
-    let offer = session.wait_for_offer().await?;
-    tracing::info!(
-        session = signaling::short(&session.session_id),
-        manifest_version = offer.manifest_version.unwrap_or(0),
-        tracks = offer.tracks.len(),
-        sdp_bytes = offer.sdp.len(),
-        turn = session.turn.is_some(),
-        "the robot offered"
-    );
-    tracing::trace!(sdp = %offer.sdp, "the offer, verbatim");
+    if args.grant.len() != args.robots.len() {
+        anyhow::bail!(
+            "{} robot(s) but {} grant(s): a grant names one robot, so pass --grant once per robot, in \
+             the same order (docs/09#a-session-grants)",
+            args.robots.len(),
+            args.grant.len()
+        );
+    }
 
     if args.dry_run {
-        println!(
-            "fjarr-connect: reached {} and it offered {} track(s); --dry-run stops here",
-            args.robot,
-            offer.tracks.len()
-        );
-        session.close().await?;
+        for (robot, grant) in args.robots.iter().zip(&args.grant) {
+            let mut session = signaling::Session::open(&args.server, grant)
+                .await
+                .with_context(|| format!("no session for {robot}"))?;
+            let offer = session.wait_for_offer().await?;
+            println!(
+                "fjarr-connect: reached {robot} and it offered {} track(s); --dry-run stops here",
+                offer.tracks.len()
+            );
+            session.close().await?;
+        }
         return Ok(());
     }
 
-    // Answer it, and trickle candidates both ways (docs/08). The agent creates the channels; this
-    // end only receives them.
-    let (peer, answer_sdp, mut events) =
-        peer::answer(&offer.sdp, session.turn.as_ref(), &args.stun).await?;
-    session.send_answer(&answer_sdp).await?;
-
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(args.timeout);
-    let (mut control_open, mut stream_open) = (false, false);
-    // Bytes the robot sent before this end could route anything. Counted rather than ignored,
-    // because a silent drop is the thing that makes a tunnel hard to debug (docs/27).
-    let mut early_packets = 0usize;
-    let mut late_candidates: Vec<(String, u32)> = Vec::new();
-    while !(control_open && stream_open) {
-        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if left.is_zero() {
+    // Open every link before routing any of them, so a colliding pair is refused with nothing left
+    // half-attached.
+    let mut opened = Vec::new();
+    for (robot, grant) in args.robots.iter().zip(&args.grant) {
+        let one = link::open(
+            robot,
+            &args.server,
+            grant,
+            &args.stun,
+            std::time::Duration::from_secs(args.timeout),
+        )
+        .await?;
+        if let Some(clash) = opened
+            .iter()
+            .find(|o: &&link::Opened<_>| o.robot_addr == one.robot_addr)
+        {
             anyhow::bail!(
-                "the link did not come up within {}s (control={control_open}, tunnel={stream_open})",
-                args.timeout
+                "{} and {} both claim {} — two robots cannot share one address on one interface.\n\
+                 Pin one of them to a free address in its agent config and restart it:\n  \
+                 [capabilities.\"fjarr.net\"]\n  address = \"100.x.y.z\"\n\
+                 An address is either derived from the robot id or pinned there (docs/27#addressing); \
+                 renaming a robot changes what it derives.",
+                clash.robot,
+                one.robot,
+                one.robot_addr
             );
         }
-        tokio::select! {
-            ev = events.recv() => match ev {
-                Some(peer::Event::ChannelOpen(label)) => {
-                    tracing::debug!(%label, "channel open");
-                    control_open |= label == peer::CONTROL;
-                    stream_open |= label == peer::NET_STREAM;
-                }
-                Some(peer::Event::Closed(why)) => anyhow::bail!("the connection closed before the link was up ({why})"),
-                Some(peer::Event::Candidate { candidate, sdp_mline_index }) => {
-                    session.send_candidate(candidate, sdp_mline_index).await?;
-                }
-                Some(peer::Event::Packet(bytes)) => early_packets += bytes.len(),
-                Some(_) => {}
-                None => anyhow::bail!("the peer connection ended"),
-            },
-            inbound = session.next_inbound(left) => match inbound? {
-                // The agent's offer carries no candidates — these are the only ones there are.
-                signaling::Inbound::Candidate { candidate, sdp_mline_index } => {
-                    tracing::debug!(%candidate, sdp_mline_index, "a candidate from the robot");
-                    if let Err(e) = peer.add_remote_candidate(candidate, sdp_mline_index).await {
-                        tracing::warn!(error = %e, "the peer connection would not take a candidate");
-                    }
-                }
-                signaling::Inbound::Other => {}
-                signaling::Inbound::Closed(reason) => anyhow::bail!("the session ended: {reason}"),
-            },
-        }
+        opened.push(one);
     }
 
-    // The link is a capability request, not a side effect of connecting (docs/08#net-packets).
-    let open = fjarr_protocol::Envelope::request("fjarr.net", "open", serde_json::json!({}));
-    peer.send_control(&open).await?;
-    let result = peer::await_result(
-        &mut events,
-        &open.event_id,
-        |ev| match ev {
-            peer::Event::Packet(bytes) => early_packets += bytes.len(),
-            // The link is already up by now, so these are late arrivals — kept rather than dropped,
-            // because a candidate silently discarded is how the first version of this failed.
-            peer::Event::Candidate {
-                candidate,
-                sdp_mline_index,
-            } => late_candidates.push((candidate, sdp_mline_index)),
-            _ => {}
-        },
-        std::time::Duration::from_secs(10),
-    )
-    .await?;
-    for (candidate, mline) in late_candidates.drain(..) {
-        session.send_candidate(candidate, mline).await?;
-    }
-    if !result.ok() {
-        let code = result.error_code().unwrap_or("unknown").to_string();
-        peer.close().await.ok();
-        session.close().await.ok();
-        anyhow::bail!("the robot refused the link: {code} ({})", result.payload);
-    }
-    let field = |k: &str| {
-        result
-            .payload
-            .get(k)
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string()
-    };
-    let mtu = result
-        .payload
-        .get("mtu")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(1280) as usize;
-    let robot_addr = tun::parse_address(&field("address")).context("the robot's own address")?;
-    let self_addr = tun::parse_address(&field("peer_address")).context("this end's address")?;
-
-    // The interface, then the route, then the pump. In that order because a route to a device that
-    // is not up goes nowhere, and a packet arriving before the route exists has nothing to reach.
-    let (device, provenance) = tun::Tun::open(&args.dev, self_addr, mtu)?;
-    device.add_route(robot_addr)?;
-
-    println!(
-        "{}  {}  mtu {}  up in {:.1} s",
-        args.robot,
-        robot_addr,
-        mtu,
-        started.elapsed().as_secs_f32()
-    );
+    // The interface, then the routes, then the pump: a route to a device that is not up goes nowhere,
+    // and a packet arriving before its route exists has nothing to reach.
+    let self_addr = opened[0].self_addr;
+    let mtu = opened[0].mtu;
+    let (device, provenance) = tun::Tun::open(&args.dev, self_addr, mtu).await?;
+    let device = std::sync::Arc::new(device);
     if provenance == tun::Provenance::Created {
         println!("  created {} {self_addr}", device.name());
     }
-    println!("  ssh <user>@{robot_addr}");
-    if early_packets > 0 {
-        // The robot's kernel can address the link the moment it is open, so this is expected rather
-        // than alarming — and worth saying, because those bytes were dropped.
-        println!("  {early_packets} bytes arrived before the route existed and were dropped");
+
+    let mut links = Vec::new();
+    let mut addrs = Vec::new();
+    for one in opened {
+        println!(
+            "{}  {}  mtu {}  up in {:.1} s",
+            one.robot,
+            one.robot_addr,
+            one.mtu,
+            one.up_in.as_secs_f32()
+        );
+        println!("  ssh <user>@{}", one.robot_addr);
+        if one.early_bytes > 0 {
+            println!(
+                "  {} bytes arrived before the route existed and were dropped",
+                one.early_bytes
+            );
+        }
+        addrs.push(one.robot_addr);
+        links.push(one.start(device.clone(), !args.no_heartbeat).await?);
     }
 
-    let counts = pump(
-        &device,
-        &peer,
-        &mut events,
-        &mut session,
-        robot_addr,
-        self_addr,
-        &args,
-    )
-    .await;
-    let counts = match counts {
-        Ok(counts) => counts,
-        Err(e) => {
-            tun::drop_route(&args.dev, robot_addr);
-            peer.close().await.ok();
-            session.close().await.ok();
-            return Err(e);
-        }
-    };
+    let counts = pump(&device, &links, &addrs, self_addr, &args).await;
 
-    tun::drop_route(&args.dev, robot_addr);
-    let close = fjarr_protocol::Envelope::request("fjarr.net", "close", serde_json::json!({}));
-    peer.send_control(&close).await.ok();
-    peer.close().await.ok();
-    session.close().await.ok();
-    println!(
-        "  link closed · {} up / {} down{}",
-        human(counts.tx_bytes),
-        human(counts.rx_bytes),
-        counts.dropped_note()
-    );
-    Ok(())
-}
-
-#[derive(Default)]
-struct Counts {
-    tx_bytes: u64,
-    rx_bytes: u64,
-    /// Outbound packets the channel would not take at its bound: tail-drop, counted
-    /// (docs/27#the-packet-path).
-    dropped: u64,
-    /// Inbound packets the two rules refused. Anything but zero means something addressed this link
-    /// that had no business on it (docs/27#isolation).
-    refused: u64,
-    /// Writes into the device the kernel rejected, which from the outside looks exactly like a
-    /// stalled transfer and is recorded nowhere else.
-    write_failed: u64,
-    /// Packets larger than the MTU, which the interface should make impossible.
-    oversize: u64,
-}
-
-impl Counts {
-    fn dropped_note(&self) -> String {
-        let mut parts = Vec::new();
-        if self.dropped > 0 {
-            parts.push(format!("{} dropped at the queue bound", self.dropped));
-        }
-        if self.refused > 0 {
-            parts.push(format!("{} refused by policy", self.refused));
-        }
-        if self.write_failed > 0 {
-            parts.push(format!(
-                "{} could not be written to the device",
-                self.write_failed
-            ));
-        }
-        if self.oversize > 0 {
-            parts.push(format!("{} over the MTU", self.oversize));
-        }
-        if parts.is_empty() {
-            String::new()
-        } else {
-            format!(" · {}", parts.join(", "))
-        }
+    for one in links {
+        let robot = one.robot.clone();
+        let c = one.stop(&device).await;
+        println!(
+            "  {robot}: {} up / {} down{}",
+            human(c.tx_bytes),
+            human(c.rx_bytes),
+            c.note()
+        );
     }
+    counts
 }
 
-/// Bytes in the unit they are actually in. A small transfer rounding to "0 kB" reads as a link that
-/// carried nothing, which is the opposite of what it means.
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
-
-fn human(bytes: u64) -> String {
-    const K: f64 = 1024.0;
-    const M: f64 = K * 1024.0;
-    const G: f64 = M * 1024.0;
-    let b = bytes as f64;
-    if b >= G {
-        format!("{:.1} GB", b / G)
-    } else if b >= M {
-        format!("{:.0} MB", b / M)
-    } else if b >= K {
-        format!("{:.0} kB", b / K)
-    } else {
-        format!("{bytes} B")
-    }
-}
-
-/// Carry packets until the link ends: Ctrl-C, the command exiting, or the far end going away.
-///
-/// One task rather than two: a send is a queue push, so nothing here blocks long enough to be worth
-/// the shared state that two tasks would need.
+/// Read the device and hand each packet to the link that owns its destination. This is the only
+/// place that sees more than one link, and all it does is choose one: there is no path from a packet
+/// that arrived on one link to another link's route (docs/27#isolation).
 async fn pump(
     device: &tun::Tun,
-    peer: &peer::Peer<impl webrtc::peer_connection::PeerConnection>,
-    events: &mut tokio::sync::mpsc::Receiver<peer::Event>,
-    session: &mut signaling::Session,
-    robot: std::net::Ipv4Addr,
+    links: &[link::Link],
+    addrs: &[std::net::Ipv4Addr],
     self_addr: std::net::Ipv4Addr,
     args: &Args,
-) -> Result<Counts> {
-    let robot_u32 = policy::to_u32(robot);
+) -> Result<()> {
     let self_u32 = policy::to_u32(self_addr);
-    let mut counts = Counts::default();
     let mut buf = vec![0u8; 65536];
-
-    // Heartbeat, not an optional nicety: the agent ends the session with `reason="heartbeat"` once
-    // three of these are missed (docs/08#datachannel-topology), so a link that sends none dies about
-    // fifteen seconds in. It cost a morning to find, because every short check passes.
-    let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(5));
-    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Two different things, counted apart: the interface sees the kernel's IPv6 chatter the moment it
+    // comes up, and that is not the same event as an IPv4 packet for an address no link owns.
+    let mut not_ipv4 = 0u64;
+    let mut unroutable = 0u64;
 
     let mut child = if args.command.is_empty() {
         None
     } else {
         let mut cmd = tokio::process::Command::new(&args.command[0]);
         cmd.args(&args.command[1..])
-            .env("FJARR_ADDR", robot.to_string());
+            .env("FJARR_ADDR", addrs[0].to_string())
+            .env(
+                "FJARR_ADDRS",
+                addrs
+                    .iter()
+                    .map(|a| a.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
         Some(
             cmd.spawn()
                 .with_context(|| format!("running {}", args.command.join(" ")))?,
@@ -365,70 +230,21 @@ async fn pump(
                 r?;
                 while let Some(n) = device.try_read(&mut buf)? {
                     if n == 0 { break; }
-                    if n > device.mtu() {
-                        counts.oversize += 1;
-                        continue;
-                    }
                     let packet = &buf[..n];
-                    // The same two rules the robot applies, from this end (docs/27#isolation): what
-                    // leaves here must be from us and for the robot this link belongs to.
-                    if policy::check(&policy::inspect(packet), robot_u32, self_u32) != policy::Verdict::Allow {
-                        counts.refused += 1;
+                    let view = policy::inspect(packet);
+                    if !view.ipv4 {
+                        // IPv6 inside the tunnel is open question #22; until then it never leaves here.
+                        not_ipv4 += 1;
                         continue;
                     }
-                    if peer.send_packet(packet).await? {
-                        counts.tx_bytes += n as u64;
-                    } else {
-                        counts.dropped += 1;
+                    // The link is chosen by destination, and the rules are then checked against that
+                    // link's own addresses. A packet for an address no link owns has nowhere to go.
+                    match addrs.iter().position(|a| policy::to_u32(*a) == view.dst) {
+                        Some(i) if policy::check(&view, policy::to_u32(addrs[i]), self_u32) == policy::Verdict::Allow => {
+                            links[i].offer(packet.to_vec());
+                        }
+                        _ => unroutable += 1,
                     }
-                }
-            }
-            ev = events.recv() => match ev {
-                Some(peer::Event::Packet(bytes)) => {
-                    let verdict = policy::check(&policy::inspect(&bytes), self_u32, robot_u32);
-                    if verdict != policy::Verdict::Allow {
-                        counts.refused += 1;
-                        tracing::debug!(verdict = verdict.name(), bytes = bytes.len(), "a packet this link may not carry");
-                        continue;
-                    }
-                    if device.try_write(&bytes)? {
-                        counts.rx_bytes += bytes.len() as u64;
-                    } else {
-                        counts.write_failed += 1;
-                    }
-                }
-                Some(peer::Event::Candidate { candidate, sdp_mline_index }) => {
-                    session.send_candidate(candidate, sdp_mline_index).await.ok();
-                }
-                Some(peer::Event::Closed(why)) => {
-                    println!("  the robot's end went away ({why})");
-                    break None;
-                }
-                Some(_) => {}
-                None => break None,
-            },
-            inbound = session.next_inbound(std::time::Duration::from_secs(3600)) => match inbound? {
-                signaling::Inbound::Candidate { candidate, sdp_mline_index } => {
-                    if let Err(e) = peer.add_remote_candidate(candidate, sdp_mline_index).await {
-                        tracing::warn!(error = %e, "the peer connection would not take a candidate");
-                    }
-                }
-                signaling::Inbound::Other => {}
-                signaling::Inbound::Closed(reason) => {
-                    println!("  the session ended ({reason})");
-                    break None;
-                }
-            },
-            _ = heartbeat.tick(), if !args.no_heartbeat => {
-                let ping = fjarr_protocol::Envelope::request(
-                    "fjarr.core",
-                    "ping",
-                    serde_json::json!({ "t0": now_ms() }),
-                );
-                if let Err(e) = peer.send_control(&ping).await {
-                    // The control channel going away is the link going away.
-                    println!("  the control channel closed ({e})");
-                    break None;
                 }
             }
             // A link lives in the terminal that started it (docs/27#what-it-feels-like).
@@ -437,13 +253,19 @@ async fn pump(
         }
     };
 
+    if unroutable > 0 {
+        println!("  {unroutable} packets were for no attached robot and went nowhere");
+    }
+    if not_ipv4 > 0 {
+        tracing::debug!(not_ipv4, "packets that were not IPv4 (question #22)");
+    }
     if let Some(status) = status {
         if !status.success() {
-            // The command's own exit code is the interesting one; the link did its job either way.
+            // The command's own exit code is the interesting one; the links did their job either way.
             println!("  {} exited with {}", args.command[0], status);
         }
     }
-    Ok(counts)
+    Ok(())
 }
 
 /// Resolve when the child exits, or never when there is no child.
@@ -453,6 +275,31 @@ async fn wait_for(
     match child {
         Some(child) => Ok(Some(child.wait().await.context("waiting for the command")?)),
         None => std::future::pending().await,
+    }
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Bytes in the unit they are actually in. A small transfer rounding to "0 kB" reads as a link that
+/// carried nothing, which is the opposite of what it means.
+fn human(bytes: u64) -> String {
+    const K: f64 = 1024.0;
+    const M: f64 = K * 1024.0;
+    const G: f64 = M * 1024.0;
+    let b = bytes as f64;
+    if b >= G {
+        format!("{:.1} GB", b / G)
+    } else if b >= M {
+        format!("{:.0} MB", b / M)
+    } else if b >= K {
+        format!("{:.0} kB", b / K)
+    } else {
+        format!("{bytes} B")
     }
 }
 
@@ -472,14 +319,14 @@ mod tests {
     /// The closing line stays silent when nothing went wrong, and names each thing that did.
     #[test]
     fn the_closing_line_only_mentions_what_happened() {
-        assert_eq!(Counts::default().dropped_note(), "");
-        let c = Counts {
+        assert_eq!(link::Counts::default().note(), "");
+        let c = link::Counts {
             dropped: 3,
             refused: 1,
-            ..Counts::default()
+            ..link::Counts::default()
         };
         assert_eq!(
-            c.dropped_note(),
+            c.note(),
             " · 3 dropped at the queue bound, 1 refused by policy"
         );
     }

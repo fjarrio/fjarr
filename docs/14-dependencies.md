@@ -67,6 +67,7 @@ ioctls.
 | webrtc-rs | pinned at implementation | peer connection + data channels, no media | MIT/Apache-2.0 | yes |
 | tokio | 1.x | async runtime | MIT | yes |
 | libc | 0.2 | the virtual interface, with no wrapper crate: `TUNSETIFF` plus one unbuffered read and write per packet is three calls, and a TUN crate would bring its own I/O model to sit beside tokio's. Interface, address and route setup shells out to `ip`, which is on every host that has a TUN device (slice 4.5e; the macOS `utun` path is the same three calls against a different socket family) | MIT/Apache-2.0 | yes |
+| rtnetlink (with netlink-packet-core / -route / -utils, netlink-proto, netlink-sys, nix) | 0.23 | the interface's address, MTU and per-robot routes, **in process**. A file capability is not inherited by a child, so shelling out to `ip` cannot work under the `setcap` install docs/27 promises — and speaking netlink here also means the binary needs no `iproute2` on the host (slice 4.5e) | MIT | yes |
 | clap | 4.x | the CLI surface | MIT/Apache-2.0 | yes |
 | `fjarr-protocol` (this repo) | workspace | shared signaling message types — the reason wire drift is a compile error. Its own crate since slice 4.5e, so an operator client links the types without the server's axum/hyper/HMAC stack (ADR-0024) | AGPL-3.0 | yes |
 | reqwest (rustls) | 0.12 | webhook delivery | MIT/Apache-2.0 | yes |
