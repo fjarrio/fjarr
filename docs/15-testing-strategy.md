@@ -110,7 +110,10 @@ regresses**:
   in [docs/27](27-network-tunnel.md#lifecycle), and therefore the installer's
   job and the systemd unit's ordering, is built on nothing else. Implemented in
   slice 4.5d as `make tunnel-ros-ordering`, against real ROS 2 participants on
-  both ends of a real link. The agent runs under a supervisor in the lab so it
+  both ends of a real link, and run **nightly** after `make tunnel-ros` as its
+  positive control: it builds the ROS lab image, restarts the agent and recreates
+  participants, which is minutes of work for a property that changes rarely. The
+  agent runs under a supervisor in the lab so it
   can be restarted the way systemd restarts it, leaving the interface in place;
   restarting the container instead would take the device with it and the third
   fact would be untestable.

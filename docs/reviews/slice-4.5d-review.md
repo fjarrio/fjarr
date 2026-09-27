@@ -54,6 +54,6 @@ setup`'s offer to write the file: **deliberately not met**, and moved to
 ## Deferred
 
 - **Question #29**: Cyclone over the link, and the `net setup` offer that waits on it.
-- **The ordering regression is not in CI.** It restarts the agent and recreates participants, which takes a couple of minutes and wants the ROS profile up; it belongs in the nightly rather than every push, and nothing schedules it yet.
-- **The `ros` profile is not part of CI at all**, so `tunnel-ros` is a local gate today. It should join the nightly with the ordering regression.
+- ~~**The ordering regression is not in CI.**~~ Scheduled in the nightly after slice 4.5e, with `tunnel-ros` before it as the positive control (docs/15).
+- ~~**The `ros` profile is not part of CI at all**~~ — the nightly builds it now, for the two steps above.
 - The lab's ROS participant publishes one topic at 2 Hz. Nothing has measured ROS 2 over the link under the docs/25 network profiles, which is where the spike's `bad`-profile finding (DDS discovery does not complete at 15 % loss) would be re-checked.
