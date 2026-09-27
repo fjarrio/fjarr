@@ -105,6 +105,7 @@ pub async fn open(
     server: &str,
     grant: &str,
     stun: &[String],
+    relay_only: bool,
     timeout: std::time::Duration,
 ) -> Result<Opened<impl PeerConnection>> {
     let started = std::time::Instant::now();
@@ -125,7 +126,7 @@ pub async fn open(
     // Answer it, and trickle candidates both ways (docs/08). The agent creates the channels; this
     // end only receives them.
     let (peer, answer_sdp, mut events) =
-        peer::answer(&offer.sdp, session.turn.as_ref(), stun).await?;
+        peer::answer(&offer.sdp, session.turn.as_ref(), stun, relay_only).await?;
     session.send_answer(&answer_sdp).await?;
 
     let deadline = tokio::time::Instant::now() + timeout;

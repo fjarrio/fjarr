@@ -250,7 +250,9 @@ session's minted TURN credentials are the path that needs no third party, the
 same starting point as the agent and `@fjarr/core`. An operator who wants a
 server-reflexive candidate passes `--stun <url>` (repeatable, or `FJARR_STUN`);
 baking a public STUN server into the binary would send every operator's address
-to a server the customer never chose.
+to a server the customer never chose. `--relay-only` offers nothing but TURN
+candidates, for a network that forbids direct UDP — and for the lab, where it is
+how a robot behind carrier NAT is stood in for ([testing](#testing)).
 
 ## Finding a robot, and who authorizes it {#discovery}
 

@@ -26,7 +26,7 @@ use webrtc::data_channel::{DataChannel, DataChannelEvent};
 use webrtc::peer_connection::{
     register_default_interceptors, MediaEngine, PeerConnection, PeerConnectionBuilder,
     PeerConnectionEventHandler, RTCConfigurationBuilder, RTCIceCandidateInit, RTCIceServer,
-    RTCPeerConnectionIceEvent, RTCPeerConnectionState, Registry,
+    RTCIceTransportPolicy, RTCPeerConnectionIceEvent, RTCPeerConnectionState, Registry,
 };
 use webrtc::runtime::{default_runtime, Runtime};
 
@@ -62,6 +62,16 @@ impl PeerConnectionEventHandler for Handler {
     async fn on_ice_candidate(&self, event: RTCPeerConnectionIceEvent) {
         match event.candidate.to_json() {
             Ok(init) => {
+                // The type is the fourth-from-last token of the SDP line ("... typ host ..."), and
+                // it is what a relay-only gate reads: with the policy set, no `typ host` may appear.
+                let kind = init
+                    .candidate
+                    .split_whitespace()
+                    .skip_while(|t| *t != "typ")
+                    .nth(1)
+                    .unwrap_or("?")
+                    .to_string();
+                tracing::debug!(candidate.kind = %kind, "local candidate");
                 let _ = self.events.try_send(Event::Candidate {
                     candidate: init.candidate,
                     sdp_mline_index: init.sdp_mline_index.unwrap_or(0) as u32,
@@ -134,6 +144,7 @@ pub async fn answer(
     offer: &str,
     turn: Option<&TurnCredentials>,
     stun: &[String],
+    relay_only: bool,
 ) -> Result<(Peer<impl PeerConnection>, String, mpsc::Receiver<Event>)> {
     let runtime = default_runtime().ok_or_else(|| anyhow!("no async runtime for webrtc"))?;
     let (events_tx, events_rx) = mpsc::channel::<Event>(1024);
@@ -173,6 +184,15 @@ pub async fn answer(
         .with_configuration(
             RTCConfigurationBuilder::new()
                 .with_ice_servers(ice_servers)
+                // Relay-only gathers no host or reflexive candidate at all, so the link can only
+                // go through TURN: the lab's stand-in for a robot behind carrier NAT
+                // (docs/27#testing), and what an operator on a network that forbids direct UDP
+                // would set.
+                .with_ice_transport_policy(if relay_only {
+                    RTCIceTransportPolicy::Relay
+                } else {
+                    RTCIceTransportPolicy::All
+                })
                 .build(),
         )
         .with_media_engine(media)

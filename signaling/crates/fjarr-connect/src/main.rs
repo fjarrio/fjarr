@@ -103,6 +103,11 @@ struct ConnectArgs {
     #[arg(long, env = "FJARR_STUN")]
     stun: Vec<String>,
 
+    /// Go through TURN only: no host or reflexive candidate is offered. For a network that forbids
+    /// direct UDP, and for the lab's carrier-NAT stand-in (docs/27#testing).
+    #[arg(long, env = "FJARR_RELAY_ONLY")]
+    relay_only: bool,
+
     /// The tunnel interface. One interface carries every attached robot as a /32 route, so this is
     /// the same device for every link and rarely worth changing (docs/27#the-shape). Defaults to
     /// `[net] interface` in the config, then `fjarr0`.
@@ -130,6 +135,9 @@ async fn main() -> Result<()> {
                 .unwrap_or_else(|_| "info".into()),
         )
         .with_target(false)
+        // Colour on a terminal only: a log piped into a file or a lab check should not carry
+        // escape codes between a field's name and its value.
+        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
         .init();
     let cli = Cli::parse();
     let cfg = config::load()?;
@@ -411,6 +419,7 @@ async fn do_connect(cfg: &config::Config, args: ConnectArgs) -> Result<()> {
             &args.server,
             grant,
             &args.stun,
+            args.relay_only,
             std::time::Duration::from_secs(args.timeout),
         )
         .await?;
@@ -463,7 +472,7 @@ async fn do_connect(cfg: &config::Config, args: ConnectArgs) -> Result<()> {
         links.push(one.start(device.clone(), !args.no_heartbeat).await?);
     }
 
-    let counts = pump(&device, &links, &addrs, self_addr, &args).await;
+    let outcome = pump(&device, &links, &addrs, self_addr, &args).await;
 
     for one in links {
         let robot = one.robot.clone();
@@ -475,19 +484,53 @@ async fn do_connect(cfg: &config::Config, args: ConnectArgs) -> Result<()> {
             c.note()
         );
     }
-    counts
+    // The command's exit status is this process's, the way `ssh host cmd` behaves: a script that
+    // ran something over the link learns whether it worked. The links are down by now.
+    if let Some(status) = outcome? {
+        if !status.success() {
+            std::process::exit(status.code().unwrap_or(1));
+        }
+    }
+    Ok(())
 }
 
-/// Read the device and hand each packet to the link that owns its destination. This is the only
-/// place that sees more than one link, and all it does is choose one: there is no path from a packet
-/// that arrived on one link to another link's route (docs/27#isolation).
+/// Where a packet from the device goes.
+#[derive(Debug, PartialEq, Eq)]
+enum Route {
+    /// The one link whose robot the packet is addressed to.
+    Link(usize),
+    /// Every link: multicast, which ADR-0026 admits on its source alone — DDS discovery is what the
+    /// tunnel exists for, and it is addressed to a group, not to a robot. Fan-out from the operator,
+    /// never link to link.
+    All,
+    /// No link owns the destination, or the packet is not this end's to send.
+    Nowhere,
+}
+
+fn route_for(view: &policy::PacketView, addrs: &[std::net::Ipv4Addr], self_u32: u32) -> Route {
+    if view.src != self_u32 {
+        return Route::Nowhere; // not from this end: the rules refuse it on every link
+    }
+    if policy::is_multicast(view.dst) {
+        return Route::All;
+    }
+    match addrs.iter().position(|a| policy::to_u32(*a) == view.dst) {
+        Some(i) => Route::Link(i),
+        None => Route::Nowhere,
+    }
+}
+
+/// Read the device and hand each packet to the link that owns its destination — or, for multicast,
+/// to every link. This is the only place that sees more than one link, and all it does is choose:
+/// there is no path from a packet that arrived on one link to another link's route
+/// (docs/27#isolation).
 async fn pump(
     device: &tun::Tun,
     links: &[link::Link],
     addrs: &[std::net::Ipv4Addr],
     self_addr: std::net::Ipv4Addr,
     args: &ConnectArgs,
-) -> Result<()> {
+) -> Result<Option<std::process::ExitStatus>> {
     let self_u32 = policy::to_u32(self_addr);
     let mut buf = vec![0u8; 65536];
     // Two different things, counted apart: the interface sees the kernel's IPv6 chatter the moment it
@@ -530,13 +573,16 @@ async fn pump(
                         not_ipv4 += 1;
                         continue;
                     }
-                    // The link is chosen by destination, and the rules are then checked against that
-                    // link's own addresses. A packet for an address no link owns has nowhere to go.
-                    match addrs.iter().position(|a| policy::to_u32(*a) == view.dst) {
-                        Some(i) if policy::check(&view, policy::to_u32(addrs[i]), self_u32) == policy::Verdict::Allow => {
+                    match route_for(&view, addrs, self_u32) {
+                        Route::Link(i) => {
                             links[i].offer(packet.to_vec());
                         }
-                        _ => unroutable += 1,
+                        Route::All => {
+                            for link in links {
+                                link.offer(packet.to_vec());
+                            }
+                        }
+                        Route::Nowhere => unroutable += 1,
                     }
                 }
             }
@@ -554,11 +600,10 @@ async fn pump(
     }
     if let Some(status) = status {
         if !status.success() {
-            // The command's own exit code is the interesting one; the links did their job either way.
             println!("  {} exited with {}", args.command[0], status);
         }
     }
-    Ok(())
+    Ok(status)
 }
 
 /// Resolve when the child exits, or never when there is no child.
@@ -649,6 +694,53 @@ mod tests {
         assert!(
             resolve_backend(&cfg, None, None).is_err(),
             "nothing typed and nothing remembered is a question, not a default"
+        );
+    }
+
+    /// The operator end's routing: unicast to the one link whose robot it names, multicast to every
+    /// link (ADR-0026 — DDS discovery is addressed to a group), and nothing for anything else. This
+    /// is the decision that, made by destination alone, dropped every discovery packet and broke
+    /// ROS 2 over fjarr-connect while it worked over opsim.
+    #[test]
+    fn multicast_goes_to_every_link_and_unicast_to_its_own() {
+        let a = std::net::Ipv4Addr::new(100, 70, 118, 224);
+        let b = std::net::Ipv4Addr::new(100, 103, 147, 23);
+        let me = policy::to_u32(std::net::Ipv4Addr::new(100, 64, 0, 1));
+        let view = |src: u32, dst: std::net::Ipv4Addr| policy::PacketView {
+            ipv4: true,
+            src,
+            dst: policy::to_u32(dst),
+            protocol: 17,
+            dst_port: Some(7400),
+        };
+        assert_eq!(route_for(&view(me, b), &[a, b], me), Route::Link(1));
+        assert_eq!(route_for(&view(me, a), &[a, b], me), Route::Link(0));
+        assert_eq!(
+            route_for(
+                &view(me, std::net::Ipv4Addr::new(239, 255, 0, 1)),
+                &[a, b],
+                me
+            ),
+            Route::All
+        );
+        assert_eq!(
+            route_for(
+                &view(me, std::net::Ipv4Addr::new(100, 99, 9, 9)),
+                &[a, b],
+                me
+            ),
+            Route::Nowhere
+        );
+        // Not from this end: refused everywhere, multicast included.
+        let other = policy::to_u32(std::net::Ipv4Addr::new(10, 0, 0, 5));
+        assert_eq!(route_for(&view(other, a), &[a, b], me), Route::Nowhere);
+        assert_eq!(
+            route_for(
+                &view(other, std::net::Ipv4Addr::new(239, 255, 0, 1)),
+                &[a, b],
+                me
+            ),
+            Route::Nowhere
         );
     }
 
