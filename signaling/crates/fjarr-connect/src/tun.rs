@@ -389,7 +389,7 @@ async fn add_route(name: &str, robot: Ipv4Addr) -> Result<()> {
         // colliding pair is refused before anything is routed (docs/27#addressing).
         Err(rtnetlink::Error::NetlinkError(e)) if e.raw_code() == -libc::EEXIST => Ok(()),
         Err(e) => Err(anyhow!(e))
-            .context(privilege_hint(name, robot, 1280))
+            .context(privilege_hint(name, robot, 1184))
             .with_context(|| format!("routing {robot} down {name}")),
     }
 }

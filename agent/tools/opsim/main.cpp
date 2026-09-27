@@ -1774,7 +1774,7 @@ class TunnelEnd {
     std::string ifname_;
     int fd_ = -1;
     std::uint32_t self_ = 0, peer_ = 0;
-    int mtu_ = 1280;
+    int mtu_ = fjarr::net::DEFAULT_TUNNEL_MTU; // replaced by the robot's report on open
     std::atomic<unsigned long> tx_{0}, rx_{0}, dropped_{0}, refused_{0}, wr_fail_{0};
     glib::SourceGuard watch_;
     glib::SourceGuard ticker_;

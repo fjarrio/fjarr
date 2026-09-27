@@ -26,7 +26,7 @@ up)
   address=${3:?address}
   peer=${4:?peer}
   dev=${5:-fjarr0}
-  mtu=${6:-1280}
+  mtu=${6:-1184} # ADR-0027: one SCTP chunk
   # The account the service runs as: the device must be owned by it, since the agent is not root.
   owner=$(docker compose exec -T "$service" id -un | tr -d '\r\n')
   in_service sh -euc "

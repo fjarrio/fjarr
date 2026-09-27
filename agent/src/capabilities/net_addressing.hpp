@@ -28,6 +28,17 @@ std::string to_dotted(std::uint32_t addr);
 /// literally and forever (docs/27#addressing). It is the range's base + 1.
 std::uint32_t operator_address(const Range& range);
 
+/// The SCTP path MTU every WebRTC stack uses: GStreamer pins usrsctp's to 1200 with PMTU discovery
+/// off (draft-ietf-rtcweb-data-channel), and so do browsers.
+constexpr int SCTP_PATH_MTU = 1200;
+/// An SCTP DATA chunk's own header.
+constexpr int SCTP_DATA_CHUNK_HEADER = 16;
+/// The tunnel's default MTU: the largest IP packet that travels as ONE SCTP DATA chunk (ADR-0027).
+/// One byte more and every full-size packet is a two-chunk message on a channel that never
+/// retransmits — which wedged a usrsctp receiver in half of all bulk transfers (question #28),
+/// measured as a one-byte edge: 1184 green in 10 of 10, 1185 in 4 of 10.
+constexpr int DEFAULT_TUNNEL_MTU = SCTP_PATH_MTU - SCTP_DATA_CHUNK_HEADER;
+
 /// A robot's address, derived from its id: SHA-256 masked into the range, skipping the reserved
 /// first /24 and the top address. No allocator and no state anywhere — the robot knows its own
 /// address at boot without asking (docs/27#addressing).

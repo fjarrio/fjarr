@@ -235,7 +235,7 @@ decision in [ADR-0023](adr/0023-network-tunnel-virtual-interface.md).
   participant creation, so a tunnel that appears at connect time is
   invisible to a ROS stack that is already running.
 - Packets on `fjarr:stream:fjarr.net` with `raw` framing, unordered and
-  never retransmitted ([docs/08](08-protocol.md#net-packets)); MTU 1280;
+  never retransmitted ([docs/08](08-protocol.md#net-packets)); MTU 1184, one SCTP chunk (ADR-0027);
   bounded queue with tail-drop.
 - The operator's address is fixed, the robot's is derived from its robot id.
   No allocator and no state in the signaling server.

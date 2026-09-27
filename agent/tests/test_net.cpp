@@ -68,6 +68,10 @@ struct Rig {
         EXPECT_EQ(::socketpair(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK, 0, sv.data()), 0);
         peer_fd = sv[1];
         config["enabled"] = true;
+        // A name no host has. With the default `fjarr0`, configure() attached to whatever real
+        // device the machine running the tests had — the lab's own, in the dev container — and read
+        // its MTU, so a test's result depended on the lab's state (found by ADR-0027's change).
+        if (!config.contains("interface")) config["interface"] = "fjarr-ut-none";
         cap.configure(config, sources.reg);
         cap.test_attach_fd(sv[0]);
         self_addr = cap.address();
@@ -121,6 +125,14 @@ TEST(NetAddressing, derivesAStableAddressInsideTheRangeAboveTheReservedBlock) {
 TEST(NetAddressing, theOperatorAddressIsTheSameOnEveryLink) {
     // docs/27: fixed and well known, so a robot's DDS config can name one peer literally forever.
     EXPECT_EQ(net::to_dotted(net::operator_address(CGNAT)), "100.64.0.1");
+}
+
+/// ADR-0027, pinned: the default is derived, not chosen. If GStreamer's SCTP path MTU or the chunk
+/// header ever changes, this is where it has to be restated — and the scp gate at the default is
+/// where a wrong restatement shows up.
+TEST(NetAddressing, theDefaultMtuIsOneSctpChunk) {
+    EXPECT_EQ(net::DEFAULT_TUNNEL_MTU, 1200 - 16);
+    EXPECT_EQ(net::DEFAULT_TUNNEL_MTU, 1184);
 }
 
 TEST(NetAddressing, rangesAreParsedAndBadOnesRefused) {
@@ -216,7 +228,7 @@ TEST(NetCapability, openReportsTheAddressesAndThatNothingIsForwarded) {
     const auto &p = rig.ctx.last_result()->payload;
     EXPECT_EQ(p["address"], rig.self_addr);
     EXPECT_EQ(p["peer_address"], "100.64.0.1");
-    EXPECT_EQ(p["mtu"], 1280);
+    EXPECT_EQ(p["mtu"], net::DEFAULT_TUNNEL_MTU);
     EXPECT_FALSE(p["policy"]["forwarding"].get<bool>());
 }
 

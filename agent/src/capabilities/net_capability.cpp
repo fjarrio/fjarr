@@ -71,7 +71,7 @@ struct NetCapability::Impl {
     net::Range range{};
     std::uint32_t self_addr = 0; // this robot
     std::uint32_t peer_addr = 0; // the operator, the same on every link
-    int mtu = 1280;
+    int mtu = net::DEFAULT_TUNNEL_MTU; // ADR-0027: one SCTP chunk
     std::vector<std::uint16_t> allow_ports;
     unsigned long abandoned_at_open = 0; // the process-wide count when this link opened
     std::string attach_error; // why the device could not be attached to
@@ -129,6 +129,16 @@ struct NetCapability::Impl {
             log::warn("net", "interface MTU differs from the configured one, following the interface",
                       {{"interface", ifname}, {"configured", std::to_string(mtu)}, {"interface_mtu", std::to_string(real)}});
             mtu = real;
+        }
+        if (mtu > net::DEFAULT_TUNNEL_MTU) {
+            // Allowed, because the device governs — but every full-size packet will fragment into
+            // two SCTP chunks on a no-retransmit channel, which is question #28. An installer that
+            // predates ADR-0027 created devices at 1280; this is how such a robot says so.
+            log::warn("net", "interface MTU is larger than one SCTP chunk; bulk transfers may stall",
+                      {{"interface", ifname},
+                       {"interface_mtu", std::to_string(mtu)},
+                       {"recommended", std::to_string(net::DEFAULT_TUNNEL_MTU)},
+                       {"fix", "ip link set " + ifname + " mtu " + std::to_string(net::DEFAULT_TUNNEL_MTU) + " (ADR-0027)"}});
         }
         log::info("net", "attached to the tunnel interface",
                   {{"interface", ifname},
@@ -232,7 +242,7 @@ std::string NetCapability::address_from_config(const std::string& robot_id, cons
 void NetCapability::configure(const nlohmann::json& c, const SourceFactory&) {
     impl_->enabled = c.value("enabled", false);
     impl_->ifname = c.value("interface", std::string{"fjarr0"});
-    impl_->mtu = c.value("mtu", 1280);
+    impl_->mtu = c.value("mtu", net::DEFAULT_TUNNEL_MTU);
     const Addressing a = resolve_addressing(impl_->robot_id, c);
     impl_->range = a.range;
     impl_->self_addr = a.self;

@@ -214,7 +214,7 @@ pub async fn open(
             .payload
             .get("mtu")
             .and_then(|v| v.as_u64())
-            .unwrap_or(1280) as usize,
+            .unwrap_or(1184) as usize, // ADR-0027: one SCTP chunk; the robot's own report wins
         up_in: started.elapsed(),
         early_bytes,
         peer,

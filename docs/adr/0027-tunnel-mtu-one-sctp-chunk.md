@@ -2,7 +2,7 @@
 title: "ADR 0027: the tunnel MTU is one SCTP chunk"
 ---
 
-- **Status**: proposed
+- **Status**: accepted
 - **Date**: 2026-09-27
 
 ## Context
