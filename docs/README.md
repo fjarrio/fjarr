@@ -20,7 +20,7 @@ with rationale).
 | 04 | [Supported platforms](04-supported-platforms.md) | OS, GPU, browser, network matrices | review |
 | 05 | [Extension model](05-extension-model.md) | The capability/plugin API — the centerpiece | review |
 | 06 | [Capabilities](06-capabilities.md) | Catalog: camera, desktop, telemetry, files, terminal, observability, OTA | review |
-| 07 | [Desktop backends](07-desktop-backends.md) | X11/Wayland × XTest/libei/uinput evaluation plan | review |
+| 07 | [Desktop backends](07-desktop-backends.md) | X11/Wayland × XTest/libei/uinput evaluation plan | stable |
 | 08 | [Protocol](08-protocol.md) | Normative wire spec: signaling + DataChannels | review |
 | 09 | [Interfaces](09-interfaces.md) | The three embedding APIs + backend contract | review |
 | 10 | [Security](10-security.md) | Threat model, identity, tokens, TURN, privileges | review |

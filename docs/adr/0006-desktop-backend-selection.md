@@ -35,3 +35,45 @@ Wayland-first so whichever combo wins is swappable per deployment.
 
 M2 carries four small throwaway spikes; this ADR gains a findings appendix
 per spike and flips to accepted with the data attached.
+
+## Findings — phase 1, step 1: GNOME on Wayland under GDM (2026-09-27)
+
+On the spike machine (docs/07), stock GNOME 50 session, the `fjarr-spike`
+account. The probes are in `spikes/desktop-{c,d,e}/`. The verdicts come from
+the injection oracle (`spikes/desktop-oracle/`), which logs what it receives.
+Capture counts only when the frame shows the oracle's colour. Probes ran with
+the session user's credentials (its session bus and PipeWire), the way a user
+service in that session would. The appliance setup disabled the lock screen and
+idle blanking for that account. A robot that ships this case would ship the same
+settings.
+
+| Combo | Appliance (auto-login, rebooted) | Login screen (nobody logged in) |
+|---|---|---|
+| C portal + libei | **yes after one human grant.** With no grant, `Start` puts up a consent dialog and waits indefinitely (measured: no answer in 25 s). After one grant with "remember" ticked, the restore token survives a reboot and `Start` returns in 0.0 s without a dialog. Capture and injection verified | **no.** The greeter runs xdg-desktop-portal, but `CreateSession` fails with `AccessDenied: Invalid session` |
+| D portal + uinput | **input yes; capture as C.** A root helper's uinput device reaches the session with no grant at all (the oracle logged it). The ScreenCast-only portal puts up its own dialog and waits when there is no grant (measured). Its remembered-grant path was not re-measured, because it needs a human click; it is the same portal and permission store as C | **no.** The capture request got no answer in 20 s. uinput would inject into the greeter, but there is no picture to steer by |
+| E mutter D-Bus | **yes, no human ever.** `RemoteDesktop.CreateSession` plus a linked `ScreenCast.RecordMonitor` needs no consent and shows no dialog. Any process on the user's session bus can do it. Capture verified (1920×1080, oracle colour), and injection via `NotifyKeyboardKeysym`/`NotifyPointer*` verified | **no.** The greeter's gnome-shell exposes the same interfaces on its own bus, but both `CreateSession` calls fail with `Session creation inhibited` |
+
+What surprised us:
+
+- **E needs no consent at all in a logged-in session.** The only gate is being
+  on that user's session bus. That makes E the simplest unattended answer on
+  GNOME. It also means the security boundary is the Unix account: anything
+  running as the auto-login user can watch and drive the screen. docs/10 has to
+  say so if E wins.
+- **C's grant is keyed to the monitor's identity.** GNOME's permission store
+  records the restore data (`DEL:DELL U2422H:<serial>`) against the token. So a
+  robot whose display changes, or that runs headless, can lose its grant. A
+  swapped or absent monitor is a phase 2 question for C.
+- **Nothing reaches the GDM login screen.** GNOME deliberately inhibits
+  remote-desktop and screencast sessions in the greeter. GNOME's own route to
+  "before anyone logs in" is gnome-remote-desktop's system mode: it asks GDM
+  for a new headless login session over RDP, rather than driving the physical
+  greeter. That is a different product shape (a separate session, not the
+  robot's screen), and it is recorded as an open question, not tested here.
+- Relative uinput motion is subject to pointer acceleration: a +40,+30 move
+  landed +22,+17. A D or B helper has to present an absolute device.
+
+Open for the user: whether provisioning may write a C grant into the portal
+permission store with no human (it would remove C's one click). This was not
+attempted. It forges a consent record, and that is a policy decision before it
+is an experiment.

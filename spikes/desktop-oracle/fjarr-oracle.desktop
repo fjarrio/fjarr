@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=fjarr-oracle
+Exec=/usr/bin/python3 /opt/fjarr-spike/oracle.py
+X-GNOME-Autostart-enabled=true
