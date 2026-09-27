@@ -248,7 +248,10 @@ pointer + keyboard with the full input pipeline (focus model,
 browser-reserved shortcuts + Keyboard Lock, no-auto-repeat, composed text,
 client-side release-all), local-cursor mode where the backend allows,
 `sharpness` preference and `latencyMode: interactive`, clipboard text;
-`release_all_input` safety; unattended-access test green on the spike machine
+`release_all_input` safety; `fjarr-desktop-session` and the descriptor
+handover, proven first with the agent running as its own account
+([ADR-0028](adr/0028-desktop-session-helper.md));
+unattended-access test green on the spike machine
 (the Ryzen mini-PC from 2b); local cursor on Wayland through Fjarr's own
 PipeWire reader ([docs/22](22-remote-desktop-client.md#cursor-strategy));
 clipboard verified in both directions on every chosen backend (not yet spiked);

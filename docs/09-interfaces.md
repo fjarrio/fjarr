@@ -212,7 +212,10 @@ Implementations, per [ADR-0006](adr/0006-desktop-backend-selection.md):
 `MutterDesktopBackend` (GNOME: mutter's ScreenCast and RemoteDesktop),
 `PortalDesktopBackend` (the ScreenCast/RemoteDesktop portals with libei), and
 `X11DesktopBackend` (`ximagesrc` and XTest). They are chosen by config and by
-what the running session offers. `UinputInjector` stays a designed override
+what the running session offers. The Wayland ones run in the agent but reach the
+desktop through `fjarr-desktop-session`, a helper running as the desktop user.
+It hands them a PipeWire descriptor and an EIS descriptor
+([ADR-0028](adr/0028-desktop-session-helper.md)). `UinputInjector` stays a designed override
 that no chosen backend needs.
 
 ### The video source contract {#the-video-source-contract}

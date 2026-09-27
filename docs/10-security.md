@@ -84,7 +84,9 @@ sees a static TURN password.
 ```text
 fjarr-agent            unprivileged user "fjarr"
   ├─ media plane       same user; GPU via render group
-  ├─ desktop backend   session user integration per ADR-0006
+  ├─ desktop backend   agent-side module; the desktop is reached through
+  │                    fjarr-desktop-session (ADR-0028), which runs as the
+  │                    desktop user and hands over PipeWire + EIS descriptors
   └─ fjarr-inputd      SEPARATE minimal binary, owns /dev/uinput (or XTest),
                        speaks a 5-verb protocol over a mode-0700 unix socket:
                        key / button / motion / wheel / release_all
@@ -93,15 +95,35 @@ fjarr-agent            unprivileged user "fjarr"
 The privileged surface is auditable in one sitting (< 500 lines target). It
 validates ranges, rate-limits, and refuses when no session claim exists.
 
-**On GNOME, the session user's account is the boundary**
+**On GNOME, the desktop user's account is the boundary**
 ([ADR-0006](adr/0006-desktop-backend-selection.md)). Mutter's `RemoteDesktop`
 and `ScreenCast` interfaces ask for no consent from a process on the session
 bus. The portal's consent is a record in the user's permission store, which the
 same user can write. So anything running as the auto-login user can watch and
-drive the screen. The desktop backend therefore runs as that user and nothing
-else does. The auto-login account runs no other network-facing software. The
-installer creates it without a password (auto-login needs none) and without
-remote login. None of the chosen backends needs `fjarr-inputd`.
+drive the screen.
+
+The agent is therefore **not** that user
+([ADR-0028](adr/0028-desktop-session-helper.md)). A small helper,
+`fjarr-desktop-session`, runs in the session as the desktop user. It talks to
+mutter or the portal, and hands the agent a PipeWire descriptor for capture and
+an EIS descriptor for input over `/run/fjarr/desktop.sock`. The agent accepts
+that connection only from the configured desktop user's uid. There are three
+reasons, in order of weight:
+
+1. **Embedding.** libfjarr runs inside the customer's software, under the
+   customer's service account. That account has to reach the desktop from the
+   outside anyway, and the helper is how.
+2. **The device key.** It stays `0600` under the agent's account. If the agent
+   ran as the desktop user, every app in the desktop session (a kiosk HMI, a
+   browser) could read it and impersonate the robot.
+3. **Lifetime.** The desktop session is not durable: the spikes saw it end on a
+   GNOME crash. The agent, and with it the camera, terminal and tunnel, must
+   outlive it.
+
+The installer creates the auto-login account without a password (auto-login
+needs none) and without remote login. None of the chosen backends needs
+`fjarr-inputd`. On X11 kiosks, the session grants the agent's account with
+`xhost +si:localuser:<agent user>` instead of sharing an authority file.
 
 ## Network tunnel ([docs/27](27-network-tunnel.md)) {#network-tunnel}
 
