@@ -319,8 +319,8 @@ pub fn refusal(robot: &str, code: &str, message: &str) -> String {
         format!(" ({message})")
     };
     match code {
-        // Policy, not failure: the grant does not carry the terminal, or (until control domains
-        // land) another operator holds the robot's input.
+        // Policy, not failure: the grant does not carry the terminal, or carries it view-only
+        // (docs/10#terminal). Never another operator: shells run side by side.
         "capability-denied" => format!("you were not given a shell on {robot}{because}"),
         // A deployment choice: the robot names no account for a shell (docs/06).
         "unavailable" => format!("{robot} has no shell to give{because}"),

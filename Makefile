@@ -344,9 +344,8 @@ connect-unprivileged: ## docs/27's promise that an existing, addressed interface
 .PHONY: connect-shell
 connect-shell: ## docs/27#shell gate: the robot's terminal in a pty — round trip, stty size, a resize, exit status, termios restored after exit, a killed link and SIGTERM
 	@# A copy of the binary, because `cp` drops the file capability connect-build grants: the shell
-	@# must work with no privilege at all, and this is where that is proved (docs/27#shell). Until the
-	@# control domains (#31) land the terminal takes the old input lease, so both grants are the lab's
-	@# one operator identity, and nothing else in the lab should hold the robot's input meanwhile.
+	@# must work with no privilege at all, and this is where that is proved (docs/27#shell). The
+	@# terminal is in no control domain (docs/10#terminal), so this runs beside anything else in the lab.
 	@docker compose exec -T dev sh -c 'cd /workspace/signaling && cargo build -q --release -p fjarr-connect && cp target/release/fjarr-connect /tmp/fjarr-connect-shell'
 	@grant=$$(docker/lab/mint-grant.sh $(OPSIM_ROBOT) fjarr.terminal); \
 	  denied=$$(docker/lab/mint-grant.sh $(OPSIM_ROBOT) fjarr.test); \
