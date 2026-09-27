@@ -19,6 +19,8 @@ w.set_wm_name("fjarr-oracle")
 w.change_property(d.intern_atom("_NET_WM_STATE"), d.intern_atom("ATOM"), 32,
                   [d.intern_atom("_NET_WM_STATE_FULLSCREEN")])
 w.map(); d.sync()
+if os.environ.get("ORACLE_TAKE_FOCUS"):  # a greeter has no window manager to give focus out
+    time.sleep(0.5); w.set_input_focus(X.RevertToParent, X.CurrentTime); d.sync()
 log(f"start pid={os.getpid()} x11={os.environ.get('DISPLAY')} xlib")
 while True:
     e = d.next_event()

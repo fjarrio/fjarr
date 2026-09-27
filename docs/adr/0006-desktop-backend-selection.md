@@ -106,3 +106,42 @@ What surprised us:
   X11 kiosk needs a boot-time unit that re-activates its session. That is a
   workaround the robot would ship, and a reason to prefer LightDM or no display
   manager for an X11 kiosk.
+
+## Findings — phase 1, step 3: Xfce on Xorg under LightDM (2026-09-27)
+
+LightDM 1.32 with `lightdm-gtk-greeter`, and Xfce 4.20 from the archive. LightDM
+runs Xorg as root (`-auth /var/run/lightdm/root/:0`). The user session's
+authority is `~/.Xauthority`.
+
+| Combo | Appliance (auto-login, rebooted) | Login screen (nobody logged in) |
+|---|---|---|
+| A X11 + XTest | **yes, no workaround.** The session kept the seat. Capture 99% oracle colour; keys and click logged | **yes, as root.** With the X server's own authority file, root captures the greeter (the screenshot shows the lightdm-gtk-greeter login box). XTest input reaches a client on that server (the X11 oracle, run as root on it, logged keys and click) |
+| B X11 + uinput | **yes, no workaround**, as A with the root helper's uinput input | **yes**, as A's capture with uinput input |
+
+This is the only setup in phase 1 where anything reaches the screen before
+login. It costs a robot three things: shipping LightDM instead of stock GDM, an
+X11 session, and a root-owned agent component that can read the display
+server's authority file.
+
+## Phase 1 verdict (2026-09-27)
+
+| Combo | Stock GNOME, appliance | Stock GNOME, login screen | X11 kiosk, appliance | X11 kiosk, login screen |
+|---|---|---|---|---|
+| A X11 + XTest | n/a (no X11 session) | n/a | yes (GDM: re-activate session at boot; LightDM: as is) | GDM: no (structural); LightDM: yes as root |
+| B X11 + uinput | n/a | n/a | yes, as A | as A |
+| C portal + libei | yes after one human grant; token survives reboot | no | n/a | n/a |
+| D portal + uinput | capture as C; input yes | no | n/a | n/a |
+| E mutter D-Bus | **yes, no human** | no (inhibited) | n/a | n/a |
+
+Every combination survives the hard gate for the appliance case in the
+configuration it belongs to, so phase 2 measures all five, in two groups:
+
+- **Stock Ubuntu (GNOME Wayland): C, D and E.** E is the only one that needs no
+  human ever. C needs one grant that is tied to the monitor. D adds a
+  privileged helper for no unattended gain over E.
+- **X11 kiosk: A and B.**
+
+No combination reaches GNOME's login screen. On stock Ubuntu, "unattended
+before login" means gnome-remote-desktop's headless system mode or nothing. The
+product question for docs/04 is whether Fjarr requires an appliance auto-login
+on GNOME robots, which every candidate here supports.
