@@ -499,8 +499,21 @@ can see it.** `SCTP_SEND_FAILED_EVENT` arrives asynchronously, after
 tail-drop rule above, which watches the buffered amount, is blind to the one
 failure that matters. Any design that treats "the send returned true" as
 delivery, or the buffered amount as the only measure of pressure, is building on
-that blind spot. The fault is also rate-sensitive enough that logging the SCTP
-layer suppresses it entirely, which is worth knowing before measuring it. On the `bad` profile ssh still logs in, slowly, while DDS discovery
+that blind spot.
+
+Since slice 4.5e's follow-up it is at least **counted**: GStreamer reports the
+event as nothing but a `GST_ERROR` line on the `sctpassociation` category — no
+signal, no state change — so the agent installs a log function on that category
+at ERROR level and reports the count on `link-stats` as `abandoned`, with
+usrsctp's reason as `abandoned_error` ([docs/08](08-protocol.md#datachannel-topology)).
+ERROR is level 1 and costs nothing until the event fires. That distinction
+matters: `GST_DEBUG=sctp*:3`, which is how the events were first seen, slows the
+send path enough to make the fault disappear (8 of 8 passed with it on), so any
+instrument on this path has to be checked for changing the result before its
+readings are believed. On a partially reliable stream — this channel has
+`max-retransmits=0` — an abandonment is what a lost first transmission looks
+like, so a trickle of them under loss is the class working as designed; a burst
+with the four drop counters at zero is the shape of #28. On the `bad` profile ssh still logs in, slowly, while DDS discovery
 does not finish — its handshakes are reliable exchanges that 15 % loss
 defeats. That is a property of DDS, not of the tunnel, and the honest
 statement is that ROS 2 tooling needs a usable link while `ssh` tolerates a

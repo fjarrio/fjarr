@@ -29,6 +29,7 @@ add_library(fjarr STATIC
   src/agent.cpp
   src/core/glib/raii.cpp
   src/core/log.cpp
+  src/core/sctp_watch.cpp
   src/core/backoff.cpp
   src/core/loop.cpp
   src/core/protocol.cpp

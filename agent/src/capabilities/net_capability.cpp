@@ -19,6 +19,7 @@
 
 #include "capabilities/net_addressing.hpp"
 #include "core/log.hpp"
+#include "core/sctp_watch.hpp"
 
 namespace fjarr {
 namespace {
@@ -46,11 +47,18 @@ struct Counters {
     unsigned long tx_packets = 0, rx_packets = 0;
     unsigned long long tx_bytes = 0, rx_bytes = 0;
     unsigned long dropped_no_peer = 0, dropped_policy = 0, dropped_queue = 0, dropped_mtu = 0;
+    /// Messages usrsctp abandoned after `send_binary` had already returned true — the one loss the
+    /// tail-drop rule cannot see, because `buffered_amount` never counted them (docs/27#testing).
+    /// Read from the process-wide watch at each tick, relative to where it stood when the link
+    /// opened; `abandoned_error` is usrsctp's reason for the latest one.
+    unsigned long abandoned = 0;
+    unsigned abandoned_error = 0;
 
     nlohmann::json to_json() const {
         return nlohmann::json{{"interval_ms", STATS_PERIOD.count()}, {"tx_packets", tx_packets},   {"rx_packets", rx_packets},
                               {"tx_bytes", tx_bytes},                {"rx_bytes", rx_bytes},       {"dropped_no_peer", dropped_no_peer},
-                              {"dropped_policy", dropped_policy},    {"dropped_queue", dropped_queue}, {"dropped_mtu", dropped_mtu}};
+                              {"dropped_policy", dropped_policy},    {"dropped_queue", dropped_queue}, {"dropped_mtu", dropped_mtu},
+                              {"abandoned", abandoned},              {"abandoned_error", abandoned_error}};
     }
 };
 
@@ -65,6 +73,7 @@ struct NetCapability::Impl {
     std::uint32_t peer_addr = 0; // the operator, the same on every link
     int mtu = 1280;
     std::vector<std::uint16_t> allow_ports;
+    unsigned long abandoned_at_open = 0; // the process-wide count when this link opened
     std::string attach_error; // why the device could not be attached to
 
     /// Open for the agent's whole life, not per link: attaching is what raises the interface's
@@ -304,6 +313,7 @@ void NetCapability::on_message(SessionContext& ctx, const Envelope& msg) {
         }
         impl_->drain_stale();
         impl_->counters = Counters{};
+        impl_->abandoned_at_open = sctp_watch::abandoned();
         impl_->link_session = ctx.id();
         const SessionId sid = ctx.id();
         impl_->watch = ctx.watch_readable(impl_->tun_fd, [this, sid, ctxp = &ctx]() -> bool {
@@ -353,6 +363,8 @@ void NetCapability::on_message(SessionContext& ctx, const Envelope& msg) {
         });
         impl_->stats_timer = ctx.every(STATS_PERIOD, [this, sid, ctxp = &ctx]() -> bool {
             if (impl_->link_session != sid) return false;
+            impl_->counters.abandoned = sctp_watch::abandoned() - impl_->abandoned_at_open;
+            impl_->counters.abandoned_error = sctp_watch::last_error();
             ctxp->event("link-stats", impl_->counters.to_json());
             return true;
         });

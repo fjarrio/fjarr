@@ -14,6 +14,7 @@
 #include <fjarr/version.hpp>
 
 #include "core/log.hpp"
+#include "core/sctp_watch.hpp"
 #include "core/loop.hpp"
 #include "core/protocol.hpp"
 #include "core/session_manager.hpp"
@@ -339,6 +340,7 @@ void validate_json_schema(const nlohmann::json& schema, const nlohmann::json& in
 Agent::Agent(AgentConfig config) : impl_(std::make_unique<Impl>()) {
     impl_->config = std::move(config);
     if (!gst_is_initialized()) gst_init(nullptr, nullptr);
+    sctp_watch::install(); // the transport's one invisible failure, counted from the start (docs/27#testing)
     log::set_level(impl_->config.agent.log_level);
     log::set_json(impl_->config.agent.log_format == "json");
     {

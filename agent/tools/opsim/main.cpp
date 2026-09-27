@@ -1710,8 +1710,15 @@ class TunnelEnd {
         // goes wrong.
         ticker_ = op_.loop().add_timeout(std::chrono::milliseconds(1000), [this] {
             const unsigned long tx = tx_, rx = rx_;
-            logf("tunnel: tx=%lu (+%lu) rx=%lu (+%lu) dropped=%lu wr_fail=%lu buffered=%lu", tx, tx - last_tx_, rx, rx - last_rx_,
-                 dropped_.load(), wr_fail_.load(), static_cast<unsigned long>(op_.peer()->buffered(LABEL)));
+            // The robot's side of the same second, from its latest link-stats: `abandoned` is the
+            // count the sender itself cannot see (docs/27#testing), so a stall that shows tx frozen
+            // here and abandoned climbing there is the transport throwing packets away after
+            // accepting them — the shape #28 was described as, without a number, for three slices.
+            const auto robot = last_link_stats(op_).value_or(json::object());
+            logf("tunnel: tx=%lu (+%lu) rx=%lu (+%lu) dropped=%lu wr_fail=%lu buffered=%lu | robot: abandoned=%lu (err %u) dropped_queue=%lu",
+                 tx, tx - last_tx_, rx, rx - last_rx_, dropped_.load(), wr_fail_.load(),
+                 static_cast<unsigned long>(op_.peer()->buffered(LABEL)), robot.value("abandoned", 0ul),
+                 robot.value("abandoned_error", 0u), robot.value("dropped_queue", 0ul));
             last_tx_ = tx;
             last_rx_ = rx;
             return true;
@@ -1838,9 +1845,13 @@ void scenario_tunnel(Operator& op) {
         logf("exec: %s", op.exec_cmd().c_str());
         const int rc = std::system(cmd.c_str());
         const int status = rc == -1 ? -1 : (WIFEXITED(rc) ? WEXITSTATUS(rc) : 128 + WTERMSIG(rc));
+        // The robot's last link-stats belongs in this verdict whether it passed or not: on a failing
+        // run the later `refused-and-counted` check never sees a sample, and the one number that
+        // says what the transport did (`abandoned`, docs/27#testing) would otherwise go unprinted.
         r.check("exec", status == 0,
                 "`" + op.exec_cmd() + "` exited " + std::to_string(status) + " after " + ms_str(g_get_monotonic_time() - t_cmd) +
-                    " with the link up; operator end: " + tun.counters());
+                    " with the link up; operator end: " + tun.counters() +
+                    "; robot's last link-stats: " + last_link_stats(op).value_or(json::object()).dump());
     }
 
     // #23, measured: what the camera did while the link was saturated.
