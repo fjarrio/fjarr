@@ -516,6 +516,17 @@ written down). Two slices, and the letters after them shift:
   "several robots at once" needed `--grant` per robot, since a grant names one robot.
   macOS is written, type-checked for `aarch64-apple-darwin` in CI, and recorded in
   [docs/04](04-supported-platforms.md) as never having run on macOS hardware.
+  **Follow-up, 2026-09-27, before 4.5f:** warnings are errors on every shipped
+  target; the ROS ordering regression runs nightly; `link-stats` carries
+  `abandoned` from a log hook on GStreamer's `sctpassociation` category; and
+  [#28](18-open-questions.md) is narrowed, not closed — `fjarr-connect` moves
+  1 GiB 5 of 5 beside a 30 fps viewer where opsim is red about half the time, so
+  what wedges is a usrsctp-to-usrsctp association and the failing operator is a
+  lab tool. **Decision:** 4.5f starts now; reading both ends of a wedged
+  association — which says whether it is opsim's bug or the robot's — comes after
+  it, and the M4.5 gate's `scp` claim is made through `fjarr-connect`, the
+  product, and says so. The [slice-4.5e review](reviews/slice-4.5e-review.md#follow-up-2026-09-27)
+  carries the three lab fixtures that had to be made to fail first.
 - **4.5f — discovery and login.** Without this the CLI is a debugging tool
   rather than a product: the optional
   [operator API](09-interfaces.md#operator-api) on the customer's backend, the
