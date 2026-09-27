@@ -291,6 +291,31 @@ TEST(NetCapability, aFullChannelTailDropsInsteadOfGrowingAQueue) {
     EXPECT_EQ(net::inspect(bytes_of(rig.ctx.stream_sender.frames[0])).dst_port, 4242);
 }
 
+/// The pump reads at most 32 packets per dispatch and then returns, and what it returns decides
+/// whether the watch survives. It used to return nothing at all on that path — undefined behaviour
+/// that GLib read as `G_SOURCE_REMOVE` often enough to unref a source the guard still owned, which
+/// aborted the agent inside glibc's allocator seconds into any bulk transfer (docs/18 #28). A short
+/// transfer never reaches a full batch, which is why every quick check passed.
+TEST(NetCapability, aSaturatedBatchKeepsTheWatchAndLosesNoPacket) {
+    Rig rig;
+    rig.open();
+    // One more than the bound, so the handler returns after a full batch rather than on EAGAIN.
+    constexpr int COUNT = 33;
+    for (int i = 0; i < COUNT; i++) {
+        const std::string p = packet(rig.self_addr, rig.peer_addr, 17, static_cast<std::uint16_t>(5000 + i));
+        ASSERT_EQ(::write(rig.peer_fd, p.data(), p.size()), static_cast<ssize_t>(p.size()));
+    }
+    EXPECT_TRUE(rig.ctx.fire_readable()) << "a full batch must keep the watch: returning false removes it, "
+                                            "and returning nothing is undefined behaviour";
+    EXPECT_EQ(rig.ctx.stream_sender.frames.size(), 32u) << "the batch is bounded so the loop is not starved";
+    // GLib re-dispatches while the fd stays readable, so the 33rd packet is not lost.
+    EXPECT_TRUE(rig.ctx.fire_readable());
+    ASSERT_EQ(rig.ctx.stream_sender.frames.size(), static_cast<std::size_t>(COUNT));
+    EXPECT_EQ(net::inspect(bytes_of(rig.ctx.stream_sender.frames.back())).dst_port, 5000 + COUNT - 1)
+        << "the last packet written is the last one forwarded, in order";
+    EXPECT_EQ(rig.stats()["tx_packets"], COUNT);
+}
+
 TEST(NetCapability, theLinkDiesWithTheSessionButTheInterfaceStays) {
     Rig rig;
     rig.open();

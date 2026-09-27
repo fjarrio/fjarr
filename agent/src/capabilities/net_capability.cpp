@@ -343,6 +343,13 @@ void NetCapability::on_message(SessionContext& ctx, const Envelope& msg) {
                 impl_->counters.tx_packets++;
                 impl_->counters.tx_bytes += size;
             }
+            // Keep the watch after a full batch. Falling off the end instead was undefined
+            // behaviour on the one path only a saturating flow reaches — 32 successful reads — and
+            // it aborted the agent inside glibc's allocator within seconds of any bulk transfer,
+            // for every operator. `-Wall` had been reporting it as `control reaches end of non-void
+            // function` the whole time, in a build that did not fail on warnings; it does now
+            // (docs/13, the root CMakeLists).
+            return true;
         });
         impl_->stats_timer = ctx.every(STATS_PERIOD, [this, sid, ctxp = &ctx]() -> bool {
             if (impl_->link_session != sid) return false;

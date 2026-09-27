@@ -488,6 +488,20 @@ written down). Two slices, and the letters after them shift:
   so rather than pretending: the peer connection, the TUN device and
   `-- <command>` are next. `docker/lab/mint-grant.sh` mints a lab grant so nothing
   needs Node to get one.
+
+  **The link carries IP traffic, 2026-09-27.** `fjarr-connect <robot> -- <command>`
+  answers the offer, opens both channels, asks `fjarr.net` for the link, attaches
+  the operator's interface with a /32 route for that robot, pumps packets under the
+  same two policy rules the agent applies, and tears the route down when the command
+  exits: `ssh`, an HTTP request and a hash-verified 1 GiB `scp` all run over it. Two
+  defects in already-reviewed code came out of it, both in the
+  [slice-4.5e review](reviews/slice-4.5e-review.md): the client's ICE had to trickle
+  in both directions before any link came up at all, and **the agent had been
+  aborting inside glibc's allocator in every saturating transfer** because the packet
+  pump's fd-watch callback fell off the end of a `-> bool` function — one cause of
+  [#28](18-open-questions.md), fixed, measured A/B, and now a build error rather than
+  a warning nobody read. Still to do for the gate: the two-robot isolation
+  regression, collision detection, macOS, and a `--release` throughput number.
 - **4.5f — discovery and login.** Without this the CLI is a debugging tool
   rather than a product: the optional
   [operator API](09-interfaces.md#operator-api) on the customer's backend, the
