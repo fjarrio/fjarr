@@ -43,9 +43,29 @@ ros2)
   # discovery and user traffic cross the link, with the direct path removed by dds-isolate.sh.
   # Cyclone reads its file through CYCLONEDDS_URI; Fast DDS is left stock on purpose (ADR-0026).
   ros_env='set +u; source /opt/ros/jazzy/setup.bash; [ -s /tmp/cyclonedds.xml ] && export CYCLONEDDS_URI=file:///tmp/cyclonedds.xml;'
-  out=$(docker compose exec -T operator-ros bash -lc "$ros_env timeout 25 ros2 topic list" 2>&1)
+  # `ros2 topic list` does not wait: it returns what the ROS 2 daemon already knows, and the daemon
+  # outlives any one link. So asking once is a race between this query and DDS rediscovering the
+  # robot after the link came up — which is what the "fast miss" was. Poll instead, up to a deadline,
+  # and report how long discovery took: that number is the user-visible cost, and a check that only
+  # passes when it happens to be quick measures nothing. ROS_CHECK_DEADLINE_S overrides the 30 s.
+  deadline_ms=$(( ${ROS_CHECK_DEADLINE_S:-30} * 1000 ))
+  # bash's own clock: 26.04's date is uutils, which does not print milliseconds the way GNU does
+  now_ms() { local us=${EPOCHREALTIME/[.,]/}; echo $(( us / 1000 )); }
+  t0=$(now_ms)
+  out=""
+  while :; do
+    out=$(docker compose exec -T operator-ros bash -lc "$ros_env timeout 10 ros2 topic list" 2>&1)
+    case "$out" in *"/fjarr/robot_heartbeat"*) break ;; esac
+    if [ $(( $(now_ms) - t0 )) -ge "$deadline_ms" ]; then
+      echo "tunnel-checks: ros2 topic list ->" $(echo "$out" | tr '\n' ' ')
+      echo "tunnel-checks: the robot's topic is not visible over the link (not within $(( deadline_ms / 1000 )) s)" >&2
+      exit 1
+    fi
+    sleep 0.5
+  done
+  ms=$(( $(now_ms) - t0 ))
   echo "tunnel-checks: ros2 topic list ->" $(echo "$out" | tr '\n' ' ')
-  case "$out" in *"/fjarr/robot_heartbeat"*) ;; *) echo "tunnel-checks: the robot's topic is not visible over the link" >&2; exit 1 ;; esac
+  echo "tunnel-checks: discovered in $(( ms / 1000 )).$(( (ms % 1000) / 100 )) s"
   msg=$(docker compose exec -T operator-ros bash -lc "$ros_env timeout 25 ros2 topic echo --once /fjarr/robot_heartbeat" 2>&1)
   echo "tunnel-checks: ros2 topic echo ->" $(echo "$msg" | tr '\n' ' ')
   case "$msg" in *demo-robot-01*) ;; *) echo "tunnel-checks: discovery worked but no sample arrived" >&2; exit 1 ;; esac

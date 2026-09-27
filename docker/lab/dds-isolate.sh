@@ -22,16 +22,27 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 DDS_MCAST=${DDS_MCAST:-239.255.0.0/16}
+INTROSPECT_PORT=${INTROSPECT_PORT:-7381}
 CHAIN=FJDDS
 
 ip_of() { docker compose exec -T "$1" hostname -i 2>/dev/null | tr -d '\r' | awk '{print $1}'; }
 
+# One exemption, in both directions on both ends: the robot's introspection endpoint (TCP INTROSPECT_PORT). The simulator asks it over
+# this path whether a session was really torn down, and blocking it made every tunnel scenario hang to
+# its 240 s timeout after passing, so the ROS gate exited non-zero on a green link. DDS is UDP, so the
+# exemption cannot carry what the isolation exists to rule out; the netem profiles exempt the same
+# port for the same reason (docs/25). Comments do not go inside apply_in's quoted script: bash expands
+# backticks there, and one in a comment once ran the ROS gate recursively.
 apply_in() { # apply_in <service> <peer-ip>
   local svc=$1 peer=$2
   docker compose exec -T -u root "$svc" sh -euc "
     iptables -N $CHAIN 2>/dev/null || iptables -F $CHAIN
     iptables -C OUTPUT -o eth0 -j $CHAIN 2>/dev/null || iptables -I OUTPUT -o eth0 -j $CHAIN
     iptables -C INPUT -i eth0 -j $CHAIN 2>/dev/null || iptables -I INPUT -i eth0 -j $CHAIN
+    iptables -A $CHAIN -p tcp -d $peer --dport $INTROSPECT_PORT -j RETURN
+    iptables -A $CHAIN -p tcp -s $peer --sport $INTROSPECT_PORT -j RETURN
+    iptables -A $CHAIN -p tcp -s $peer --dport $INTROSPECT_PORT -j RETURN
+    iptables -A $CHAIN -p tcp -d $peer --sport $INTROSPECT_PORT -j RETURN
     iptables -A $CHAIN -d $peer -j DROP
     iptables -A $CHAIN -s $peer -j DROP
     iptables -A $CHAIN -p udp -d $DDS_MCAST -j DROP

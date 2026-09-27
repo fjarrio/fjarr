@@ -17,8 +17,15 @@ cd "$(dirname "$0")/../.."
 HOLD=/tmp/fjarr-agent-hold
 say() { printf '\n== %s\n' "$*"; }
 robot_sh() { docker compose exec -T -u root demo-robot sh -c "$1"; }
+# The robot's tunnel addresses, which a Cyclone participant needs in its file and Fast DDS does not.
+# Recreating the participant without them left Cyclone refusing to start — "the participant never
+# started" — which read like an ordering verdict and was this script's own gap; it had only ever run
+# with Fast DDS.
+ROBOT_ADDR=$(docker compose exec -T -e FJARR_ROBOT_ID=${OPSIM_ROBOT:-demo-robot-01} dev ./build/release/agent/daemon/fjarr-agent --net-address | tail -1 | tr -d '\r')
+OPERATOR_ADDR=${TUN_OPERATOR:-100.64.0.1}
 restart_participant() {
-  docker compose --profile demo --profile ros up -d --no-deps --force-recreate robot-ros >/dev/null
+  FJARR_TUN_SELF="$ROBOT_ADDR" FJARR_TUN_PEER="$OPERATOR_ADDR" \
+    docker compose --profile demo --profile ros up -d --no-deps --force-recreate robot-ros >/dev/null
   for _ in $(seq 40); do
     docker compose --profile demo --profile ros logs --no-color robot-ros 2>/dev/null | grep -q "publishing /fjarr" && return 0
     sleep 1
@@ -68,7 +75,17 @@ robot_sh "grep -q fjarr0 /proc/net/dev" || { echo "FAIL A: the interface vanishe
 restart_participant || { echo "FAIL A: the participant never started"; exit 1; }
 robot_sh "rm -f $HOLD" >/dev/null
 wait_online || { echo "FAIL A: the agent did not come back"; exit 1; }
-if sees_topic; then
+# Fact A is a Fast DDS property, not a DDS one. Fast DDS discovers interfaces when a participant is
+# created and ignores one without a carrier; Cyclone, given docs/27's file, binds the interface it is
+# NAMED and sends to its peers by address, carrier or not — measured 2026-09-27, #29. So each is held to
+# its own behaviour, and a change in either is a finding rather than noise.
+if [ "${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}" = rmw_cyclonedds_cpp ]; then
+  if sees_topic; then
+    echo "PASS A (Cyclone): visible — Cyclone binds the named interface whatever its carrier, so the ordering rule does not bind it"
+  else
+    echo "FAIL A (Cyclone): not visible, which Cyclone with docs/27's file has not done before"; fail=1
+  fi
+elif sees_topic; then
   echo "FAIL A: it is visible, so docs/27's ordering rule is not the constraint it claims"; fail=1
 else
   echo "PASS A: not visible — a participant created with the carrier down never sees the interface"
