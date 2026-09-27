@@ -318,3 +318,60 @@ LightDM. The user pulled and replugged the cables.
   hot-plugged MST branch needs an X server restart. GNOME, which drives KMS
   itself, listed all three monitors in its layout after every replug, and
   none was reported dark. That was not checked monitor by monitor.
+
+## Findings — robots without a display (2026-09-27)
+
+Two ways were tested on the spike machine, with every physical monitor
+unplugged. Harness: `spikes/desktop-headless/` and `probe_e.py virtual`.
+
+**A connector forced on from the kernel command line.** We used
+`video=HDMI-A-1:1920x1080@60e drm.edid_firmware=HDMI-A-1:edid/fjarr-1080p.bin`,
+with an EDID copied from a real monitor and given its own serial
+(`FJARRVIRT1`).
+
+- The kernel reported the connector connected, with that EDID, and nothing
+  attached. GNOME treated it as an ordinary monitor.
+- With no physical monitor, the session auto-logged in on it as the only,
+  primary monitor. E captured and drove it (oracle colour; keys and click
+  logged), and so did C, with a grant written for the fake monitor's identity.
+- Latency matched a real monitor: paint→capture p50 31 ms / p95 42 ms,
+  input→photon p50 49 ms / p95 57 ms. Scan-out timing carries on without a
+  display.
+- The connector is forced below the display server, so the same mechanism
+  should serve an X11 kiosk. That was not measured.
+
+This contrasts with the sysfs `status` force tried earlier. That one acts on a
+running system and never reaches userspace; the kernel parameter applies before
+the display server starts. Two cautions:
+
+- On a robot that also has a screen, the forced monitor joins the layout
+  wherever the desktop puts it. GNOME placed it *between* two real monitors, so
+  windows and the pointer can end up somewhere nobody sees. Its position has to
+  be set.
+- Recent kernels ship no EDID files. The installer supplies one, in
+  `/lib/firmware/edid/` (and in the initramfs where the GPU driver loads from
+  there).
+
+**GNOME virtual monitors (E only), with no system change.**
+
+- With zero monitors and no forced connector, GDM still auto-logged in and
+  gnome-shell ran, with an empty layout. Asking for "the primary monitor"
+  failed with `Unknown monitor`.
+- `ScreenCast.RecordVirtual` creates a monitor that exists while its stream is
+  consumed. The oracle window moved onto it, and capture and input worked: 5 of
+  5 runs logged both keys and the click at the intended point.
+- Its size is whatever the consumer negotiates. Asked for nothing, it came up
+  1×1, so the backend must request the resolution it wants. This is also what
+  lets a virtual monitor match the operator's window.
+- Input needs the stream running. Injecting after the capture pipeline had
+  stopped put every click at 0,0. A first run right after the monitor appeared
+  landed one click short, while the window was still moving onto it.
+
+Recommendation: provision the **forced connector** for headless robots. It is
+one mechanism for GNOME and (unmeasured) X11. The desktop exists at boot, so
+apps started at login have a screen. C's grant can name it, and it behaves like
+hardware. E's virtual monitor is the zero-provisioning alternative for GNOME,
+and the natural shape for "size the remote desktop to the operator". It adds
+two open questions: whether apps started at boot find their windows once a
+monitor appears, and how several operators share one virtual monitor. A dummy
+plug remains the hardware fallback and was not tested.

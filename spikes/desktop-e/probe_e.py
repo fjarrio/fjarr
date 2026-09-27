@@ -27,7 +27,10 @@ sc = dbus.Interface(bus.get_object(MUTTER_SC, "/org/gnome/Mutter/ScreenCast"), M
 sc_path = sc.CreateSession({"remote-desktop-session-id": session_id})
 sc_sess = dbus.Interface(bus.get_object(MUTTER_SC, sc_path), MUTTER_SC + ".Session")
 connector = sys.argv[1] if len(sys.argv) > 1 else ""
-stream_path = sc_sess.RecordMonitor(connector, {"cursor-mode": dbus.UInt32(1)})
+if connector == "virtual":  # no monitor at all: mutter creates one that lives as long as the stream
+    stream_path = sc_sess.RecordVirtual({"cursor-mode": dbus.UInt32(1)})
+else:
+    stream_path = sc_sess.RecordMonitor(connector, {"cursor-mode": dbus.UInt32(1)})
 print(f"screencast stream {stream_path} connector={connector!r}")
 
 node = {}
@@ -43,7 +46,9 @@ if "id" not in node:
 print(f"pipewire node {node['id']}")
 
 pipe = Gst.parse_launch(
-    f"pipewiresrc path={node["id"]} always-copy=true ! videoconvert ! "
+    f"pipewiresrc path={node["id"]} always-copy=true ! "
+    # a virtual monitor takes its size from what the consumer negotiates; unasked, it is 1x1
+    + ("video/x-raw,width=1920,height=1080 ! " if connector == "virtual" else "") + "videoconvert ! "
     "video/x-raw,format=RGB ! appsink name=sink max-buffers=1 drop=true sync=false")
 pipe.set_state(Gst.State.PLAYING)
 sink = pipe.get_by_name("sink")
@@ -70,7 +75,6 @@ for y in range(0, h, 16):
 with open("/tmp/fjarr-probe-frame.ppm", "wb") as f:  # what the capture saw, for a human to look at
     f.write(f"P6 {w} {h} 255\n".encode())
     for y in range(h): f.write(bytes(data[y*stride : y*stride + 3*w]))
-pipe.set_state(Gst.State.NULL)
 print(f"CAPTURE {'yes' if magenta > total // 2 else 'frames-but-no-oracle'}: {w}x{h}, {100*magenta//total}% magenta")
 
 # Input: the D-Bus Notify* methods, the pre-EIS half of the interface. The oracle must log each.
@@ -83,5 +87,6 @@ BTN_LEFT = 0x110
 rd_sess.NotifyPointerButton(dbus.Int32(BTN_LEFT), True)
 rd_sess.NotifyPointerButton(dbus.Int32(BTN_LEFT), False)
 time.sleep(1)
+pipe.set_state(Gst.State.NULL)  # after injecting: a virtual monitor exists only while its stream is consumed
 rd_sess.Stop()
 print("INJECT sent: key f, key j, click at 321,234 — read the oracle log for the verdict")
