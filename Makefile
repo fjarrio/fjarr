@@ -364,6 +364,11 @@ tunnel-collision: ## Two robots claiming one address: the operator must refuse t
 	@# at a robot pinned to its neighbour's address.
 	@FJARR_DEMO_NET_2=1 docker compose --profile demo up -d --no-deps --force-recreate demo-robot-2 >/dev/null 2>&1 || true
 
+.PHONY: tunnel-login
+tunnel-login: ## The 4.5f gate: fjarr-connect login through the demo dashboard, then list, pick and connect with nobody typing a robot id
+	@$(MAKE) --no-print-directory connect-build >/dev/null
+	pnpm --filter @fjarr/e2e exec playwright test tests/stack/cli-login.spec.ts --project stack
+
 .PHONY: tunnel-ros-ordering
 tunnel-ros-ordering: ## The three docs/27#lifecycle facts as a regression: attached, detached, and across an agent restart
 	docker/lab/ros-ordering.sh
