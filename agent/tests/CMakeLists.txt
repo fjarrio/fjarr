@@ -10,6 +10,7 @@ add_executable(fjarr-tests
   test_frame_hub.cpp
   test_channels.cpp
   test_blob.cpp
+  test_nice_options.cpp
   test_rate_estimator.cpp
   test_supervision.cpp
   test_terminal_capability.cpp

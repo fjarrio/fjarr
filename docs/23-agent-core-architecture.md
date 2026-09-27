@@ -288,6 +288,12 @@ exact API sequences):
   switches to the in-place re-offer with no protocol change.
 - **ICE.** Trickled both ways; `candidate: ""` marks end-of-candidates;
   remote candidates arriving before a remote description is set are queued.
+  **libnice's UPnP-IGD is off** on every webrtcbin, set through its ICE agent's
+  `agent` before gathering. libnice's default is on, which asks the robot's
+  gateway to map ports for its host candidates. A robot opening ports on a
+  customer's router is not Fjarr's to decide, and TURN is the path for what
+  direct candidates cannot reach. Found in the 2026-09-28 review: it had been on
+  since M1, hidden behind a leak and a race suppression for its discovery thread.
   TURN via `add-turn-server` (`turn(s)://user:pass@host:port[?transport=tcp]`,
   Q6) with credentials from config (dev) or the docs/10 scheme (M5);
   `ice-transport-policy` from config for relay-only tests.
@@ -424,8 +430,13 @@ What the module and the package take from it:
   has already taken the helper's credentials. The agent passes the descriptor
   to `pipewiresrc fd=` together with the stream's node id. As the spike did it,
   the connection carries **all** of the desktop user's PipeWire rights,
-  microphones included. The helper therefore narrows its client to the granted
-  node before handing it over, as the portal's `OpenPipeWireRemote` does. The
+  microphones included. The helper **must** narrow the connection to the
+  granted node before handing it over, as the portal's `OpenPipeWireRemote`
+  does. **That is not yet verified.** The portal narrows as a privileged
+  PipeWire client, and whether an ordinary session-user process can restrict its
+  own connection is untested. It is an M3 gate item, because it is the account
+  boundary for audio. If it cannot be done, the helper proxies the one stream
+  instead of handing over the connection. The
   stream is damage-driven, so a static screen yields almost no buffers, and the
   source must not treat silence as capture loss.
 - **EIS.** The helper calls `ConnectToEIS` after `Start()`. mutter then offers

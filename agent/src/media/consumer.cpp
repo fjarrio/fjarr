@@ -6,6 +6,7 @@
 #include <gst/video/video.h>
 
 #include "core/log.hpp"
+#include "media/nice_options.hpp"
 
 namespace fjarr::media {
 
@@ -68,6 +69,9 @@ bool ConsumerPipeline::build(const std::string& ice_policy, const std::optional<
         return false;
     }
     g_object_set(webrtc_.get(), "bundle-policy", GST_WEBRTC_BUNDLE_POLICY_MAX_BUNDLE, "latency", 100u, nullptr);
+    // Before anything gathers: the robot never asks its router to open ports (docs/23 ICE).
+    if (!disable_upnp(webrtc_.get()))
+        log::warn("consumer", "could not turn libnice UPnP-IGD off (ICE agent is not libnice?)", {{"session", sid8_}});
     if (ice_policy == "relay") g_object_set(webrtc_.get(), "ice-transport-policy", GST_WEBRTC_ICE_TRANSPORT_POLICY_RELAY, nullptr);
     if (turn) {
         for (const auto& url : turn->urls) {

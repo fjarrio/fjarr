@@ -13,7 +13,6 @@ race:libgio-2.0.so*
 race:libgmodule-2.0.so*
 race:libgst*.so*
 race:libnice.so*
-race:libgupnp-igd-*.so*
 race:libsoup-3.0.so*
 race:libsrtp2.so*
 race:libusrsctp.so*

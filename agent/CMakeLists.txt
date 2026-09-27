@@ -46,6 +46,7 @@ add_library(fjarr STATIC
   src/media/encoder.cpp
   src/media/producer.cpp
   src/media/consumer.cpp
+  src/media/nice_options.cpp
   src/media/media_plane.cpp
   src/media/probe.cpp
   src/media/rate_estimator.cpp
