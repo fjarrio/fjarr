@@ -1,0 +1,20 @@
+run 1 rc=0 [  21.02s] RESULT COMPLETED size=1280: A offered every byte and B drained; A sent 26215, B received 25163 (95.99 %), send-failed events 1629
+run 2 rc=0 [  22.02s] RESULT COMPLETED size=1280: A offered every byte and B drained; A sent 26215, B received 25150 (95.94 %), send-failed events 1657
+run 3 rc=0 [  21.02s] RESULT COMPLETED size=1280: A offered every byte and B drained; A sent 26215, B received 25167 (96.00 %), send-failed events 1599
+run 4 rc=0 [  22.02s] RESULT COMPLETED size=1280: A offered every byte and B drained; A sent 26215, B received 25140 (95.90 %), send-failed events 1714
+run 5 rc=0 [  22.03s] RESULT COMPLETED size=1280: A offered every byte and B drained; A sent 26215, B received 25146 (95.92 %), send-failed events 1658
+run 6 rc=0 [  22.02s] RESULT COMPLETED size=1280: A offered every byte and B drained; A sent 26215, B received 25150 (95.94 %), send-failed events 1649
+run 7 rc=0 [  21.02s] RESULT COMPLETED size=1280: A offered every byte and B drained; A sent 26215, B received 25177 (96.04 %), send-failed events 1592
+run 8 rc=0 [  21.02s] RESULT COMPLETED size=1280: A offered every byte and B drained; A sent 26215, B received 25167 (96.00 %), send-failed events 1654
+run 9 rc=2 [  11.02s] RESULT STALL size=1280: B has received nothing for 11s; B->A heartbeat 107/108 delivered, last 0.1s ago; A sent 1643, B received 72 (4.38 %), send-failed events 58
+run 10 rc=0 [  25.03s] RESULT COMPLETED size=1280: A offered every byte and B drained; A sent 26215, B received 25092 (95.72 %), send-failed events 1708
+run 11 rc=2 [  11.01s] RESULT STALL size=1280: B has received nothing for 11s; B->A heartbeat 104/108 delivered, last 0.0s ago; A sent 1657, B received 88 (5.31 %), send-failed events 50
+run 12 rc=2 [  11.01s] RESULT STALL size=1280: B has received nothing for 11s; B->A heartbeat 108/108 delivered, last 0.0s ago; A sent 1670, B received 32 (1.92 %), send-failed events 37
+run 13 rc=0 [  21.02s] RESULT COMPLETED size=1280: A offered every byte and B drained; A sent 26215, B received 25135 (95.88 %), send-failed events 1669
+run 14 rc=0 [  21.01s] RESULT COMPLETED size=1280: A offered every byte and B drained; A sent 26215, B received 25123 (95.83 %), send-failed events 1704
+run 15 rc=0 [  21.02s] RESULT COMPLETED size=1280: A offered every byte and B drained; A sent 26215, B received 25154 (95.95 %), send-failed events 1661
+run 16 rc=0 [  21.01s] RESULT COMPLETED size=1280: A offered every byte and B drained; A sent 26215, B received 25133 (95.87 %), send-failed events 1679
+run 17 rc=2 [  11.01s] RESULT STALL size=1280: B has received nothing for 11s; B->A heartbeat 105/108 delivered, last 0.0s ago; A sent 1657, B received 55 (3.32 %), send-failed events 36
+run 18 rc=0 [  20.01s] RESULT COMPLETED size=1280: A offered every byte and B drained; A sent 26215, B received 25209 (96.16 %), send-failed events 1556
+run 19 rc=2 [  11.02s] RESULT STALL size=1280: B has received nothing for 11s; B->A heartbeat 104/108 delivered, last 0.0s ago; A sent 1649, B received 63 (3.82 %), send-failed events 44
+run 20 rc=2 [  11.01s] RESULT STALL size=1280: B has received nothing for 11s; B->A heartbeat 105/108 delivered, last 0.1s ago; A sent 1642, B received 13 (0.79 %), send-failed events 38

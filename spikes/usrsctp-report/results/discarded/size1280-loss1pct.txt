@@ -1,0 +1,2 @@
+run 1 rc=0 [  52.34s] RESULT COMPLETED size=1280: A offered every byte and B drained; A sent 838861, B received 822011 (97.99 %), send-failed events 25563
+run 2 rc=0 [ 107.40s] RESULT COMPLETED size=1280: A offered every byte and B drained; A sent 838861, B received 821975 (97.99 %), send-failed events 25603

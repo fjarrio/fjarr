@@ -1,0 +1,13 @@
+--- a/ext/sctp/usrsctp/usrsctplib/netinet/sctp_indata.c
++++ b/ext/sctp/usrsctp/usrsctplib/netinet/sctp_indata.c
+@@ -5506,7 +5506,9 @@
+ 	 * delivery function... to see if it can be delivered... But
+ 	 * for now we just dump everything on the queue.
+ 	 */
+-	if (!asoc->idata_supported && !ordered && SCTP_TSN_GT(control->fsn_included, cumtsn)) {
++	if (!asoc->idata_supported && !ordered &&
++	    control->first_frag_seen &&
++	    SCTP_TSN_GT(control->fsn_included, cumtsn)) {
+ 		return;
+ 	}
+ 	TAILQ_FOREACH_SAFE(chk, &control->reasm, sctp_next, nchk) {

@@ -1,0 +1,2 @@
+# Full per-run logs (~60 MB) stay local; the per-arm .txt summaries are the record.
+results/**/*.log
