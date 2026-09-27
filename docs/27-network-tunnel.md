@@ -493,6 +493,36 @@ Topic-name collisions between two robots attached at once are a ROS 2
 concern, solved with namespaces or distinct domain ids. Fjarr does not
 rewrite traffic.
 
+## Your own remote-desktop client over the link {#byo-remote-desktop}
+
+**Unverified.** This is noted 2026-09-27 and is to be tried on the spike
+machine once the agent is installed there (M2.5).
+
+An engineer who already lives in Remmina, or in the Windows Remote Desktop
+client, can reach the robot's desktop over the link like any other TCP service.
+Run an RDP server on the robot (GNOME's own gnome-remote-desktop, port 3389) or
+a VNC server on an X11 kiosk (`x11vnc`, port 5900). Bring the link up with
+`fjarr-connect`, and point the client at the robot's tunnel address. ssh and
+scp work this way already. This needs nothing from Fjarr but the link.
+
+It is a pattern Fjarr documents, not a feature it ships, and it has costs the
+engineer should see up front:
+
+- **It is a second door.** The RDP or VNC server has its own password. Fjarr's
+  grants, input lease, audit record and view-only mode govern the link, not
+  what happens inside it. Granting the link already means granting network
+  access to the robot ([docs/10](10-security.md#network-tunnel)); an RDP server
+  makes that access a full desktop.
+- **It fights the appliance setup.** gnome-remote-desktop keeps its credentials
+  in the login keyring. On an auto-login robot there is none until one is
+  created, and creating it puts a dialog on the robot's screen
+  ([docs/07](07-desktop-backends.md#decision-2026-09-27)).
+- **It is not `fjarr.desktop`.** The native capability needs no client install,
+  rides Fjarr's grants and adaptive bitrate, and brings local cursor,
+  multi-monitor presentation and the audit record. The link carries whatever
+  the RDP or VNC client negotiates, over a path with a 1184-byte MTU
+  ([ADR-0027](adr/0027-tunnel-mtu-one-sctp-chunk.md)).
+
 ## Degradation
 
 From the probe, over the network profiles in [docs/25](25-browser-lab.md):

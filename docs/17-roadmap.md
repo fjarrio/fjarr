@@ -209,7 +209,11 @@ the install script, `fjarr-agent setup` / `--check`
 Vendor camera packages themselves are M3 (chosen by the design partner's
 hardware). Also here: the [browser lab](25-browser-lab.md) profiling
 scenarios and docs/16 web budgets promoted to CI gates, and release
-process + docs versioning (open question #14).
+process + docs versioning (open question #14). Once the agent runs on the
+spike machine, also try an RDP client over `fjarr.net` to the robot's own
+gnome-remote-desktop, and record the result in
+[docs/27](27-network-tunnel.md#byo-remote-desktop) (noted 2026-09-27,
+unverified).
 **Gate:** a fresh Ubuntu 26.04 machine goes from `curl … | sh` to a test
 pattern in the dashboard with no hand-written config; `apt install
 fjarr-desktop-wayland` adds remote desktop to it; the package set builds
