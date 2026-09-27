@@ -165,3 +165,73 @@ No combination reaches GNOME's login screen. On stock Ubuntu, "unattended
 before login" means gnome-remote-desktop's headless system mode or nothing. The
 product question for docs/04 is whether Fjarr requires an appliance auto-login
 on GNOME robots, which every candidate here supports.
+
+## Findings — phase 2: the criteria table (2026-09-27)
+
+Measured on the spike machine at 1920×1080. The stamp window repainted every
+frame, so capture never idled. GNOME numbers are from the GDM auto-login session;
+X11 numbers are from Openbox under LightDM. Harness: `spikes/desktop-measure/`.
+"Paint→capture" is the clock painted into a frame against the clock when that
+frame reaches the agent. "Input→photon" is from the injection call to the first
+captured frame that shows its effect. Both are p50 / p95 over 300 frames and 40
+presses. Cost is capture + `vah264enc` at 30 fps, minus an idle baseline of the
+same length, in % of one core.
+
+| Criterion | A X11+XTest | B X11+uinput | C portal+libei | D portal+uinput | E mutter D-Bus |
+|---|---|---|---|---|---|
+| Unattended (phase 1) | yes (kiosk) | yes (kiosk) | yes, grant written at provisioning | capture as C, input yes | yes, nothing needed |
+| Login screen (phase 1) | LightDM: yes as root; GDM: no | as A | no | no | no |
+| Paint→capture | 14 / 22 ms | 14 / 22 ms | 31 / 43 ms | 31 / 43 ms | 31 / 42 ms |
+| Input→photon | 44 / 64 ms | 38 / 62 ms | 54 / 66 ms | 54 / 65 ms | 52 / 68 ms |
+| Cost at 1080p30 (agent / display server / GPU) | +10.6% / +2.9% / +9 pts | +10.8% / +2.9% / +9 pts | +9.2% / +4.7% / +10 pts | as C | +8.7% / +4.5% / +10 pts |
+| Privilege surface | session user; or root with the server's authority file (needed at the LightDM greeter) | + a root uinput helper (or a udev group rule) | session user; provisioning writes one permission-store record | C + the root helper | session user only |
+| Cursor metadata | XFixes shape readable, `show-pointer=false` | as A | not through GStreamer (below) | as C | not through GStreamer (below) |
+| Desktop audio | PipeWire sink monitor, unattended (measured under GNOME; same PipeWire in the kiosk) | as A | as A | as A | as A |
+| Session ends | LightDM shows its greeter (after a 90 s SIGKILL, because Openbox ignores SIGTERM); still reachable as root | as A | GDM shows its greeter; unreachable until `systemctl restart gdm`, which auto-logs in again in <10 s | as C | as C |
+| Spike size (non-comment lines) | 30 | 30 + 11 helper | 73 | 29 + 11 helper | 74 |
+| Future-proofing | Xorg in maintenance; GNOME has no X11 session | as A | the cross-desktop standard, but the unattended grant is GNOME's private format | as C | GNOME-private interface; gnome-remote-desktop depends on it |
+| Multi-monitor, hot-plug | **not measured**: one monitor, and forcing the connector through sysfs reaches neither mutter nor Xorg | | | | |
+
+Every latency difference is under the decision rule's 20 ms p50 noise line. X11
+paint→capture is lower because nothing composites; input→photon, the number an
+operator feels, is the same for all five.
+
+What surprised us:
+
+- **Mutter only sends frames when something changes.** Its stream is variable
+  rate (`framerate=0/1`), so a still screen delivers no frames at all, not
+  even a first one. The agent must repeat the last frame for the encoder and must
+  not treat silence as a dead source.
+- **Zero-copy did not happen.** When `pipewiresrc` is free to negotiate
+  DMA-BUF with mutter, the stream fails with "target not found". Constrained to
+  system memory, it works. Every GNOME number above is for the copying path, so
+  DMA-BUF is headroom, not a baseline.
+- **`pipewiresrc` drops PipeWire's cursor metadata.** With cursor-mode
+  "metadata", its most verbose trace shows no cursor handling. Local-cursor mode
+  on Wayland therefore needs Fjarr's own PipeWire consumer, as
+  gnome-remote-desktop has, or a patched `pipewiresrc`.
+- **A GNOME robot needs a session watchdog.** An auto-login happens once per
+  boot. If the session dies, the robot sits at a login screen nothing can reach.
+  Restarting GDM brings it back.
+- **The render node is granted to the seat user.** `vah264enc` shows 0 features
+  to any other account, so an agent outside the session needs the `render`
+  group.
+
+## Recommendation (for acceptance)
+
+- **Stock Ubuntu (GNOME Wayland): E**, as the backend `fjarr-desktop-wayland`
+  ships first. It is the only candidate that is unattended with nothing written
+  and no root. Its latency and cost equal C's. Its risk is the interface's
+  stability, and gnome-remote-desktop shares that risk upstream. It ships with
+  the GDM watchdog above, and docs/10 records that the session user's account is
+  the security boundary.
+- **C as the second Wayland backend**, for non-GNOME compositors (portal
+  standard). On GNOME it is the fallback if E's interface breaks. Its unattended
+  mode depends on a provisioning step that writes GNOME's private grant format
+  naming the real monitor, so it is second on GNOME, not first.
+- **X11 kiosk: A.** It is unattended and reaches LightDM's greeter as root, with
+  no privileged helper. B's uinput gains nothing over XTest here.
+- **D is dropped.** It pairs portal consent with a root helper and gains nothing
+  in return.
+- Before this ADR is accepted, multi-monitor and hot-plug still need a second
+  physical monitor and a cable pull. Neither can be simulated on this machine.
