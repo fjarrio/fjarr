@@ -2,8 +2,7 @@
 title: "ADR 0030: Several operators on one robot's tunnel, from a small pool of operator addresses"
 ---
 
-- **Status**: proposed (2026-09-28). Decided that tunnels are concurrent; the
-  addressing below awaits review, and is implemented in a slice after M3.
+- **Status**: accepted (2026-09-28), implemented in a slice after M3.
 - **Date**: 2026-09-28
 - **Supersedes**: — (amends [docs/27](../27-network-tunnel.md#addressing)'s
   single operator address; [ADR-0023](0023-network-tunnel-virtual-interface.md)

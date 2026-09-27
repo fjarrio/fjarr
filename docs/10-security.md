@@ -70,7 +70,7 @@ thing take turns; everyone else works side by side.**
   |---|---|---|---|
   | `desktop` | `fjarr.desktop` input | two people moving one pointer is chaos | **5 s after the holder's last input** control is free, and the next to type or move the pointer takes it; any operator may also **take control** at once, and the holder is told |
   | `motion` | teleop; `fjarr.test`'s drive in the demo | two people steering one robot is dangerous | **never on idle.** Only `release-control`, disconnect, or another operator's **take control**, which first stops the robot: the capability's `release_all_input` runs for the old holder before the new holder's first command is accepted, so nobody inherits a robot in motion |
-  | none | `fjarr.terminal`, `fjarr.net`, `fjarr.files` | nothing is shared: each session has its own pty, link or transfer | not applicable. Concurrent and audited. (Concurrent *links* need per-operator addresses, [ADR-0030](adr/0030-concurrent-tunnel-operators.md); until that lands a second link is refused as `busy`, naming who holds the first) |
+  | none | `fjarr.terminal`, `fjarr.net`, `fjarr.files` | nothing is shared: each session has its own pty, link or transfer | not applicable. Concurrent and audited. (Concurrent *links* need per-operator addresses, [ADR-0030](adr/0030-concurrent-tunnel-operators.md), accepted; until it is built, a second link is refused as `busy`, naming who holds the first) |
 
 - **A claim is taken on engagement, not on session open.** It happens at the
   session's first input in that domain (a pointer or key event, a drive

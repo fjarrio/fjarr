@@ -51,4 +51,4 @@ options weighed, the choice, and its consequences — so future maintainers
 | [0027](0027-tunnel-mtu-one-sctp-chunk.md) | The tunnel MTU is one SCTP chunk (1184) — every full-size packet at 1280 fragmented, and that is #28 | accepted |
 | [0028](0028-desktop-session-helper.md) | The desktop is reached through a session helper that hands the agent descriptors | accepted |
 | [0029](0029-robot-files-as-a-webdav-drive.md) | Robot files as a drive, through a WebDAV bridge in `fjarr-connect` | accepted |
-| [0030](0030-concurrent-tunnel-operators.md) | Several operators on one robot's tunnel, from a small pool of operator addresses | proposed |
+| [0030](0030-concurrent-tunnel-operators.md) | Several operators on one robot's tunnel, from a small pool of operator addresses | accepted |
