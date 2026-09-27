@@ -375,3 +375,30 @@ and the natural shape for "size the remote desktop to the operator". It adds
 two open questions: whether apps started at boot find their windows once a
 monitor appears, and how several operators share one virtual monitor. A dummy
 plug remains the hardware fallback and was not tested.
+
+### Several fake monitors (2026-09-27)
+
+- **Three forced connectors at once work, DisplayPort included.** HDMI-A-1,
+  DP-1 and DP-2 were forced on with distinct EDIDs (`FJARRVIRT1` to `3`) and
+  nothing attached. The kernel reported all three connected and enabled,
+  without link-training errors on the DP ports. GNOME laid them out side by side
+  (DP-1 primary). E captured each one; clicks on the monitors without the oracle
+  correctly did not reach it; and on the oracle's monitor, keys and a click at
+  321,234 arrived.
+- **A static full-screen window gave no first frame.** On the primary fake
+  monitor, the oracle started at login produced no frame in 3 of 3 E sessions.
+  After the oracle was restarted, the same connector captured at once. So this
+  is E behaviour, not fake-monitor behaviour, and it matches the earlier
+  "no first frame" cases. The backend must not wait for a first frame: it can
+  create damage itself (a one-pixel pointer move with an embedded cursor) or
+  send a placeholder.
+- **Several virtual monitors work, with unstable identities.** Two E sessions
+  each created a virtual monitor (`Meta-0`, `Meta-1`), which GNOME appended to
+  the right of the layout. Both captured at 1920×1080. Their serials are
+  creation counters (`0x000001`, `0x000002`), so nothing, a C grant included, can
+  refer to one across sessions. Forced connectors, whose identities are
+  fixed, are the choice when a robot needs a stable multi-screen layout.
+- **The DRM card number is not stable.** With a monitor at boot, the firmware
+  framebuffer's placeholder driver takes `card0` and the GPU is `card1`. With
+  none, the GPU is `card0`. The agent must find the GPU by device, not by card
+  number. (The cost harness had `card1` hard-coded; it now searches.)

@@ -172,7 +172,8 @@ if "cpu" in tests:
     def cpu(pid):
         f = open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split(); return (int(f[11]) + int(f[12])) / tick
     def me(): t = os.times(); return t.user + t.system
-    gpu_path = "/sys/class/drm/card1/device/gpu_busy_percent"
+    import glob  # the card number moves: with no monitor at boot the GPU is card0, not card1
+    gpu_path = glob.glob("/sys/class/drm/card*/device/gpu_busy_percent")[0]
     def window(seconds):
         a = {k: cpu(p) for k, p in procs.items() if p}; a["agent"] = me(); g = []
         end = time.time() + seconds

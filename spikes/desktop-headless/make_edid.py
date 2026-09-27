@@ -9,7 +9,7 @@ src, dst = sys.argv[1], sys.argv[2]
 serial = (sys.argv[3] if len(sys.argv) > 3 else "FJARRVIRT1").encode()[:13]
 e = bytearray(open(src, "rb").read())
 assert e[:8] == bytes([0, 255, 255, 255, 255, 255, 255, 0]), "not an EDID"
-e[12:16] = (0x464A4152).to_bytes(4, "little")  # numeric serial
+e[12:16] = (sum(serial) * 2654435761 & 0xFFFFFFFF).to_bytes(4, "little")  # numeric serial, distinct per text serial
 for off in (54, 72, 90, 108):  # the four 18-byte descriptors
     if e[off:off + 3] == b"\0\0\0" and e[off + 3] == 0xFF:
         e[off + 5:off + 18] = (serial + b"\n").ljust(13, b" ")[:13]
