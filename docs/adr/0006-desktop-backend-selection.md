@@ -73,10 +73,29 @@ What surprised us:
 - Relative uinput motion is subject to pointer acceleration: a +40,+30 move
   landed +22,+17. A D or B helper has to present an absolute device.
 
-Open for the user: whether provisioning may write a C grant into the portal
-permission store with no human (it would remove C's one click). This was not
-attempted. It forges a consent record, and that is a policy decision before it
-is an experiment.
+**C without a human, by writing the grant (2026-09-27, run with the user's
+approval).** With the human grant deleted, C waits at the dialog (no answer in
+20 s). We then wrote a grant record into the portal's permission store with the
+store's own `Set` call, as the session user, in the same layout GNOME writes:
+table `remote-desktop`, id a fresh UUID (non-UUID ids are rejected as restore
+tokens), app `""`, data `("GNOME", 1, (created, last-used, 3, false,
+[(0, 1, "<vendor>:<model>:<serial>")]))`. We offered that UUID as the restore
+token. `Start` returned in 0.0 s with no dialog. Capture showed the oracle, and
+keys and a click were logged, before and after a reboot. So **C can be
+unattended with no human ever**: provisioning writes the grant. Two conditions
+come with it:
+
+- The grant must name the robot's **actual monitor**. A grant naming a monitor
+  that is not present still makes `Start` answer "yes" and grant input, but it
+  returns **no screen stream**. A backend has to treat a start without streams
+  as a failure, and provisioning has to read the monitor's identity from the
+  machine.
+- The record format is GNOME's private data, not a portal API. It can change
+  between GNOME releases just as E's interfaces can.
+
+For docs/10, the consent dialog protects nothing against code already running
+as the session user. That code can write itself a grant, just as it can use E
+directly.
 
 ## Findings — phase 1, step 2: Openbox on Xorg under GDM (2026-09-27)
 
@@ -129,16 +148,17 @@ server's authority file.
 |---|---|---|---|---|
 | A X11 + XTest | n/a (no X11 session) | n/a | yes (GDM: re-activate session at boot; LightDM: as is) | GDM: no (structural); LightDM: yes as root |
 | B X11 + uinput | n/a | n/a | yes, as A | as A |
-| C portal + libei | yes after one human grant; token survives reboot | no | n/a | n/a |
+| C portal + libei | yes, with no human if provisioning writes the grant (it must name the real monitor); otherwise after one human grant | no | n/a | n/a |
 | D portal + uinput | capture as C; input yes | no | n/a | n/a |
 | E mutter D-Bus | **yes, no human** | no (inhibited) | n/a | n/a |
 
 Every combination survives the hard gate for the appliance case in the
 configuration it belongs to, so phase 2 measures all five, in two groups:
 
-- **Stock Ubuntu (GNOME Wayland): C, D and E.** E is the only one that needs no
-  human ever. C needs one grant that is tied to the monitor. D adds a
-  privileged helper for no unattended gain over E.
+- **Stock Ubuntu (GNOME Wayland): C, D and E.** E and C both run with no human.
+  E needs nothing written. C needs a grant written at provisioning (in GNOME's
+  private format, naming the real monitor). D adds a privileged helper for no
+  unattended gain over either.
 - **X11 kiosk: A and B.**
 
 No combination reaches GNOME's login screen. On stock Ubuntu, "unattended
