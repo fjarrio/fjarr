@@ -179,9 +179,23 @@ literally zero `bytes` fields) — designed fresh in [docs/08](08-protocol.md#fi
   PeerConnection if measurements demand — [budgets](16-performance-budgets.md)).
 - Explicit direction grants: `files:read`, `files:write`, per-path
   allow-lists in agent config.
+- **Designed to back a drive** ([ADR-0029](adr/0029-robot-files-as-a-webdav-drive.md)):
+  `fjarr-connect` will serve the allowed paths as a WebDAV folder for Nautilus,
+  Finder and Explorer, so the protocol also carries:
+  - **listings with metadata** (name, kind, size, mtime, a change tag), one
+    request per directory;
+  - **stat** of one path;
+  - **byte-range reads** at any offset, without transferring the prefix;
+  - **writes** as whole-file uploads with the existing resume;
+  - **mkdir, delete and rename** under `files:write`.
+
+  Each allow-listed root is a top-level folder, and nothing outside the
+  allow-lists is reachable, even by name.
 
 **Accepted when:** 1 GB transfers both ways with a mid-transfer network kill
-resumed to a verified hash; interactive video latency unaffected during bulk.
+resumed to a verified hash; interactive video latency unaffected during bulk;
+a byte-range read from the middle of a 1 GB file that transfers no prefix; a
+path outside the allow-lists refused for list, stat, read and write alike.
 
 ## `fjarr.terminal` — remote terminal (M2)
 
@@ -190,7 +204,9 @@ so it proves the extension API generalizes beyond video.
 
 - PTY on the robot over the bulk byte channel in both directions, `raw`
   framing, one per session ([docs/08](08-protocol.md#terminal)); xterm.js
-  component in `@fjarr/react`. Resize, UTF-8, scrollback client-side.
+  component in `@fjarr/react`. Resize, UTF-8, scrollback client-side. The
+  second client is native: `fjarr-connect shell` attaches the operator's own
+  terminal to the same pty (planned, [docs/27](27-network-tunnel.md#shell)).
 - **Off unless configured, and it names its user.** No pty exists until
   `fjarr.toml` says which account the shell runs as — the capability reports
   `unavailable` otherwise, which is a deployment choice rather than a fault.

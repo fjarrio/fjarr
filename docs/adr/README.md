@@ -50,3 +50,4 @@ options weighed, the choice, and its consequences — so future maintainers
 | [0026](0026-multicast-over-the-tunnel.md) | Multicast crosses the tunnel, on the strength of its source — the destination rule made ROS 2 impossible | accepted |
 | [0027](0027-tunnel-mtu-one-sctp-chunk.md) | The tunnel MTU is one SCTP chunk (1184) — every full-size packet at 1280 fragmented, and that is #28 | accepted |
 | [0028](0028-desktop-session-helper.md) | The desktop is reached through a session helper that hands the agent descriptors | accepted |
+| [0029](0029-robot-files-as-a-webdav-drive.md) | Robot files as a drive, through a WebDAV bridge in `fjarr-connect` | accepted |

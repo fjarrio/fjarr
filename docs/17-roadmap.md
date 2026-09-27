@@ -210,10 +210,10 @@ Vendor camera packages themselves are M3 (chosen by the design partner's
 hardware). Also here: the [browser lab](25-browser-lab.md) profiling
 scenarios and docs/16 web budgets promoted to CI gates, and release
 process + docs versioning (open question #14). Once the agent runs on the
-spike machine, also try an RDP client over `fjarr.net` to the robot's own
-gnome-remote-desktop, and record the result in
+spike machine, also try two things over `fjarr.net` and record the results in
 [docs/27](27-network-tunnel.md#byo-remote-desktop) (noted 2026-09-27,
-unverified).
+unverified): an RDP client to the robot's own gnome-remote-desktop, and
+Nautilus mounting the robot over sftp (`sftp://<user>@<tunnel address>/`).
 **Gate:** a fresh Ubuntu 26.04 machine goes from `curl … | sh` to a test
 pattern in the dashboard with no hand-written config; `apt install
 fjarr-desktop-wayland` adds remote desktop to it; the package set builds
@@ -289,6 +289,13 @@ actually picks the stream class — docs/13 KISS); the cheap conventions:
 **Gate:** 1 GB resume-after-kill with verified hash; bulk/interactive
 isolation within budget; telemetry replay after outage; logs tail from
 robot-sim with a filter; spike report attached to open question #16.
+
+`fjarr.files` is designed for the drive of
+[ADR-0029](adr/0029-robot-files-as-a-webdav-drive.md) from the start: listings
+with metadata, stat, byte-range reads, and mkdir, delete and rename. **After
+M4's gate**, `fjarr-connect` serves the robot's allowed paths as a WebDAV
+folder. *Its gate:* Nautilus, Finder and Explorer mount it, list a directory,
+open a file and save it back, and are refused outside the allow-lists.
 
 ## M4.5 — Direct access: the network tunnel
 
@@ -586,6 +593,14 @@ relay-only with the direct path removed; the evidence, criterion by criterion,
 is the [M4.5 gate review](reviews/m45-gate-review.md). Carried out of the
 milestone: [#28](18-open-questions.md) for the lab's usrsctp-to-usrsctp operator,
 and [#29](18-open-questions.md) for Cyclone — closed the same day.
+
+**Next for the native client** (decided 2026-09-27): `fjarr-connect shell`, which
+attaches the operator's own terminal to the robot's `fjarr.terminal` pty with no
+tunnel and no privilege ([docs/27](27-network-tunnel.md#shell)). It is small:
+the terminal protocol is unchanged, and it only needs raw mode, resize and a
+grant that carries the terminal. *Gate:* an interactive shell, a resize seen
+by the robot's `stty size`, the shell's exit status as the client's, and the
+local terminal restored after a killed link.
 
 ## M5 — Hardening + Fjarr Cloud alpha
 

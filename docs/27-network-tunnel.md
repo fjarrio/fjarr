@@ -260,6 +260,34 @@ to a server the customer never chose. `--relay-only` offers nothing but TURN
 candidates, for a network that forbids direct UDP — and for the lab, where it is
 how a robot behind carrier NAT is stood in for ([testing](#testing)).
 
+### `fjarr-connect shell` — the robot's terminal in yours {#shell}
+
+**Planned (decided 2026-09-27): the native client's next small step.**
+`fjarr-connect shell robot-024` opens the robot's
+[`fjarr.terminal`](08-protocol.md#terminal) pty in the terminal the command runs
+in (GNOME Terminal, xterm, any other). It needs no tunnel and no `sshd` on the
+robot.
+
+- **Only the terminal channel.** It opens a session whose grant carries
+  `fjarr.terminal` and no `fjarr.net`. So it needs no interface and no
+  `CAP_NET_ADMIN`, and it runs the same on macOS and Windows as on Linux.
+- **The existing protocol, unchanged.** `open` with the local terminal's size
+  and `$TERM`; `resize` on every `SIGWINCH`, coalesced; `close` on exit. The
+  shell's `exit` event becomes `fjarr-connect`'s own exit status, so it
+  composes in scripts. A `busy` or `unavailable` answer, or a grant without the
+  terminal (`capability-denied`), is printed as the reason and exits non-zero.
+- **The local terminal is restored on every way out**: the shell exiting, the
+  link dropping, a signal. It is in raw mode while attached, so a client that
+  leaks raw mode leaves the operator's own terminal unusable.
+- **Grants and audit as in the browser.** The terminal is input-bearing, so it
+  takes the ownership lease; every open and close is audited. `login` asks the
+  operator API for a grant that carries `fjarr.terminal`, which the operator is
+  given only if their backend allows it.
+
+ssh over the link remains for what the ssh ecosystem brings (VS Code
+Remote-SSH, rsync, port forwarding). `shell` is for the operator who wants a
+shell on the robot and nothing else to install or open on it.
+
 ## Finding a robot, and who authorizes it {#discovery}
 
 `fjarr-connect` is a dashboard without a screen. It discovers and authorizes
@@ -496,7 +524,11 @@ rewrite traffic.
 ## Your own remote-desktop client over the link {#byo-remote-desktop}
 
 **Unverified.** This is noted 2026-09-27 and is to be tried on the spike
-machine once the agent is installed there (M2.5).
+machine once the agent is installed there (M2.5). The same trial covers the
+file-manager equivalent: Nautilus mounting the robot over sftp
+(`sftp://<user>@<tunnel address>/`), which needs `sshd` on the robot and
+carries the same second-door caveat. Fjarr's own answer for files is the
+WebDAV drive of [ADR-0029](adr/0029-robot-files-as-a-webdav-drive.md).
 
 An engineer who already lives in Remmina, or in the Windows Remote Desktop
 client, can reach the robot's desktop over the link like any other TCP service.
