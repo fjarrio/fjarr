@@ -13,10 +13,13 @@ import { FjarrError, NotImplementedError } from "./errors.js";
 import type { MediaStreamFactory, MediaStreamTrackLike, PeerConnectionFactory, PeerConnectionLike } from "./peer.js";
 import {
   CORE_CAP,
+  isDomainControlWire,
   makeEnvelope,
   newEventId,
   parseSignaling,
   PROTO_VERSION,
+  type ControlDomain,
+  type ControlHolder,
   type Envelope,
   type MonitorsEventPayload,
   type PongPayload,
@@ -99,6 +102,27 @@ export interface TrackApi {
   list(): TrackSnapshot["entries"];
 }
 
+/** One control domain as this session sees it (docs/10#session-ownership). */
+export interface DomainControl {
+  /** `null` = free: the next input in the domain claims it. */
+  readonly holder: ControlHolder | null;
+  /** When the holder claimed it, unix ms on the agent's clock (`timeSync.offsetMs` converts); `null` when free. */
+  readonly since: number | null;
+  /** This operator holds it (true in every session of the holding operator). */
+  readonly you: boolean;
+  /** This session can never claim it (a `view_only` grant): render no input surface and no take-control button. */
+  readonly viewOnly: boolean;
+}
+
+/**
+ * The latest `fjarr.core/control-state`: only the domains this session's grant
+ * has a capability in. Replaced wholesale on every event; `null` until the
+ * agent's first one on the current connection.
+ */
+export interface ControlState {
+  readonly domains: Readonly<Partial<Record<ControlDomain, DomainControl>>>;
+}
+
 export interface AudioUplink {
   /** Attach/detach the operator's microphone on the agent's pre-allocated transceiver (no renegotiation). */
   replaceTrack(track: MediaStreamTrackLike | null): Promise<boolean>;
@@ -146,6 +170,14 @@ export interface Session {
   /** Explicit `time-sync` probe (docs/08#fjarr-core); resolves the updated estimate. */
   timeSyncProbe(): Promise<TimeSyncEstimate | null>;
 
+  // control domains (docs/10#session-ownership)
+  /** Who holds each control domain, from `control-state`; `null` until the first one, and again after a disconnect. */
+  readonly control: ReadonlyStore<ControlState | null>;
+  /** `fjarr.core/take-control`: claim `domain` now, from whoever holds it. Rejects with `FjarrError` (`capability-denied` for a view-only grant). */
+  takeControl(domain: ControlDomain, options?: RequestOptions): Promise<void>;
+  /** `fjarr.core/release-control`: give `domain` up at once. Idempotent. */
+  releaseControl(domain: ControlDomain, options?: RequestOptions): Promise<void>;
+
   readonly consumerCount: number;
   readonly turn: TurnCredentials | null;
 }
@@ -160,6 +192,7 @@ export class SessionImpl implements Session {
   private readonly registry: TrackRegistry;
   private readonly heartbeat: Heartbeat;
   private readonly time = new TimeSync();
+  private readonly controlStore = createStore<ControlState | null>(null);
   private readonly sampler: StatsSampler;
   private readonly backoff: Backoff;
   private readonly slots = new Map<string, PublisherSlot>();
@@ -255,6 +288,8 @@ export class SessionImpl implements Session {
       });
     }
     this.channels.onEnvelope.on((env) => {
+      // Control state is core state, like monitors: it must not count as a consumer (idle policy).
+      if (env.cap === CORE_CAP && env.type === "control-state" && env.kind === "event") this.noteControlState(env.payload);
       if (env.cap === "fjarr.desktop" && env.type === "monitors" && env.kind === "event") {
         const p = env.payload as MonitorsEventPayload;
         if (Array.isArray(p?.monitors)) this.registry.setMonitors(p.monitors);
@@ -715,6 +750,7 @@ export class SessionImpl implements Session {
     this.heartbeat.stop();
     this.sampler.stop();
     this.time.reset(); // a new peer may be a rebooted robot with a new clock
+    this.controlStore.set(null); // the next connection's control-state is the truth; a stale "You" must not linger
     if (this.graceTimer) clearTimeout(this.graceTimer);
     if (this.restartTimer) clearTimeout(this.restartTimer);
     if (this.connectTimer) clearTimeout(this.connectTimer);
@@ -912,6 +948,52 @@ export class SessionImpl implements Session {
     return this.time.store.getSnapshot();
   }
 
+  // ------------------------------------------------------ control domains
+
+  get control(): ReadonlyStore<ControlState | null> {
+    return this.controlStore;
+  }
+
+  async takeControl(domain: ControlDomain, options?: RequestOptions): Promise<void> {
+    await this.request(CORE_CAP, "take-control", { domain }, options);
+  }
+
+  async releaseControl(domain: ControlDomain, options?: RequestOptions): Promise<void> {
+    await this.request(CORE_CAP, "release-control", { domain }, options);
+  }
+
+  /**
+   * spec: docs/08-protocol.md#fjarr-core (`control-state`). The event is the
+   * whole picture: it replaces the previous one. A malformed domain entry is
+   * dropped (and warned about) rather than poisoning the rest; unknown fields are ignored.
+   */
+  private noteControlState(payload: unknown): void {
+    if (typeof payload !== "object" || payload === null) return;
+    const raw = (payload as { domains?: unknown }).domains;
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      this.deps.emit({ type: "warning", robotId: this.robotId, message: "ignored a control-state without a domains object" });
+      return;
+    }
+    const prev: Partial<Record<ControlDomain, DomainControl>> = this.controlStore.getSnapshot()?.domains ?? {};
+    const domains: Partial<Record<ControlDomain, DomainControl>> = {};
+    for (const [name, entry] of Object.entries(raw as Record<string, unknown>)) {
+      if (!isDomainControlWire(entry)) {
+        this.deps.emit({ type: "warning", robotId: this.robotId, message: `ignored a malformed control-state entry for "${name}"` });
+        continue;
+      }
+      const next: DomainControl = {
+        holder: entry.holder ? { id: entry.holder.id, label: entry.holder.label } : null,
+        since: entry.holder && entry.since !== undefined ? entry.since : null,
+        you: entry.holder !== null && entry.you,
+        viewOnly: entry.view_only === true, // absent from older agents
+      };
+      // An unchanged domain keeps its identity, so a per-domain selector re-renders only on its own change.
+      const old = prev[name];
+      domains[name] = old && sameControl(old, next) ? old : next;
+    }
+    this.controlStore.set({ domains });
+  }
+
   // --------------------------------------------------------------- idle
 
   get consumerCount(): number {
@@ -939,6 +1021,10 @@ export class SessionImpl implements Session {
     this.idleTimer = null;
     this.registry.dispose();
   }
+}
+
+function sameControl(a: DomainControl, b: DomainControl): boolean {
+  return a.since === b.since && a.you === b.you && a.viewOnly === b.viewOnly && a.holder?.id === b.holder?.id && a.holder?.label === b.holder?.label && (a.holder === null) === (b.holder === null);
 }
 
 export function createSession(deps: SessionDeps): SessionImpl {
