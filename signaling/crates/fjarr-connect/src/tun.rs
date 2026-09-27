@@ -245,10 +245,19 @@ async fn has_address(handle: &rtnetlink::Handle, index: u32, address: Ipv4Addr) 
         .context("reading the interface's addresses")?
     {
         for attr in &msg.attributes {
-            if let AddressAttribute::Address(std::net::IpAddr::V4(a)) = attr {
-                if *a == address {
-                    return Ok(true);
+            // Both, deliberately. On a point-to-point address — the shape the installer creates,
+            // `ip addr add <self> peer <robot>` — `IFA_ADDRESS` is the *peer* and the local end is
+            // `IFA_LOCAL`; on an ordinary address they are the same. Checking only `Address` missed
+            // the lab's device, tried to add an address it already had, and turned the documented
+            // no-privilege attach into an EPERM. The setcap'd lab build had been hiding it.
+            match attr {
+                AddressAttribute::Address(std::net::IpAddr::V4(a))
+                | AddressAttribute::Local(std::net::IpAddr::V4(a))
+                    if *a == address =>
+                {
+                    return Ok(true)
                 }
+                _ => {}
             }
         }
     }
@@ -330,12 +339,49 @@ fn route_to(index: u32, robot: Ipv4Addr) -> rtnetlink::packet_route::route::Rout
         .build()
 }
 
+/// Is `robot/32` already routed down interface `index`? Asked before any write, because for an
+/// unprivileged process the kernel answers RTM_NEWROUTE with EPERM before it would ever say
+/// EEXIST — and on a point-to-point device whose address names the peer, the kernel installed this
+/// exact route with the address. That is the installer's shape, and the documented no-privilege
+/// attach depends on recognising it by looking rather than by trying (docs/27#the-operator-client).
+#[cfg(target_os = "linux")]
+async fn route_exists(handle: &rtnetlink::Handle, index: u32, robot: Ipv4Addr) -> Result<bool> {
+    use futures_util::TryStreamExt;
+    use rtnetlink::packet_route::route::{RouteAddress, RouteAttribute};
+
+    let all = rtnetlink::RouteMessageBuilder::<Ipv4Addr>::new().build();
+    let mut routes = handle.route().get(all).execute();
+    while let Some(msg) = routes.try_next().await.context("listing routes")? {
+        if msg.header.destination_prefix_length != 32 {
+            continue;
+        }
+        let mut dst_matches = false;
+        let mut oif_matches = false;
+        for attr in &msg.attributes {
+            match attr {
+                RouteAttribute::Destination(RouteAddress::Inet(a)) if *a == robot => {
+                    dst_matches = true
+                }
+                RouteAttribute::Oif(i) if *i == index => oif_matches = true,
+                _ => {}
+            }
+        }
+        if dst_matches && oif_matches {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 #[cfg(target_os = "linux")]
 async fn add_route(name: &str, robot: Ipv4Addr) -> Result<()> {
     let handle = netlink().await?;
     let index = index_of(&handle, name)
         .await?
         .ok_or_else(|| anyhow!("{name} is gone"))?;
+    if route_exists(&handle, index, robot).await? {
+        return Ok(());
+    }
     match handle.route().add(route_to(index, robot)).execute().await {
         Ok(()) => Ok(()),
         // An existing route is the normal case on a point-to-point device whose address names the

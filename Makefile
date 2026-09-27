@@ -321,6 +321,21 @@ tunnel-isolation: ## docs/15 safety class: two robots on one operator interface 
 	    --server $(OPSIM_SERVER) --dev $(TUN_DEV) --grant "$$grant_a" --grant "$$grant_b" \
 	    -- docker/lab/two-robot-isolation.sh
 
+.PHONY: connect-unprivileged
+connect-unprivileged: ## docs/27's promise that an existing, addressed interface needs no privilege: strip the capability and run ssh over the link
+	@$(MAKE) --no-print-directory connect-build >/dev/null
+	@docker compose exec -T -u root dev setcap -r /workspace/signaling/target/release/fjarr-connect
+	@caps=$$(docker compose exec -T dev getcap /workspace/signaling/target/release/fjarr-connect); \
+	  echo "connect-unprivileged: binary has $${caps:-no capabilities} — attaching to the interface tun-up created"
+	@grant=$$(docker/lab/mint-grant.sh $(OPSIM_ROBOT) fjarr.net); \
+	  docker compose exec -T -e FJARR_GRANT="$$grant" -e FJARR_LOG=warn dev \
+	    ./signaling/target/release/fjarr-connect $(OPSIM_ROBOT) --server $(OPSIM_SERVER) --dev $(TUN_DEV) -- docker/lab/tunnel-checks.sh ssh \
+	  || { echo "connect-unprivileged: FAIL — an addressed interface must not need CAP_NET_ADMIN to attach (docs/27#the-operator-client)"; \
+	       docker compose exec -T -u root dev setcap cap_net_admin+ep /workspace/signaling/target/release/fjarr-connect; exit 1; }
+	@# Put the capability back: every other lab target expects the installed shape.
+	@docker compose exec -T -u root dev setcap cap_net_admin+ep /workspace/signaling/target/release/fjarr-connect
+	@echo "connect-unprivileged: PASS"
+
 .PHONY: connect-macos-check
 connect-macos-check: ## Type-check fjarr-connect's platform code for macOS, its committed second platform (ADR-0024)
 	@docker compose exec -T dev bash docker/lab/macos-check.sh /workspace/signaling/crates/fjarr-connect/src
