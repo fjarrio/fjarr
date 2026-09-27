@@ -191,8 +191,11 @@ TUN_OPERATOR ?= 100.64.0.1
 # what puts them on its tunnel address. Recreating the robot leaves them pointing at a namespace
 # that no longer exists — reachable enough to answer with a TCP reset, which reads as "nothing is
 # listening" rather than "your sidecar is stale" — so tun-up recreates them after it.
-# `ROS=1` adds the ROS 2 participant to the sidecars tun-up brings up in order.
-ROBOT_SIDECARS ?= robot-services$(if $(ROS), robot-ros,)
+# `ROS=1` adds the ROS 2 participant — but not here: it is recreated at the END of tun-up, once the
+# interface exists and the agent has attached. A participant created before that never advertises
+# the tunnel, however long it runs (docs/27#lifecycle, fact A, and `tunnel-ros-ordering`), and
+# recreating it beside sshd here is exactly how the ROS gate went red in the M4.5 gate run.
+ROBOT_SIDECARS ?= robot-services
 # The size of the file the docs/27 scp gate transfers. Passed explicitly rather than left to the
 # environment: `docker compose up` re-resolves a service's variables, so anything set only on an
 # earlier command is lost the next time the sidecar is recreated — the same trap that cost CI the
@@ -232,7 +235,7 @@ tun-up: ## Create the tunnel interfaces the installer creates on a real robot (d
 	@echo "tun-up: the robot is online, attached, and serving ssh; 'make opsim-tunnel' will find it"
 	@if [ -n "$(ROS)" ]; then \
 	  addr=$$(docker compose exec -T -e FJARR_ROBOT_ID=$(OPSIM_ROBOT) dev ./build/$(BUILD_PRESET)/agent/daemon/fjarr-agent --net-address | tail -1 | tr -d '\r'); \
-	  FJARR_TUN_SELF="$$addr" FJARR_TUN_PEER=$(TUN_OPERATOR) docker compose --profile demo --profile ros up -d --no-deps operator-ros >/dev/null; \
+	  FJARR_DEMO_NET=1 FJARR_TUN_SELF="$$addr" FJARR_TUN_PEER=$(TUN_OPERATOR) docker compose --profile demo --profile ros up -d --no-deps --force-recreate robot-ros operator-ros >/dev/null; \
 	  for i in $$(seq 60); do docker compose --profile demo --profile ros logs --no-color robot-ros 2>/dev/null | grep -q "publishing /fjarr" && break; sleep 1; done; \
 	  docker compose --profile demo --profile ros logs --no-color robot-ros 2>/dev/null | grep -q "publishing /fjarr" \
 	    && echo "tun-up: ROS 2 is publishing on the robot, after the interface existed (docs/27#lifecycle)" \
@@ -364,10 +367,60 @@ tunnel-collision: ## Two robots claiming one address: the operator must refuse t
 	@# at a robot pinned to its neighbour's address.
 	@FJARR_DEMO_NET_2=1 docker compose --profile demo up -d --no-deps --force-recreate demo-robot-2 >/dev/null 2>&1 || true
 
+# The M4.5 gate's own claims are made through fjarr-connect, the product, with the direct path
+# removed (dds-isolate) and the client relay-only: the lab's stand-in for a robot behind carrier
+# NAT (docs/17 M4.5 gate, docs/27#testing). The candidate log proves the client offered nothing
+# but relay candidates; a green run with a host candidate in it would be measuring the bridge.
+CONNECT_RELAY = docker compose exec -T -e FJARR_LOG=warn,fjarr_connect=debug dev ./signaling/target/release/fjarr-connect $(OPSIM_ROBOT) \
+  --server $(OPSIM_SERVER) --dev $(TUN_DEV) --relay-only
+define connect_relay_check
+	@$(MAKE) --no-print-directory connect-build >/dev/null
+	@docker/lab/dds-isolate.sh on
+	@grant=$$(docker/lab/mint-grant.sh $(OPSIM_ROBOT) fjarr.net); \
+	  out=$$($(CONNECT_RELAY) --grant "$$grant" -- $(1) 2>&1); rc=$$?; docker/lab/dds-isolate.sh off >/dev/null; \
+	  echo "$$out" | grep -viE "pingAllCandidates|remote_addr|refusing first|TURN transaction|Failed to connect TCP|local candidate|route outlived"; \
+	  if echo "$$out" | grep -q 'candidate.kind=host'; then echo "$(2): FAIL — a host candidate was offered under --relay-only"; exit 1; fi; \
+	  echo "$$out" | grep -q 'candidate.kind=relay' || { echo "$(2): FAIL — no relay candidate was offered (is coturn up?)"; exit 1; }; \
+	  [ $$rc -eq 0 ] && echo "$(2): PASS — over the relay, with the direct path removed" || { echo "$(2): FAIL (exit $$rc)"; exit $$rc; }
+endef
+
+.PHONY: tunnel-ssh-connect
+tunnel-ssh-connect: ## M4.5 gate: ssh over the link through fjarr-connect, relay-only, direct path removed
+	$(call connect_relay_check,docker/lab/tunnel-checks.sh ssh,tunnel-ssh-connect)
+
+.PHONY: tunnel-scp-connect
+tunnel-scp-connect: ## M4.5 gate: a hash-verified LAB_FILE_MB scp through fjarr-connect, relay-only, direct path removed
+	$(call connect_relay_check,docker/lab/tunnel-checks.sh scp,tunnel-scp-connect)
+
+.PHONY: tunnel-ros-connect
+tunnel-ros-connect: ## M4.5 gate: ros2 topic list and echo through fjarr-connect, relay-only, direct path removed (needs tun-up ROS=1)
+	$(call connect_relay_check,docker/lab/tunnel-checks.sh ros2,tunnel-ros-connect)
+
+.PHONY: m45-gate
+m45-gate: ## The M4.5 gate, criterion by criterion (docs/06 fjarr.net, docs/17): every claim through fjarr-connect on the relay path, plus the lab's two-robot and login gates. Run from the HOST (it recreates services)
+	@if [ -n "$(IN_DEV)" ]; then echo "m45-gate: run this from the host — it recreates services, and a recreate from inside dev mounts the wrong workspace"; exit 2; fi
+	@echo "m45-gate: 0/6 the lab the way the installer leaves a robot: interface, then agent, then its ROS stack"; $(MAKE) --no-print-directory tun-up ROS=1 >/dev/null
+	@echo "m45-gate: 1/6 ssh over the link, relay-only, direct path removed";        $(MAKE) --no-print-directory tunnel-ssh-connect
+	@echo "m45-gate: 2/6 hash-verified $(LAB_FILE_MB) MiB scp, the same way";           $(MAKE) --no-print-directory tunnel-scp-connect
+	@echo "m45-gate: 3/6 ros2 topic list and echo, Fast DDS unconfigured, the same way"; $(MAKE) --no-print-directory tunnel-ros-connect
+	@echo "m45-gate: 4/6 two robots attached at once, unreachable from each other";   $(MAKE) --no-print-directory tunnel-isolation
+	@echo "m45-gate: 5/6 login through the dashboard, list, pick, connect, audit log"; $(MAKE) --no-print-directory tunnel-login
+	@echo "m45-gate: 6/6 the agent restarts without the robot's ROS stack restarting"; $(MAKE) --no-print-directory tunnel-ros-ordering
+	@echo "m45-gate: every criterion the lab can measure passed. Cyclone DDS is open question #29 and is not claimed."
+
+# Where a target runs matters in this lab. A `docker compose up` from INSIDE dev hands the host's
+# daemon `/workspace` as the bind source — a path that exists only in the container — and every
+# service it recreates comes up with an empty workspace ("demo-robot not built yet"). So targets
+# that recreate services run on the host. The browser suites are the opposite: their defaults name
+# compose services (`browser:9222`), so they run inside dev, where those names resolve — unless the
+# host provides the E2E_* view of the same stack, as CI does.
+IN_DEV := $(shell test -d /workspace -a -f /.dockerenv && echo 1)
+E2E_IN_DEV = $(if $(IN_DEV),,docker compose exec -T dev )pnpm --filter @fjarr/e2e exec playwright test
+
 .PHONY: tunnel-login
 tunnel-login: ## The 4.5f gate: fjarr-connect login through the demo dashboard, then list, pick and connect with nobody typing a robot id
 	@$(MAKE) --no-print-directory connect-build >/dev/null
-	pnpm --filter @fjarr/e2e exec playwright test tests/stack/cli-login.spec.ts --project stack
+	$(if $(E2E_BROWSER),pnpm --filter @fjarr/e2e exec playwright test,$(E2E_IN_DEV)) tests/stack/cli-login.spec.ts --project stack
 
 .PHONY: tunnel-ros-ordering
 tunnel-ros-ordering: ## The three docs/27#lifecycle facts as a regression: attached, detached, and across an agent restart

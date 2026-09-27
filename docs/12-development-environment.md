@@ -67,6 +67,18 @@ demo-backend demo-dashboard` (and `demo-robot` after `make agent-build`).
 
 ## The network tunnel in the lab
 
+**Where a target runs matters.** A `docker compose up` or `--force-recreate` run
+from *inside* `dev` hands the host's daemon `/workspace` as the bind source — a
+path that exists only in the container — and every service it recreates comes
+up with an empty workspace, reporting "demo-robot not built yet". So targets
+that recreate services (`tun-up`, `tunnel-isolation`, `tunnel-collision`,
+`m45-gate`) run on the host. The browser suites are the opposite case: their
+defaults name compose services (`browser:9222`, `demo-dashboard:5173`), so
+they run inside `dev`, where those names resolve — `make tunnel-login` does the
+`docker compose exec dev` itself when invoked from the host, and CI provides the
+host's view of the same stack through `E2E_*` instead. `make m45-gate` refuses to
+run inside `dev` for this reason.
+
 `fjarr.net` ([docs/27](27-network-tunnel.md)) attaches to a TUN interface that
 someone else created — on a robot the installer, in the lab `make tun-up`:
 

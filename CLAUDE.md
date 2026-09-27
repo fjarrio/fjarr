@@ -53,6 +53,10 @@ CI mirrors all of this in `.github/workflows/ci.yml`.
 - C++ follows the camera-streamer idioms (docs/09): RAII wrappers for GObjects,
   generation-counted session contexts, all callbacks marshaled to one loop,
   caps-gated offers.
+- **Never `docker compose up`/`--force-recreate` from inside `dev`**: compose there hands the host
+  daemon `/workspace` as the bind source and every recreated service starts with an empty
+  workspace ("demo-robot not built yet"). Recreating targets (`tun-up`, `tunnel-isolation`,
+  `m45-gate`) run on the host; browser suites run inside `dev`, where compose names resolve.
 - Never commit `.env`; `inspiration/` is gitignored reference material.
 - Commit style: conventional commits (`feat(agent): …`, `spec(protocol): …`).
 
