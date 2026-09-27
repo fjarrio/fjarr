@@ -208,12 +208,19 @@ tun-up: ## Create the tunnel interfaces the installer creates on a real robot (d
 	  docker/lab/tundev.sh up demo-robot "$$addr" $(TUN_OPERATOR) $(TUN_DEV) && \
 	  docker/lab/tundev.sh up dev $(TUN_OPERATOR) "$$addr" $(TUN_DEV)
 	@echo "tun-up: the robot waited for its interface before starting — the ordering the whole design rests on (docs/27#lifecycle)"
-	@# The robot was just recreated and boots only once the interface exists, so it registers with
-	@# the server a moment after this returns. Waiting here rather than in every caller: without it
-	@# a scenario starting immediately gets `robot-offline`, which is a true answer to the wrong
-	@# question. A recreate gives the container a fresh log, so an earlier line cannot match.
-	@for i in $$(seq 60); do docker compose logs --no-color demo-robot 2>/dev/null | grep -q "hello-ack: online" && break; sleep 1; done; \
-	  docker compose logs --no-color demo-robot 2>/dev/null | grep -q "hello-ack: online" \
+	@# `up -d` leaves a running container alone, and its supervisor keeps the agent process it
+	@# started — which may be a binary built hours ago. Every measurement after a rebuild then runs
+	@# against stale code and says nothing about the change (it did, twice, in slice 4.5e). So the
+	@# agent process is always restarted here, the way systemd would restart it, onto whatever
+	@# build/ holds now; the device survives, as docs/27#lifecycle requires. The wait below counts
+	@# hello-ack lines rather than grepping for one, because an old line matches too.
+	@before=$$(docker compose logs --no-color demo-robot 2>/dev/null | grep -c "hello-ack: online"); \
+	  docker compose exec -T demo-robot pkill -x demo-robot >/dev/null 2>&1 || true; \
+	  for i in $$(seq 60); do \
+	    now=$$(docker compose logs --no-color demo-robot 2>/dev/null | grep -c "hello-ack: online"); \
+	    [ "$$now" -gt "$$before" ] && break; sleep 1; done; \
+	  now=$$(docker compose logs --no-color demo-robot 2>/dev/null | grep -c "hello-ack: online"); \
+	  [ "$$now" -gt "$$before" ] \
 	  || { echo "tun-up: the robot never registered with the server; its last lines were:"; \
 	       docker compose logs --no-color --tail 20 demo-robot; exit 1; }
 	@# The sidecars share the robot's namespace and are what the gate actually talks to, and the one
