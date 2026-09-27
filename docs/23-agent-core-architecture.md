@@ -405,6 +405,42 @@ runs for two seconds and reports frame rate and any bus error — so a
 customer can validate a new camera on the robot without a browser or a
 server. The doctor gains a row per configured source.
 
+### The desktop descriptor handover (ADR-0028) {#desktop-descriptor-handover}
+
+On GNOME the desktop backend module receives its PipeWire and EIS descriptors
+from `fjarr-desktop-session` ([ADR-0028](adr/0028-desktop-session-helper.md)).
+It never opens the desktop user's bus. **This handover is measured, not
+assumed.** On the spike machine on 2026-09-28 (GNOME 50.1, PipeWire 1.6.2, libei
+1.5.0; [spikes/desktop-helper](../spikes/desktop-helper/README.md)),
+a process ran under its own system account, from a system unit with no session
+environment. It could not reach the user's bus or PipeWire socket itself. It
+accepted the helper after the `SO_PEERCRED` check, captured the oracle's magenta
+through `pipewiresrc fd=`, and injected two keys and a click through libei that
+the oracle logged. It rejected root and non-members. The ADR stands as written.
+
+What the module and the package take from it:
+
+- **PipeWire.** The helper hands over a connection it opened, so the server
+  has already taken the helper's credentials. The agent passes the descriptor
+  to `pipewiresrc fd=` together with the stream's node id. As the spike did it,
+  the connection carries **all** of the desktop user's PipeWire rights,
+  microphones included. The helper therefore narrows its client to the granted
+  node before handing it over, as the portal's `OpenPipeWireRemote` does. The
+  stream is damage-driven, so a static screen yields almost no buffers, and the
+  source must not treat silence as capture loss.
+- **EIS.** The helper calls `ConnectToEIS` after `Start()`. mutter then offers
+  one keyboard device and one absolute pointer device with buttons. The
+  pointer's region is the monitor's logical rectangle, so the module maps a
+  track-local point to the stream's `position` plus that point. Keys are evdev
+  codes. Input lands on the focused surface; the handover does nothing about
+  focus.
+- **The socket's group.** The agent has to be in `fjarr-desktop`
+  (`SupplementaryGroups=` in the unit) to give `/run/fjarr/desktop.sock` that
+  group, unless a `.socket` unit creates the socket. Adding the desktop account
+  to the group takes effect only at its **next login**, because the running
+  `systemd --user` keeps its old groups. The installer restarts the session
+  or says that it must.
+
 ### Encoders and tiers
 
 The core owns encoding through the `EncoderAdapter` seam, so a source never
