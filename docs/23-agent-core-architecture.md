@@ -1138,10 +1138,17 @@ the text above left open, or learned from the lab:
 - *Snapshot coalescing is trailing-edge*: a trigger inside the 250 ms
   window is deferred to the window's end, never dropped, so the served
   snapshot is always the latest state within a quarter second.
-- *Input lease*: a session whose operator does not hold the lease is
-  accepted read-only — requests to input-bearing capabilities get
-  `capability-denied`, events are dropped and counted; the lease refreshes
-  on the owner's pings and fails open after 30 s (docs/10).
+- *Control domains* (docs/10, revised 2026-09-28): every session is accepted
+  with input allowed by its grant; nothing is claimed at open. The
+  SessionManager keeps one claim per `control_domain` from the capability
+  manifests. A session's first input to a capability with a domain claims it
+  if free. A non-holder's events are dropped and counted, and its requests are
+  answered `control-held`. `take-control` and `release-control` are served by
+  the core under `fjarr.core`. `desktop` frees 5 s after its holder's last
+  input; `motion` only on release, disconnect or takeover, and a takeover runs
+  the capability's `release_all_input` first. Claims fail open after 30 s
+  without the holder's heartbeat. Capabilities without a domain (terminal, net,
+  files) are never gated.
 - *Closing has a flush window.* `release_all_input` runs synchronously and
   what it emits on `fjarr:control` (`deadman{expired}`) must reach the
   operator; a NULL state change in the same loop turn discarded it. The

@@ -144,6 +144,9 @@ Rules:
 | `pong` | result (echoes the `ping`'s `event_id`) | `{"ok": true, "t0", "t1", "t2"}` | `t1` = agent receive time, `t2` = agent send time, agent clock |
 | `time-sync` | request / result (result `type` is `time-sync`; only `ping` is answered as `pong`) | same payloads as `ping`/`pong` | an explicit on-demand probe (latency harness); heartbeats already keep the estimate fresh |
 | `ice-restart` | — | — | not an envelope: it is a [signaling message](#signaling), because it must work while the media path is down |
+| `take-control` | request → result | `{"domain": "desktop" \| "motion"}` | claim a control domain now, from whoever holds it ([docs/10](10-security.md#session-ownership)). `result{ok:true}`; `error{code:"capability-denied"}` for a `view_only` grant or one without a capability in that domain. For `motion`, the previous holder's input is released (the robot stops) before this result is sent |
+| `release-control` | request → result | `{"domain": ...}` | give a held domain up at once. Idempotent |
+| `control-state` | event (agent → operator) | `{"domains": {"desktop": {"holder": {"id", "label"} \| null, "since"?: ms, "you": bool}, "motion": {...}}}` | sent at session start and on every change of holder, to every session whose grant has a capability in that domain |
 
 `t0`..`t3` are unix milliseconds (an agent using `g_get_real_time` divides
 by 1000). Clock offset and RTT follow NTP: with `t3` = the operator's receive time,
@@ -426,7 +429,12 @@ violation, not a style issue.
 
 `error.code` is a stable string: `auth-failed`, `grant-expired`,
 `capability-unknown`, `capability-denied`, `session-unknown`, `robot-offline`, `rate-limited`,
-`payload-invalid`, `internal`. Codes are append-only.
+`payload-invalid`, `internal`, `control-held`. Codes are append-only.
+
+`control-held` answers an input-bearing request from a session that does not
+hold that capability's control domain. Its `error.data` is
+`{"domain", "holder": {"id", "label"}, "since": ms}`, so the client can say who
+to ask ([docs/10](10-security.md#session-ownership)).
 
 ## Versioning {#versioning}
 

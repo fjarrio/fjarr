@@ -85,7 +85,7 @@ network.
 
 | Address | Role |
 |---|---|
-| `100.64.0.1` | the operator host, the same on every link |
+| `100.64.0.1` | the operator host, the same on every link (one link at a time today; several operators from a small address pool is [ADR-0030](adr/0030-concurrent-tunnel-operators.md), proposed) |
 | `100.64.0.0/24` | reserved for future fixed roles |
 | everything above | robot addresses |
 

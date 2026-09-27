@@ -33,6 +33,8 @@ inline constexpr std::string_view internal = "internal";
 inline constexpr std::string_view unavailable = "unavailable";
 /// The resource is already in use on this session (one pty per session).
 inline constexpr std::string_view busy = "busy";
+/// Input to a control domain another operator holds; data names the holder (docs/10).
+inline constexpr std::string_view control_held = "control-held";
 } // namespace error_codes
 
 } // namespace fjarr

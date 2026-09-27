@@ -282,4 +282,6 @@ pub mod error_codes {
     pub const RATE_LIMITED: &str = "rate-limited";
     pub const PAYLOAD_INVALID: &str = "payload-invalid";
     pub const INTERNAL: &str = "internal";
+    /// Input to a control domain another operator holds (docs/10#session-ownership).
+    pub const CONTROL_HELD: &str = "control-held";
 }

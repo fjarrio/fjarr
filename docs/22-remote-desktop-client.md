@@ -288,10 +288,23 @@ Browser side of the docs/06 offer/request model:
 
 ## Ownership and view-only
 
-The grant may say `view_only: true`; the view then renders without an
-input surface. With `session-peers` (docs/08, M5) the view shows who owns
-input and offers "request control"; until then, ownership is the docs/10
-lease and the toolbar shows locked/unlocked.
+Several operators can be on one desktop at once, the way people use a remote
+desktop to show a colleague something. Everyone sees the screen, and one of
+them has the pointer and keyboard ([docs/10](10-security.md#session-ownership),
+the `desktop` domain):
+
+- **The toolbar shows who is in control**, from `control-state`: "You",
+  "Anna (3 min)", or nobody.
+- **Starting to type or move the pointer takes control when nobody holds it.**
+  The holder keeps it while they use it, and it frees 5 s after their last
+  input.
+- **A take-control button** claims it at once, even from an active holder, who
+  sees "Bob took control". A "request control" prompt comes with
+  `session-peers` (docs/08, M5).
+- Input sent without control is dropped by the agent. The client does not send
+  it in the first place, and shows why.
+- A grant with `view_only: true` renders without an input surface and without
+  the button.
 
 ## Core requirements for slice 2 (so M3 needs no core change)
 

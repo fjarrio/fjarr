@@ -55,21 +55,48 @@ Security-relevant rules:
 
 ## Session ownership {#session-ownership}
 
-Concurrent access policy (from the fleet-daemon lesson, generalized):
+Concurrent access policy (decided 2026-09-28, answering
+[#31](18-open-questions.md)). The rule: **people who could fight over the same
+thing take turns; everyone else works side by side.**
 
-- Multiple *viewers* are fine (FrameHub exists for this).
-- **Input-bearing** capabilities (desktop input, teleop, terminal) take an
-  ownership claim: default policy one owner at a time, later owners read-only
-  until transfer.
-- Claims are leases: refreshed by the heartbeat, **fail open on staleness**
-  (30 s without refresh clears the claim, logged). A dead process must never
-  leave a robot unownable — the media plane is the component most likely to
-  hang.
+- **Viewers never block anyone.** Any number of sessions may watch any track
+  (FrameHub exists for this). Watching claims nothing.
+- **Control domains.** An input-bearing capability declares a `control_domain`
+  in its manifest ([docs/09](09-interfaces.md)). Each domain has at most one
+  holder, and the domains are independent. Someone on the desktop, someone
+  driving and someone in a terminal all work at once.
+
+  | Domain | Members | One holder because | Handover |
+  |---|---|---|---|
+  | `desktop` | `fjarr.desktop` input | two people moving one pointer is chaos | **5 s after the holder's last input** control is free, and the next to type or move the pointer takes it; any operator may also **take control** at once, and the holder is told |
+  | `motion` | teleop; `fjarr.test`'s drive in the demo | two people steering one robot is dangerous | **never on idle.** Only `release-control`, disconnect, or another operator's **take control**, which first stops the robot: the capability's `release_all_input` runs for the old holder before the new holder's first command is accepted, so nobody inherits a robot in motion |
+  | none | `fjarr.terminal`, `fjarr.net`, `fjarr.files` | nothing is shared: each session has its own pty, link or transfer | not applicable. Concurrent and audited. (Concurrent *links* need per-operator addresses, [ADR-0030](adr/0030-concurrent-tunnel-operators.md); until that lands a second link is refused as `busy`, naming who holds the first) |
+
+- **A claim is taken on engagement, not on session open.** It happens at the
+  session's first input in that domain (a pointer or key event, a drive
+  command) or at an explicit `take-control`
+  ([docs/08](08-protocol.md#fjarr-core)). Opening a session with an
+  input-bearing grant claims nothing.
+- **`view_only: true` in a grant** means that session can never claim or take
+  control, whatever its client does.
 - A claim is keyed on the **operator identity in the grant**, not on the
   session: several sessions of the same operator (one per browser window in
   the desktop [presentation mode](22-remote-desktop-client.md#presentation-mode)
-  fallback) share one claim and all may send input; a different operator
-  is read-only until transfer.
+  fallback) share one claim and all may send input.
+- **Input from a non-holder** is dropped and counted (events), or answered
+  `control-held`, naming the holder and since when (requests). Every session
+  is told who holds each domain whenever that changes (`control-state`), so a
+  client can show "Anna has been controlling the desktop for 3 min".
+- Claims still **fail open on staleness**: a holder with no live session, or
+  with no heartbeat for 30 s, loses the claim (logged). A dead process must
+  never leave a robot uncontrollable.
+
+**What the lease does not cover.** A terminal or a tunnel can move a robot
+outside the `motion` domain, for example `ros2 topic pub /cmd_vel` over the
+link. Two things stand between that and harm: the robot's own motion
+interlocks, and the customer's choice of who gets terminal and tunnel grants.
+The lease is about operators not fighting over a shared input. It is not a
+motion-safety system.
 
 ## TURN
 

@@ -59,8 +59,10 @@ struct CapabilityManifest {
   std::vector<Privilege> privileges;     // explicit grants required
   ConsumerKinds consumers;               // peer, backend, or both
   std::vector<std::string> dependencies; // required capabilities (F4)
-  bool input_bearing = false;            // takes the docs/10 ownership lease;
-                                         // release_all_input() is called on every detach
+  bool input_bearing = false;            // release_all_input() is called on every detach
+  std::string control_domain;            // "desktop" | "motion" | "" (docs/10): one holder
+                                         // per domain, claimed on first input; "" = never
+                                         // exclusive (terminal, net, files)
 };
 
 // Sending surface with mandatory backpressure (docs/08#backpressure — F3):
@@ -197,7 +199,7 @@ public:
   // Input: absolute normalized coordinates within one monitor's region —
   // the Wayland mapping_id model; X11 implements INTO this shape. Measured
   // correct on a non-primary monitor and at 200% scale (ADR-0006).
-  virtual void pointer_motion(MonitorId, double nx, double ny) = 0;
+  virtual void pointer_motion(MonitorId, double nx, double ny) = 0;  // only from the desktop domain's holder (docs/10)
   virtual void pointer_button(MouseButton, bool down) = 0;
   virtual void pointer_wheel(double dx, double dy) = 0;
   virtual void key(LinuxKeycode, bool down) = 0;

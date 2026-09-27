@@ -185,6 +185,7 @@ export const ERROR_CODES = [
   "rate-limited",
   "payload-invalid",
   "internal",
+  "control-held",
 ] as const;
 export type KnownErrorCode = (typeof ERROR_CODES)[number];
 // eslint-disable-next-line @typescript-eslint/ban-types
