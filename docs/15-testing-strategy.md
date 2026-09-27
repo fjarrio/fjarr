@@ -103,6 +103,17 @@ regresses**:
   rules in both directions, and the `tunnel` opsim scenario proves the robot
   refuses a packet aimed into its LAN over a real data channel. The
   two-robot half needs two operator ends and lands with `fjarr-connect`.
+- **discovery and login** (slice 4.5f, `make tunnel-login`, in the e2e job):
+  `fjarr-connect login --code` through the demo dashboard in the lab browser,
+  then `list`, `--ssh-config` against the agent's own addresses, a connect by a
+  word from the label with a grant from the operator API, `ssh` over the link, and
+  the session in the audit log — `session.started` naming `fjarr.net`, matched by
+  `session_id` to its `session.ended`. The **loopback** shape is tested in halves:
+  its listener in Rust over real TCP (preflight, a wrong `state`, an empty
+  credential), the `FjarrCliLogin` component in `@fjarr/react`. The seam between
+  them — a browser's `fetch` reaching `127.0.0.1` on the machine running the CLI
+  — is not one this lab can cross, since its browser is another container, and
+  that is the one part of 4.5f no test runs end to end.
 - **tunnel interface ordering**: a DDS participant created while the agent is
   detached must not advertise the tunnel address; created while attached it
   must; and it must keep advertising across an agent restart. These pin the

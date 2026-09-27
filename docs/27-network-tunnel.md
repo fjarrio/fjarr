@@ -327,7 +327,9 @@ robotics is the common case, not the exception — the CLI asks the backend for 
 code (`POST /fjarr/cli-codes`, [docs/09](09-interfaces.md#operator-api)), prints
 the dashboard's login URL and the code, and polls with a separate poll token until
 the human, wherever a browser exists, opens that URL, confirms the code on screen
-matches the terminal, and approves it. The credential comes back through the
+matches the terminal, and approves it. `login <site>` derives the operator API
+as `<site>/api`; a deployment that serves the two from different hosts passes
+`--api <url>`, and the CLI remembers both. The credential comes back through the
 poll exactly once; the code is single-use and lives ten minutes. `login --code`
 forces this path; without the flag the CLI tries to open a browser and falls back
 to the code when it cannot.

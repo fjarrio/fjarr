@@ -539,6 +539,13 @@ written down). Two slices, and the letters after them shift:
   a host with no browser; every open and close in the audit log as
   `session.started`/`session.ended` with `fjarr.net` among the capabilities.
 
+  **Gate met 2026-09-27**, for the code shape end to end and the loopback shape in
+  halves ([docs/15](15-testing-strategy.md)). The code path needed a spec first —
+  three operator endpoints docs/09 did not have — and the
+  [slice-4.5f review](reviews/slice-4.5f-review.md) records what the rest found:
+  a login URL derived from the wrong host, two component tests passing on a
+  matcher that did not exist, and `session.ended` never naming its capabilities.
+
 macOS is ADR-0024's committed second platform and there is no macOS runner, so
 4.5e ships it cross-compiled and hand-checked, with the matrix honest about
 that until M5's packaging work says otherwise.
