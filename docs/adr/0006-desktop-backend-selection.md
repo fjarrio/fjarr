@@ -271,8 +271,9 @@ be simulated on this hardware.
 - **GNOME Shell 50.1 crashed once in four unplugs of every monitor.** It
   crashed with SIGSEGV 3 s after KMS page-flip failures, and the auto-login
   session ended. The machine went to the GDM login screen, and
-  `systemctl restart gdm` recovered it. Capture was running in one of the two
-  runs with a live stream and in neither of the other two, so the crash is not
-  attributable to capture. The crash report is kept on the spike machine
+  `systemctl restart gdm` recovered it. An E stream was running in three of the
+  four runs, the crash came in one of those three, and the single run without
+  capture did not crash. That is too few runs to blame capture or to clear it.
+  The crash report is kept on the spike machine
   (`/var/crash/_usr_bin_gnome-shell.1001.crash`). This is the second reason, after
   a session that simply ends, for the GDM watchdog.
