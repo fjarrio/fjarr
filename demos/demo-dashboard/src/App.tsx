@@ -33,6 +33,7 @@ import {
 import { RobotStatusProvider, useRobotStatus } from "./robot-status.tsx";
 import { Diagnostics } from "./diagnostics.tsx";
 import { TerminalPanel } from "./terminal.tsx";
+import { CliLoginPage } from "./cli-login.tsx";
 
 // Dev only: the browser lab (docs/25) opens this page from inside the compose
 // network, where "localhost" is the lab browser itself — it passes the
@@ -80,6 +81,9 @@ import.meta.hot?.dispose(() => client.destroy());
 if (import.meta.env.DEV) (window as unknown as { __fjarr?: unknown }).__fjarr = { client };
 
 export function App() {
+  // The one authenticated route `fjarr-connect login` hands off to (docs/27#logging-in). No router
+  // in the demo, so a pathname check stands in for one.
+  if (window.location.pathname === "/cli-login") return <CliLoginPage backend={BACKEND} role={role} />;
   return (
     <FjarrProvider client={client}>
       <Shell />

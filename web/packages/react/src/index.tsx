@@ -30,6 +30,7 @@ export {
   type TelemetryReader,
 } from "./hooks.js";
 export { useFeedStatus, usePipelineBody, usePipelineFeed, usePipelines, usePipelineSnapshot, type PipelineBody } from "./pipelines.js";
+export { FjarrCliLogin, isValidCallbackPort, readCliLoginRequest, type CliLoginRequest, type CliLoginStrings, type FjarrCliLoginProps } from "./cli-login.js";
 export { useAudioTrack, usePushToTalk, useVideoTrack, type AudioSinkStatus, type AudioTrackBinding, type PushToTalkBinding, type PushToTalkOptions, type UseVideoTrackOptions, type VideoTrackBinding } from "./media.js";
 export {
   AudioSink,
