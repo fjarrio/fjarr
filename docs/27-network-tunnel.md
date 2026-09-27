@@ -262,27 +262,48 @@ how a robot behind carrier NAT is stood in for ([testing](#testing)).
 
 ### `fjarr-connect shell` — the robot's terminal in yours {#shell}
 
-**Planned (decided 2026-09-27): the native client's next small step.**
+**Implemented (decided 2026-09-27, built 2026-09-28).**
 `fjarr-connect shell robot-024` opens the robot's
 [`fjarr.terminal`](08-protocol.md#terminal) pty in the terminal the command runs
 in (GNOME Terminal, xterm, any other). It needs no tunnel and no `sshd` on the
-robot.
+robot. The robot is chosen as for a link: an id, any part of an id or label, or
+the picker when none is given; `--grant` takes one grant directly.
 
 - **Only the terminal channel.** It opens a session whose grant carries
-  `fjarr.terminal` and no `fjarr.net`. So it needs no interface and no
-  `CAP_NET_ADMIN`, and it runs the same on macOS and Windows as on Linux.
+  `fjarr.terminal` and no `fjarr.net`: it asks the operator API for exactly that
+  (`capabilities: ["fjarr.terminal"]`,
+  [docs/09](09-interfaces.md#operator-api)), and it opens no channel but
+  `fjarr:control` and `fjarr:bulk:fjarr.terminal`. So it needs no interface and
+  no `CAP_NET_ADMIN`, and nothing in it is Linux-specific: the same code builds
+  for macOS and Windows ([docs/04](04-supported-platforms.md)).
+  A grant from `--grant` or `grant_command` is used as given.
 - **The existing protocol, unchanged.** `open` with the local terminal's size
-  and `$TERM`; `resize` on every `SIGWINCH`, coalesced; `close` on exit. The
-  shell's `exit` event becomes `fjarr-connect`'s own exit status, so it
-  composes in scripts. A `busy` or `unavailable` answer, or a grant without the
-  terminal (`capability-denied`), is printed as the reason and exits non-zero.
+  and `$TERM`; `resize` on every `SIGWINCH`, coalesced to the latest size and
+  never sent twice for the same one (Windows has no `SIGWINCH`, so the size is
+  polled there); `close` on exit. Heartbeats run as on a link
+  ([docs/08](08-protocol.md#datachannel-topology)).
+- **The exit status is the shell's**, so it composes in scripts: the `exit`
+  event's `code` as it is, a `signal` as 128 + its number the way a shell
+  reports one. **255 means the shell's status is unknown** — no session, a
+  refusal, or a link that died — as `ssh` uses it. A refusal is printed as the
+  reason: `unavailable` with the robot's message, `busy`, and `capability-denied`
+  as "you were not given a shell on robot-024", which is a policy answer rather
+  than a failure.
 - **The local terminal is restored on every way out**: the shell exiting, the
-  link dropping, a signal. It is in raw mode while attached, so a client that
-  leaks raw mode leaves the operator's own terminal unusable.
+  link dropping, a refusal, `SIGTERM`, `SIGHUP`, `SIGINT` or `SIGQUIT` sent to the
+  client (which then exits 128 + that signal), and a panic. It is in raw mode
+  while attached, so a client that leaks raw mode leaves the operator's own
+  terminal unusable. Raw mode means Ctrl-C, Ctrl-Z and Ctrl-\ are keystrokes for
+  the robot's shell, not signals for the client, and there is no escape
+  sequence: a hung shell is ended by closing the window. `SIGKILL` cannot be
+  caught by anything, so after one the terminal needs `reset`.
+- **Stdin need not be a terminal.** Piped input is forwarded as keystrokes with
+  no raw mode to set, and its end stops the reading but not the session, which
+  ends when the shell does: `echo 'exit 3' | fjarr-connect shell robot-024`
+  exits 3. The size is then the output's, if that is a terminal, or 80×24.
 - **Grants and audit as in the browser.** The terminal is input-bearing, so it
-  takes the ownership lease; every open and close is audited. `login` asks the
-  operator API for a grant that carries `fjarr.terminal`, which the operator is
-  given only if their backend allows it.
+  takes the ownership lease; every open and close is audited. The operator is
+  given `fjarr.terminal` only if their backend allows it.
 
 ssh over the link remains for what the ssh ecosystem brings (VS Code
 Remote-SSH, rsync, port forwarding). `shell` is for the operator who wants a
@@ -707,6 +728,17 @@ Per [docs/15](15-testing-strategy.md):
 - **A colliding pair** (slice 4.5e, `make tunnel-collision`): the second robot is
   pinned to the first robot's address on purpose, and the operator refuses the pair
   by name with the `address` line that fixes it, before either link is routed.
+- **The shell** (`make connect-shell`, the [gate](17-roadmap.md) for
+  [`shell`](#shell)): `docker/lab/shell-checks.py` runs `fjarr-connect shell`
+  under a pty it owns, from a copy of the binary with no file capability, and
+  asserts an interactive round trip, a resize the robot's `stty size` reports,
+  `exit 7` becoming the client's 7, the local termios identical to what it was
+  after the shell exits, after the session is killed under it (heartbeats
+  withheld, so the agent's liveness budget ends it) and after a `SIGTERM`, and
+  a grant without the terminal refused as `capability-denied` with 255. The
+  pieces with no robot — resize coalescing, the exit-status mapping, the
+  refusal wording, the raw-mode guard restoring on drop — are unit tests in
+  `shell::tests` and `term::tests`.
 - **ROS 2** (slice 4.5d): `make tunnel-ros` runs `ros2 topic list` and
   `ros2 topic echo` from a sidecar on the operator's namespace against one on the
   robot's, with `docker/lab/dds-isolate.sh` removing every direct path between the

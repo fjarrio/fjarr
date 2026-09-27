@@ -206,7 +206,7 @@ so it proves the extension API generalizes beyond video.
   framing, one per session ([docs/08](08-protocol.md#terminal)); xterm.js
   component in `@fjarr/react`. Resize, UTF-8, scrollback client-side. The
   second client is native: `fjarr-connect shell` attaches the operator's own
-  terminal to the same pty (planned, [docs/27](27-network-tunnel.md#shell)).
+  terminal to the same pty ([docs/27](27-network-tunnel.md#shell)).
 - **Off unless configured, and it names its user.** No pty exists until
   `fjarr.toml` says which account the shell runs as — the capability reports
   `unavailable` otherwise, which is a deployment choice rather than a fault.

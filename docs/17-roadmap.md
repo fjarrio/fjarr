@@ -600,7 +600,13 @@ tunnel and no privilege ([docs/27](27-network-tunnel.md#shell)). It is small:
 the terminal protocol is unchanged, and it only needs raw mode, resize and a
 grant that carries the terminal. *Gate:* an interactive shell, a resize seen
 by the robot's `stty size`, the shell's exit status as the client's, and the
-local terminal restored after a killed link.
+local terminal restored after a killed link. **Met 2026-09-28** (`make
+connect-shell`, from a binary with no file capability): all four, plus the
+terminal restored after a normal exit and a `SIGTERM`, and a grant without the
+terminal refused as `capability-denied`. The operator API gained an optional
+`capabilities` narrowing so `login`'s grant carries the terminal alone
+([docs/09](09-interfaces.md#operator-api)). macOS and Windows are type-checked,
+not run ([docs/04](04-supported-platforms.md)).
 
 ## M5 — Hardening + Fjarr Cloud alpha
 

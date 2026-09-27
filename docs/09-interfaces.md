@@ -353,7 +353,7 @@ else:
 | Endpoint | Returns |
 |---|---|
 | `GET /fjarr/robots` | the robots *this human* may reach: `robot_id`, `label`, `status`, `last_seen` — their fleet table, plus the presence they already receive on the `robot.online`/`robot.offline` webhooks of (b) |
-| `POST /fjarr/grants` | a session grant for one `robot_id` — the same JWT as (a), minted by the same code |
+| `POST /fjarr/grants` | a session grant for one `robot_id` — the same JWT as (a), minted by the same code. The body may also carry `capabilities: [name, …]`: the grant then holds only those of them the caller's policy allows, and never more than without it. `fjarr-connect shell` asks for `["fjarr.terminal"]` so its session carries no `fjarr.net` ([docs/27](27-network-tunnel.md#shell)); without the field the backend grants what it always would |
 | `POST /fjarr/cli-codes` | for a terminal with no browser: creates a pending login code and returns `{code, poll_token, expires_in}`; the human approves it in the dashboard, and the CLI polls |
 | `PUT /fjarr/cli-codes/{code}` | called by the dashboard, inside the signed-in app, with `{credential}` for the user approving it: marks the code approved, once |
 | `GET /fjarr/cli-codes/{poll_token}` | the CLI's poll: `{status: "pending"}`, `{status: "approved", credential}` (returned exactly once, then the code is gone), or `{status: "expired"}` |
