@@ -552,8 +552,9 @@ that until M5's packaging work says otherwise.
 
 **Gate:** [docs/06 `fjarr.net` criteria](06-capabilities.md) —
 `ssh` and a hash-verified 1 GB `scp` to a robot behind carrier NAT; `ros2
-topic list` against it with Fast DDS unconfigured (Cyclone is
-[#29](18-open-questions.md), amended out of the gate 2026-09-27 and not claimed); `fjarr-connect login` through the demo dashboard followed by a
+topic list` against it with Fast DDS unconfigured and with the documented Cyclone
+file (amended out as [#29](18-open-questions.md) at the gate, and met the same
+day once the check stopped racing the ROS 2 daemon); `fjarr-connect login` through the demo dashboard followed by a
 list, a pick and a connect without anyone typing a robot id, and the same on
 a host with no browser; two robots attached at once provably unable to reach
 each other; the agent upgraded without restarting the robot's ROS stack; every
@@ -563,7 +564,7 @@ open and close in the audit log.
 relay-only with the direct path removed; the evidence, criterion by criterion,
 is the [M4.5 gate review](reviews/m45-gate-review.md). Carried out of the
 milestone: [#28](18-open-questions.md) for the lab's usrsctp-to-usrsctp operator,
-and [#29](18-open-questions.md) for Cyclone.
+and [#29](18-open-questions.md) for Cyclone — closed the same day.
 
 ## M5 — Hardening + Fjarr Cloud alpha
 

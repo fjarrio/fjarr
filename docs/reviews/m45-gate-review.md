@@ -16,7 +16,7 @@ description: The network tunnel's milestone gate, promise by promise — every c
 | a link up in under 3 s, and `ssh` logs in | met | 0.1 s direct, 1.6 s relay-only (TURN allocation included); `tunnel-ssh-connect` |
 | a hash-verified 1 GB `scp` to a robot behind carrier NAT | met | `tunnel-scp-connect`, 5 of 5 over TURN at 268–304 Mbps; the gate asserts that no host candidate was offered, so a pass cannot be the docker bridge |
 | `ros2 topic list` with Fast DDS unconfigured | met — after a fix | `tunnel-ros-connect`: list and echo over the relay. It failed first; finding 1 |
-| `ros2 topic list` with the documented Cyclone file | **amended out** | [#29](../18-open-questions.md): the file fixes Cyclone's hang, but discovery does not complete across the link. 4.5d measured that as a ROS 2 integration question, not a tunnel one, so docs/06 and docs/17 now state it as #29 where the criterion is stated |
+| `ros2 topic list` with the documented Cyclone file | **amended out, then met the same day** — 22 of 22 through `fjarr-connect`; the 4.5d failure was the check racing the ROS 2 daemon, and #28's MTU. Its original evidence follows | [#29](../18-open-questions.md): the file fixes Cyclone's hang, but discovery does not complete across the link. 4.5d measured that as a ROS 2 integration question, not a tunnel one, so docs/06 and docs/17 now state it as #29 where the criterion is stated |
 | login through the dashboard, then list, pick and connect with nobody typing a robot id; the same with no browser | met | `tunnel-login` (4.5f), in CI; the code shape end to end, the loopback shape in halves ([docs/15](../15-testing-strategy.md)) |
 | a second robot attached at once is unreachable from the first, in both directions | met | `tunnel-isolation`, with a route forced into each robot's tunnel before a negative is believed |
 | the agent upgraded without the robot's ROS stack restarting | met | `tunnel-ros-ordering` — facts A, B and C, nightly in CI |
@@ -41,7 +41,7 @@ goes missing, and a check whose failure cannot reach the verdict passes.
   under load with video beside it. The failing operator is the lab's opsim;
   neither real operator is usrsctp, and the gate's `scp` claim is made through
   `fjarr-connect`. Next: read both ends of a wedged association.
-- **[#29](../18-open-questions.md)** — Cyclone DDS, when a design partner uses it.
+- ~~**[#29](../18-open-questions.md)** — Cyclone DDS~~ — closed the same day; see docs/27#ros2.
 - **[#31](../18-open-questions.md)** — whether a view-only session should take the input lease.
 - macOS is written and type-checked in CI, and has never run on macOS hardware
   ([docs/04](../04-supported-platforms.md)).

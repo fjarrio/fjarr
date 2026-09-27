@@ -148,9 +148,10 @@ the agent is detached stays blind to the interface afterwards, however long it
 runs. That is the fact the installer's job and the unit's ordering rest on, and
 before 4.5d nothing had re-checked it since the spike.
 
-The operator side has no equivalent constraint, because a developer starts
-`ros2` after connecting — and the single-interface design
-([above](#the-shape)) removes it for the case where they do not.
+The operator side has no equivalent constraint, and that is now measured
+rather than argued: the operator's ROS 2 daemon, started while the link was
+down, still found the robot once the link came up, with Fast DDS and with
+Cyclone (slice 4.5e's follow-up).
 
 ## The packet path
 
@@ -428,17 +429,26 @@ blocked so DDS could only reach the peer through the tunnel:
   the isolation rule as first written dropped every discovery announcement,
   because a multicast destination is never this end's own tunnel address. The
   spike missed it because its throwaway pump applied no policy at all.
-- **Cyclone DDS needs a configuration file**, and **is not yet verified over a
-  real link.** Stock, it binds one interface chosen arbitrarily; in slice 4.5d
-  stock Cyclone did not merely pick the wrong one, it left `ros2 topic list`
-  hanging with no output at all. The file below fixes that much — the command
-  returns and lists local topics — but discovery across the link still does not
-  complete, and it is not honest to call Cyclone supported on the strength of the
-  spike alone. What was measured: **78 discovery packets arrive** on the robot's
-  tunnel interface and its Cyclone does not answer usefully; pinning the operator
-  to the tunnel as its only interface makes it send almost nothing, so Cyclone
-  appears unwilling to use a point-to-point interface alone. **Fast DDS, the ROS 2
-  default, is the verified path and needs nothing.**
+- **Cyclone DDS works with a configuration file** — verified over the real link
+  on 2026-09-27 ([#29](18-open-questions.md), closed), and gated nightly. Stock,
+  it binds one interface chosen arbitrarily and sees nothing across the link; with
+  the file below it passed **22 of 22** through `fjarr-connect`, relay-only with
+  the direct path removed, at both MTUs, whether the operator's ROS 2 daemon was
+  warm, cold, or started while the link was down. Discovery takes about **0.4 s**
+  with a warm daemon and **1.2 s** from cold, the same as Fast DDS.
+
+  Why slice 4.5d called it unverified is worth knowing, because none of it was
+  Cyclone: the check asked `ros2 topic list` **once**, the instant the link came
+  up, and that command returns what the daemon already knows rather than waiting —
+  a race it sometimes lost — and the link then ran at the 1280 MTU that
+  [ADR-0027](adr/0027-tunnel-mtu-one-sctp-chunk.md) retired. The check now polls
+  and reports how long discovery took.
+
+  **Cyclone does not need the ordering rule** ([above](#lifecycle)). Told which
+  interface to use and which peers to talk to, it binds `fjarr0` whether or not
+  it has a carrier: a participant created while the agent was detached is visible
+  once it attaches, where a Fast DDS one never is. The installer's ordering
+  remains right for the ROS 2 default.
 
   The file, generated per end by `docker/lab/cyclonedds-tunnel.sh`:
 
@@ -468,9 +478,16 @@ blocked so DDS could only reach the peer through the tunnel:
   priorities stops the arbitrary single-interface choice and keeps the local
   network usable at the same time, and the unicast `<Peers>` supply the discovery
   that a point-to-point link's multicast cannot bootstrap. `fjarr-agent net setup`
-  will offer to write it ([docs/26](26-robot-install-and-drivers.md)) **once it is
-  a file that is known to work** — offering to install an unverified one would be
-  worse than offering nothing.
+  can now offer to write it ([docs/26](26-robot-install-and-drivers.md)), and has to
+  fill in the robot's real LAN interface name: the file's `eth0` is the lab's, and
+  a name that does not exist leaves Cyclone on the tunnel alone.
+
+  **Not verified: Cyclone on the tunnel alone.** Given only `fjarr0` with multicast
+  on, Cyclone sends almost nothing — the spike and slice 4.5d both saw it —
+  consistent with it treating a point-to-point interface as unable to multicast.
+  The spike found a tunnel-only recipe (multicast off, peers by address) that
+  worked on its UDP link; it has never run over the real one, so an operator who
+  wants DDS on the tunnel and nowhere else is on unmeasured ground.
 
 Topic-name collisions between two robots attached at once are a ROS 2
 concern, solved with namespaces or distinct domain ids. Fjarr does not

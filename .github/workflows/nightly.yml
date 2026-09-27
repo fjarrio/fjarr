@@ -99,6 +99,14 @@ jobs:
           docker compose --profile ros build robot-ros operator-ros
           make tunnel-ros
           make tunnel-ros-ordering
+      # Cyclone DDS with docs/27's file, the same two gates (#29, closed 2026-09-27). Fact A is held to
+      # Cyclone's own behaviour: it binds the interface it is named, carrier or not.
+      - name: the same with Cyclone DDS and the documented file
+        run: |
+          RMW_IMPLEMENTATION=rmw_cyclonedds_cpp make tun-up ROS=1
+          RMW_IMPLEMENTATION=rmw_cyclonedds_cpp make tunnel-ros
+          RMW_IMPLEMENTATION=rmw_cyclonedds_cpp make tunnel-ros-ordering
+          make tun-up ROS=1
       # The latency harness is a browser suite, so this job needs node as well as make.
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
