@@ -48,3 +48,4 @@ options weighed, the choice, and its consequences — so future maintainers
 | [0024](0024-native-operator-client.md) | `fjarr-connect` — a native operator client, data channels only | accepted |
 | [0025](0025-encoder-families.md) | Four encoder families behind one adapter, and what each owes CI | accepted |
 | [0026](0026-multicast-over-the-tunnel.md) | Multicast crosses the tunnel, on the strength of its source — the destination rule made ROS 2 impossible | accepted |
+| [0027](0027-tunnel-mtu-one-sctp-chunk.md) | The tunnel MTU is one SCTP chunk (1184) — every full-size packet at 1280 fragmented, and that is #28 | proposed |

@@ -187,6 +187,8 @@ opsim-netem: ## Apply a docs/25 profile (NETEM_PROFILE=lan|wifi-ok|4g|lossy|bad)
 
 TUN_DEV ?= fjarr0
 TUN_OPERATOR ?= 100.64.0.1
+# The interfaces' MTU. The agent reads it from its device and reports it on `open`, so both ends agree.
+TUN_MTU ?= 1280
 # Containers that share the robot's network namespace (`network_mode: service:demo-robot`), which is
 # what puts them on its tunnel address. Recreating the robot leaves them pointing at a namespace
 # that no longer exists — reachable enough to answer with a TCP reset, which reads as "nothing is
@@ -208,8 +210,8 @@ tun-up: ## Create the tunnel interfaces the installer creates on a real robot (d
 	  FJARR_DEMO_NET=1 docker compose up -d demo-robot && \
 	  FJARR_DEMO_NET=1 FJARR_LAB_FILE_MB=$(LAB_FILE_MB) FJARR_TUN_SELF="$$addr" FJARR_TUN_PEER=$(TUN_OPERATOR) \
 	    docker compose --profile demo --profile ros up -d --no-deps --force-recreate $(ROBOT_SIDECARS) && \
-	  docker/lab/tundev.sh up demo-robot "$$addr" $(TUN_OPERATOR) $(TUN_DEV) && \
-	  docker/lab/tundev.sh up dev $(TUN_OPERATOR) "$$addr" $(TUN_DEV)
+	  docker/lab/tundev.sh up demo-robot "$$addr" $(TUN_OPERATOR) $(TUN_DEV) $(TUN_MTU) && \
+	  docker/lab/tundev.sh up dev $(TUN_OPERATOR) "$$addr" $(TUN_DEV) $(TUN_MTU)
 	@echo "tun-up: the robot waited for its interface before starting — the ordering the whole design rests on (docs/27#lifecycle)"
 	@# `up -d` leaves a running container alone, and its supervisor keeps the agent process it
 	@# started — which may be a binary built hours ago. Every measurement after a rebuild then runs
