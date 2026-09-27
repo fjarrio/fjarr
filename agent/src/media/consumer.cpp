@@ -88,7 +88,7 @@ bool ConsumerPipeline::build(const std::string& ice_policy, const std::optional<
     gst_bin_add(GST_BIN(pipeline_.get()), webrtc_.get());
     glib::GstBusPtr bus(gst_pipeline_get_bus(GST_PIPELINE(pipeline_.get())));
     GSource* watch = gst_bus_create_watch(bus.get());
-    g_source_set_callback(watch, reinterpret_cast<GSourceFunc>(&ConsumerPipeline::on_bus), this, nullptr);
+    g_source_set_callback(watch, G_SOURCE_FUNC(&ConsumerPipeline::on_bus), this, nullptr);
     g_source_attach(watch, ctx_);
     bus_watch_ = glib::SourceGuard::attached(watch);
     connect_signals();

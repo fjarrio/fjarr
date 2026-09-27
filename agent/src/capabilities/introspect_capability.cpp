@@ -38,7 +38,9 @@ void IntrospectCapability::ensure_listening() {
 
 void IntrospectCapability::session_attached(SessionContext &ctx, const nlohmann::json &) {
     ensure_listening();
-    sessions_[ctx.id()] = Attached{&ctx};
+    Attached attached;
+    attached.ctx = &ctx;
+    sessions_[ctx.id()] = std::move(attached);
 }
 
 void IntrospectCapability::session_detached(const SessionId &id, DetachReason, std::string_view) { sessions_.erase(id); }

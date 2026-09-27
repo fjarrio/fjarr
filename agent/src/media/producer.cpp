@@ -58,7 +58,7 @@ bool Producer::build() {
         }
         glib::GstBusPtr pbus(gst_pipeline_get_bus(GST_PIPELINE(pipeline_.get())));
         GSource* pwatch = gst_bus_create_watch(pbus.get());
-        g_source_set_callback(pwatch, reinterpret_cast<GSourceFunc>(&Producer::on_bus), this, nullptr);
+        g_source_set_callback(pwatch, G_SOURCE_FUNC(&Producer::on_bus), this, nullptr);
         g_source_attach(pwatch, bus_context_);
         bus_watch_ = glib::SourceGuard::attached(pwatch);
         return true;
@@ -106,7 +106,7 @@ bool Producer::build() {
     }
     glib::GstBusPtr bus(gst_pipeline_get_bus(GST_PIPELINE(pipeline_.get())));
     GSource* watch = gst_bus_create_watch(bus.get());
-    g_source_set_callback(watch, reinterpret_cast<GSourceFunc>(&Producer::on_bus), this, nullptr);
+    g_source_set_callback(watch, G_SOURCE_FUNC(&Producer::on_bus), this, nullptr);
     g_source_attach(watch, bus_context_);
     bus_watch_ = glib::SourceGuard::attached(watch);
     return true;

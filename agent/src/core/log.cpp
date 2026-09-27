@@ -49,7 +49,9 @@ std::string timestamp() {
     const std::time_t t = system_clock::to_time_t(now);
     std::tm tm{};
     gmtime_r(&t, &tm);
-    char buf[40];
+    // 96, not the 25 the timestamp needs: gcc sizes the buffer by what `%d` *can* print (an
+    // 11-character int, seven times) and warns of truncation otherwise. The bytes are free.
+    char buf[96];
     std::snprintf(buf, sizeof buf, "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", tm.tm_year + 1900, tm.tm_mon + 1,
                   tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, static_cast<int>(ms.count()));
     return buf;

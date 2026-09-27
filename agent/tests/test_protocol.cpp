@@ -54,7 +54,9 @@ TEST(Protocol, validSignalingFixturesParseAndInvalidOnesDoNot) {
             continue;
         }
         // Agent-bound types are validated structurally; operator-bound types are tolerated (ignored later).
-        if (m) EXPECT_TRUE(m->type == "offer" || m->type == "hello" || m->type == "hello-ack" || m->type == "error" || m->type == "ice") << name;
+        if (m) {
+            EXPECT_TRUE(m->type == "offer" || m->type == "hello" || m->type == "hello-ack" || m->type == "error" || m->type == "ice") << name;
+        }
     }
 }
 
