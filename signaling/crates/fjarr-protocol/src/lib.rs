@@ -70,6 +70,50 @@ impl Envelope {
     pub fn error_code(&self) -> Option<&str> {
         self.payload.get("error")?.get("code")?.as_str()
     }
+
+    /// `payload.error`, typed, when a result says no and its error is well-formed enough to have a
+    /// code. Unknown fields are ignored; a malformed `data` is kept as it came, for
+    /// [`ResultError::holder`] to decline (docs/08#errors).
+    pub fn error(&self) -> Option<ResultError> {
+        serde_json::from_value(self.payload.get("error")?.clone()).ok()
+    }
+}
+
+/// The `error` of a failed `result`: `{code, message, data?}` (docs/08#envelope). `data` is
+/// code-specific and optional — `busy` on `fjarr.net/open` and `control-held` carry
+/// `{holder:{id, label}, since}` (docs/08#errors) — so it stays untyped here and is read through
+/// accessors that return `None` rather than fail on a shape they do not recognise.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ResultError {
+    pub code: String,
+    #[serde(default)]
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
+}
+
+/// Who holds something another operator asked for: `error.data.holder` (docs/08#errors).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Holder {
+    pub id: String,
+    pub label: String,
+}
+
+impl ResultError {
+    /// `data.holder`, when present and well-formed.
+    pub fn holder(&self) -> Option<Holder> {
+        serde_json::from_value(self.data.as_ref()?.get("holder")?.clone()).ok()
+    }
+
+    /// `data.since`: when the holder took it, unix milliseconds.
+    pub fn since_ms(&self) -> Option<i64> {
+        self.data.as_ref()?.get("since")?.as_i64()
+    }
+
+    /// `data.domain`, which `control-held` names (docs/10#session-ownership).
+    pub fn domain(&self) -> Option<&str> {
+        self.data.as_ref()?.get("domain")?.as_str()
+    }
 }
 
 /// Common fields carried by every signaling message.
@@ -284,4 +328,80 @@ pub mod error_codes {
     pub const INTERNAL: &str = "internal";
     /// Input to a control domain another operator holds (docs/10#session-ownership).
     pub const CONTROL_HELD: &str = "control-held";
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture(name: &str) -> Envelope {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../protocol/fixtures/valid")
+            .join(name);
+        let text = std::fs::read_to_string(&path).unwrap();
+        serde_json::from_str(&text).unwrap_or_else(|e| panic!("{name}: {e}"))
+    }
+
+    #[test]
+    fn every_valid_envelope_fixture_parses_and_its_error_round_trips() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../protocol/fixtures/valid");
+        let mut checked = 0;
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let name = entry.unwrap().file_name().to_string_lossy().to_string();
+            if !name.starts_with("env-") {
+                continue;
+            }
+            let env = fixture(&name);
+            if let Some(err) = env.error() {
+                let back = serde_json::to_value(&err).unwrap();
+                assert_eq!(back, env.payload["error"], "{name}: error drifted");
+            }
+            checked += 1;
+        }
+        assert!(checked > 0);
+    }
+
+    #[test]
+    fn busy_names_its_holder_and_since() {
+        let err = fixture("env-result-net-busy.json").error().unwrap();
+        assert_eq!(err.code, "busy");
+        assert_eq!(
+            err.holder(),
+            Some(Holder {
+                id: "anna@example.com".into(),
+                label: "Anna".into()
+            })
+        );
+        assert_eq!(err.since_ms(), Some(1_790_000_000_000));
+        assert_eq!(err.domain(), None);
+    }
+
+    #[test]
+    fn control_held_names_its_domain() {
+        let err = fixture("env-result-control-held.json").error().unwrap();
+        assert_eq!(err.code, error_codes::CONTROL_HELD);
+        assert_eq!(err.domain(), Some("motion"));
+        assert_eq!(err.holder().unwrap().label, "Anna");
+    }
+
+    #[test]
+    fn error_without_or_with_malformed_data_parses_and_declines() {
+        let env = Envelope {
+            payload: serde_json::json!({"ok": false, "error": {"code": "busy", "message": "m", "extra": 1}}),
+            ..Envelope::request("fjarr.net", "open", Value::Null)
+        };
+        let err = env.error().unwrap();
+        assert_eq!(err.data, None);
+        assert_eq!(err.holder(), None);
+
+        let env = Envelope {
+            payload: serde_json::json!({"ok": false, "error": {"code": "busy", "message": "m",
+                "data": {"holder": "Anna", "since": "yesterday"}}}),
+            ..Envelope::request("fjarr.net", "open", Value::Null)
+        };
+        let err = env.error().unwrap();
+        assert_eq!(err.holder(), None);
+        assert_eq!(err.since_ms(), None);
+    }
 }
