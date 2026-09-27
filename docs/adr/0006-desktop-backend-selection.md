@@ -190,8 +190,8 @@ same length, in % of one core.
 | Session ends | LightDM shows its greeter (after a 90 s SIGKILL, because Openbox ignores SIGTERM); still reachable as root | as A | GDM shows its greeter; unreachable until `systemctl restart gdm`, which auto-logs in again in <10 s | as C | as C |
 | Spike size (non-comment lines) | 30 | 30 + 11 helper | 73 | 29 + 11 helper | 74 |
 | Future-proofing | Xorg in maintenance; GNOME has no X11 session | as A | the cross-desktop standard, but the unattended grant is GNOME's private format | as C | GNOME-private interface; gnome-remote-desktop depends on it |
-| Multi-monitor (3 × 1920×1080, DP MST) | not measured (one global root; RandR gives the offsets) | as A | **correct**, including 200% scale (below) | as C | **correct**, including 200% scale (below) |
-| Hot-plug | not measured | as A | follows the monitor's identity across a replug | as C | a stream silently dies with its monitor (below) |
+| Multi-monitor (3 × 1920×1080, DP MST) | **correct** once the kiosk lays out the outputs itself; no per-monitor scale on X11 (below) | capture as A; absolute uinput placement not tested | **correct**, including 200% scale (below) | as C | **correct**, including 200% scale (below) |
+| Hot-plug | capture never stops, but monitors come back dark; the kiosk must re-lay out, and the middle monitor of the chain did not recover (below) | as A | follows the monitor's identity across a replug | as C | a stream silently dies with its monitor (below) |
 
 Every latency difference is under the decision rule's 20 ms p50 noise line. X11
 paint→capture is lower because nothing composites; input→photon, the number an
@@ -277,3 +277,43 @@ be simulated on this hardware.
   The crash report is kept on the spike machine
   (`/var/crash/_usr_bin_gnome-shell.1001.crash`). This is the second reason, after
   a session that simply ends, for the GDM watchdog.
+
+## Findings — X11 multi-monitor and hot-plug (2026-09-27)
+
+The same three-monitor chain, with Openbox on Xorg (amdgpu driver) under
+LightDM. The user pulled and replugged the cables.
+
+- **A bare X11 kiosk lays out nothing.** At boot, Xorg switched on one of the
+  three connected monitors, and the other two stayed dark. GNOME arranges
+  monitors itself. A kiosk has to ship its own `xrandr` step: switch off outputs
+  that are disconnected but still hold a CRTC, and switch on the connected ones
+  in order.
+- **Pointer mapping and per-monitor capture are correct.** Once laid out, the
+  X desktop is one 5760×1080 root. An XTest click at 4161,234 reached the oracle
+  on the rightmost monitor as 321,234. Capturing each monitor's region with
+  `ximagesrc startx/endx` showed the oracle only in its own region (99% against
+  0%). X11 has no per-monitor scale, so the mixed-DPI case does not apply.
+  B's helper only produces relative motion, so B's absolute placement across
+  monitors was not tested.
+- **Capture never notices a hot-plug.** Through an unplug and replug of the
+  last monitor, then of the whole chain, a full-root capture ran at
+  8.4–11.7 fps with no error, and the root kept its size. RandR reported every
+  change (`ScreenChangeNotify`, `OutputChangeNotify`), but Xorg changed nothing:
+  the layout still named the old connectors, now disconnected. The monitors
+  came back under new names (DisplayPort-4, -8 and -10), connected but switched
+  off, so they stayed dark. Capture and input carried on against a desktop no
+  physical screen showed. A kiosk robot needs a RandR listener that re-runs its
+  layout, and "capture works" does not mean "someone local can see it".
+- **Shrinking the root moves windows.** Switching outputs off during a
+  re-layout shrank the root. Xorg moved the rightmost output to x=0, and
+  Openbox moved the full-screen oracle to the left monitor. A re-layout has to
+  set every position explicitly.
+- **The middle monitor of the chain did not recover after a hot-plug.**
+  Re-running the layout lit the first and last monitors. The middle one (the
+  chain's first branch) stayed dark with its output reported active, through
+  cycling that output and through a power cycle of the monitor. The power cycle
+  also cut and renamed the monitor behind it, and a re-layout brought that one
+  back. The kernel logged only a normal MST link setup, and Xorg logged no error.
+  After a reboot, the same layout step lit all three. So on this driver, a
+  hot-plugged MST branch needs an X server restart. GNOME, which drives KMS
+  itself, brought all three back after every replug.
