@@ -632,6 +632,7 @@ dependencies = [
  "clap",
  "fjarr-protocol",
  "futures-util",
+ "libc",
  "serde",
  "serde_json",
  "tokio",

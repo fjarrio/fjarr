@@ -244,6 +244,31 @@ impl<P: PeerConnection> Peer<P> {
             .context("adding a trickled candidate")
     }
 
+    /// One IP packet onto the stream channel, or `false` when the channel is over its bound.
+    ///
+    /// Tail-drop rather than queue, at the same 4 MiB the agent's stream sender uses: both ends of
+    /// one channel should drop at the same depth, and a queue on a lossy class delivers a burst of
+    /// stale packets after congestion, which ruins TCP's round-trip estimate
+    /// (docs/27#the-packet-path).
+    pub async fn send_packet(&self, packet: &[u8]) -> Result<bool> {
+        let dc = self
+            .channel(NET_STREAM)
+            .await
+            .ok_or_else(|| anyhow!("the tunnel's stream channel is not open"))?;
+        const HIGH_WATER: usize = 4 * 1024 * 1024;
+        if dc.outstanding_bytes().await.unwrap_or(0) >= HIGH_WATER {
+            return Ok(false);
+        }
+        match dc.try_send(bytes::BytesMut::from(packet)).await {
+            Ok(()) => Ok(true),
+            // A refusal is the channel's own bound, which is a drop like any other.
+            Err(e) => {
+                tracing::trace!(error = %e, "the stream channel refused a packet");
+                Ok(false)
+            }
+        }
+    }
+
     pub async fn close(&self) -> Result<()> {
         self.pc.close().await?;
         Ok(())

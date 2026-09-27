@@ -11,7 +11,7 @@ repository = "https://github.com/fjarrio/fjarr"
 [workspace.dependencies]
 fjarr-protocol = { path = "crates/fjarr-protocol" }
 axum = { version = "0.8", features = ["ws"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "process"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde = { version = "1", features = ["derive"] }

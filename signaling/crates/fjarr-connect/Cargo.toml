@@ -23,4 +23,6 @@ webrtc = { workspace = true }
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
 bytes = "1"
+# The TUN ioctl and the two unbuffered device reads/writes; no wrapper crate for three calls.
+libc = "0.2"
 async-trait = "0.1"
