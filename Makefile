@@ -316,7 +316,6 @@ tunnel-isolation: ## docs/15 safety class: two robots on one operator interface 
 
 .PHONY: connect-macos-check
 connect-macos-check: ## Type-check fjarr-connect's platform code for macOS, its committed second platform (ADR-0024)
-	@docker compose exec -T dev bash -lc 'rustup target list --installed | grep -q aarch64-apple-darwin || rustup target add aarch64-apple-darwin'
 	@docker compose exec -T dev bash docker/lab/macos-check.sh /workspace/signaling/crates/fjarr-connect/src
 
 .PHONY: tunnel-collision
@@ -403,6 +402,10 @@ docs-lint: ## Markdown lint over docs and root files
 .PHONY: docs-links
 docs-links: ## Internal link check (offline: files + anchors)
 	lychee --offline --include-fragments "docs/**/*.md" "*.md"
+
+.PHONY: docs-mermaid
+docs-mermaid: ## Parse every ```mermaid diagram in docs/, and check the built site still holds its source
+	pnpm --filter fjarr-website run check:mermaid
 
 # -------------------------------------------------------------- hygiene ---
 .PHONY: fmt

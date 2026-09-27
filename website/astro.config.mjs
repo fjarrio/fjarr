@@ -5,11 +5,12 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import { remarkMdLinks } from "./plugins/remark-md-links.mjs";
+import { remarkMermaid } from "./plugins/remark-mermaid.mjs";
 
 export default defineConfig({
   site: "https://fjarr.io",
   markdown: {
-    remarkPlugins: [remarkMdLinks],
+    remarkPlugins: [remarkMdLinks, remarkMermaid],
   },
   integrations: [
     starlight({
@@ -64,24 +65,33 @@ export default defineConfig({
           items: [{ autogenerate: { directory: "adr" } }],
         },
       ],
-      // Client-side mermaid rendering for ```mermaid fences (docs/19).
+      // Client-side mermaid rendering. `remark-mermaid` has already turned every
+      // fence into a `div.mermaid` holding the author's own source, so there is
+      // nothing to un-highlight here — only a theme to match and a run to make
+      // (docs/19#diagrams).
       head: [
         {
           tag: "script",
           attrs: { type: "module" },
           content: `
-            const blocks = () => document.querySelectorAll("pre[data-language='mermaid'], code.language-mermaid");
-            if (blocks().length) {
-              const { default: mermaid } = await import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs");
-              mermaid.initialize({ startOnLoad: false, theme: "dark" });
-              for (const el of blocks()) {
-                const src = el.textContent ?? "";
-                const holder = document.createElement("div");
-                holder.className = "mermaid";
-                holder.textContent = src;
-                (el.closest("pre") ?? el).replaceWith(holder);
+            const nodes = document.querySelectorAll("pre.mermaid[data-mermaid]");
+            if (nodes.length) {
+              // The attribute is the author's source, byte for byte; the element's text has
+              // been through the markdown pipeline's whitespace normalisation.
+              for (const node of nodes) {
+                const exact = node.getAttribute("data-mermaid");
+                if (exact) node.textContent = exact;
               }
-              mermaid.run();
+              const { default: mermaid } = await import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs");
+              const light = document.documentElement.dataset.theme === "light";
+              mermaid.initialize({ startOnLoad: false, theme: light ? "default" : "dark" });
+              try {
+                await mermaid.run({ nodes });
+              } catch (e) {
+                // One bad diagram should not take the rest of the page's diagrams
+                // with it; mermaid draws its own error box in the element it failed on.
+                console.error("mermaid:", e);
+              }
             }
           `,
         },

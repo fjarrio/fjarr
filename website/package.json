@@ -8,12 +8,17 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "typecheck": "astro check || true"
+    "typecheck": "astro check || true",
+    "check:mermaid": "node scripts/check-mermaid.mjs"
   },
   "dependencies": {
     "@astrojs/markdown-remark": "^7.3.1",
     "@astrojs/starlight": "^0.42.0",
     "astro": "^7.0.0",
     "unist-util-visit": "^5.0.0"
+  },
+  "devDependencies": {
+    "jsdom": "^26.0.0",
+    "mermaid": "^11.4.0"
   }
 }

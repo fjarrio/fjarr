@@ -103,7 +103,7 @@ sequenceDiagram
   A-->>D: trickle ICE both ways (via S)
   A-->>D: DTLS/SRTP established — media + DCs flow P2P
   S->>B: webhook: session.started
-  Note over A,D: heartbeat on control DC; reconnect/ICE-restart on failure
+  Note over A,D: heartbeat on control DC, reconnect/ICE-restart on failure
   S->>B: webhook: session.ended(reason, stats)
 ```
 

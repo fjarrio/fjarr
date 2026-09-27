@@ -31,6 +31,12 @@ jobs:
         run: node protocol/check.mjs
       - name: build website
         run: pnpm --filter fjarr-website build
+      # After the build, because it checks both halves: that every diagram parses, and that the
+      # built page still carries the author's source. The bug it was written for was silent — a
+      # diagram that parses perfectly became "Syntax error in text" on the site, because the source
+      # was scraped back out of highlighted markup and lost every line break (docs/19#diagrams).
+      - name: mermaid diagrams (parse + present in the built site)
+        run: pnpm --filter fjarr-website run check:mermaid
 
   web:
     name: Web packages + demos
@@ -192,7 +198,8 @@ jobs:
       # so the platform code is type-checked for it here. This does not link the binary — webrtc-rs
       # pulls `ring`, whose build script needs the Apple SDK — and nothing runs on macOS hardware
       # (docs/04).
-      - run: rustup target add aarch64-apple-darwin
+      # The script installs the target on the pinned toolchain itself, because its scratch crate sits
+      # outside the workspace and would otherwise pick up whichever toolchain rustup defaults to.
       - run: bash ../docker/lab/macos-check.sh crates/fjarr-connect/src
 
   cpp:

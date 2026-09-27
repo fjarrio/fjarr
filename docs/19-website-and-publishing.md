@@ -19,11 +19,47 @@ One Astro app (`website/`) serves both public surfaces
   Starlight, harmless on GitHub.
 - Relative links between docs (`[x](08-protocol.md#anchor)`) — they work in
   GitHub, editors, and Starlight alike.
-- Mermaid diagrams in fenced blocks (rendered client-side on the site).
+- Mermaid diagrams in fenced blocks ([below](#diagrams)).
 - ADRs publish too — they are the "why" documentation integrators love.
 - **Feature-status honesty**: the landing page labels capabilities with
   their real roadmap state (`in development`, `planned`) pulled from
   [docs/17](17-roadmap.md). Never market what doesn't run.
+
+## Diagrams {#diagrams}
+
+Mermaid, in ```` ```mermaid ```` fences, rendered in the reader's browser.
+
+`website/plugins/remark-mermaid.mjs` replaces each fence **before any
+highlighter sees it** with a `<pre class="mermaid">` carrying the author's source
+twice: as the element's text, which is what a reader without JavaScript sees, and
+in a `data-mermaid` attribute, which is what the client hands mermaid. Both halves
+of that are load-bearing, and each was a bug first:
+
+- **Never scrape the source back out of rendered markup.** Starlight highlights
+  code with Expressive Code, which emits one `<div class="ec-line">` per line and
+  no newline text nodes, so `textContent` returns the whole diagram on a single
+  line. Every diagram on the page then fails with `Syntax error in text` on source
+  that is perfectly valid.
+- **The attribute, not the text node.** Something in Astro's markdown pipeline
+  strips the leading whitespace of every line in a text node — measured; it is
+  neither `compressHTML` nor the choice of tag. Flowcharts do not care, but a
+  mermaid YAML config header (`---`, `config:`, an indented `theme:`) would, and
+  an attribute is serialised byte for byte.
+
+Two authoring traps, both of which look like working markdown:
+
+- **A `;` is a statement separator**, including inside a `Note over A,B: …` line.
+  Write a comma.
+- Mermaid is loaded from a CDN (`cdn.jsdelivr.net`), so diagrams are the one part
+  of the site that needs a third-party request. Self-hosting it is a small change
+  if that ever matters.
+
+`make docs-mermaid` is the gate, and it runs in CI after the website build. It
+parses every diagram with mermaid itself — in Node, with a jsdom shim, so it needs
+neither a browser nor the network — and then checks that the built page still holds
+each diagram's source byte for byte. Whether a diagram actually *draws* is the one
+thing it cannot answer; that was verified by hand in Chromium against the built
+site, and would need the lab to serve `website/dist` to become a regression.
 
 ## Local workflow
 
