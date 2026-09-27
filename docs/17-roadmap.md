@@ -254,7 +254,8 @@ handover, proven first with the agent running as its own account
 unattended-access test green on the spike machine
 (the Ryzen mini-PC from 2b); local cursor on Wayland through Fjarr's own
 PipeWire reader ([docs/22](22-remote-desktop-client.md#cursor-strategy));
-clipboard verified in both directions on every chosen backend (not yet spiked);
+clipboard in both directions on every chosen backend (verified for mutter's interface
+([docs/07](07-desktop-backends.md#decision-2026-09-27)); the portal and X11 remain);
 **presentation mode** (multi-monitor fullscreen, one window per monitor)
 with the **portal-vs-route spike** that fixes the default per browser
 (open question #19).

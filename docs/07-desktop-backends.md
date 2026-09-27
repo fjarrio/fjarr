@@ -161,6 +161,19 @@ non-GNOME compositors and as E's fallback), and **A** is for X11 kiosks. D is
 dropped and B is not built. Headless robots get a forced connector. The
 hypotheses below are kept as they were written.
 
+**Clipboard, verified after the ADR (2026-09-27).** Mutter's RemoteDesktop
+session carries a clipboard: `EnableClipboard`, `SetSelection`,
+`SelectionRead`, `SelectionWrite`, `SelectionTransfer` and
+`SelectionOwnerChanged`, which is what E will use. We verified it end to end
+through gnome-remote-desktop, whose clipboard is built on those calls. From a
+laptop over RDP into the auto-login session on the spike machine, text copied
+on the laptop pasted on the robot, and text copied on the robot pasted on the
+laptop. No prompt was reported on the robot. One side finding: gnome-remote-desktop
+keeps its credentials in the login keyring. An auto-login account has none
+until one is created, and creating it raised a dialog on the robot's screen.
+Fjarr must not depend on the keyring. C's portal clipboard and A's X11
+selections are not yet verified.
+
 ## Working hypotheses (to be falsified, not trusted)
 
 - ~~A (X11+XTest) will win the MVP on simplicity and unattended behavior.~~
