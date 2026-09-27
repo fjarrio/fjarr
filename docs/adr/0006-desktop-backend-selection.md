@@ -77,3 +77,32 @@ Open for the user: whether provisioning may write a C grant into the portal
 permission store with no human (it would remove C's one click). This was not
 attempted. It forges a consent record, and that is a policy decision before it
 is an experiment.
+
+## Findings — phase 1, step 2: Openbox on Xorg under GDM (2026-09-27)
+
+Xorg, the amdgpu driver and Openbox installed from the archive. The session is
+chosen through AccountsService (`Session=openbox`). GDM runs it with
+`gdm-x-session`, as a rootless Xorg owned by the user, with its authority file
+at `/run/user/<uid>/gdm/Xauthority`. A root process with `DISPLAY=:0` and that
+`XAUTHORITY` can capture it too. The oracle here is `oracle_x11.py`: the GTK4
+oracle neither painted nor reliably took focus under Openbox.
+
+| Combo | Appliance (auto-login, rebooted) | Login screen |
+|---|---|---|
+| A X11 + XTest | **yes, with a boot-time VT fix** (below). Capture 99% oracle colour, and XTest keys and an absolute click are logged | **structurally no.** GDM's greeter is Wayland; there is no X server to reach before login |
+| B X11 + uinput | **yes, with the same fix.** Capture as A, and the root helper's uinput keys and click are logged | **structurally no**, as A |
+
+What surprised us:
+
+- **GDM takes the screen back from an X11 auto-login session.** About 11 s after
+  the auto-login it starts its Wayland greeter on tty1 and makes that the seat's
+  active session. The Openbox session keeps running on tty2, but off-screen. This
+  happened on every boot with nobody touching the machine. While it was
+  backgrounded, `ximagesrc` returned all-black frames and uinput input went
+  nowhere, because logind pauses the session's devices. XTest keys still reached
+  the backgrounded server, so "the input was accepted" would have looked fine
+  while nothing was visible. One `loginctl activate <session>` from root brings
+  the session back, and it stayed in front for the 60 s we watched. So on GDM, an
+  X11 kiosk needs a boot-time unit that re-activates its session. That is a
+  workaround the robot would ship, and a reason to prefer LightDM or no display
+  manager for an X11 kiosk.
