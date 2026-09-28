@@ -41,6 +41,19 @@ groups with comments.
 | Vendor camera SDKs (ZED, RealSense, Jetson multimedia, GigE vendors…) | per vendor | **never a `libfjarr` dependency** — each ships as its own GStreamer plugin package `fjarr-gst-<vendor>` per architecture ([ADR-0020](adr/0020-vendor-sources-as-gstreamer-plugins.md)) | per vendor (checked per package) | optional, separate packages |
 | **Forbidden**: `gstreamer1.0-plugins-ugly` (x264enc) | — | — | GPL | **never** (doctor-enforced) |
 
+## Setup tool (`fjarr-setup`) — ships in `fjarr-agent`
+
+The installer commands `fjarr-agent` hands over
+([docs/26](26-robot-install-and-drivers.md#the-setup-tool)): a Rust binary at
+`/usr/lib/fjarr/fjarr-setup`, no GStreamer, nothing of it in the agent's process.
+
+| Dependency | Version | Purpose | License | Ships |
+|---|---|---|---|---|
+| cliclack | 0.5 | the prompts (every one has a flag); the one prompt library once `fjarr-connect` moves off dialoguer | MIT | yes |
+| toml_edit | 0.22 | `/etc/fjarr/fjarr.toml` edited in place, comments and order kept — it is the customer's file | MIT/Apache-2.0 | yes |
+| clap, anyhow, libc, serde, serde_json, tokio | as the operator client | the CLI, errors, `getpwnam`/`getuid`/`isatty`, the change record, the netlink runtime | MIT/Apache-2.0 | yes |
+| `fjarr-netdev` (rtnetlink) | in-tree | the same device code `fjarr-connect` uses: the persistent tun, its address, the routing table for the range check | MIT (rtnetlink) | yes |
+
 ## Signaling (`fjarr-signaling` / `fjarr-server`) — ships as sidecar/Cloud
 
 | Dependency | Version | Purpose | License | Ships |
@@ -74,7 +87,7 @@ ioctls.
 | clap | 4.x | the CLI surface | MIT/Apache-2.0 | yes |
 | getrandom | 0.3 | the 128-bit `state` of the loopback login (docs/27#logging-in), from the OS on every platform; it replaced a Linux-only `libc::getrandom` so the binary builds where the [shell](27-network-tunnel.md#shell) runs. Already in the tree under `rand` | MIT/Apache-2.0 | yes |
 | windows-sys | 0.61 | Windows only: the console modes and size behind `fjarr-connect shell`'s raw mode (docs/27#shell); on Unix that is termios through `libc`. Already in the tree under tokio | MIT/Apache-2.0 | yes |
-| dialoguer | 0.11 | the robot picker — type to filter, enter to connect (docs/27#what-it-feels-like) — rather than a hand-rolled terminal UI (slice 4.5f) | MIT | yes |
+| dialoguer | 0.11 | the robot picker — type to filter, enter to connect (docs/27#what-it-feels-like) — rather than a hand-rolled terminal UI (slice 4.5f). To be replaced by cliclack, the setup tool's prompt library, once its filter mode is confirmed to serve the picker (docs/26#the-setup-tool) | MIT | yes |
 | toml, dirs | 0.8, 6 | `~/.config/fjarr/config.toml` and the 0600 credential cache beside it (slice 4.5f) | MIT/Apache-2.0 | yes |
 | reqwest (rustls) | 0.12 | the operator API calls — robots, grants, login codes (docs/09#operator-api); already in the tree for the server's webhooks | MIT/Apache-2.0 | yes |
 | `fjarr-protocol` (this repo) | workspace | shared signaling message types — the reason wire drift is a compile error. Its own crate since slice 4.5e, so an operator client links the types without the server's axum/hyper/HMAC stack (ADR-0024) | AGPL-3.0 | yes |

@@ -129,10 +129,12 @@ behaviour of a persistent TUN device:
 
 Three rules follow:
 
-1. **The installer creates the device**, once, owned by the `fjarr` user
-   (`ip tuntap add … user fjarr`), with its address and MTU set
-   ([docs/26](26-robot-install-and-drivers.md)). The agent then attaches to
-   it as an unprivileged user with **no `CAP_NET_ADMIN` at all** — measured.
+1. **The installer creates the device**, owned by the `fjarr` user, with its
+   address and MTU set — and, because a tun device does not survive a reboot,
+   `fjarr-net.service` recreates it at every boot before the agent
+   ([docs/26](26-robot-install-and-drivers.md#fjarr-agent-net-setup)). The
+   agent then attaches to it as an unprivileged user with **no
+   `CAP_NET_ADMIN` at all** — measured.
 2. **The agent's systemd unit orders before the robot's software.** Carrier
    is down while nothing is attached, and a participant created then ignores
    the interface permanently. This is an ordering dependency, not a nicety.
@@ -532,10 +534,12 @@ blocked so DDS could only reach the peer through the tunnel:
   Both elements are there for different reasons: `<Interfaces>` with explicit
   priorities stops the arbitrary single-interface choice and keeps the local
   network usable at the same time, and the unicast `<Peers>` supply the discovery
-  that a point-to-point link's multicast cannot bootstrap. `fjarr-agent net setup`
-  can now offer to write it ([docs/26](26-robot-install-and-drivers.md)), and has to
-  fill in the robot's real LAN interface name: the file's `eth0` is the lab's, and
-  a name that does not exist leaves Cyclone on the tunnel alone.
+  that a point-to-point link's multicast cannot bootstrap. `fjarr-agent net setup
+  --dds cyclone` writes it to `/etc/fjarr/cyclonedds.xml`
+  ([docs/26](26-robot-install-and-drivers.md#fjarr-agent-net-setup)) with the
+  robot's real LAN interface name — the default route's, or `--lan-interface`:
+  the file's `eth0` is the lab's, and a name that does not exist leaves Cyclone
+  on the tunnel alone.
 
   **Not verified: Cyclone on the tunnel alone.** Given only `fjarr0` with multicast
   on, Cyclone sends almost nothing — the spike and slice 4.5d both saw it —
@@ -751,8 +755,8 @@ Per [docs/15](15-testing-strategy.md):
   two containers first — without that the two would discover each other over the
   lab's own bridge and the test would prove nothing. The session uses the relay
   (`--ice-policy relay`) because the direct path is exactly what was blocked. The
-  documented Cyclone file and `fjarr-agent net setup`'s offer to write it are
-  still owed, as are the docs/25 network profiles.
+  documented Cyclone file exists and `fjarr-agent net setup` writes it
+  (2026-09-28); the docs/25 network profiles are still owed.
 
 ## Open questions
 

@@ -220,6 +220,12 @@ built once and packaged twice; Pixi, Nix and Yocto per customer as renderings
 of the same system profile; debhelper packages in a signed static repository on
 Cloudflare R2; one version for every artifact; tag → `testing` → a manual
 promotion to `stable` without a rebuild.
+**Progress 2026-09-28:** the `.deb`s, `libfjarr-dev`, the system profile and
+`--check`, the image from the `.deb`s, and the setup tool's first commands:
+`fjarr-agent net setup`, `net up` (`fjarr-net.service`) and `setup --undo net`
+([docs/26](26-robot-install-and-drivers.md#fjarr-agent-net-setup)), proven on
+the spike machine across a reboot. Left: `setup` itself, `setup desktop`,
+`drivers`, the repository and signing, the install script, the desktop packages.
 **Gate:** a fresh Ubuntu 26.04 machine (the spike machine, reinstalled) goes
 from `curl … | sh` to a test pattern in the dashboard with no hand-written
 config; `apt install fjarr-desktop-wayland` plus `setup desktop` gives remote
