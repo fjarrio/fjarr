@@ -293,10 +293,13 @@ tun-up-2: ## Bring the second robot up with its own tunnel interface, for the tw
 	@addr=$$(docker compose exec -T -e FJARR_ROBOT_ID=$(OPSIM_ROBOT_2) dev ./build/$(BUILD_PRESET)/agent/daemon/fjarr-agent --net-address | tail -1 | tr -d '\r'); \
 	  echo "tun-up-2: $(OPSIM_ROBOT_2) derives $$addr (docs/27#addressing)"; \
 	  FJARR_DEMO_NET_2=1 docker compose --profile demo up -d --no-deps demo-robot-2 >/dev/null && \
+	  docker compose restart demo-robot-2 >/dev/null && \
 	  docker/lab/tundev.sh up demo-robot-2 "$$addr" $(TUN_OPERATOR) $(TUN_DEV)
 	@# This robot has no supervisor, so it cannot be restarted onto a device that appears later: it
 	@# waits 20 s for one at boot, and the line above creates it inside that window. That ordering is
-	@# the same one a real robot's systemd unit enforces (docs/27#lifecycle).
+	@# the same one a real robot's systemd unit enforces (docs/27#lifecycle). The restart is what
+	@# makes the agent boot *now*: when the container was already running, `up -d` does nothing, the
+	@# device appeared long after the agent's window, and its attach was refused (found 2026-09-28).
 	@for i in $$(seq 60); do docker compose logs --no-color demo-robot-2 2>/dev/null | grep -q "hello-ack: online" && break; sleep 1; done; \
 	  docker compose exec -T demo-robot-2 sh -c 'ip link show $(TUN_DEV) >/dev/null 2>&1' \
 	  || { echo "tun-up-2: the second robot has no $(TUN_DEV); docker compose logs demo-robot-2"; exit 1; }
