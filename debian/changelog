@@ -1,5 +1,6 @@
-fjarr (0.0.1~dev) unstable; urgency=medium
+fjarr (0.1.0) unstable; urgency=medium
 
-  * Development build. Release builds generate this entry from the tag (docs/26#releases).
+  * First release: fjarr-agent, fjarr-tools (fjarr-connect) and libfjarr-dev,
+    with fjarr-setup's setup, net setup and drivers (docs/26, M2.5).
 
- -- Fjarr <dev@fjarr.io>  Mon, 28 Sep 2026 08:00:00 +0200
+ -- Fjarr <dev@fjarr.io>  Tue, 29 Sep 2026 00:09:43 +0200
