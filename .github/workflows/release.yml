@@ -1,0 +1,206 @@
+# Fjarr release — docs/26#releases, ADR-0031.
+# A tag vX.Y.Z builds and tests the packages natively on amd64 and arm64, publishes them and the
+# multi-arch image to `testing`, verifies the published repository from apt.fjarr.io, and — after a
+# person approves in the apt-stable environment — promotes the SAME files to `stable`: promotion only
+# re-indexes files already in the pool, so it cannot rebuild anything.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/fjarrio/fjarr-agent
+  KEY_FINGERPRINT: B376164F0985CFDB0DE7C26C839E1ECA17D3B8F1
+  # R2 speaks S3; recent AWS CLIs add checksum headers by default, which R2 does not need.
+  AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+  AWS_DEFAULT_REGION: auto
+
+jobs:
+  packages:
+    name: packages (${{ matrix.arch }})
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: the tag is the version every artifact declares
+        # One version for every artifact (docs/26#releases): set by `make set-version V=X.Y.Z` and
+        # committed before tagging. A tag that does not match is refused here, naming each place.
+        run: bash packaging/set-version.sh --check "${GITHUB_REF_NAME#v}"
+      - run: make deb DEB_ARCH=${{ matrix.arch }}
+      - run: make deb-install-test DEB_ARCH=${{ matrix.arch }}
+      - run: make deb-embed-test DEB_ARCH=${{ matrix.arch }}
+      - run: make install-script-test DEB_ARCH=${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs-${{ matrix.arch }}
+          path: dist/deb/${{ matrix.arch }}/*.deb
+          retention-days: 30
+
+  images:
+    name: image (${{ matrix.arch }})
+    needs: packages
+    strategy:
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-${{ matrix.arch }}
+          path: dist/deb/${{ matrix.arch }}
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: build from the .debs and push
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          docker build -f docker/agent/Dockerfile --target runtime -t "$IMAGE:$v-${{ matrix.arch }}" .
+          docker push "$IMAGE:$v-${{ matrix.arch }}"
+
+  images-manifest:
+    name: image manifest, signature and SBOM
+    needs: images
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # cosign keyless: the signature is bound to this workflow's identity
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: sigstore/cosign-installer@v3
+      - uses: anchore/sbom-action/download-syft@v0
+      - name: one manifest for both architectures, tagged X.Y.Z and testing
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          docker buildx imagetools create -t "$IMAGE:$v" -t "$IMAGE:testing" "$IMAGE:$v-amd64" "$IMAGE:$v-arm64"
+          digest=$(docker buildx imagetools inspect "$IMAGE:$v" --format '{{json .Manifest}}' | jq -r .digest)
+          echo "DIGEST=$digest" >> "$GITHUB_ENV"
+      - name: sign and attest the SBOM
+        run: |
+          cosign sign --yes "$IMAGE@$DIGEST"
+          syft "$IMAGE@$DIGEST" -o spdx-json > sbom.spdx.json
+          cosign attest --yes --type spdxjson --predicate sbom.spdx.json "$IMAGE@$DIGEST"
+
+  publish-testing:
+    name: publish to testing
+    needs: packages
+    runs-on: ubuntu-24.04
+    environment: apt-testing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: debs-*
+          path: debs
+          merge-multiple: true
+      - name: tools and the signing key
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq apt-utils gnupg >/dev/null
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"; mkdir -p "$GNUPGHOME" && chmod 700 "$GNUPGHOME"; echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          printf '%s\n' "$APT_SIGNING_KEY" | gpg --batch --import
+          gpg --list-secret-keys --with-colons | grep -q "^fpr:.*:$KEY_FINGERPRINT:" || { echo "the signing key is not $KEY_FINGERPRINT"; exit 1; }
+      - name: index testing
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          mkdir -p repo/pool/main/f/fjarr && cp debs/*.deb repo/pool/main/f/fjarr/
+          bash packaging/repo/index.sh repo testing "$v" "$KEY_FINGERPRINT"
+          cp packaging/fjarr-archive-keyring.asc repo/
+      - name: upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          s3() { aws s3 --endpoint-url "$R2_ENDPOINT" "$@"; }
+          # The pool first (nothing is ever removed from it), then the index that points into it.
+          s3 cp --recursive repo/pool s3://fjarr-apt/pool --only-show-errors
+          s3 cp repo/fjarr-archive-keyring.asc s3://fjarr-apt/fjarr-archive-keyring.asc --cache-control no-cache --only-show-errors
+          s3 sync repo/dists/testing s3://fjarr-apt/dists/testing --delete --cache-control no-cache --only-show-errors
+      - name: verify testing from apt.fjarr.io
+        run: |
+          # The published repository, through install.sh, on a clean Ubuntu: what a device does.
+          docker run --rm -v "$PWD/packaging":/pk:ro ubuntu:26.04 sh -c \
+            'apt-get update -qq >/dev/null && apt-get install -y -qq curl ca-certificates >/dev/null && sh /pk/install.sh --channel testing </dev/null && fjarr-agent --help 2>&1 | head -1'
+
+  promote-stable:
+    name: promote to stable
+    needs: [publish-testing, images-manifest]
+    runs-on: ubuntu-24.04
+    environment: apt-stable # a person approves here (docs/26#releases)
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: debs-*
+          path: debs
+          merge-multiple: true
+      - name: tools and the signing key
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq apt-utils gnupg >/dev/null
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"; mkdir -p "$GNUPGHOME" && chmod 700 "$GNUPGHOME"; echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          printf '%s\n' "$APT_SIGNING_KEY" | gpg --batch --import
+          gpg --list-secret-keys --with-colons | grep -q "^fpr:.*:$KEY_FINGERPRINT:" || { echo "the signing key is not $KEY_FINGERPRINT"; exit 1; }
+      - name: index stable over the files testing published
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          mkdir -p repo/pool/main/f/fjarr
+          # The pool's own copies, not this run's artifacts: stable indexes exactly what testing published.
+          aws s3 --endpoint-url "$R2_ENDPOINT" cp --recursive s3://fjarr-apt/pool/main/f/fjarr repo/pool/main/f/fjarr \
+            --exclude '*' --include "*_${v}_*.deb" --only-show-errors
+          for d in debs/*.deb; do cmp -s "$d" "repo/pool/main/f/fjarr/$(basename "$d")" || { echo "$d differs from the published pool"; exit 1; }; done
+          bash packaging/repo/index.sh repo stable "$v" "$KEY_FINGERPRINT"
+      - name: upload stable and install.sh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          s3() { aws s3 --endpoint-url "$R2_ENDPOINT" "$@"; }
+          s3 sync repo/dists/stable s3://fjarr-apt/dists/stable --delete --cache-control no-cache --only-show-errors
+          s3 cp packaging/install.sh s3://fjarr-apt/install.sh --content-type text/x-shellscript --cache-control no-cache --only-show-errors
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - name: the image's latest tag moves to this version
+        run: docker buildx imagetools create -t "$IMAGE:latest" "$IMAGE:${GITHUB_REF_NAME#v}"
+      - name: verify stable through get.fjarr.io
+        run: |
+          docker run --rm ubuntu:26.04 sh -c \
+            'apt-get update -qq >/dev/null && apt-get install -y -qq curl ca-certificates >/dev/null && curl -fsSL https://get.fjarr.io | sh </dev/null && fjarr-agent --help 2>&1 | head -1'

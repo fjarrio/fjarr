@@ -6,7 +6,8 @@
 
 namespace fjarr {
 
-std::string version() { return "0.0.1"; }
+// One version for every artifact (docs/26#releases): CMake's project version, set by make set-version.
+std::string version() { return FJARR_VERSION; }
 
 std::string short_session_id(const std::string& session_id) { return session_id.size() > 8 ? session_id.substr(session_id.size() - 8) : session_id; }
 

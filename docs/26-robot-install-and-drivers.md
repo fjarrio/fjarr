@@ -526,7 +526,11 @@ offline; its revocation certificate is kept offline with it.
 - **One version** for every artifact, from one tag `vX.Y.Z`: packages, images,
   `fjarr-connect`, the `fjarr-server` image, crates and npm packages. The wire
   protocol keeps its own major ([docs/08](08-protocol.md#versioning)). 0.x
-  until the extension API is stable (M6).
+  until the extension API is stable (M6). `make set-version V=X.Y.Z` sets it
+  everywhere it is declared (CMake, which the agent reports; the Cargo
+  workspace and its lockfile; the npm packages; `debian/changelog`). That is
+  committed, then tagged, and the release workflow refuses a tag that does
+  not match every one of them.
 - **A release** is: tag → full CI → packages and images to `testing` → a
   manual, protected promotion to `stable` that copies the same artifacts and
   never rebuilds them (`.github/workflows/release.yml`; environments

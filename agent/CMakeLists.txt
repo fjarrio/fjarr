@@ -75,7 +75,7 @@ target_include_directories(fjarr
 target_link_libraries(fjarr
   PUBLIC nlohmann_json::nlohmann_json PkgConfig::GST
   PRIVATE PkgConfig::SOUP tomlplusplus::tomlplusplus nlohmann_json_schema_validator util ${CMAKE_DL_LIBS}) # util: forkpty (fjarr.terminal); dl: desktop modules (ADR-0021)
-target_compile_definitions(fjarr PUBLIC GST_USE_UNSTABLE_API)
+target_compile_definitions(fjarr PUBLIC GST_USE_UNSTABLE_API PRIVATE FJARR_VERSION="${PROJECT_VERSION}")
 if(SYSTEMD_FOUND)
   target_link_libraries(fjarr PRIVATE PkgConfig::SYSTEMD)
   target_compile_definitions(fjarr PRIVATE FJARR_HAVE_SYSTEMD=1)
