@@ -41,15 +41,21 @@ RUN cmake -S . -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release \
 # --------------------------------------------------------------- runtime --
 FROM ubuntu:26.04 AS runtime
 ENV DEBIAN_FRONTEND=noninteractive
-# NOTE: gstreamer1.0-plugins-ugly (GPL: x264enc) is deliberately absent — ADR-0011; asserted below.
+# NOTE: gstreamer1.0-plugins-ugly (GPL: x264enc) and gstreamer1.0-libav (GPL-built libavcodec, which
+# decodebin would autoplug for RTSP) are deliberately absent — ADR-0011; asserted below. libx265 IS
+# present: Ubuntu's plugins-bad depends on it for x265enc, an encoder nothing autoplugs and the agent
+# never selects (docs/14).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl \
     gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
-    gstreamer1.0-nice gstreamer1.0-libav gstreamer1.0-tools \
+    gstreamer1.0-nice gstreamer1.0-tools \
     intel-media-va-driver mesa-va-drivers libva2 libva-drm2 \
     libsoup-3.0-0 glib-networking libsystemd0 libtomlplusplus3t64 \
     && rm -rf /var/lib/apt/lists/* \
-    && if gst-inspect-1.0 x264enc >/dev/null 2>&1; then echo "x264enc is present: GPL plugin in a shipped image (ADR-0011)"; exit 1; fi
+    && if gst-inspect-1.0 x264enc >/dev/null 2>&1; then echo "x264enc is present: GPL plugin in a shipped image (ADR-0011)"; exit 1; fi \
+    && if gst-inspect-1.0 avdec_h264 >/dev/null 2>&1; then echo "avdec_h264 is present: decodebin would load GPL-built libavcodec into the agent (ADR-0011)"; exit 1; fi \
+    && gpl=$(dpkg-query -W -f '${Package}\n' 'libx264-*' 'libxvidcore*' 2>/dev/null | tr '\n' ' ') \
+    && if [ -n "$gpl" ]; then echo "GPL codec libraries in a shipped image (ADR-0011): $gpl"; exit 1; fi
 RUN useradd -r -u 10001 -m -d /var/lib/fjarr fjarr
 COPY --from=build /build/agent/daemon/fjarr-agent /usr/local/bin/fjarr-agent
 # The viewer where the fjarr-agent package installs it (docs/24, docs/26).

@@ -14,6 +14,7 @@ groups with comments.
 | Dependency | Version (Ubuntu 26.04 LTS, ADR-0022; re-verified in slice 2.9) | Purpose | License | Ships |
 |---|---|---|---|---|
 | GStreamer core + base/good/bad plugins | 1.28.2 | pipelines, RTP, WebRTC | LGPL-2.1 (dynamic) | yes |
+| `libx265` (pulled by Ubuntu's `gstreamer1.0-plugins-bad` for its `x265enc`) | 26.04 | **nothing**: present on disk, never loaded by the agent. `x265enc` is an encoder, encoders are never autoplugged, and the agent's encoder is explicit (VA-API, openh264). Recorded 2026-09-28, when the image's GPL guard was sharpened | GPL-2.0 | present, not a dependency: the rule (ADR-0011) is about what enters the agent's process. The image guard fails on `x264enc`, `avdec_*`, `libx264` and `libxvidcore` instead, which are what decodebin or a GPL encoder would load |
 | `gstreamer1.0-nice` (libnice) | 0.1.23 | ICE for webrtcbin | LGPL-2.1/MPL | yes |
 | `gstreamer1.0-pipewire` | 1.6.2 | Wayland capture (`pipewiresrc`) | MIT | yes |
 | libva + intel-media-driver (iHD) | 2.22 / 26.1 | VA-API H.264 encode | MIT | yes (driver from distro) |
@@ -32,7 +33,7 @@ groups with comments.
 | nlohmann json-schema-validator | 2.3 (no Ubuntu package: pinned via CMake `FetchContent`, built into `libfjarr`) | capability config validation against `config_schema` | MIT | yes |
 | GStreamer `gstreamer.supp` (valgrind suppressions, vendored at `agent/tests/valgrind/`) | 1.28.2 source tree | `make agent-memcheck` (docs/23 memory ladder, nightly) | LGPL-2.1-or-later (a data file; never linked) | **no** — dev only |
 | `python3-gi` + `gir1.2-gst-rtsp-server-1.0` + `gstreamer1.0-rtsp` | 26.04 | the lab's RTSP camera simulator (`docker/lab/rtsp-sim.py`, the `rtsp-sim` compose service) for `fjarr.camera`'s `rtsp` track | LGPL-2.1 (PyGObject, gst-rtsp-server) | **no** — dev image and CI only |
-| `gstreamer1.0-libav` (`avdec_h264`) | 1.28 | receive-side H.264 decode in `fjarr-opsim` (docs/23) — the dev image and CI only | LGPL-2.1 (Ubuntu's ffmpeg build enables GPL parts) | **no** — a test tool; never linked into `libfjarr`, `fjarr-agent` or a demo |
+| `gstreamer1.0-libav` (`avdec_h264`) | 1.28 | receive-side H.264 decode in `fjarr-opsim` (docs/23) — the dev image and CI only. It had crept into the shipped agent image, where `decodebin` would autoplug it for RTSP; removed 2026-09-28, and the image guard now fails on it | LGPL-2.1 (Ubuntu's ffmpeg build enables GPL parts) | **no** — a test tool; never linked into `libfjarr`, `fjarr-agent` or a demo |
 | libsystemd (`sd_notify`) | 26.04 | READY/WATCHDOG supervision — required by the packaged agent (ADR-0019 addendum) | LGPL-2.1 (dynamic) | yes |
 | GoogleTest | 1.17 | C++ unit/loop tests | BSD-3 | dev-only |
 | Vendor camera SDKs (ZED, RealSense, Jetson multimedia, GigE vendors…) | per vendor | **never a `libfjarr` dependency** — each ships as its own GStreamer plugin package `fjarr-gst-<vendor>` per architecture ([ADR-0020](adr/0020-vendor-sources-as-gstreamer-plugins.md)) | per vendor (checked per package) | optional, separate packages |
