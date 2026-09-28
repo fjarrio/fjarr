@@ -692,6 +692,7 @@ dependencies = [
  "clap",
  "dialoguer",
  "dirs",
+ "fjarr-netdev",
  "fjarr-protocol",
  "futures-util",
  "getrandom 0.3.4",
@@ -708,6 +709,17 @@ dependencies = [
  "tracing-subscriber",
  "webrtc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "fjarr-netdev"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "futures-util",
+ "libc",
+ "rtnetlink",
+ "tokio",
 ]
 
 [[package]]

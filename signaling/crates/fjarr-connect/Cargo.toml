@@ -44,6 +44,8 @@ sha2 = "0.10"
 # platform links the other's mechanism.
 [target.'cfg(target_os = "linux")'.dependencies]
 rtnetlink = "0.23.0"
+# The persistent device itself, shared with fjarr-setup (docs/26#the-setup-tool).
+fjarr-netdev = { path = "../fjarr-netdev" }
 
 # `shell`'s raw mode and window size on Windows: the console API, with virtual-terminal input so
 # keys arrive as the escape sequences the robot's pty expects (docs/27#shell, docs/04).

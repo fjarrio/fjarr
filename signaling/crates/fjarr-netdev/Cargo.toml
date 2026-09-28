@@ -1,0 +1,16 @@
+[package]
+name = "fjarr-netdev"
+description = "The persistent tun device, over netlink in-process: shared by fjarr-connect and fjarr-setup (docs/27, docs/26#the-setup-tool)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+anyhow = "1"
+libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rtnetlink = "0.23.0"
+futures-util = { workspace = true }
+tokio = { workspace = true }

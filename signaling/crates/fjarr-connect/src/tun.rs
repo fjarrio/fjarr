@@ -17,10 +17,15 @@
 //!
 //! spec: docs/27-network-tunnel.md#the-shape · docs/27-network-tunnel.md#the-packet-path
 use std::net::Ipv4Addr;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+#[cfg(target_os = "macos")]
+use std::os::fd::FromRawFd;
+use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 
 use anyhow::{anyhow, bail, Context, Result};
 use tokio::io::unix::AsyncFd;
+
+#[cfg(target_os = "linux")]
+use fjarr_netdev::{index_of, netlink, open_tun};
 
 /// `IFNAMSIZ` — the kernel's limit on an interface name, including its terminator.
 const IFNAMSIZ: usize = 16;
@@ -134,70 +139,6 @@ fn attach(name: &str) -> Result<Tun> {
     })
 }
 
-/// `TUNSETIFF` against `/dev/net/tun`: attaches to `name`, or creates it when it does not exist —
-/// which is the one operation here that is the same call either way.
-#[cfg(target_os = "linux")]
-fn open_tun(name: &str) -> Result<OwnedFd> {
-    use std::ffi::CString;
-
-    let path = CString::new("/dev/net/tun").expect("no interior nul");
-    // SAFETY: a constant, valid, nul-terminated path.
-    let raw = unsafe { libc::open(path.as_ptr(), libc::O_RDWR | libc::O_CLOEXEC) };
-    if raw < 0 {
-        return Err(std::io::Error::last_os_error())
-            .context("opening /dev/net/tun (in a container it has to be passed in as a device)");
-    }
-    // SAFETY: `raw` is a fresh, owned descriptor.
-    let fd = unsafe { OwnedFd::from_raw_fd(raw) };
-
-    // `struct ifreq` is larger than the two fields used here, and the kernel reads all of it, so the
-    // whole thing is zeroed first.
-    #[repr(C)]
-    struct IfReq {
-        name: [libc::c_char; IFNAMSIZ],
-        flags: libc::c_short,
-        _pad: [u8; 22],
-    }
-    let mut req = IfReq {
-        name: [0; IFNAMSIZ],
-        // No packet-information header: one read is one bare IP packet, which is what rides the
-        // channel (docs/27#the-packet-path).
-        flags: (libc::IFF_TUN | libc::IFF_NO_PI) as libc::c_short,
-        _pad: [0; 22],
-    };
-    for (slot, byte) in req.name.iter_mut().zip(name.as_bytes()) {
-        *slot = *byte as libc::c_char;
-    }
-    // TUNSETIFF: _IOW('T', 202, int).
-    const TUNSETIFF: libc::c_ulong = 0x4004_54ca;
-    // SAFETY: `req` is a correctly shaped, zero-initialised `ifreq` for this ioctl.
-    if unsafe { libc::ioctl(fd.as_raw_fd(), TUNSETIFF, &mut req) } < 0 {
-        return Err(std::io::Error::last_os_error())
-            .with_context(|| format!("attaching to {name}"));
-    }
-    Ok(fd)
-}
-
-/// Make a freshly created device outlive this process, owned by whoever is running. The interface and
-/// its address never changing is what lets a long-running ROS 2 node keep working as robots come and
-/// go (docs/27#the-shape), and it is also what makes the next run need no privilege at all.
-#[cfg(target_os = "linux")]
-fn make_persistent(fd: &OwnedFd) -> Result<()> {
-    // TUNSETPERSIST: _IOW('T', 203, int); TUNSETOWNER: _IOW('T', 204, int).
-    const TUNSETPERSIST: libc::c_ulong = 0x4004_54cb;
-    const TUNSETOWNER: libc::c_ulong = 0x4004_54cc;
-    // SAFETY: both take an int by value on an fd this process owns.
-    unsafe {
-        if libc::ioctl(fd.as_raw_fd(), TUNSETPERSIST, 1) < 0 {
-            return Err(std::io::Error::last_os_error()).context("making the device persistent");
-        }
-        if libc::ioctl(fd.as_raw_fd(), TUNSETOWNER, libc::getuid() as libc::c_int) < 0 {
-            return Err(std::io::Error::last_os_error()).context("setting the device's owner");
-        }
-    }
-    Ok(())
-}
-
 fn set_nonblocking(fd: RawFd) -> Result<()> {
     // SAFETY: `fd` is open and owned by the caller for the duration of these two calls.
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
@@ -207,114 +148,17 @@ fn set_nonblocking(fd: RawFd) -> Result<()> {
     Ok(())
 }
 
-/// A netlink connection, for as long as the caller needs it. Each call opens its own rather than
-/// holding one: this happens a handful of times per link, and a socket kept open for the life of the
-/// process would be one more thing to reason about in the pump.
-#[cfg(target_os = "linux")]
-async fn netlink() -> Result<rtnetlink::Handle> {
-    let (connection, handle, _) = rtnetlink::new_connection().context("opening netlink")?;
-    tokio::spawn(connection);
-    Ok(handle)
-}
-
-#[cfg(target_os = "linux")]
-async fn index_of(handle: &rtnetlink::Handle, name: &str) -> Result<Option<u32>> {
-    use futures_util::TryStreamExt;
-    let mut links = handle.link().get().match_name(name.to_string()).execute();
-    match links.try_next().await {
-        Ok(Some(link)) => Ok(Some(link.header.index)),
-        Ok(None) => Ok(None),
-        // "no such device" is an answer, not a failure.
-        Err(rtnetlink::Error::NetlinkError(e)) if e.raw_code() == -libc::ENODEV => Ok(None),
-        Err(e) => Err(e).with_context(|| format!("looking up {name}")),
-    }
-}
-
-#[cfg(target_os = "linux")]
-async fn has_address(handle: &rtnetlink::Handle, index: u32, address: Ipv4Addr) -> Result<bool> {
-    use futures_util::TryStreamExt;
-    use rtnetlink::packet_route::address::AddressAttribute;
-
-    let mut addrs = handle
-        .address()
-        .get()
-        .set_link_index_filter(index)
-        .execute();
-    while let Some(msg) = addrs
-        .try_next()
-        .await
-        .context("reading the interface's addresses")?
-    {
-        for attr in &msg.attributes {
-            // Both, deliberately. On a point-to-point address — the shape the installer creates,
-            // `ip addr add <self> peer <robot>` — `IFA_ADDRESS` is the *peer* and the local end is
-            // `IFA_LOCAL`; on an ordinary address they are the same. Checking only `Address` missed
-            // the lab's device, tried to add an address it already had, and turned the documented
-            // no-privilege attach into an EPERM. The setcap'd lab build had been hiding it.
-            match attr {
-                AddressAttribute::Address(std::net::IpAddr::V4(a))
-                | AddressAttribute::Local(std::net::IpAddr::V4(a))
-                    if *a == address =>
-                {
-                    return Ok(true)
-                }
-                _ => {}
-            }
-        }
-    }
-    Ok(false)
-}
-
-/// Create and address the device when it is not already there. Never re-addresses an existing one:
-/// flushing an address is exactly what breaks participants already bound to it
-/// (docs/27#lifecycle), and on the operator side it would break the other robots' links too.
+/// Create and address the device when it is not already there, owned by whoever runs this, at a /32
+/// with no peer: the operator's side (docs/27#the-shape). Never re-addresses an existing one.
 #[cfg(target_os = "linux")]
 async fn ensure_device(name: &str, address: Ipv4Addr, mtu: usize) -> Result<Provenance> {
-    let handle = netlink().await?;
-    let existing = index_of(&handle, name).await?;
-    if let Some(index) = existing {
-        if has_address(&handle, index, address).await? {
-            return Ok(Provenance::Existing);
-        }
+    // SAFETY: getuid never fails.
+    let me = unsafe { libc::getuid() };
+    match fjarr_netdev::ensure_tun(name, me, address, None, mtu).await {
+        Ok(fjarr_netdev::Provenance::Existing) => Ok(Provenance::Existing),
+        Ok(fjarr_netdev::Provenance::Created) => Ok(Provenance::Created),
+        Err(e) => Err(e.context(privilege_hint(name, address, mtu))),
     }
-
-    // Creating it is the same ioctl as attaching to it; what makes it outlive this process is
-    // TUNSETPERSIST. The fd is dropped straight after, because the pump attaches its own.
-    let created = existing.is_none();
-    if created {
-        let fd = open_tun(name).map_err(|e| e.context(privilege_hint(name, address, mtu)))?;
-        make_persistent(&fd).map_err(|e| e.context(privilege_hint(name, address, mtu)))?;
-    }
-    let index = index_of(&handle, name)
-        .await?
-        .ok_or_else(|| anyhow!("{name} does not exist even after creating it"))?;
-
-    handle
-        .address()
-        .add(index, std::net::IpAddr::V4(address), 32)
-        .execute()
-        .await
-        .map_err(|e| anyhow!(e).context(privilege_hint(name, address, mtu)))
-        .with_context(|| format!("adding {address}/32 to {name}"))?;
-
-    let up = rtnetlink::LinkMessageBuilder::<rtnetlink::LinkUnspec>::new()
-        .index(index)
-        .mtu(mtu as u32)
-        .up()
-        .build();
-    handle
-        .link()
-        .set(up)
-        .execute()
-        .await
-        .map_err(|e| anyhow!(e).context(privilege_hint(name, address, mtu)))
-        .with_context(|| format!("bringing {name} up with mtu {mtu}"))?;
-
-    Ok(if created {
-        Provenance::Created
-    } else {
-        Provenance::Existing
-    })
 }
 
 /// What to do about a change the kernel refused. Printed as the error's context, because `Operation
