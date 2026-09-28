@@ -4,7 +4,8 @@
 //! Attaching never creates. The device is created and addressed only when it is not already there,
 //! which keeps the common case — a device that exists, as on a robot — free of privilege: the same
 //! property the agent is measured against (docs/27#lifecycle). Creating one needs `CAP_NET_ADMIN`,
-//! from `setcap cap_net_admin+ep` at install or from `sudo`, and when it is missing this says which
+//! from `setcap cap_net_admin+p` at install (raised for the link only, privilege.rs) or from `sudo`,
+//! and when it is missing this says which
 //! commands fix it rather than failing with `EPERM`.
 //!
 //! Every change to the host's network configuration is made **in this process**, over netlink. That
@@ -322,7 +323,7 @@ async fn ensure_device(name: &str, address: Ipv4Addr, mtu: usize) -> Result<Prov
 fn privilege_hint(name: &str, address: Ipv4Addr, mtu: usize) -> String {
     format!(
         "setting up {name} needs CAP_NET_ADMIN. Either grant it once to the binary:\n  \
-         sudo setcap cap_net_admin+ep $(command -v fjarr-connect)\n\
+         sudo setcap cap_net_admin+p $(command -v fjarr-connect)\n\
          or create the interface once, as root, and run unprivileged from then on:\n  \
          sudo ip tuntap add dev {name} mode tun user {}\n  \
          sudo ip addr add {address}/32 dev {name}\n  \

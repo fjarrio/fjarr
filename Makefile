@@ -308,7 +308,7 @@ connect-build: ## Build fjarr-connect --release and grant it CAP_NET_ADMIN the w
 	@# The same grant docs/27 describes for a real install: the capability lives on the client binary,
 	@# never on the agent, and never on the whole container's user. Without it the client can still
 	@# attach an interface somebody else created — it just cannot add the second robot's route.
-	@docker compose exec -T -u root dev setcap cap_net_admin+ep /workspace/signaling/target/release/fjarr-connect
+	@docker compose exec -T -u root dev setcap cap_net_admin+p /workspace/signaling/target/release/fjarr-connect
 	@docker compose exec -T dev getcap /workspace/signaling/target/release/fjarr-connect
 
 .PHONY: tunnel-isolation
@@ -336,9 +336,9 @@ connect-unprivileged: ## docs/27's promise that an existing, addressed interface
 	  docker compose exec -T -e FJARR_GRANT="$$grant" -e FJARR_LOG=warn dev \
 	    ./signaling/target/release/fjarr-connect $(OPSIM_ROBOT) --server $(OPSIM_SERVER) --dev $(TUN_DEV) -- docker/lab/tunnel-checks.sh ssh \
 	  || { echo "connect-unprivileged: FAIL — an addressed interface must not need CAP_NET_ADMIN to attach (docs/27#the-operator-client)"; \
-	       docker compose exec -T -u root dev setcap cap_net_admin+ep /workspace/signaling/target/release/fjarr-connect; exit 1; }
+	       docker compose exec -T -u root dev setcap cap_net_admin+p /workspace/signaling/target/release/fjarr-connect; exit 1; }
 	@# Put the capability back: every other lab target expects the installed shape.
-	@docker compose exec -T -u root dev setcap cap_net_admin+ep /workspace/signaling/target/release/fjarr-connect
+	@docker compose exec -T -u root dev setcap cap_net_admin+p /workspace/signaling/target/release/fjarr-connect
 	@echo "connect-unprivileged: PASS"
 
 .PHONY: connect-shell

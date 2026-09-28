@@ -229,8 +229,12 @@ It speaks the ordinary signaling and session protocol and uses **data
 channels only, no media**, which is why it needs no GStreamer and ships as
 one static binary ([ADR-0024](adr/0024-native-operator-client.md)). It
 requires `CAP_NET_ADMIN` to create its interface and add routes, granted by
-`setcap cap_net_admin+ep` at install or by running it under `sudo`, and uses no
-other privilege. Every such change is made **in the client's own process**, over
+`setcap cap_net_admin+p` at install or by running it under `sudo`, and uses no
+other privilege. The capability is **permitted, not effective**: `fjarr-connect`
+raises it itself, before its runtime starts and only for the link command, so
+`shell`, `login` and `list` never hold it. With `+ep`, the kernel refuses to run
+the binary at all wherever the capability is outside the bounding set (a
+container, CI), which the M2.5 install test found. Every such change is made **in the client's own process**, over
 netlink: a file capability is not inherited by a child process, so a client that
 shelled out to `ip` would work under `sudo` and fail under `setcap` with
 `Operation not permitted`. Doing it in-process also means the binary needs no

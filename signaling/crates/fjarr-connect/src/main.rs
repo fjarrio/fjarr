@@ -28,6 +28,7 @@ mod operator_api;
 mod peer;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod policy;
+mod privilege;
 mod shell;
 mod signaling;
 mod term;
@@ -155,9 +156,20 @@ struct ConnectArgs {
     command: Vec<String>,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let cli = Cli::parse();
+    // Only the link command raises CAP_NET_ADMIN, and before the runtime's worker threads exist,
+    // because capabilities are per thread and they inherit the main thread's (privilege.rs).
+    if cli.command.is_none() {
+        privilege::raise_net_admin();
+    }
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run(cli))
+}
+
+async fn run(cli: Cli) -> Result<()> {
     // A shell's screen is the robot's: progress lines would land in the middle of it, and a log line
     // written in raw mode has no carriage return. So `shell` logs nothing of its libraries' and only
     // this crate's errors, unless FJARR_LOG asks — webrtc-rs reports a TURN retry as an ERROR, which
