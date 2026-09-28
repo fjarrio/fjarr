@@ -208,7 +208,10 @@ with the image's uid so the `xhost` grant can name it.
   architecture in a throwaway builder container (`docker/deb-builder`) into
   `dist/deb/<arch>/`. `make deb-install-test` installs them on a clean Ubuntu
   26.04 and checks every promise in the table above
-  (`packaging/install-test.sh`). CI runs both on native amd64 and arm64 runners.
+  (`packaging/install-test.sh`). `make deb-embed-test` builds `demo-robot` out of
+tree against the installed `libfjarr-dev` alone (`find_package(fjarr)`), which
+is what a customer's CMake project does. CI runs all three on native amd64 and
+arm64 runners.
 - **The install script** (`get.fjarr.io`) only does what apt cannot do by
   itself. It detects Ubuntu 26.04 and the architecture, adds the key and the
   repository, installs `fjarr-agent` and runs `setup`. On anything else it

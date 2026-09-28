@@ -6,8 +6,10 @@ export DEBIAN_FRONTEND=noninteractive
 fail() { echo "FAIL: $*"; exit 1; }
 ok() { echo "ok   $*"; }
 apt-get update -qq >/dev/null
-cp /debs/*.deb /tmp/ && apt-get install -y -qq /tmp/*.deb >/tmp/apt.log 2>&1 || { tail -20 /tmp/apt.log; fail "apt could not install the packages"; }
-ok "apt installed: $(ls /debs/*.deb | xargs -n1 basename | tr '\n' ' ')"
+# What a robot installs: the runtime packages. libfjarr-dev is for an embedder's build machine and has
+# its own test (embed-test.sh); its GStreamer -dev dependencies bring FFmpeg's, which docs/14 records.
+cp /debs/fjarr-agent_*.deb /debs/fjarr-tools_*.deb /tmp/ && apt-get install -y -qq /tmp/*.deb >/tmp/apt.log 2>&1 || { tail -20 /tmp/apt.log; fail "apt could not install the packages"; }
+ok "apt installed: $(ls /tmp/*.deb | xargs -n1 basename | tr '\n' ' ')"
 
 # --help exits 2 by design (usage); what matters is that it ran, so match its first line.
 fjarr-agent --help 2>&1 | grep -q '^fjarr-agent \[' || fail "fjarr-agent does not run (a missing library?)"; ok "fjarr-agent runs"

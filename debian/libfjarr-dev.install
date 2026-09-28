@@ -1,0 +1,4 @@
+usr/include/fjarr
+usr/lib/*/libfjarr.a
+usr/lib/*/fjarr/
+usr/lib/*/cmake/fjarr/

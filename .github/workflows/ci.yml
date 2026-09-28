@@ -277,6 +277,8 @@ jobs:
         run: make deb DEB_ARCH=${{ matrix.arch }}
       - name: install them on a clean Ubuntu 26.04
         run: make deb-install-test DEB_ARCH=${{ matrix.arch }}
+      - name: embed libfjarr from the package (demo-robot out of tree)
+        run: make deb-embed-test DEB_ARCH=${{ matrix.arch }}
       - uses: actions/upload-artifact@v4
         with:
           name: debs-${{ matrix.arch }}

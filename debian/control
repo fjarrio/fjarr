@@ -24,6 +24,16 @@ Description: Fjarr agent: peer-to-peer connectivity for robots
  link, over WebRTC. Runs as its own unprivileged account. The service starts
  once /etc/fjarr/fjarr.toml exists; `fjarr-agent setup` writes it.
 
+Package: libfjarr-dev
+Section: libdevel
+Architecture: any
+Depends: ${misc:Depends}, pkgconf,
+ libgstreamer1.0-dev, libgstreamer-plugins-base1.0-dev, libgstreamer-plugins-bad1.0-dev,
+ libsoup-3.0-dev, libsystemd-dev, nlohmann-json3-dev, libtomlplusplus-dev
+Description: Fjarr robot library: static library, headers and CMake package
+ For robot software that embeds Fjarr: find_package(fjarr) and link
+ fjarr::fjarr. Static in 0.x, until the ABI is stable (docs/26).
+
 Package: fjarr-tools
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}, libcap2-bin

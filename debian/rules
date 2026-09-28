@@ -23,7 +23,7 @@ execute_before_dh_installsystemd:
 override_dh_auto_test:
 
 override_dh_auto_install:
-	dh_auto_install --destdir=debian/fjarr-agent
+	dh_auto_install --destdir=debian/tmp
 	@test -f web/apps/introspect-viewer/dist/index.html || { echo "the introspection viewer is not built: run make deb, which builds it first"; exit 1; }
 	mkdir -p debian/fjarr-agent/usr/share/fjarr/viewer
 	cp -a web/apps/introspect-viewer/dist/. debian/fjarr-agent/usr/share/fjarr/viewer/

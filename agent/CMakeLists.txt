@@ -1,6 +1,7 @@
 # libfjarr — the robot-side library (public headers = the docs/09 surface),
 # the fjarr-agent reference daemon, fjarr-opsim and the tests.
 # spec: docs/23-agent-core-architecture.md · docs/14-dependencies.md
+include(GNUInstallDirs)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GST REQUIRED IMPORTED_TARGET
   gstreamer-1.0>=1.24
@@ -68,7 +69,7 @@ add_library(fjarr STATIC
 )
 add_library(fjarr::fjarr ALIAS fjarr)
 target_include_directories(fjarr
-  PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(fjarr
   PUBLIC nlohmann_json::nlohmann_json PkgConfig::GST
@@ -96,6 +97,23 @@ if(FJARR_BUILD_TESTS)
   add_subdirectory(tests)
 endif()
 
-# What the packages install (docs/26#packages). libfjarr-dev's install rules come with its own slice.
-include(GNUInstallDirs)
+# What the packages install (docs/26#packages): fjarr-agent, and libfjarr-dev — the static library,
+# its headers and a CMake package. The json-schema-validator is a private dependency fetched at build
+# time with no Ubuntu package, so its archive travels in fjarr's own export set, kept in a private
+# directory rather than beside the system's libraries.
 install(TARGETS fjarr-agent RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS fjarr EXPORT fjarrTargets ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+# Its header is private to libfjarr (no embedder includes it); its PUBLIC_HEADER property names it
+# relative to its own directory, which does not resolve from here, so it is cleared, not installed.
+set_target_properties(nlohmann_json_schema_validator PROPERTIES PUBLIC_HEADER "")
+install(TARGETS nlohmann_json_schema_validator EXPORT fjarrTargets ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}/fjarr)
+install(DIRECTORY include/fjarr DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(EXPORT fjarrTargets NAMESPACE fjarr:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/fjarr)
+include(CMakePackageConfigHelpers)
+configure_package_config_file(cmake/fjarrConfig.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/fjarrConfig.cmake
+  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/fjarr)
+# 0.x: a minor release may break the API (docs/26#releases), so only the same minor is compatible.
+write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/fjarrConfigVersion.cmake
+  VERSION ${PROJECT_VERSION} COMPATIBILITY SameMinorVersion)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/fjarrConfig.cmake ${CMAKE_CURRENT_BINARY_DIR}/fjarrConfigVersion.cmake
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/fjarr)
