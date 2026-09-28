@@ -204,13 +204,13 @@ Rules for every command:
 ### `fjarr-agent setup`
 
 The first run, which the install script calls. It detects the machine (OS,
-architecture, hardware H.264 encode, display server, ROS if any, cameras via
+architecture, hardware H.264 encode, display server, cameras via
 `gst-device-monitor-1.0` matched against the catalog), then asks:
 
 ```text
 ┌  fjarr setup
 │
-◇  This device: Ubuntu 26.04 · amd64 · VA-API H.264 ✔ · GNOME on Wayland · ROS 2 Jazzy
+◇  This device: Ubuntu 26.04 · amd64 · VA-API H.264 ✔ · GNOME on Wayland
 │
 ◆  Where does it connect?
 │  ● Your own fjarr-server   ○ Fjarr Cloud
@@ -241,8 +241,12 @@ when a participant is created. `net setup` derives or takes the address, checks
 the range against existing routes, enables `fjarr.net` in the config, and
 installs `fjarr-net.service`: a oneshot that recreates the device **at every
 boot** (owned by `fjarr`, at the chunk MTU, before `fjarr-agent`), because a
-tun device does not survive a reboot. The ROS steps are **optional**. When no
-ROS is detected they are skipped, and each has an explicit "none":
+tun device does not survive a reboot.
+
+ROS and DDS are an **explicit question, never detected**. ROS often runs in a
+container, invisible from the host, so detection would answer "no" on exactly
+the machines that need the ordering. "No" skips the ordering and DDS steps
+(`--ros no`); "yes" asks which units start it and which DDS it uses:
 
 ```text
 ┌  fjarr net setup
@@ -250,10 +254,12 @@ ROS is detected they are skipped, and each has an explicit "none":
 ◇  Device id: dev-024 → tunnel address 100.70.118.224 (derived)
 ◇  Range 100.64.0.0/10 is free on this machine ✔
 │
-◆  Which services use ROS/DDS? They must start after the tunnel.
+◆  Does software on this machine use ROS 2 / DDS over the tunnel?
+│  ● Yes   ○ No
+│
+◆  Which services start it? They must start after the tunnel.
 │  ◼ bringup.service
-│  ◻ docker.service
-│  ○ None: nothing on this machine uses ROS/DDS
+│  ◼ docker.service   (ROS in containers: they start with the runtime)
 │
 ◆  Which DDS?
 │  ● Cyclone DDS (writes /etc/fjarr/cyclonedds.xml, LAN interface enp3s0)
@@ -266,6 +272,10 @@ ROS is detected they are skipped, and each has an explicit "none":
 
 The ordering is a systemd drop-in (`After=` and `Wants=fjarr-net.service`) per
 chosen unit, which is the ordering rule applied to the customer's own services.
+When ROS runs in containers, the unit to order is the container runtime
+(`docker.service`) or the unit that starts the compose stack, and the containers
+need host networking to see `fjarr0` (as in
+[containerized devices](#containerized-robots)).
 
 ### `fjarr-agent setup desktop`
 
