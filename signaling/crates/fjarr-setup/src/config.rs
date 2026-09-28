@@ -29,8 +29,7 @@ pub fn load(path: &Path) -> Result<DocumentMut> {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => bail!(
-            "{} does not exist: `fjarr-agent setup` writes it (until it exists in this version, copy \
-             /usr/share/fjarr/fjarr.toml.example there and set agent.robot_id and agent.server_url)",
+            "{} does not exist: `sudo fjarr-agent setup` writes it",
             path.display()
         ),
         Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
@@ -41,6 +40,111 @@ pub fn load(path: &Path) -> Result<DocumentMut> {
 
 pub fn save(path: &Path, doc: &DocumentMut) -> Result<()> {
     std::fs::write(path, doc.to_string()).with_context(|| format!("writing {}", path.display()))
+}
+
+/// A fresh /etc/fjarr/fjarr.toml, as `setup` writes it on a device that has none: plain, with the
+/// keys it asked for, and the viewer where the package put it (docs/24#the-viewer).
+pub fn new_document() -> DocumentMut {
+    "# Written by `fjarr-agent setup`. Edit freely: setup only touches the keys it asks about, and\n\
+     # keeps your comments and order. Reference: docs/23 (agent, media), docs/06 (per capability).\n\
+     \n\
+     [agent]\n\
+     \n\
+     [introspect]\n\
+     viewer_dir = \"/usr/share/fjarr/viewer\"   # installed by the fjarr-agent package (docs/24#the-viewer)\n"
+        .parse()
+        .expect("the template parses")
+}
+
+/// The agent's identity and server: the keys `agent/src/core/config.cpp` reads. Until M5's
+/// enrollment the device token is written here (docs/26#fjarr-agent-setup).
+pub fn set_agent(doc: &mut DocumentMut, robot_id: &str, server_url: &str, dev_token: &str) {
+    let agent = table_at(doc, &["agent"]);
+    replace_value(agent, "robot_id", Value::from(robot_id));
+    replace_value(agent, "server_url", Value::from(server_url));
+    replace_value(agent, "dev_token", Value::from(dev_token));
+}
+
+pub fn agent_values(doc: &DocumentMut) -> (Option<String>, Option<String>, Option<String>) {
+    let get = |k: &str| doc.get("agent")?.get(k)?.as_str().map(str::to_string);
+    (get("robot_id"), get("server_url"), get("dev_token"))
+}
+
+/// `media.encoder` (docs/23): the agent has no silent fallback, so a device without VA-API must
+/// say `software` or the service will not start.
+pub fn set_encoder(doc: &mut DocumentMut, encoder: &str) {
+    let media = table_at(doc, &["media"]);
+    replace_value(media, "encoder", Value::from(encoder));
+}
+
+#[cfg(test)]
+pub fn encoder(doc: &DocumentMut) -> Option<String> {
+    doc.get("media")?
+        .get("encoder")?
+        .as_str()
+        .map(str::to_string)
+}
+
+/// One camera track in docs/06's format:
+/// `[capabilities."fjarr.camera".tracks.<id>]` with `label` and an inline `source`.
+pub fn set_camera_track(
+    doc: &mut DocumentMut,
+    id: &str,
+    label: &str,
+    source: toml_edit::InlineTable,
+) {
+    let track = table_at(doc, &["capabilities", "fjarr.camera", "tracks", id]);
+    replace_value(track, "label", Value::from(label));
+    replace_value(track, "source", Value::InlineTable(source));
+}
+
+/// The v4l2 source (docs/06): the by-id name, and the mode when one was picked.
+pub fn v4l2_source(device: &str, mode: Option<(&str, u32, u32, u32)>) -> toml_edit::InlineTable {
+    let mut t = toml_edit::InlineTable::new();
+    t.insert("type", Value::from("v4l2"));
+    t.insert("device", Value::from(device));
+    if let Some((format, w, h, fps)) = mode {
+        t.insert("format", Value::from(format));
+        t.insert("width", Value::from(w as i64));
+        t.insert("height", Value::from(h as i64));
+        t.insert("fps", Value::from(fps as i64));
+    }
+    t
+}
+
+pub fn camera_track_ids(doc: &DocumentMut) -> Vec<String> {
+    doc.get("capabilities")
+        .and_then(|c| c.get("fjarr.camera"))
+        .and_then(|c| c.get("tracks"))
+        .and_then(Item::as_table)
+        .map(|t| t.iter().map(|(k, _)| k.to_string()).collect())
+        .unwrap_or_default()
+}
+
+/// `[capabilities."fjarr.terminal"]`: on, as `user` (docs/06: there is deliberately no default).
+pub fn set_terminal(doc: &mut DocumentMut, user: &str) {
+    let term = table_at(doc, &["capabilities", "fjarr.terminal"]);
+    replace_value(term, "enabled", Value::from(true));
+    replace_value(term, "user", Value::from(user));
+}
+
+/// The table at `path`, created on the way as header tables (implicit parents, so the file reads
+/// `[capabilities."fjarr.camera".tracks.front]` and not a trail of empty headers).
+fn table_at<'a>(doc: &'a mut DocumentMut, path: &[&str]) -> &'a mut Item {
+    let mut item: &mut Item = doc.as_item_mut();
+    for (i, key) in path.iter().enumerate() {
+        let t = item.as_table_mut().expect("a table on the path");
+        let child = t.entry(key).or_insert(Item::Table(Table::new()));
+        if i + 1 < path.len() {
+            if let Some(ct) = child.as_table_mut() {
+                if ct.is_empty() {
+                    ct.set_implicit(true);
+                }
+            }
+        }
+        item = child;
+    }
+    item
 }
 
 pub fn device_id(doc: &DocumentMut) -> Option<String> {
@@ -246,6 +350,78 @@ viewer_dir = "/usr/share/fjarr/viewer"
         let prev = set_net_value(&mut doc, "enabled", Value::from(true));
         restore_net_value(&mut doc, "enabled", prev.as_deref()).unwrap();
         assert_eq!(doc.to_string(), EXAMPLE, "a created table is pruned again");
+    }
+
+    #[test]
+    fn a_new_file_carries_the_agent_keys_the_encoder_a_track_and_the_terminal_in_docs_06s_shape() {
+        let mut doc = new_document();
+        set_agent(&mut doc, "dev-024", "wss://fleet.acme.com/ws", "t0k3n");
+        set_encoder(&mut doc, "software");
+        set_camera_track(
+            &mut doc,
+            "front",
+            "Logitech C920",
+            v4l2_source("usb-046d_C920-video-index0", Some(("mjpeg", 1280, 720, 30))),
+        );
+        set_camera_track(&mut doc, "rear", "Rear", v4l2_source("/dev/video2", None));
+        set_terminal(&mut doc, "operator");
+        let out = doc.to_string();
+        assert!(out.contains("[agent]\nrobot_id = \"dev-024\"\nserver_url = \"wss://fleet.acme.com/ws\"\ndev_token = \"t0k3n\"\n"), "{out}");
+        assert!(out.contains("[media]\nencoder = \"software\"\n"), "{out}");
+        assert!(
+            out.contains("[capabilities.\"fjarr.camera\".tracks.front]\nlabel = \"Logitech C920\"\nsource = { type = \"v4l2\", device = \"usb-046d_C920-video-index0\", format = \"mjpeg\", width = 1280, height = 720, fps = 30 }\n"),
+            "{out}"
+        );
+        assert!(out.contains("[capabilities.\"fjarr.camera\".tracks.rear]\nlabel = \"Rear\"\nsource = { type = \"v4l2\", device = \"/dev/video2\" }\n"), "{out}");
+        assert!(
+            out.contains(
+                "[capabilities.\"fjarr.terminal\"]\nenabled = true\nuser = \"operator\"\n"
+            ),
+            "{out}"
+        );
+        assert!(
+            !out.contains("[capabilities]\n") && !out.contains("[capabilities.\"fjarr.camera\"]\n"),
+            "no empty headers: {out}"
+        );
+        assert!(out.contains("viewer_dir = \"/usr/share/fjarr/viewer\""));
+        assert_eq!(camera_track_ids(&doc), vec!["front", "rear"]);
+        assert_eq!(
+            agent_values(&doc),
+            (
+                Some("dev-024".into()),
+                Some("wss://fleet.acme.com/ws".into()),
+                Some("t0k3n".into())
+            )
+        );
+        assert_eq!(encoder(&doc).as_deref(), Some("software"));
+        // What the agent parses: the same document, back through the parser.
+        let again: DocumentMut = out.parse().unwrap();
+        assert_eq!(again.to_string(), out);
+    }
+
+    #[test]
+    fn an_existing_file_is_edited_in_place_keeping_comments_order_and_the_customers_other_keys() {
+        let mut doc: DocumentMut = format!(
+            "{EXAMPLE}\n[capabilities.\"fjarr.camera\".tracks.arm]\nlabel = \"Arm\"   # keep me\nsource = \"videotestsrc\"\n"
+        )
+        .parse()
+        .unwrap();
+        set_agent(&mut doc, "spike", "ws://192.168.10.188:8080/ws", "tok");
+        set_camera_track(
+            &mut doc,
+            "front",
+            "Front",
+            v4l2_source("usb-x-video-index0", None),
+        );
+        let out = doc.to_string();
+        assert!(out.starts_with("# Example /etc/fjarr/fjarr.toml.\n[agent]\nrobot_id        = \"spike\"   # the device id\nserver_url      = \"ws://192.168.10.188:8080/ws\"\ndev_token = \"tok\"\n"), "{out}");
+        assert!(out.contains("label = \"Arm\"   # keep me\n"), "{out}");
+        assert!(
+            out.contains("[capabilities.\"fjarr.camera\".tracks.front]\n"),
+            "{out}"
+        );
+        assert_eq!(camera_track_ids(&doc), vec!["arm", "front"]);
+        assert!(out.contains("[introspect]\nviewer_dir"), "{out}");
     }
 
     #[test]

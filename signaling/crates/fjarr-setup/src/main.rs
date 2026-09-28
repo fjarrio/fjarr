@@ -1,6 +1,6 @@
-//! fjarr-setup — `fjarr-agent`'s installer commands, handed over unchanged: `net setup`, `net up`
-//! (run at boot by `fjarr-net.service`), `setup --undo <feature>`, and the places `setup`,
-//! `setup desktop` and `drivers` will go (docs/26#the-setup-tool).
+//! fjarr-setup — `fjarr-agent`'s installer commands, handed over unchanged: `setup` (the first
+//! run), `net setup`, `net up` (run at boot by `fjarr-net.service`), `setup --undo [<feature>]`,
+//! `drivers list|detect|install`, and the place `setup desktop` goes in M3 (docs/26#the-setup-tool).
 //!
 //! Rules every command keeps: every prompt has a flag, every change is recorded so `--undo` reverses
 //! exactly those, system changes are applied only on Ubuntu with apt, and each command ends with
@@ -13,9 +13,13 @@ use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 mod addressing;
+mod catalog;
 mod changes;
 mod config;
+mod detect;
+mod drivers;
 mod net;
+mod setup;
 mod system;
 mod ui;
 mod undo;
@@ -23,6 +27,7 @@ mod undo;
 pub const DEFAULT_CONFIG: &str = "/etc/fjarr/fjarr.toml";
 pub const DEFAULT_STATE: &str = "/var/lib/fjarr/setup-changes.json";
 pub const DEFAULT_PROFILE: &str = "/usr/share/fjarr/profile.toml";
+pub const DEFAULT_CATALOG: &str = "/usr/share/fjarr/catalog.toml";
 
 #[derive(Parser, Debug)]
 #[command(
@@ -40,33 +45,116 @@ pub struct Cli {
     /// The system profile (docs/26#the-system-profile).
     #[arg(long, global = true, default_value = DEFAULT_PROFILE, env = "FJARR_PROFILE", hide = true)]
     pub profile: PathBuf,
+    /// The driver catalog (docs/26#the-driver-catalog).
+    #[arg(long, global = true, default_value = DEFAULT_CATALOG, env = "FJARR_CATALOG", hide = true)]
+    pub catalog: PathBuf,
     #[command(subcommand)]
     pub command: Command,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// The first run (not built yet), and `--undo <feature>`.
+    /// The first run: server, device id and token, cameras, terminal; writes the configuration
+    /// and starts the agent. `--undo [<feature>]` reverses what was recorded.
     Setup(SetupArgs),
     /// The network tunnel's device (docs/27).
     Net {
         #[command(subcommand)]
         command: NetCommand,
     },
-    /// The driver catalog (not built yet).
+    /// The driver catalog against this device.
     Drivers {
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        rest: Vec<String>,
+        #[command(subcommand)]
+        command: DriversCommand,
     },
 }
 
-#[derive(Args, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum Encoder {
+    /// VA-API when the agent finds it; the agent refuses to start otherwise (no silent fallback).
+    Auto,
+    Vaapi,
+    /// openh264 on the CPU.
+    Software,
+}
+
+impl Encoder {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Encoder::Auto => "auto",
+            Encoder::Vaapi => "vaapi",
+            Encoder::Software => "software",
+        }
+    }
+}
+
+#[derive(Args, Debug, Default)]
 pub struct SetupArgs {
-    /// Reverse every change recorded for this feature: `net`.
-    #[arg(long, value_name = "FEATURE")]
+    /// `desktop` (M3). Alone: the first run.
+    #[arg(value_name = "WHAT")]
+    pub what: Option<String>,
+    /// Reverse every recorded change: of one feature (`setup`, `net`), or, bare, of all of them.
+    #[arg(long, value_name = "FEATURE", num_args = 0..=1, default_missing_value = "")]
     pub undo: Option<String>,
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-    pub rest: Vec<String>,
+    /// Accept every default (provisioning scripts); the values with no default still need their flags.
+    #[arg(long, short = 'y')]
+    pub yes: bool,
+    /// The server: your fjarr-server's ws:// or wss:// URL.
+    #[arg(long, value_name = "URL")]
+    pub server: Option<String>,
+    /// This device's id (default: the hostname).
+    #[arg(long, value_name = "ID")]
+    pub device_id: Option<String>,
+    /// The device token the server accepts (enrollment replaces it in M5). Also FJARR_DEVICE_TOKEN,
+    /// for scripts that keep it off the command line.
+    #[arg(
+        long,
+        value_name = "TOKEN",
+        env = "FJARR_DEVICE_TOKEN",
+        hide_env_values = true
+    )]
+    pub token: Option<String>,
+    /// Write the configuration without reaching the server first.
+    #[arg(long)]
+    pub offline: bool,
+    /// media.encoder (default: auto with hardware encode, else software).
+    #[arg(long, value_enum)]
+    pub encoder: Option<Encoder>,
+    /// Which detected cameras stream: `all`, `none`, or by-id names / /dev paths (comma-separated).
+    #[arg(long, value_delimiter = ',', value_name = "all|none|DEVICE,...")]
+    pub cameras: Option<Vec<String>>,
+    /// The account the terminal runs as, or `none` (there is no default: docs/06).
+    #[arg(long, value_name = "none|ACCOUNT")]
+    pub terminal: Option<String>,
+    /// Run `net setup` next.
+    #[arg(long, value_enum)]
+    pub net: Option<YesNo>,
+    /// For `--net yes`: see `net setup`.
+    #[arg(long, value_enum)]
+    pub ros: Option<YesNo>,
+    #[arg(long, value_delimiter = ',', value_name = "UNIT,...")]
+    pub ros_units: Option<Vec<String>>,
+    #[arg(long, value_enum)]
+    pub dds: Option<Dds>,
+    /// How long to wait for the agent's STATUS=online, in seconds.
+    #[arg(long, default_value_t = 30, value_name = "SECONDS")]
+    pub timeout: u64,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DriversCommand {
+    /// The catalog, with each entry's status on this device.
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Hardware currently attached, matched against the catalog.
+    Detect {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Install one entry and its prerequisites.
+    Install { name: String },
 }
 
 #[derive(Subcommand, Debug)]
@@ -134,15 +222,31 @@ fn main() {
 
 async fn run(cli: Cli) -> Result<i32> {
     match cli.command {
-        Command::Net { command: NetCommand::Setup(args) } => net::setup(&cli.config, &cli.state, &cli.profile, args).await,
-        Command::Net { command: NetCommand::Up } => net::up(&cli.config, &cli.profile).await.map(|_| 0),
-        Command::Setup(SetupArgs { undo: Some(feature), .. }) => undo::undo(&cli.config, &cli.state, &feature).await,
-        Command::Setup(_) => bail!(
-            "`fjarr-agent setup` (the first run) is not built in this version; write {} from \
-             /usr/share/fjarr/fjarr.toml.example, then `fjarr-agent net setup` (docs/26#the-setup-tool)",
-            cli.config.display()
-        ),
-        Command::Drivers { .. } => bail!("`fjarr-agent drivers` is not built in this version (docs/26#fjarr-agent-drivers)"),
+        Command::Net {
+            command: NetCommand::Setup(args),
+        } => net::setup(&cli.config, &cli.state, &cli.profile, args).await,
+        Command::Net {
+            command: NetCommand::Up,
+        } => net::up(&cli.config, &cli.profile).await.map(|_| 0),
+        Command::Setup(SetupArgs {
+            undo: Some(feature),
+            ..
+        }) => {
+            let feature = (!feature.is_empty()).then_some(feature);
+            undo::undo(&cli.config, &cli.state, feature.as_deref()).await
+        }
+        Command::Setup(args) => {
+            setup::setup(&cli.config, &cli.state, &cli.profile, &cli.catalog, args).await
+        }
+        Command::Drivers {
+            command: DriversCommand::List { json },
+        } => drivers::list(&cli.catalog, json),
+        Command::Drivers {
+            command: DriversCommand::Detect { json },
+        } => drivers::detect(&cli.catalog, json),
+        Command::Drivers {
+            command: DriversCommand::Install { name },
+        } => drivers::install(&cli.catalog, &name),
     }
 }
 

@@ -1,5 +1,5 @@
-//! `fjarr-agent setup --undo <feature>`: exactly the recorded changes, newest first
-//! (docs/26#the-setup-tool).
+//! `fjarr-agent setup --undo [<feature>]`: exactly the recorded changes, newest first; bare, every
+//! feature (docs/26#the-setup-tool).
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -8,14 +8,21 @@ use cliclack::log;
 use crate::changes::{Change, Record};
 use crate::{config, system};
 
-pub async fn undo(config_path: &Path, state: &Path, feature: &str) -> Result<i32> {
-    crate::require_root(&format!("setup --undo {feature}"))?;
-    cliclack::intro(format!("fjarr setup --undo {feature}"))?;
+pub async fn undo(config_path: &Path, state: &Path, feature: Option<&str>) -> Result<i32> {
+    let what = feature.unwrap_or("everything");
+    crate::require_root(&match feature {
+        Some(f) => format!("setup --undo {f}"),
+        None => "setup --undo".to_string(),
+    })?;
+    cliclack::intro(format!("fjarr setup --undo {what}"))?;
     let mut record = Record::load(state)?;
-    let changes = record.take(feature);
+    let changes = match feature {
+        Some(f) => record.take(f),
+        None => record.take_all(),
+    };
     if changes.is_empty() {
         cliclack::outro(format!(
-            "nothing recorded for {feature:?} in {}",
+            "nothing recorded for {what} in {}",
             state.display()
         ))?;
         return Ok(0);
@@ -33,6 +40,10 @@ pub async fn undo(config_path: &Path, state: &Path, feature: &str) -> Result<i32
             Change::UnitEnabled { unit } => {
                 system::systemctl(&["disable", "--now", &unit])?;
                 log::step(format!("unit {unit}: disabled and stopped"))?;
+            }
+            Change::UnitStarted { unit } => {
+                system::systemctl(&["stop", &unit])?;
+                log::step(format!("unit {unit}: stopped"))?;
             }
             Change::File { path, backup } => {
                 match backup {
@@ -70,6 +81,11 @@ pub async fn undo(config_path: &Path, state: &Path, feature: &str) -> Result<i32
                 key,
                 previous,
             } => {
+                // The file may already be gone: a bare undo that removed setup's own file first.
+                if !file.exists() {
+                    log::step(format!("{}: already removed", file.display()))?;
+                    continue;
+                }
                 let mut doc = config::load(&file)?;
                 config::restore_net_value(&mut doc, &key, previous.as_deref())?;
                 config::save(&file, &doc)?;
@@ -89,8 +105,20 @@ pub async fn undo(config_path: &Path, state: &Path, feature: &str) -> Result<i32
     if units_changed {
         system::systemctl(&["daemon-reload"])?;
     }
-    // The agent stops using what was undone on its next start; a running one restarts now.
-    system::restart_agent_if_running()?;
+    // The agent stops using what was undone on its next start; a running one restarts now (and
+    // stays down when its configuration is gone: the unit waits for the file).
+    if system::systemd_running() {
+        system::restart_agent_if_running()?;
+    }
+    // Setup's own file undone: there is nothing left for --check to verify, and the next step is
+    // the one --check would name anyway.
+    if !config_path.exists() {
+        cliclack::outro(format!(
+            "undone · {} is gone; `sudo fjarr-agent setup` writes it again",
+            config_path.display()
+        ))?;
+        return Ok(0);
+    }
     cliclack::outro("undone · fjarr-agent --check follows")?;
     crate::agent_check(config_path)
 }

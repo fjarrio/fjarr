@@ -224,7 +224,12 @@ promotion to `stable` without a rebuild.
 `--check`, the image from the `.deb`s, and the setup tool's first commands:
 `fjarr-agent net setup`, `net up` (`fjarr-net.service`) and `setup --undo net`
 ([docs/26](26-robot-install-and-drivers.md#fjarr-agent-net-setup)), proven on
-the spike machine across a reboot. Left: `setup` itself, `drivers`, the
+the spike machine across a reboot. Later the same day: `fjarr-agent setup`
+(the first run: detection, server, device id and token, cameras as tracks,
+terminal, the agent started and online, `--undo`) and `drivers list|detect|install`
+with the built-in catalog (`packaging/catalog.toml`), proven on the spike
+machine against the lab server and in the package install test
+([docs/26](26-robot-install-and-drivers.md#fjarr-agent-setup)). Left: the
 repository and signing, the install script, the reference compose file.
 **Moved to M3 (2026-09-28):** the desktop packages and `setup desktop`. They
 configure the session helper and backend M3 builds; in M2.5 they would set up

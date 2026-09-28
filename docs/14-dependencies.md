@@ -13,7 +13,7 @@ groups with comments.
 
 | Dependency | Version (Ubuntu 26.04 LTS, ADR-0022; re-verified in slice 2.9) | Purpose | License | Ships |
 |---|---|---|---|---|
-| GStreamer core + base/good/bad plugins | 1.28.2 | pipelines, RTP, WebRTC | LGPL-2.1 (dynamic) | yes |
+| GStreamer core + base/good/bad plugins | 1.28.2 | pipelines, RTP, WebRTC; `gstreamer1.0-plugins-base-apps` for `gst-device-monitor-1.0`, which `fjarr-agent setup` and `drivers detect` run to find cameras (docs/26), a package dependency since 2026-09-28 | LGPL-2.1 (dynamic) | yes |
 | `libx265` (pulled by Ubuntu's `gstreamer1.0-plugins-bad` for its `x265enc`) | 26.04 | **nothing**: present on disk, never loaded by the agent. `x265enc` is an encoder, encoders are never autoplugged, and the agent's encoder is explicit (VA-API, openh264). Recorded 2026-09-28, when the image's GPL guard was sharpened | GPL-2.0 | present, not a dependency: the rule (ADR-0011) is about what enters the agent's process. The image guard fails on `x264enc`, `avdec_*`, `libx264` and `libxvidcore` instead, which are what decodebin or a GPL encoder would load |
 | `gstreamer1.0-nice` (libnice) | 0.1.23 | ICE for webrtcbin | LGPL-2.1/MPL | yes |
 | `gstreamer1.0-pipewire` | 1.6.2 | Wayland capture (`pipewiresrc`) | MIT | yes |

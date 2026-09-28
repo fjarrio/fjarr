@@ -25,6 +25,235 @@ pub fn ubuntu_with_apt() -> bool {
     (ids.contains("ubuntu") || ids.contains("debian")) && Path::new("/usr/bin/apt-get").exists()
 }
 
+/// Is systemd the init here? In a container it is not, and the agent has to be started by hand.
+pub fn systemd_running() -> bool {
+    Path::new("/run/systemd/system").is_dir()
+}
+
+pub fn gid_of(group: &str) -> Result<libc::gid_t> {
+    let c = std::ffi::CString::new(group)?;
+    // SAFETY: getgrnam takes a valid C string; the result is read before any other call touches it.
+    let gr = unsafe { libc::getgrnam(c.as_ptr()) };
+    if gr.is_null() {
+        bail!("no group {group:?}: the fjarr-agent package's sysusers entry creates it (sudo systemd-sysusers)");
+    }
+    Ok(unsafe { (*gr).gr_gid })
+}
+
+/// `chown user:group` and `chmod mode`: the configuration is root's, readable by the agent's group
+/// and nobody else, because it carries the device token (docs/26#fjarr-agent-setup).
+pub fn set_owner_mode(path: &Path, user: &str, group: &str, mode: u32) -> Result<()> {
+    let uid = uid_of(user)?;
+    let gid = gid_of(group)?;
+    let c = std::ffi::CString::new(path.to_string_lossy().as_bytes())?;
+    // SAFETY: a valid path.
+    if unsafe { libc::chown(c.as_ptr(), uid, gid) } != 0 {
+        return Err(std::io::Error::last_os_error())
+            .with_context(|| format!("chown {} to {user}:{group}", path.display()));
+    }
+    std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(mode))
+        .with_context(|| format!("chmod {mode:o} {}", path.display()))
+}
+
+/// The accounts a person could hold a terminal as: ordinary users with a login shell.
+pub fn human_accounts() -> Vec<String> {
+    std::fs::read_to_string("/etc/passwd")
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split(':').collect();
+            let uid: u32 = f.get(2)?.parse().ok()?;
+            let shell = f.get(6)?;
+            ((1000..60000).contains(&uid)
+                && !shell.ends_with("nologin")
+                && !shell.ends_with("/false"))
+            .then(|| f[0].to_string())
+        })
+        .collect()
+}
+
+/// Is the package installed (dpkg's view; the only package manager the tool acts through)?
+pub fn dpkg_installed(package: &str) -> bool {
+    Command::new("dpkg-query")
+        .args(["-W", "-f", "${db:Status-Status}", package])
+        .output()
+        .map(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).trim() == "installed")
+        .unwrap_or(false)
+}
+
+pub fn unit_enabled(unit: &str) -> bool {
+    systemctl_output(&["is-enabled", unit])
+        .map(|s| s.trim() == "enabled")
+        .unwrap_or(false)
+}
+
+pub fn unit_active(unit: &str) -> bool {
+    systemctl_output(&["is-active", unit])
+        .map(|s| s.trim() == "active")
+        .unwrap_or(false)
+}
+
+/// The agent's `STATUS=` line and state, as `systemctl status` shows them (ADR-0019 addendum).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentState {
+    pub active: String,
+    pub sub: String,
+    pub status: String,
+    pub restarts: u64,
+}
+
+pub fn agent_state() -> AgentState {
+    let out = systemctl_output(&[
+        "show",
+        "-p",
+        "ActiveState",
+        "-p",
+        "SubState",
+        "-p",
+        "StatusText",
+        "-p",
+        "NRestarts",
+        "fjarr-agent.service",
+    ])
+    .unwrap_or_default();
+    let mut st = AgentState::default();
+    for l in out.lines() {
+        match l.split_once('=') {
+            Some(("ActiveState", v)) => st.active = v.to_string(),
+            Some(("SubState", v)) => st.sub = v.to_string(),
+            Some(("StatusText", v)) => st.status = v.to_string(),
+            Some(("NRestarts", v)) => st.restarts = v.parse().unwrap_or(0),
+            _ => {}
+        }
+    }
+    st
+}
+
+/// Wait for `STATUS=online` (ADR-0019, second addendum): the agent's own word that the server
+/// took its token. A restart or a failed unit in the meantime is an answer too: the journal's
+/// reason, with the fix.
+pub fn wait_for_agent_online(timeout: std::time::Duration) -> Result<()> {
+    let start = std::time::Instant::now();
+    let restarts_before = agent_state().restarts;
+    let mut last = String::new();
+    loop {
+        let st = agent_state();
+        if st.status == "online" {
+            return Ok(());
+        }
+        if st.active == "failed" || st.restarts > restarts_before {
+            bail!(
+                "fjarr-agent {}{}: {}",
+                if st.active == "failed" {
+                    "failed"
+                } else {
+                    "restarted"
+                },
+                if st.status.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", st.status)
+                },
+                journal_reason()
+            );
+        }
+        if st.status != last && !st.status.is_empty() {
+            cliclack::log::step(format!("fjarr-agent: {}", st.status))?;
+            last = st.status.clone();
+        }
+        if start.elapsed() >= timeout {
+            bail!(
+                "fjarr-agent is not online after {} s (last status: {}); the configuration is written and the \
+                 agent keeps trying. Check the server URL and the device token: journalctl -u fjarr-agent.service",
+                timeout.as_secs(),
+                if st.status.is_empty() { st.active.as_str() } else { st.status.as_str() }
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
+/// The agent's last error line, for a start that did not stay up.
+fn journal_reason() -> String {
+    let out = Command::new("journalctl")
+        .args([
+            "-u",
+            "fjarr-agent.service",
+            "-n",
+            "40",
+            "-o",
+            "cat",
+            "--no-pager",
+        ])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    out.lines()
+        .rev()
+        .find(|l| l.contains("ERROR") || l.contains("fjarr-agent:") || l.contains("auth failed"))
+        .map(|l| l.trim().to_string())
+        .unwrap_or_else(|| "see journalctl -u fjarr-agent.service".to_string())
+}
+
+/// The host and port a `ws://` or `wss://` URL names, for the reachability check.
+pub fn ws_host_port(url: &str) -> Result<(String, u16)> {
+    let (scheme, rest) = url
+        .split_once("://")
+        .ok_or_else(|| anyhow::anyhow!("{url:?} is not a ws:// or wss:// URL"))?;
+    let default_port = match scheme {
+        "ws" => 80,
+        "wss" => 443,
+        _ => bail!("{url:?} is not a ws:// or wss:// URL"),
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let authority = authority.rsplit('@').next().unwrap_or(authority);
+    if authority.is_empty() {
+        bail!("{url:?} names no host");
+    }
+    // [v6]:port, host:port, or host.
+    if let Some(v6) = authority.strip_prefix('[') {
+        let (host, port) = v6
+            .split_once(']')
+            .ok_or_else(|| anyhow::anyhow!("{url:?}: unclosed [ in the host"))?;
+        let port = port
+            .strip_prefix(':')
+            .map(|p| p.parse::<u16>())
+            .transpose()?
+            .unwrap_or(default_port);
+        return Ok((host.to_string(), port));
+    }
+    match authority.rsplit_once(':') {
+        Some((host, port)) => Ok((
+            host.to_string(),
+            port.parse()
+                .with_context(|| format!("{url:?}: port {port:?}"))?,
+        )),
+        None => Ok((authority.to_string(), default_port)),
+    }
+}
+
+/// Can this device open a TCP connection to the server right now? Not the WebSocket handshake:
+/// the agent does that, and reports it as STATUS=. This catches the typo and the closed port
+/// before anything is written.
+pub fn tcp_reachable(host: &str, port: u16, timeout: std::time::Duration) -> Result<()> {
+    use std::net::ToSocketAddrs;
+    let addrs: Vec<_> = (host, port)
+        .to_socket_addrs()
+        .with_context(|| format!("resolving {host}"))?
+        .collect();
+    let mut last = None;
+    for a in addrs {
+        match std::net::TcpStream::connect_timeout(&a, timeout) {
+            Ok(_) => return Ok(()),
+            Err(e) => last = Some(e),
+        }
+    }
+    match last {
+        Some(e) => Err(e).with_context(|| format!("connecting to {host}:{port}")),
+        None => bail!("{host} resolves to no address"),
+    }
+}
+
 pub fn uid_of(user: &str) -> Result<libc::uid_t> {
     let c = std::ffi::CString::new(user)?;
     // SAFETY: getpwnam takes a valid C string; the result is read before any other call touches it.
@@ -69,6 +298,11 @@ pub fn systemctl(args: &[&str]) -> Result<()> {
 /// (no credential yet, a server it cannot reach) is the agent's to report, not this command's:
 /// the closing `--check` still runs, and the journal has the reason.
 pub fn restart_agent_if_running() -> Result<()> {
+    // A start-rate limit left by an earlier failure (a wrong token restarts the agent until systemd
+    // gives up) would make this restart fail for a reason that is already gone.
+    let _ = Command::new("systemctl")
+        .args(["reset-failed", "fjarr-agent.service"])
+        .status();
     let status = Command::new("systemctl")
         .args(["try-restart", "fjarr-agent.service"])
         .status()
@@ -211,6 +445,37 @@ mod tests {
             prefix,
             oif: Some(oif.into()),
         }
+    }
+
+    #[test]
+    fn a_ws_url_yields_its_host_and_port_with_the_schemes_default() {
+        assert_eq!(
+            ws_host_port("ws://192.168.10.188:8080/ws").unwrap(),
+            ("192.168.10.188".into(), 8080)
+        );
+        assert_eq!(
+            ws_host_port("wss://fleet.acme.com/ws").unwrap(),
+            ("fleet.acme.com".into(), 443)
+        );
+        assert_eq!(
+            ws_host_port("ws://fjarr-server/ws?x=1").unwrap(),
+            ("fjarr-server".into(), 80)
+        );
+        assert_eq!(
+            ws_host_port("wss://[::1]:9443/ws").unwrap(),
+            ("::1".into(), 9443)
+        );
+        assert!(ws_host_port("https://fleet.acme.com").is_err());
+        assert!(ws_host_port("ws://").is_err());
+    }
+
+    #[test]
+    fn an_unreachable_port_is_reported_not_hung() {
+        // Port 9 (discard) is closed on every lab machine; the check fails fast and names it.
+        let e = tcp_reachable("127.0.0.1", 9, std::time::Duration::from_secs(2))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("127.0.0.1:9"), "{e}");
     }
 
     #[test]

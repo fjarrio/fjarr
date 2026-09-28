@@ -6,9 +6,9 @@
 //! is the one-time part: the address, the config, the unit, and the customer's own units ordered
 //! after it when they use ROS.
 use std::net::Ipv4Addr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use cliclack::log;
 
 use crate::changes::{Change, Record};
@@ -18,8 +18,6 @@ pub const FEATURE: &str = "net";
 pub const UNIT: &str = "fjarr-net.service";
 pub const AGENT_UNIT: &str = "fjarr-agent.service";
 pub const CYCLONE_FILE: &str = "/etc/fjarr/cyclonedds.xml";
-/// Where a replaced file's previous contents are kept for `--undo`.
-const BACKUPS: &str = "/var/lib/fjarr/setup-backups";
 
 /// The device's owner: the agent's account, from the profile's `[net] owner` (docs/26#the-system-profile).
 fn owner(profile: &Path) -> String {
@@ -107,36 +105,9 @@ pub fn cyclone_xml(tunnel: &str, lan: &str, self_addr: Ipv4Addr, operator: Ipv4A
     )
 }
 
-/// Write `path`, keeping what was there for `--undo`, and record it.
+/// Write `path`, keeping what was there for `--undo`, and record it under this feature.
 fn write_recorded(record: &mut Record, path: &Path, contents: &str) -> Result<()> {
-    let backup = match std::fs::read(path) {
-        Ok(old) => {
-            let name = path
-                .to_string_lossy()
-                .trim_start_matches('/')
-                .replace('/', "%");
-            let b = PathBuf::from(BACKUPS).join(name);
-            std::fs::create_dir_all(BACKUPS)?;
-            std::fs::write(&b, old)
-                .with_context(|| format!("keeping a copy of {}", path.display()))?;
-            Some(b)
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
-    };
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    std::fs::write(path, contents).with_context(|| format!("writing {}", path.display()))?;
-    // The first run's backup is the one that matters (changes.rs), so this is a no-op on a rerun.
-    record.add(
-        FEATURE,
-        Change::File {
-            path: path.to_path_buf(),
-            backup,
-        },
-    );
-    Ok(())
+    record.write_file(FEATURE, path, contents, Path::new(crate::changes::BACKUPS))
 }
 
 /// What `net setup` would do, for a system it does not change (docs/26#the-setup-tool).
@@ -279,6 +250,8 @@ pub async fn setup(
             "Which services start it? They must start after the tunnel.",
             "--ros-units a.service,b.service",
             args.ros_units,
+            false,
+            &[],
             &choices,
         )?;
         for u in &ros_units {

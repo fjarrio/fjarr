@@ -1,0 +1,30 @@
+# The driver catalog (docs/26#the-driver-catalog): the single source `fjarr-agent setup` and
+# `fjarr-agent drivers` read. Installed as /usr/share/fjarr/catalog.toml and versioned with the agent.
+#
+# Per entry: `title`; `builtin = true` for a source type compiled into fjarr-agent (`source` is its
+# `type` in fjarr.toml); otherwise `package` (the .deb that brings it) and `arch` (where that package
+# exists). `element` is what the doctor checks, `matches` is how `setup` and `drivers detect`
+# recognise attached hardware (`usb = "vvvv:pppp"` with a trailing `*`, or `api = "v4l2"` as
+# gst-device-monitor-1.0 reports it). `requires_manual`, `prereqs`, `post_install` and `docs` carry
+# the human steps for anything behind a EULA. Vendor entries and their packages are M3, chosen by
+# the design partner's hardware; adding one is a catalog entry plus a plugin package, never a change
+# to fjarr-agent.
+
+[test]
+title   = "Test pattern (videotestsrc)"
+builtin = true
+source  = "test"
+element = "videotestsrc"
+
+[v4l2]
+title   = "V4L2 cameras (USB webcams, UVC, CSI through the kernel)"
+builtin = true
+source  = "v4l2"
+element = "v4l2src"
+matches = [{ api = "v4l2" }]
+
+[rtsp]
+title   = "RTSP network cameras (H.264 passthrough or decoded)"
+builtin = true
+source  = "rtsp"
+element = "rtspsrc"

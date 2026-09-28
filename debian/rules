@@ -37,6 +37,8 @@ override_dh_auto_install:
 	@# Not under /usr/share/doc: Ubuntu's minimal and container images drop that path at install.
 	install -D -m 0644 packaging/fjarr.toml.example debian/fjarr-agent/usr/share/fjarr/fjarr.toml.example
 	install -D -m 0644 packaging/profile.toml debian/fjarr-agent/usr/share/fjarr/profile.toml
+	@# The driver catalog `setup` and `drivers` read (docs/26#the-driver-catalog).
+	install -D -m 0644 packaging/catalog.toml debian/fjarr-agent/usr/share/fjarr/catalog.toml
 	install -D -m 0755 signaling/target/release/fjarr-connect debian/fjarr-tools/usr/bin/fjarr-connect
 	@# The setup tool, handed `setup`, `net` and `drivers` by fjarr-agent (docs/26#the-setup-tool).
 	install -D -m 0755 signaling/target/release/fjarr-setup debian/fjarr-agent/usr/lib/fjarr/fjarr-setup

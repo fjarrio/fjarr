@@ -99,10 +99,23 @@ prerequisite and the catalog carries the human steps.
 
 ## The driver catalog
 
-`share/fjarr/drivers.toml` (also published at `https://fjarr.io/drivers/`
-and versioned with the agent) is the single source the tools read:
+`packaging/catalog.toml` in the repository, installed as
+`/usr/share/fjarr/catalog.toml` (also published at `https://fjarr.io/drivers/`
+later, and versioned with the agent), is the single source the tools read.
+**Shipped 2026-09-28 with the built-in entries only**: `test`, `v4l2` and
+`rtsp`, each `builtin = true` with `source` naming its `type` in `fjarr.toml`
+and `element` what the doctor checks. Vendor entries and their packages are
+M3, chosen by the design partner's hardware; the desktop entries come with the
+desktop packages (M3). The shape, with the vendor entries as they will look:
 
 ```toml
+[v4l2]
+title   = "V4L2 cameras (USB webcams, UVC, CSI through the kernel)"
+builtin = true
+source  = "v4l2"
+element = "v4l2src"
+matches = [{ api = "v4l2" }]                                 # gst-device-monitor's device.api
+
 [realsense]
 title       = "Intel RealSense (D4xx, L5xx)"
 package     = "fjarr-gst-realsense"
@@ -135,7 +148,11 @@ matches  = [{ display = "wayland" }]
 
 The `matches` rules are what `setup` uses to *detect* hardware; `element`
 is what the doctor checks; `arch` is why the tool can say "not available
-on this machine" instead of failing an install.
+on this machine" instead of failing an install. A `usb` rule is a `vvvv:pppp`
+id with an optional trailing `*`; it beats an `api` rule for the same device
+(a RealSense is a v4l2 device too, and the vendor entry is the one that brings
+its depth stream). The tool reads the file's order and nothing else: adding a
+vendor is an entry plus a plugin package.
 
 ## The commands
 
@@ -150,7 +167,7 @@ on this machine" instead of failing an install.
 | `fjarr-agent net setup` | the tunnel's one-time setup: address, `fjarr-net.service` recreating the device at every boot, optional ROS ordering and DDS file ([below](#fjarr-agent-net-setup), [docs/27](27-network-tunnel.md)) |
 
 | `fjarr-agent setup desktop` | makes a desktop robot reachable unattended ([ADR-0006](adr/0006-desktop-backend-selection.md)): chooses or creates the auto-login account (no password, no remote login), enables auto-login, the GDM watchdog and the session helper's user unit; for X11 kiosks the output layout; for headless robots, on request, a forced connector with an EDID on the kernel command line |
-| `fjarr-agent setup --undo <feature>` | reverses every change `setup` recorded for that feature (GDM, GRUB, accounts, units) |
+| `fjarr-agent setup --undo [<feature>]` | reverses every change `setup` recorded for that feature (`setup`, `net`; later `desktop`: GDM, GRUB, accounts, units); bare, every feature, newest change first |
 
 `setup` never guesses silently: every proposed track and every install
 is shown and confirmed (`--yes` for provisioning scripts), and the result
@@ -203,9 +220,11 @@ Rules for every command:
 
 **Built 2026-09-28:** `net setup`, `net up` and `setup --undo net`
 (`signaling/crates/fjarr-setup`), shipped in `fjarr-agent` with
-`fjarr-net.service`, and proven on the spike machine. `setup` (the first run),
-`setup desktop` and `drivers` say so and exit non-zero until they exist; until
-then the config is written by hand from `/usr/share/fjarr/fjarr.toml.example`.
+`fjarr-net.service`, and proven on the spike machine; then, the same day,
+`setup` (the first run, [below](#fjarr-agent-setup)), `drivers list|detect|install`
+with the built-in catalog ([below](#fjarr-agent-drivers)) and the bare
+`setup --undo`, proven on the spike machine against the lab server and in the
+package install test. `setup desktop` says so and exits non-zero until M3.
 `fjarr-connect` still prompts with dialoguer; its move to cliclack is owed
 (docs/14).
 
@@ -245,6 +264,74 @@ Until M5 builds enrollment ([docs/17](17-roadmap.md), [docs/10](10-security.md))
 `setup` asks for the **device token** the server accepts today and writes it
 to the configuration. The prompt becomes a one-time enrollment token, redeemed
 for the per-device key, when M5 lands. The flow around it does not change.
+The "Fjarr Cloud" choice joins the server prompt with M7; today the prompt is
+the server URL. Installing a vendor driver from this flow is M3 with the first
+vendor entry: a detected camera that needs one is shown with its entry and left
+unchecked.
+
+What it does, in order, as built 2026-09-28 (`fjarr-setup`'s `setup.rs`):
+
+1. **Detects**: OS and architecture (os-release), hardware H.264 encode (the
+   line `fjarr-agent --check` prints, so the encoder the agent will probe is
+   the one reported), the graphical session (`loginctl`), and the cameras
+   (`gst-device-monitor-1.0 Video/Source`, matched against the
+   [catalog](#the-driver-catalog) by udev usb id and `device.api`).
+2. **Asks** the server URL, the device id (default: the hostname, or the
+   existing config's), and the device token (a password prompt; an existing
+   token is offered to keep). Before anything is written it opens a TCP
+   connection to the server's host and port: a typo or a closed port fails
+   here, with nothing changed, and `--offline` skips the check for a device
+   provisioned before its uplink exists (offline is a normal state,
+   [ADR-0019](adr/0019-agent-process-model.md) addendum; a first run that
+   cannot be checked is not a finished setup, so it is said, not assumed).
+3. **Decides the encoder** with the agent's answer: `auto` with hardware
+   encode; otherwise `software`, confirmed, because the agent has no silent
+   fallback and would refuse to start ([docs/23](23-agent-core-architecture.md)).
+4. **Proposes one track per camera** that a built-in source serves, pre-selected;
+   the id is a slug of the camera's name (unique among the file's tracks), the
+   label its name, the source `{ type = "v4l2", device = <by-id name> }` with
+   the mode picked as MJPEG 1280×720@30 when the camera has it, else the
+   largest MJPEG mode up to 1080p at ≥ 15 fps, else the largest raw mode
+   ([docs/06](06-capabilities.md#fjarrcamera--camera-video-m1-reference-implementation)'s format; editable).
+5. **Asks the terminal's account**, with no default ([docs/06](06-capabilities.md#fjarrterminal--remote-terminal-m2)):
+   the agent's own account works now; another account is written as chosen,
+   with the warning that the terminal reports `unavailable` until the agent
+   runs as it. `--yes` without `--terminal` configures none.
+6. **Writes `/etc/fjarr/fjarr.toml`**, `0640 root:fjarr`: created plain when
+   absent, edited in place when present (comments, order and the customer's
+   other keys kept; a track with the same id is replaced). The whole file is
+   recorded, with its previous contents beside the record, so `--undo` puts
+   back exactly what was there.
+7. **Starts the agent** (`systemctl restart fjarr-agent.service`; enabled by
+   the package, enabled here if it was not) and waits for its `STATUS=online`
+   ([ADR-0019](adr/0019-agent-process-model.md), second addendum; `--timeout`,
+   30 s) — the server's acceptance of the token is the agent's own word, not a
+   second handshake in the tool. A failed or restarted unit ends the wait with
+   the journal's reason; a timeout says the configuration stays and the agent
+   keeps trying. Without systemd (a container) the agent is not started and
+   the tool says how to run it.
+8. **Ends with `--check`**, or hands over to `net setup` when the tunnel was
+   chosen (`--net yes`, with `--ros`, `--ros-units`, `--dds` passed through).
+
+The flags, one per prompt: `--yes`, `--server`, `--device-id`, `--token` (or
+`FJARR_DEVICE_TOKEN`, for scripts that keep it off the command line),
+`--offline`, `--encoder auto|vaapi|software`, `--cameras all|none|<device,…>`
+(by-id names or `/dev` paths, as `drivers detect` lists them), `--terminal
+none|<account>`, `--net yes|no`, `--timeout`. What it leaves on the device,
+recorded for `--undo`:
+
+| Where | What |
+|---|---|
+| `/etc/fjarr/fjarr.toml` | `agent.robot_id`, `agent.server_url`, `agent.dev_token`, `media.encoder`, one `capabilities."fjarr.camera".tracks.<id>` per chosen camera, `capabilities."fjarr.terminal"` when an account was chosen; `0640 root:fjarr` |
+| `/var/lib/fjarr` | created `0700 fjarr` when the service has not run yet |
+| `fjarr-agent.service` | started; recorded as enabled only when the package had not already enabled it, as started only when it was not running |
+| `/var/lib/fjarr/setup-changes.json` | the record, feature `setup`; the file's previous contents under `setup-backups/` |
+
+The package install test (`packaging/install-test.sh`) runs the scripted form
+on a clean Ubuntu 26.04 without systemd and a server: the first run fails
+before writing anything and names `--offline`; `--offline` writes the file the
+agent's `--check` then passes on; `--undo` removes it and the check names
+`setup` again.
 
 ### `fjarr-agent net setup`
 
@@ -355,19 +442,31 @@ Mostly output, for people and scripts alike (`--json`):
 ```text
 $ fjarr-agent drivers list
   NAME        STATUS          PACKAGE              NOTE
-  v4l2        built in        —
+  v4l2        built in        —                    source = { type = "v4l2", … } in fjarr.toml (docs/06)
   realsense   available       fjarr-gst-realsense  needs Intel's apt repository (added for you)
   zed         needs manual    fjarr-gst-zed        SDK behind a EULA: see the link
-  jetson-csi  not for amd64   fjarr-gst-argus
+  jetson-csi  not for amd64   fjarr-gst-argus      available on arm64
 
 $ fjarr-agent drivers detect
-  /dev/video0     Logitech C920         → v4l2 (built in)
-  usb 8086:0b07   Intel RealSense D435  → realsense (not installed)
+  /dev/video0      Logitech C920                    → v4l2 (built in)  mjpeg 1280×720@30
+  usb 8086:0b07    Intel RealSense D435             → realsense (available)
 ```
 
-`sudo fjarr-agent drivers install realsense` shows the prerequisites, asks
-before adding a vendor repository, installs, reloads udev, and finishes with a
-`--probe-source` of the device it found.
+The status per entry is `built in`, `installed` (dpkg's view of the package),
+`available`, `not for <arch>` or `needs manual`, in that precedence; `--json`
+gives `{ "arch", "catalog", "drivers": [ { name, title, status, package,
+element, note, docs } ] }` for `list` and `{ "arch", "devices": [ { name,
+path, api, usb_id, serial, modes, stable_name, driver, status } ] }` for
+`detect`, where `stable_name` is the by-id name a `v4l2` source takes and
+`modes` the caps the monitor reported. Neither needs root. `detect` without
+`gst-device-monitor-1.0` is an error naming `gstreamer1.0-plugins-base-apps`,
+which the `fjarr-agent` package depends on for exactly this.
+
+`fjarr-agent drivers install v4l2` says the entry is built in and exits 0.
+`sudo fjarr-agent drivers install realsense` will show the prerequisites, ask
+before adding a vendor repository, install, reload udev, and finish with a
+`--probe-source` of the device it found — with the first vendor entry, M3;
+until then it says so and exits non-zero.
 
 ## Containerized robots {#containerized-robots}
 

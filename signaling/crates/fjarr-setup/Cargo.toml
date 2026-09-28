@@ -1,6 +1,6 @@
 [package]
 name = "fjarr-setup"
-description = "fjarr-agent's setup commands: net setup, net up, and undo (docs/26#the-setup-tool)"
+description = "fjarr-agent's setup commands: setup, net setup, net up, drivers, and undo (docs/26#the-setup-tool)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

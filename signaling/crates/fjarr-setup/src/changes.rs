@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+/// Where a replaced file's previous contents are kept for `--undo`.
+pub const BACKUPS: &str = "/var/lib/fjarr/setup-backups";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Change {
@@ -16,6 +19,8 @@ pub enum Change {
     },
     /// A unit enabled with `systemctl enable`.
     UnitEnabled { unit: String },
+    /// A unit started (one the package had already enabled): undone with `systemctl stop`.
+    UnitStarted { unit: String },
     /// A tun device created.
     Device { name: String },
     /// One key of `capabilities."fjarr.net"` in the configuration set; `previous` is its former
@@ -91,6 +96,65 @@ impl Record {
             self.changes.drain(..).partition(|e| e.feature == feature);
         self.changes = rest;
         mine.into_iter().rev().map(|e| e.change).collect()
+    }
+
+    /// Every feature's changes, newest first: a bare `setup --undo`.
+    pub fn take_all(&mut self) -> Vec<Change> {
+        self.changes.drain(..).rev().map(|e| e.change).collect()
+    }
+
+    #[cfg(test)]
+    pub fn features(&self) -> Vec<String> {
+        let mut f: Vec<String> = Vec::new();
+        for e in &self.changes {
+            if !f.contains(&e.feature) {
+                f.push(e.feature.clone());
+            }
+        }
+        f
+    }
+
+    /// Write `path`, keeping what was there under `backups` for `--undo`, and record it. On a
+    /// rerun the first run's backup is the one kept, on disk as in the record (see `add`): the
+    /// second run must not replace the customer's file with the first run's output.
+    pub fn write_file(
+        &mut self,
+        feature: &str,
+        path: &Path,
+        contents: &str,
+        backups: &Path,
+    ) -> Result<()> {
+        let already = self.changes.iter().any(|e| {
+            e.feature == feature && matches!(&e.change, Change::File { path: p, .. } if p == path)
+        });
+        let backup = match std::fs::read(path) {
+            Ok(_) if already => None,
+            Ok(old) => {
+                let name = path
+                    .to_string_lossy()
+                    .trim_start_matches('/')
+                    .replace('/', "%");
+                let b = backups.join(name);
+                std::fs::create_dir_all(backups)?;
+                std::fs::write(&b, old)
+                    .with_context(|| format!("keeping a copy of {}", path.display()))?;
+                Some(b)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+        };
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(path, contents).with_context(|| format!("writing {}", path.display()))?;
+        self.add(
+            feature,
+            Change::File {
+                path: path.to_path_buf(),
+                backup,
+            },
+        );
+        Ok(())
     }
 }
 
@@ -179,6 +243,76 @@ mod tests {
             }
         );
         assert_eq!(r.changes.len(), 1);
+    }
+
+    #[test]
+    fn a_bare_undo_takes_every_feature_newest_first() {
+        let mut r = Record::default();
+        r.add(
+            "setup",
+            Change::File {
+                path: "/etc/fjarr/fjarr.toml".into(),
+                backup: None,
+            },
+        );
+        r.add(
+            "setup",
+            Change::UnitStarted {
+                unit: "fjarr-agent.service".into(),
+            },
+        );
+        r.add(
+            "net",
+            Change::UnitEnabled {
+                unit: "fjarr-net.service".into(),
+            },
+        );
+        assert_eq!(r.features(), vec!["setup", "net"]);
+        let all = r.take_all();
+        assert_eq!(
+            all[0],
+            Change::UnitEnabled {
+                unit: "fjarr-net.service".into()
+            }
+        );
+        assert_eq!(
+            all[2],
+            Change::File {
+                path: "/etc/fjarr/fjarr.toml".into(),
+                backup: None
+            }
+        );
+        assert!(r.changes.is_empty());
+    }
+
+    #[test]
+    fn writing_a_file_twice_keeps_the_first_backup_and_a_new_file_records_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let backups = dir.path().join("backups");
+        let target = dir.path().join("etc/fjarr/fjarr.toml");
+        let mut r = Record::default();
+        r.write_file("setup", &target, "new\n", &backups).unwrap();
+        assert_eq!(
+            r.changes[0].change,
+            Change::File {
+                path: target.clone(),
+                backup: None
+            }
+        );
+        std::fs::write(&target, "customer edit\n").unwrap();
+        let mut r2 = Record::default();
+        r2.write_file("setup", &target, "run one\n", &backups)
+            .unwrap();
+        r2.write_file("setup", &target, "run two\n", &backups)
+            .unwrap();
+        let Change::File {
+            backup: Some(b), ..
+        } = &r2.changes[0].change
+        else {
+            panic!("{:?}", r2.changes);
+        };
+        assert_eq!(std::fs::read_to_string(b).unwrap(), "customer edit\n");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "run two\n");
     }
 
     #[test]

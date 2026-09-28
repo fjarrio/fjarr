@@ -54,17 +54,51 @@ if FJARR_MEDIA_ENCODER=software fjarr-agent --config "$cfg" --check >/tmp/check.
 fi
 grep -q 'profile core    /etc/fjarr/fjarr.toml .*MISSING.*sudo fjarr-agent setup' /tmp/check.log || { cat /tmp/check.log; fail "--check did not name setup as the fix"; }
 ok "before setup, --check fails and names the fix"
-# What setup and the service's first start do (until setup exists): the config, and the state directory.
-install -D -m 0644 "$cfg" /etc/fjarr/fjarr.toml
-install -d -o fjarr -g fjarr -m 0700 /var/lib/fjarr
-# And what boot does: /run is empty at every boot and systemd-tmpfiles recreates /run/fjarr. This
+# What boot does: /run is empty at every boot and systemd-tmpfiles recreates /run/fjarr. This
 # container runs no systemd, so the step is done by hand here, the way the tmpfiles entry says.
 install -d -o fjarr -g fjarr -m 0755 /run/fjarr
-FJARR_MEDIA_ENCODER=software fjarr-agent --config /etc/fjarr/fjarr.toml --check >/tmp/check.log 2>&1 || { cat /tmp/check.log; fail "--check fails after setup's steps"; }
-grep -q '^profile core' /tmp/check.log || { cat /tmp/check.log; fail "--check printed no profile rows"; }
-ok "after setup's steps, --check passes with every profile row ok (software encoder: no GPU here)"
 
-apt-get install -y -qq gstreamer1.0-tools >/dev/null 2>&1   # the test's own tool, after the packages
+# The driver catalog and `drivers` (docs/26#fjarr-agent-drivers): shipped, and the built-in entries only.
+[ -f /usr/share/fjarr/catalog.toml ] || fail "no driver catalog installed"
+fjarr-agent drivers list >/tmp/drivers.log 2>&1 || { cat /tmp/drivers.log; fail "drivers list failed"; }
+for d in test v4l2 rtsp; do grep -q "^  $d  *built in" /tmp/drivers.log || { cat /tmp/drivers.log; fail "drivers list lacks the built-in $d"; }; done
+fjarr-agent drivers list --json | grep -q '"status": "built-in"' || fail "drivers list --json is not JSON with statuses"
+# gstreamer1.0-plugins-base-apps is a dependency: detection has its tool on every robot. No camera here.
+fjarr-agent drivers detect | grep -q 'no video sources found' || fail "drivers detect did not run (gst-device-monitor-1.0 missing?)"
+fjarr-agent drivers install v4l2 | grep -q 'built into fjarr-agent' || fail "drivers install v4l2 did not say it is built in"
+fjarr-agent drivers install nosuch >/dev/null 2>&1 && fail "drivers install of an unknown entry succeeded"
+ok "catalog shipped; drivers list/detect/install answer for the built-in entries"
+
+# `setup` (docs/26#fjarr-agent-setup), scripted. Against a server that is not there it fails before
+# writing anything and names the fix; with --offline it writes the config the way the agent reads it.
+if fjarr-agent setup --yes --server ws://127.0.0.1:9/ws --device-id test-device --token t0k --cameras none --net no >/tmp/setup.log 2>&1; then
+    cat /tmp/setup.log; fail "setup against no server succeeded"
+fi
+grep -q 'not reachable' /tmp/setup.log && grep -q -- '--offline' /tmp/setup.log || { cat /tmp/setup.log; fail "setup against no server did not name the fix"; }
+[ ! -e /etc/fjarr/fjarr.toml ] || fail "setup wrote the config although it failed"
+ok "setup against no server fails cleanly, names --offline, writes nothing"
+FJARR_DEVICE_TOKEN=t0k fjarr-agent setup --yes --offline --server ws://127.0.0.1:9/ws --device-id test-device --cameras none --net no >/tmp/setup.log 2>&1 || { cat /tmp/setup.log; fail "setup --offline failed"; }
+[ "$(stat -c '%a %U:%G' /etc/fjarr/fjarr.toml)" = "640 root:fjarr" ] || fail "config is not 0640 root:fjarr: $(stat -c '%a %U:%G' /etc/fjarr/fjarr.toml)"
+grep -q '^robot_id = "test-device"' /etc/fjarr/fjarr.toml || fail "config lacks robot_id"
+grep -q '^server_url = "ws://127.0.0.1:9/ws"' /etc/fjarr/fjarr.toml || fail "config lacks server_url"
+grep -q '^dev_token = "t0k"' /etc/fjarr/fjarr.toml || fail "config lacks the token from FJARR_DEVICE_TOKEN"
+# No GPU here: setup must have chosen the software encoder, or the agent would refuse to start (docs/23).
+grep -q '^encoder = "software"' /etc/fjarr/fjarr.toml || { cat /etc/fjarr/fjarr.toml; fail "setup did not choose the software encoder without VA-API"; }
+grep -q 'systemd is not running' /tmp/setup.log || { cat /tmp/setup.log; fail "setup did not say the agent was not started (no systemd here)"; }
+grep -q '^check: OK' /tmp/setup.log || { cat /tmp/setup.log; fail "setup did not end with a passing --check"; }
+grep -q '"path": "/etc/fjarr/fjarr.toml"' /var/lib/fjarr/setup-changes.json || fail "setup did not record the config for --undo"
+[ "$(stat -c '%a %U' /var/lib/fjarr)" = "700 fjarr" ] || fail "/var/lib/fjarr is not 0700 fjarr"
+ok "setup --offline wrote the config (0640 root:fjarr, keys the agent reads, software encoder), recorded it, --check passed"
+# The agent reads what setup wrote: the doctor from the file alone, no environment.
+fjarr-agent --config /etc/fjarr/fjarr.toml --check >/tmp/check.log 2>&1 || { cat /tmp/check.log; fail "--check fails on setup's config"; }
+grep -q '^profile core' /tmp/check.log || { cat /tmp/check.log; fail "--check printed no profile rows"; }
+ok "after setup, --check passes with every profile row ok"
+fjarr-agent setup --undo >/tmp/undo.log 2>&1 || { cat /tmp/undo.log; fail "setup --undo failed"; }
+[ ! -e /etc/fjarr/fjarr.toml ] || fail "--undo left the config in place"
+grep -q '"changes": \[\]' /var/lib/fjarr/setup-changes.json || fail "--undo left changes recorded: $(cat /var/lib/fjarr/setup-changes.json)"
+FJARR_MEDIA_ENCODER=software fjarr-agent --config "$cfg" --check 2>&1 | grep -q 'MISSING.*sudo fjarr-agent setup' || fail "after --undo, --check does not name setup again"
+ok "setup --undo removed the config and the record; --check names setup again"
+
 for e in x264enc avdec_h264; do gst-inspect-1.0 "$e" >/dev/null 2>&1 && fail "$e came with the packages (ADR-0011)"; done
 gpl=$(dpkg-query -W -f '${Package} ' 'libx264-*' 'libxvidcore*' 2>/dev/null || true)
 [ -z "$gpl" ] || fail "GPL codec libraries came with the packages: $gpl"

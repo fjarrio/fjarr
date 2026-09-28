@@ -65,11 +65,56 @@ pub fn select<T: Clone + Eq>(
     Ok(s.interact()?)
 }
 
-/// Any number of strings from a list, with the flag's comma-separated form.
+/// A line of text with a flag; `default` is offered on the terminal and taken by `--yes`.
+pub fn input(
+    question: &str,
+    flag: &str,
+    given: Option<String>,
+    yes: bool,
+    default: Option<&str>,
+) -> Result<String> {
+    if let Some(v) = given {
+        cliclack::log::step(format!("{question}  {v}"))?;
+        return Ok(v);
+    }
+    if yes {
+        if let Some(d) = default {
+            cliclack::log::step(format!("{question}  {d} (--yes)"))?;
+            return Ok(d.to_string());
+        }
+        return Err(no_terminal(flag, question));
+    }
+    if !is_terminal() {
+        return Err(no_terminal(flag, question));
+    }
+    let mut p = cliclack::input(question).required(true);
+    if let Some(d) = default {
+        p = p.default_input(d);
+    }
+    Ok(p.interact::<String>()?)
+}
+
+/// A secret with a flag (and its environment variable, for scripts that keep it off the command
+/// line): never echoed, never shown as a settled step.
+pub fn secret(question: &str, flag: &str, given: Option<String>) -> Result<String> {
+    if let Some(v) = given {
+        cliclack::log::step(format!("{question}  ••••••••"))?;
+        return Ok(v);
+    }
+    if !is_terminal() {
+        return Err(no_terminal(flag, question));
+    }
+    Ok(cliclack::password(question).mask('•').interact()?)
+}
+
+/// Any number of strings from a list, with the flag's comma-separated form; `--yes` takes
+/// `initial`, which is also what the terminal shows pre-selected.
 pub fn multiselect(
     question: &str,
     flag: &str,
     given: Option<Vec<String>>,
+    yes: bool,
+    initial: &[String],
     items: &[(String, &str)],
 ) -> Result<Vec<String>> {
     if let Some(v) = given {
@@ -83,10 +128,23 @@ pub fn multiselect(
         ))?;
         return Ok(v);
     }
+    if yes {
+        cliclack::log::step(format!(
+            "{question}  {} (--yes)",
+            if initial.is_empty() {
+                "(none)".to_string()
+            } else {
+                initial.join(", ")
+            }
+        ))?;
+        return Ok(initial.to_vec());
+    }
     if !is_terminal() {
         return Err(no_terminal(flag, question));
     }
-    let mut s = cliclack::multiselect(question).required(false);
+    let mut s = cliclack::multiselect(question)
+        .required(false)
+        .initial_values(initial.to_vec());
     for (v, hint) in items {
         s = s.item(v.clone(), v, hint);
     }

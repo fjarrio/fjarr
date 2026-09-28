@@ -17,7 +17,7 @@ Package: fjarr-agent
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends},
  gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad,
- gstreamer1.0-nice, glib-networking
+ gstreamer1.0-nice, gstreamer1.0-plugins-base-apps, glib-networking
 Recommends: mesa-va-drivers | intel-media-va-driver, fjarr-tools
 Description: Fjarr agent: peer-to-peer connectivity for robots
  Streams cameras and the desktop, gives operators a terminal and a network
