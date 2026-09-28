@@ -256,10 +256,7 @@ struct Agent::Impl {
             if (rc.enabled) scfg.capability_names.push_back(name);
         core::SignalingHooks hooks;
         hooks.on_ready = [this] {
-            if (!ready_notified && supervision.ready) {
-                supervision.ready();
-                ready_notified = true;
-            }
+            if (supervision.status) supervision.status("online");
         };
         hooks.on_message = [this](const protocol::SignalingMessage& m) {
             if (m.type == "session-request") sessions->on_session_request(m);
@@ -267,7 +264,10 @@ struct Agent::Impl {
             else if (m.type == "error") log::warn("agent", "server error", {{"code", m.body.value("code", "")}, {"message", m.body.value("message", "")}});
             else sessions->on_signal(m);
         };
-        hooks.on_closed = [this](const std::string&) { sessions->close_all("peer-gone"); };
+        hooks.on_closed = [this](const std::string& reason) {
+            if (supervision.status) supervision.status("offline: " + (reason.empty() ? std::string("server connection lost") : reason) + ", reconnecting");
+            sessions->close_all("peer-gone");
+        };
         hooks.on_error = [this](const std::string& code, const std::string&) {
             if (code == "auth-failed") {
                 log::error("agent", "device auth failed: check FJARR_DEV_DEVICE_TOKEN / the credential (exit 1)");
@@ -294,6 +294,16 @@ struct Agent::Impl {
         });
         log::info("agent", "core started", {{"robot_id", config.agent.robot_id}, {"encoder", encoder.name},
                                             {"capabilities", std::to_string(registry.size())}});
+        // READY here — the capabilities are configured (the tunnel attached, docs/27) and the loop
+        // is about to run — not on hello-ack: offline is a robot's normal state, and holding READY
+        // for the server had systemd kill and restart the agent at every start timeout while the
+        // customer's units, ordered after this one (docs/26), waited for the WAN. STATUS= tells
+        // `systemctl status` what READY used to (ADR-0019, second addendum).
+        if (supervision.ready && !ready_notified) {
+            supervision.ready();
+            ready_notified = true;
+        }
+        if (supervision.status) supervision.status("connecting to " + config.agent.server_url);
     }
 
     void shutdown() {

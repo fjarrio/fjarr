@@ -75,10 +75,13 @@ struct SessionEvent {
     std::string code;   // error
 };
 
-/// Supervision seam (ADR-0019): sd_notify READY/WATCHDOG when running under
-/// systemd; embedders may leave it unset.
+/// Supervision seam (ADR-0019): sd_notify READY/STATUS/WATCHDOG when running under
+/// systemd; embedders may leave it unset. `ready` fires once the capabilities are configured and
+/// the core loop runs — before any server is reached — and `status` carries the connection
+/// ("connecting to …", "online", "offline: …"), which is what `systemctl status` shows.
 struct Supervision {
     std::function<void()> ready;
+    std::function<void(const std::string& text)> status;
     std::function<void()> watchdog;
     int watchdog_interval_ms = 0; // 0 = off
     int stop_deadline_ms = 3000;  // stop_on_signal(): orderly shutdown must finish within this, else _Exit(0)

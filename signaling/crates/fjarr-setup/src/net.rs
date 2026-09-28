@@ -16,6 +16,7 @@ use crate::{config, system, ui, Dds, NetSetupArgs, YesNo};
 
 pub const FEATURE: &str = "net";
 pub const UNIT: &str = "fjarr-net.service";
+pub const AGENT_UNIT: &str = "fjarr-agent.service";
 pub const CYCLONE_FILE: &str = "/etc/fjarr/cyclonedds.xml";
 /// Where a replaced file's previous contents are kept for `--undo`.
 const BACKUPS: &str = "/var/lib/fjarr/setup-backups";
@@ -60,15 +61,18 @@ pub async fn up(config_path: &Path, profile: &Path) -> Result<()> {
     Ok(())
 }
 
+/// After the device (`fjarr-net.service`) and after the agent has attached it (`fjarr-agent.service`,
+/// whose READY does not wait for the server: ADR-0019, second addendum): a Fast DDS participant
+/// created before the attach never sees the interface (docs/27#lifecycle).
 pub fn drop_in_text(unit: &str) -> String {
     format!(
-        "# Written by `fjarr-agent net setup`: the tunnel device must exist before this service starts,\n\
-         # because DDS picks its interfaces when a participant is created (docs/27#lifecycle).\n\
+        "# Written by `fjarr-agent net setup` for {unit}: the tunnel device must exist and the agent\n\
+         # must have attached it before this service starts, because DDS picks its interfaces when a\n\
+         # participant is created and only an attached device has carrier (docs/27#lifecycle).\n\
          # Undo: fjarr-agent setup --undo net\n\
          [Unit]\n\
-         After={UNIT}\n\
-         Wants={UNIT}\n\
-         # {unit}\n"
+         After={UNIT} {AGENT_UNIT}\n\
+         Wants={UNIT} {AGENT_UNIT}\n"
     )
 }
 
@@ -394,12 +398,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_drop_in_orders_after_and_wants_the_tunnel_unit() {
+    fn the_drop_in_orders_after_and_wants_the_device_and_the_attached_agent() {
         let t = drop_in_text("bringup.service");
         assert!(
-            t.contains("[Unit]\nAfter=fjarr-net.service\nWants=fjarr-net.service\n"),
+            t.contains("[Unit]\nAfter=fjarr-net.service fjarr-agent.service\nWants=fjarr-net.service fjarr-agent.service\n"),
             "{t}"
         );
+        assert!(t.contains("for bringup.service"));
         assert!(t.contains("docs/27#lifecycle"));
     }
 

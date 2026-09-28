@@ -3,7 +3,8 @@
  *
  * systemd is the only defence against a deadlock in our own code, and it only works if two things
  * hold: the watchdog ping is driven by the core loop (so a wedged process stops pinging), and
- * READY is not claimed before the agent can actually serve. Neither was exercised by anything.
+ * READY is claimed once the agent runs — with no server at all — and STATUS says the server is
+ * not reached (ADR-0019, second addendum). Neither was exercised by anything before this.
  *
  * This test IS the supervisor: a unix datagram socket named by NOTIFY_SOCKET, exactly what systemd
  * gives the unit, so the real `sd_notify` path in the daemon runs. Nothing here needs systemd
@@ -65,6 +66,21 @@ class NotifySocket {
         return n;
     }
     void drain(int ms) { count("", ms); }
+
+    /// Everything received over `ms`, concatenated, for asserting on several lines at once.
+    std::string collect(int ms) {
+        std::string all;
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+        while (std::chrono::steady_clock::now() < until) {
+            char buf[512];
+            const ssize_t r = ::recv(fd_, buf, sizeof(buf) - 1, 0);
+            if (r <= 0) continue;
+            buf[r] = '\0';
+            all += buf;
+            all += '\n';
+        }
+        return all;
+    }
 
   private:
     std::string dir_, path_;
@@ -145,15 +161,18 @@ TEST(Supervision, theWatchdogPingsWhileHealthyAndStopsWhileTheProcessIsStopped) 
     reap(pid);
 }
 
-TEST(Supervision, readyIsNotClaimedBeforeTheAgentCanServe) {
-    // docs/23: READY follows the first hello-ack, not process start. An agent that announces
-    // itself ready while it has never reached the server would make systemd — and any operator
-    // reading `systemctl status` — believe a robot is fine when it is unreachable.
+TEST(Supervision, readyIsClaimedWithoutAServerAndStatusSaysSo) {
+    // ADR-0019, second addendum: READY once the capabilities are configured and the loop runs,
+    // with no server at all — offline is a robot's normal state, and READY held for hello-ack had
+    // systemd kill and restart the agent at every start timeout, and the customer's units ordered
+    // after it wait for the WAN. The truth `systemctl status` needs comes as STATUS= instead.
     NotifySocket notify;
     ASSERT_TRUE(notify.ok());
     const pid_t pid = spawn_agent(notify.path());
     ASSERT_GT(pid, 0);
-    const int ready = notify.count("READY=1", 3000);
-    EXPECT_EQ(ready, 0) << "READY=1 was sent although the agent never reached a server";
+    const std::string got = notify.collect(3000);
+    EXPECT_NE(got.find("READY=1"), std::string::npos) << "no READY=1 although the agent runs; got:\n" << got;
+    EXPECT_NE(got.find("STATUS=connecting to ws://127.0.0.1:9"), std::string::npos) << "STATUS does not say the server is not reached; got:\n" << got;
+    EXPECT_EQ(got.find("STATUS=online"), std::string::npos) << "STATUS claimed online with no server; got:\n" << got;
     reap(pid);
 }

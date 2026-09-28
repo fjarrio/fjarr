@@ -196,6 +196,7 @@ int main(int argc, char** argv) {
         const bool under_systemd = sd_watchdog_enabled(0, &usec) > 0 || std::getenv("NOTIFY_SOCKET") != nullptr;
         if (under_systemd) {
             sup.ready = [] { sd_notify(0, "READY=1"); };
+            sup.status = [](const std::string& text) { sd_notify(0, ("STATUS=" + text).c_str()); };
             if (usec > 0) {
                 sup.watchdog = [] { sd_notify(0, "WATCHDOG=1"); };
                 // docs/23: watchdog_secs = 0 means WatchdogSec/3 from the unit; a value overrides it.
