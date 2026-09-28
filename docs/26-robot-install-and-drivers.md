@@ -224,8 +224,8 @@ architecture, hardware H.264 encode, display server, cameras via
 │  ● Your own fjarr-server   ○ Fjarr Cloud
 ◇  Server: wss://fleet.acme.com/ws
 ◇  Device id: dev-024 (from the hostname)
-◆  Enrollment token (from your dashboard):  ••••••••
-◇  Enrolled ✔  device key in /var/lib/fjarr (0600)
+◆  Device token (from your dashboard):  ••••••••
+◇  Token accepted by the server ✔  stored in /etc/fjarr/fjarr.toml (0640, root:fjarr)
 │
 ◆  Cameras found. Which should stream?
 │  ◼ Front  Logitech C920 (usb-046d_C920…)   mjpeg 1280×720@30
@@ -240,6 +240,11 @@ architecture, hardware H.264 encode, display server, cameras via
 ◇  /etc/fjarr/fjarr.toml written · fjarr-agent started · online ✔
 └  fjarr-agent --check: all rows ok · undo: fjarr-agent setup --undo
 ```
+
+Until M5 builds enrollment ([docs/17](17-roadmap.md), [docs/10](10-security.md)),
+`setup` asks for the **device token** the server accepts today and writes it
+to the configuration. The prompt becomes a one-time enrollment token, redeemed
+for the per-device key, when M5 lands. The flow around it does not change.
 
 ### `fjarr-agent net setup`
 
@@ -315,7 +320,9 @@ closed by the ADR-0019 addendum above.
 
 ### `fjarr-agent setup desktop`
 
-The appliance pieces the M2 spikes showed a desktop device needs
+**Built in M3**, with the desktop packages (moved from M2.5 on 2026-09-28): it
+configures the session helper and backend M3 builds. The appliance pieces the
+M2 spikes showed a desktop device needs
 ([ADR-0006](adr/0006-desktop-backend-selection.md),
 [ADR-0028](adr/0028-desktop-session-helper.md)):
 
@@ -443,8 +450,8 @@ can push a driver package to a robot group like any other update.
 Packaging is the **M2.5** milestone ([docs/17](17-roadmap.md#m25--packaging--install)):
 the repository, the packages and their units, the system profile, the images
 and the reference compose file, the install script, the release pipeline,
-`setup` (with `setup desktop` and `--undo`), `drivers` and the catalog with
-the built-in entries ([ADR-0031](adr/0031-distribution-apt-and-containers-first.md)). The first
+`setup` (with `--undo`), `drivers` and the catalog with
+the built-in entries; `setup desktop` and the desktop packages are M3 ([ADR-0031](adr/0031-distribution-apt-and-containers-first.md)). The first
 vendor packages are M3, chosen by the design partner's hardware. Slice 3
 already ships the runtime half: `unavailable` with reason, `--check`,
 `--probe-source`, `/sources`.

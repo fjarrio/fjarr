@@ -224,13 +224,15 @@ promotion to `stable` without a rebuild.
 `--check`, the image from the `.deb`s, and the setup tool's first commands:
 `fjarr-agent net setup`, `net up` (`fjarr-net.service`) and `setup --undo net`
 ([docs/26](26-robot-install-and-drivers.md#fjarr-agent-net-setup)), proven on
-the spike machine across a reboot. Left: `setup` itself, `setup desktop`,
-`drivers`, the repository and signing, the install script, the desktop packages.
+the spike machine across a reboot. Left: `setup` itself, `drivers`, the
+repository and signing, the install script, the reference compose file.
+**Moved to M3 (2026-09-28):** the desktop packages and `setup desktop`. They
+configure the session helper and backend M3 builds; in M2.5 they would set up
+an auto-login for a helper that does not exist yet.
 **Gate:** a fresh Ubuntu 26.04 machine (the spike machine, reinstalled) goes
 from `curl … | sh` to a test pattern in the dashboard with no hand-written
-config; `apt install fjarr-desktop-wayland` plus `setup desktop` gives remote
-desktop, and `setup --undo desktop` restores the machine; a containerized
-robot runs from the reference compose file, tunnel and desktop included;
+config; a containerized robot runs from the reference compose file, tunnel
+included;
 `--check` reports a correct profile on both; the package set and images build
 for amd64 and arm64 in CI; a release goes tag → `testing` → `stable` without a
 rebuild.
@@ -288,8 +290,14 @@ the pre-allocated transceiver, audited) and **desktop audio** on
 **Plus** the first vendor camera packages ([ADR-0020](adr/0020-vendor-sources-as-gstreamer-plugins.md))
 chosen by the design partner's hardware, delivered through the M2.5
 repository and catalog.
+**Plus, moved from M2.5:** the `fjarr-desktop-wayland` and `fjarr-desktop-x11`
+packages and `fjarr-agent setup desktop` with `--undo desktop`
+([docs/26](26-robot-install-and-drivers.md#fjarr-agent-setup-desktop)).
 **Gate:** capability acceptance criteria ([docs/06](06-capabilities.md))
-for desktop and audio; input-to-photon within budgets; the design partner
+for desktop and audio; input-to-photon within budgets; `apt install
+fjarr-desktop-wayland` plus `setup desktop` gives remote desktop on the spike
+machine, and `setup --undo desktop` restores it; a containerized robot's
+desktop through the reference compose file; the design partner
 installs from the repository with `setup`, adds their camera with
 `drivers install`, and no config is hand-written; the first
 **design-partner demo** (docs/03 GTM).
