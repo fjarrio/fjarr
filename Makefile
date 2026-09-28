@@ -488,7 +488,7 @@ website-build: ## Production build of fjarr.io
 # --------------------------------------------------------------- packaging --
 # docs/26#releases, ADR-0031. Run on the HOST: they start their own throwaway containers.
 DEB_ARCH ?= $(shell dpkg --print-architecture 2>/dev/null || uname -m)
-.PHONY: deb deb-install-test deb-embed-test
+.PHONY: deb deb-install-test deb-embed-test install-script-test
 deb: ## Build the .debs (fjarr-agent, fjarr-tools) for this host's architecture into dist/deb/<arch>/
 	@if [ -f /.dockerenv ]; then echo "make deb runs on the host (it starts its own builder container)"; exit 1; fi
 	docker build -q -t fjarr-deb-builder docker/deb-builder >/dev/null
@@ -498,6 +498,13 @@ deb: ## Build the .debs (fjarr-agent, fjarr-tools) for this host's architecture 
 deb-install-test: ## Install dist/deb/<arch>/*.deb on a clean Ubuntu 26.04 and check what they promise
 	@if [ -f /.dockerenv ]; then echo "make deb-install-test runs on the host"; exit 1; fi
 	docker run --rm -v "$(CURDIR)/dist/deb/$(DEB_ARCH)":/debs:ro -v "$(CURDIR)/packaging/install-test.sh":/install-test.sh:ro ubuntu:26.04 sh /install-test.sh
+
+install-script-test: ## install.sh against a signed test repository on a clean Ubuntu 26.04: dry run, wrong key refused, install; and a non-Ubuntu refused
+	@if [ -f /.dockerenv ]; then echo "make install-script-test runs on the host"; exit 1; fi
+	docker run --rm -v "$(CURDIR)/dist/deb/$(DEB_ARCH)":/debs:ro -v "$(CURDIR)/packaging":/pk:ro ubuntu:26.04 sh /pk/install-script-test.sh
+	@out=$$(docker run --rm -v "$(CURDIR)/packaging":/pk:ro debian:13 sh /pk/install.sh 2>&1 || true); \
+	  echo "$$out" | grep -q "this is Debian" && echo "$$out" | grep -q "docker run ghcr.io/fjarrio/fjarr-agent" \
+	  && echo "ok   a non-Ubuntu system is refused, naming the container route" || { echo "$$out"; echo "FAIL: debian was not refused"; exit 1; }
 
 deb-embed-test: ## Build demo-robot out of tree against the installed libfjarr-dev (find_package(fjarr)) on a clean Ubuntu 26.04
 	@if [ -f /.dockerenv ]; then echo "make deb-embed-test runs on the host"; exit 1; fi
