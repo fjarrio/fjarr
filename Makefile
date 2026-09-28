@@ -493,6 +493,9 @@ deb: ## Build the .debs (fjarr-agent, fjarr-tools) for this host's architecture 
 	@if [ -f /.dockerenv ]; then echo "make deb runs on the host (it starts its own builder container)"; exit 1; fi
 	docker build -q -t fjarr-deb-builder docker/deb-builder >/dev/null
 	mkdir -p dist/deb/$(DEB_ARCH)
+	@# Only this build's packages: the tests install dist/deb/<arch>/*.deb, and a stale version beside
+	@# a new one would be tested as a mix.
+	rm -f dist/deb/$(DEB_ARCH)/*.deb
 	docker run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp -v "$(CURDIR)":/src:ro -v "$(CURDIR)/dist/deb/$(DEB_ARCH)":/out fjarr-deb-builder
 
 deb-install-test: ## Install dist/deb/<arch>/*.deb on a clean Ubuntu 26.04 and check what they promise

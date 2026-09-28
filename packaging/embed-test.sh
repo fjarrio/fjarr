@@ -8,11 +8,14 @@ apt-get update -qq >/dev/null
 cp /debs/libfjarr-dev_*.deb /tmp/ && apt-get install -y -qq /tmp/libfjarr-dev_*.deb cmake ninja-build g++ >/tmp/apt.log 2>&1 \
   || { tail -20 /tmp/apt.log; echo "FAIL: libfjarr-dev did not install"; exit 1; }
 mkdir -p /tmp/emb && cp /src/main.cpp /tmp/emb/
-cat > /tmp/emb/CMakeLists.txt <<'CM'
+# Pin the minor version this was built against, as an embedder does: in 0.x only the same minor is
+# compatible (SameMinorVersion, docs/26#releases). Read from the package, never hard-coded.
+MINOR=$(dpkg-query -W -f '${Version}' libfjarr-dev | sed -E 's/^([0-9]+\.[0-9]+).*/\1/')
+cat > /tmp/emb/CMakeLists.txt <<CM
 cmake_minimum_required(VERSION 3.25)
 project(embedded-demo-robot CXX)
 set(CMAKE_CXX_STANDARD 20)
-find_package(fjarr 0.0 REQUIRED)
+find_package(fjarr $MINOR REQUIRED)
 add_executable(demo-robot main.cpp)
 target_link_libraries(demo-robot PRIVATE fjarr::fjarr)
 CM

@@ -50,7 +50,8 @@ COPY dist/deb/${TARGETARCH}/libfjarr-dev_*.deb /tmp/debs/
 RUN apt-get update && apt-get install -y --no-install-recommends cmake ninja-build g++ /tmp/debs/libfjarr-dev_*.deb \
     && rm -rf /var/lib/apt/lists/*
 COPY demos/demo-robot/main.cpp /src/main.cpp
-RUN printf 'cmake_minimum_required(VERSION 3.25)\nproject(demo-robot CXX)\nset(CMAKE_CXX_STANDARD 20)\nfind_package(fjarr 0.0 REQUIRED)\nadd_executable(demo-robot main.cpp)\ntarget_link_libraries(demo-robot PRIVATE fjarr::fjarr)\n' > /src/CMakeLists.txt \
+RUN minor=$(dpkg-query -W -f '${Version}' libfjarr-dev | sed -E 's/^([0-9]+\.[0-9]+).*/\1/') \
+    && printf 'cmake_minimum_required(VERSION 3.25)\nproject(demo-robot CXX)\nset(CMAKE_CXX_STANDARD 20)\nfind_package(fjarr %s REQUIRED)\nadd_executable(demo-robot main.cpp)\ntarget_link_libraries(demo-robot PRIVATE fjarr::fjarr)\n' "$minor" > /src/CMakeLists.txt \
     && cmake -S /src -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build /build
 
 # ------------------------------------------------------------------ demo --
