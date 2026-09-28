@@ -500,7 +500,12 @@ with the image's uid so the `xhost` grant can name it.
   runners (`dpkg-shlibdeps` derives the dependencies). It is signed with a
   Fjarr key held in CI secrets and served from Cloudflare R2 at
   `apt.fjarr.io`. The key's custody and yearly rotation are documented beside
-  the release runbook, and the install script carries its fingerprint.
+  the release runbook, and the install script carries its fingerprint. The
+current key: Ed25519, fingerprint `B376164F0985CFDB0DE7C26C839E1ECA17D3B8F1`,
+created 2026-09-28, expiring 2028-09-27 (replaced yearly with a year of
+overlap), public half at `packaging/fjarr-archive-keyring.asc`. The private
+half exists only in the `apt-testing` and `apt-stable` GitHub environments and
+offline; its revocation certificate is kept offline with it.
 - **One version** for every artifact, from one tag `vX.Y.Z`: packages, images,
   `fjarr-connect`, the `fjarr-server` image, crates and npm packages. The wire
   protocol keeps its own major ([docs/08](08-protocol.md#versioning)). 0.x
