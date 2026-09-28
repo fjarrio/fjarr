@@ -30,7 +30,7 @@ description: How the agent is installed on a robot and how a customer discovers,
 
 | Channel | Contents | For |
 |---|---|---|
-| **apt repository** (`deb [arch=amd64,arm64] https://apt.fjarr.io …`, components `stable` and `testing`) | the packages [below](#packages) | robots on Ubuntu 26.04 LTS (the supported platform, docs/04, ADR-0022) |
+| **apt repository** (`https://apt.fjarr.io`, suites `stable` and `testing`, component `main`) | the packages [below](#packages) | robots on Ubuntu 26.04 LTS (the supported platform, docs/04, ADR-0022) |
 | **Container images** | `ghcr.io/fjarrio/fjarr-agent:<ver>` (core) and per-vendor variants `…:<ver>-zed`, `…:<ver>-realsense`, plus `-desktop-x11`/`-wayland`; **built from the same `.deb`s**, multi-arch, cosign-signed with an SBOM. The core image exists from slice 5b (`docker/agent/Dockerfile`, built and smoke-tested in CI, amd64, unpublished — [docs/12](12-development-environment.md#running-the-demo-robot-from-the-agent-image)); the variants, arm64 and publishing are this milestone | containerized robot stacks ([below](#containerized-robots)), the demo, CI |
 | **Embedding** | `libfjarr` as a CMake package (`find_package(fjarr)`), headers = docs/09; the customer's app links the core and installs the driver packages it wants | robot companies embedding the library in their own daemon |
 | **Install script** | `curl -fsSL https://get.fjarr.io \| sh` — adds the repository, installs `fjarr-agent`, runs `fjarr-agent setup` | first contact |
@@ -495,11 +495,28 @@ with the image's uid so the `xhost` grant can name it.
 
 ## Repository, versions and releases {#releases}
 
-- **The repository** is generated in CI by `reprepro`/`aptly` from debhelper
-  packages built inside Ubuntu 26.04 containers on native amd64 and arm64
-  runners (`dpkg-shlibdeps` derives the dependencies). It is signed with a
-  Fjarr key held in CI secrets and served from Cloudflare R2 at
-  `apt.fjarr.io`. The key's custody and yearly rotation are documented beside
+- **The repository** is static files on Cloudflare R2 at `apt.fjarr.io`
+  (bucket `fjarr-apt`), built from debhelper packages made inside Ubuntu 26.04
+  containers on native amd64 and arm64 runners (`dpkg-shlibdeps` derives the
+  dependencies). Its shape (corrected 2026-09-28 from "components", and from
+  reprepro/aptly, when it was built):
+
+  | Path | What |
+  |---|---|
+  | `pool/main/f/fjarr/*.deb` | every released package, shared by both channels; nothing is removed |
+  | `dists/testing/`, `dists/stable/` | one **suite** per channel: `Release`, `InRelease`, `Release.gpg`, and `main/binary-{amd64,arm64}/Packages{,.gz}` |
+  | `fjarr-archive-keyring.asc` | the public key, beside the repository it signs |
+  | `install.sh` | the install script (`get.fjarr.io` redirects here) |
+
+  The indexes are generated with `apt-ftparchive` (`packaging/repo/`) from
+  the pool, each suite listing exactly the packages of the version it
+  carries. So promotion to `stable` is regenerating `stable`'s index over
+  files already in the pool, which cannot be a rebuild. There is no
+  repository database to keep in step with the bucket. A robot's source
+  (`/etc/apt/sources.list.d/fjarr.sources`, deb822) names the suite and the
+  key: `Types: deb`, `URIs: https://apt.fjarr.io`, `Suites: stable`,
+  `Components: main`, `Signed-By: /etc/apt/keyrings/fjarr.asc`.
+- **The signing key** is held in the release environments' secrets. The key's custody and yearly rotation are documented beside
   the release runbook, and the install script carries its fingerprint. The
 current key: Ed25519, fingerprint `B376164F0985CFDB0DE7C26C839E1ECA17D3B8F1`,
 created 2026-09-28, expiring 2028-09-27 (replaced yearly with a year of
@@ -512,8 +529,15 @@ offline; its revocation certificate is kept offline with it.
   until the extension API is stable (M6).
 - **A release** is: tag → full CI → packages and images to `testing` → a
   manual, protected promotion to `stable` that copies the same artifacts and
-  never rebuilds them, then publishes the crates and npm packages. Release
-  notes come from the conventional commits since the last tag.
+  never rebuilds them (`.github/workflows/release.yml`; environments
+  `apt-testing` and `apt-stable`, the second requiring approval, both
+  deployable only from `v*` tags). Images go to
+  `ghcr.io/fjarrio/fjarr-agent` as one multi-arch manifest per version, tagged
+  `X.Y.Z` and `testing`, with `latest` moved on promotion; each is signed with
+  cosign (keyless, GitHub's identity) and carries an SBOM. `install.sh` is
+  uploaded on promotion. The crates and npm packages join the promotion once
+  their registries are set up; no token for either exists yet. Release notes
+  come from the conventional commits since the last tag.
 - **Building locally**: `make deb` builds the packages for the host's
   architecture in a throwaway builder container (`docker/deb-builder`) into
   `dist/deb/<arch>/`. `make deb-install-test` installs them on a clean Ubuntu
@@ -522,11 +546,14 @@ offline; its revocation certificate is kept offline with it.
 tree against the installed `libfjarr-dev` alone (`find_package(fjarr)`), which
 is what a customer's CMake project does. CI runs all three on native amd64 and
 arm64 runners.
-- **The install script** (`get.fjarr.io`) only does what apt cannot do by
-  itself. It detects Ubuntu 26.04 and the architecture, adds the key and the
-  repository, installs `fjarr-agent` and runs `setup`. On anything else it
+- **The install script** (`get.fjarr.io`, `packaging/install.sh`) only does
+  what apt cannot do by itself. It detects Ubuntu 26.04 and the architecture,
+  fetches the key and **refuses it unless its fingerprint is the one the script
+  carries**, writes the source above, installs `fjarr-agent` and runs `setup`
+  (reading the terminal, since its own stdin is the script). On anything else it
   refuses, naming the supported systems and the container route. `--dry-run`
-  prints every step without doing it.
+  prints every step without doing it; `--channel testing` picks the other
+  suite.
 
 ## In the dashboard and the fleet view
 
