@@ -57,16 +57,28 @@ invasive happens as a side effect of `apt install`.
 
 | Package | Installs | Switched on by |
 |---|---|---|
-| `libfjarr1` | the shared library | a dependency |
-| `libfjarr-dev` | headers and the CMake package (`find_package(fjarr)`) | the customer, for embedding |
-| `fjarr-agent` | the daemon; `fjarr-agent.service`; the `fjarr` user (sysusers) in `video` and `render`; `/etc/fjarr/fjarr.toml` (conffile); `/run/fjarr` (tmpfiles); the viewer, the driver catalog and the system profile under `/usr/share/fjarr/`; the boot unit that creates the tunnel device before the robot's software starts, inert unless `fjarr.net` is configured | the package enables the service; `setup` writes the config |
+| `libfjarr-dev` | the **static** library, headers and the CMake package (`find_package(fjarr)`) | the customer, for embedding |
+| `fjarr-agent` | the daemon, linked statically against libfjarr; `fjarr-agent.service`; the `fjarr` user (sysusers) in `video` and `render`; `/run/fjarr` and `/var/lib/fjarr` (tmpfiles); an example `fjarr.toml`; the viewer, the driver catalog and the system profile under `/usr/share/fjarr/`; the boot unit that creates the tunnel device before the robot's software starts, inert unless `fjarr.net` is configured | the package enables the service, which starts only once `/etc/fjarr/fjarr.toml` exists (`ConditionPathExists`); `setup` writes that file |
 | `fjarr-desktop-wayland` | the Wayland module; `fjarr-desktop-session` and its **user** unit ([ADR-0028](adr/0028-desktop-session-helper.md)); the `fjarr-desktop` group; the GDM watchdog unit; the fake-monitor EDIDs for headless robots | `setup desktop` |
 | `fjarr-desktop-x11` | the X11 module; the kiosk session's `xhost +si:localuser:fjarr` grant as an autostart entry; the output-layout helper and its RandR listener | `setup desktop` |
-| `fjarr-tools` | `fjarr-connect` (given `cap_net_admin` at install), `opsim`, `probe` | nothing |
+| `fjarr-tools` | `fjarr-connect` (given `cap_net_admin` at install) | nothing |
 | `fjarr-gst-<vendor>` | camera drivers, per vendor and architecture | `drivers install` (M3, per design partner) |
 
 `fjarr-inputd` is not packaged: none of the chosen desktop backends needs it
 (ADR-0006).
+
+Three choices were corrected when the packaging was built (2026-09-28):
+
+- **No shared `libfjarr` until the ABI is stable (M6).** A C++ shared library
+  would change its SONAME, and so its package name, with every 0.x release.
+  Embedders link the static library from `libfjarr-dev`, and so does
+  `fjarr-agent`.
+- **`/etc/fjarr/fjarr.toml` is written by `setup`, not shipped as a
+  conffile.** An enabled service with a placeholder config would restart in a
+  loop. The unit waits for the file instead.
+- **`fjarr-opsim` is not shipped.** It is a lab tool whose receive side
+  decodes with libav, which is dev and CI only (docs/14). Probing a source is
+  `fjarr-agent --probe-source`.
 
 ### The system profile {#the-system-profile}
 
