@@ -35,7 +35,7 @@ grep -q '^Before=fjarr-agent.service' "$netunit" || fail "fjarr-net.service is n
 ok "fjarr-net.service installed, not enabled"
 # The setup tool, and the hand-off (docs/26#the-setup-tool): `fjarr-agent net …` is fjarr-setup's.
 [ -x /usr/lib/fjarr/fjarr-setup ] || fail "no /usr/lib/fjarr/fjarr-setup"
-fjarr-agent net --help 2>&1 | grep -q '^Usage: fjarr-setup net' || fail "fjarr-agent does not hand `net` to fjarr-setup"
+fjarr-agent net --help 2>&1 | grep -q '^Usage: fjarr-setup net' || fail "fjarr-agent does not hand 'net' to fjarr-setup"
 # Root here, no config yet: the tool must refuse and name the fix, not "set up" a device that is not configured.
 fjarr-agent net setup --yes --ros no 2>&1 | grep -q 'does not exist.*fjarr-agent setup' || fail "net setup without a config did not name setup as the fix"
 ok "fjarr-agent hands setup/net/drivers to fjarr-setup"
