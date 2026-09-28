@@ -48,6 +48,7 @@ add_library(fjarr STATIC
   src/media/producer.cpp
   src/media/consumer.cpp
   src/media/nice_options.cpp
+  src/core/system_profile.cpp
   src/media/media_plane.cpp
   src/media/probe.cpp
   src/media/rate_estimator.cpp
@@ -82,6 +83,9 @@ endif()
 
 add_executable(fjarr-agent daemon/main.cpp)
 target_link_libraries(fjarr-agent PRIVATE fjarr::fjarr PkgConfig::GST)
+# The reference daemon, unlike the demos, may use libfjarr's internals for installation concerns an
+# embedder never calls: the system profile check behind --check (docs/26#the-system-profile).
+target_include_directories(fjarr-agent PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 if(SYSTEMD_FOUND)
   target_link_libraries(fjarr-agent PRIVATE PkgConfig::SYSTEMD)
   target_compile_definitions(fjarr-agent PRIVATE FJARR_HAVE_SYSTEMD=1)

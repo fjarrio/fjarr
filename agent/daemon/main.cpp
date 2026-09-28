@@ -11,6 +11,7 @@
 
 #include <gst/gst.h>
 
+#include "core/system_profile.hpp"
 #include <fjarr/diagnostics.hpp>
 #include <fjarr/fjarr.hpp>
 
@@ -122,8 +123,21 @@ int main(int argc, char** argv) {
                 ok = false; // a *malformed* desktop config is a real configuration error
             }
         }
+        // The system profile (docs/26#the-system-profile): what the OS must provide, verified however
+        // the robot was installed. Absent on a development build, which is one informational row.
+        {
+            const char* env = std::getenv("FJARR_PROFILE");
+            const std::string path = env && *env ? env : "/usr/share/fjarr/profile.toml";
+            const auto net = config.capabilities.count("fjarr.net") ? config.capabilities["fjarr.net"] : nlohmann::json::object();
+            const bool net_wanted = net.is_object() && net.value("enabled", false);
+            const auto rows = fjarr::profile::check(path, net_wanted, fjarr::profile::System::real());
+            for (const auto& r : rows)
+                std::printf("profile %-7s %-28s %-8s %s%s\n", r.feature.c_str(), r.item.c_str(), r.ok ? "ok" : "MISSING", r.detail.c_str(),
+                            r.fix.empty() ? "" : ("  → " + r.fix).c_str());
+            if (!fjarr::profile::all_ok(rows)) ok = false;
+        }
         const bool encoder_ok = config.media.encoder == "software" || hw;
-        std::printf("check: %s\n", ok ? "OK" : (encoder_ok ? "FAILED — see the source rows above" : "FAILED — VA-API unavailable; set media.encoder = \"software\" or fix /dev/dri"));
+        std::printf("check: %s\n", ok ? "OK" : (encoder_ok ? "FAILED — see the MISSING and UNAVAILABLE rows above, each with its fix" : "FAILED — VA-API unavailable; set media.encoder = \"software\" or fix /dev/dri"));
         return ok ? 0 : 1;
     }
 

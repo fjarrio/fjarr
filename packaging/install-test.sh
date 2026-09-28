@@ -35,8 +35,22 @@ ok "fjarr-connect holds cap_net_admin"
 
 cfg=/usr/share/fjarr/fjarr.toml.example
 [ -f "$cfg" ] || fail "no example config"
-FJARR_MEDIA_ENCODER=software fjarr-agent --config "$cfg" --check >/tmp/check.log 2>&1 || { cat /tmp/check.log; fail "--check fails on the example config"; }
-ok "--check passes on the example config (software encoder: no GPU here)"
+[ -f /usr/share/fjarr/profile.toml ] || fail "no system profile installed"
+# Fresh install, setup not run: the profile check must fail and name the fix (docs/26#the-system-profile).
+if FJARR_MEDIA_ENCODER=software fjarr-agent --config "$cfg" --check >/tmp/check.log 2>&1; then
+    cat /tmp/check.log; fail "--check passed before setup ran: the profile check is not checking"
+fi
+grep -q 'profile core    /etc/fjarr/fjarr.toml .*MISSING.*sudo fjarr-agent setup' /tmp/check.log || { cat /tmp/check.log; fail "--check did not name setup as the fix"; }
+ok "before setup, --check fails and names the fix"
+# What setup and the service's first start do (until setup exists): the config, and the state directory.
+install -D -m 0644 "$cfg" /etc/fjarr/fjarr.toml
+install -d -o fjarr -g fjarr -m 0700 /var/lib/fjarr
+# And what boot does: /run is empty at every boot and systemd-tmpfiles recreates /run/fjarr. This
+# container runs no systemd, so the step is done by hand here, the way the tmpfiles entry says.
+install -d -o fjarr -g fjarr -m 0755 /run/fjarr
+FJARR_MEDIA_ENCODER=software fjarr-agent --config /etc/fjarr/fjarr.toml --check >/tmp/check.log 2>&1 || { cat /tmp/check.log; fail "--check fails after setup's steps"; }
+grep -q '^profile core' /tmp/check.log || { cat /tmp/check.log; fail "--check printed no profile rows"; }
+ok "after setup's steps, --check passes with every profile row ok (software encoder: no GPU here)"
 
 apt-get install -y -qq gstreamer1.0-tools >/dev/null 2>&1   # the test's own tool, after the packages
 for e in x264enc avdec_h264; do gst-inspect-1.0 "$e" >/dev/null 2>&1 && fail "$e came with the packages (ADR-0011)"; done

@@ -29,4 +29,5 @@ override_dh_auto_install:
 	cp -a web/apps/introspect-viewer/dist/. debian/fjarr-agent/usr/share/fjarr/viewer/
 	@# Not under /usr/share/doc: Ubuntu's minimal and container images drop that path at install.
 	install -D -m 0644 packaging/fjarr.toml.example debian/fjarr-agent/usr/share/fjarr/fjarr.toml.example
+	install -D -m 0644 packaging/profile.toml debian/fjarr-agent/usr/share/fjarr/profile.toml
 	install -D -m 0755 signaling/target/release/fjarr-connect debian/fjarr-tools/usr/bin/fjarr-connect

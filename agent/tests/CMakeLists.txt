@@ -11,6 +11,7 @@ add_executable(fjarr-tests
   test_channels.cpp
   test_blob.cpp
   test_nice_options.cpp
+  test_system_profile.cpp
   test_rate_estimator.cpp
   test_supervision.cpp
   test_terminal_capability.cpp

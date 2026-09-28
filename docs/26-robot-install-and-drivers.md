@@ -82,7 +82,7 @@ Three choices were corrected when the packaging was built (2026-09-28):
 
 ### The system profile {#the-system-profile}
 
-A data file in the repository, installed as
+A data file in the repository (`packaging/profile.toml`), installed as
 `/usr/share/fjarr/profile.toml`. Per feature (`core`, `net`,
 `desktop-wayland`, `desktop-x11`, `headless`), it lists the users, groups,
 units, udev rules, kernel arguments and GDM settings that feature needs. It is

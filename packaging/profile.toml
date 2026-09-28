@@ -1,0 +1,19 @@
+# The system profile (docs/26#the-system-profile): what each feature needs from the robot's OS.
+# Installed as /usr/share/fjarr/profile.toml. The packages and `setup` produce it; `fjarr-agent --check`
+# verifies it on every robot however it was installed; later channels (a NixOS module, a Yocto layer)
+# render the same data. Desktop and headless features join when `setup desktop` exists.
+
+[core]
+account = "fjarr"                                 # the agent's own unprivileged user (docs/10)
+groups  = ["video", "render"]                     # cameras; VA-API without the seat's ACL (ADR-0028)
+config  = "/etc/fjarr/fjarr.toml"                 # written by `fjarr-agent setup`
+units   = ["fjarr-agent.service"]                 # enabled by the package
+dirs    = [
+  { path = "/var/lib/fjarr", owner = "fjarr", mode = "0700" },   # the device key (docs/10)
+  { path = "/run/fjarr",     owner = "fjarr" },                  # the desktop helper's socket (ADR-0028)
+]
+
+[net]                                             # when fjarr.net is configured (docs/27)
+device = "fjarr0"                                 # persistent, created before the robot's software starts
+owner  = "fjarr"                                  # so the agent attaches without privilege
+mtu    = 1184                                     # one SCTP chunk (ADR-0027)
