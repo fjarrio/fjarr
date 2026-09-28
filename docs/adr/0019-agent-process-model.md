@@ -53,6 +53,36 @@ against a wedged core loop and is not optional on a robot. Embedders of
 notify/watchdog seam they may leave unset); containers without systemd
 (the demo, CI) run with the watchdog off and log that fact at startup.
 
+## Addendum (2026-09-28): READY when the robot is ready, not when the server is
+
+`READY=1` was sent after the first `hello-ack`, so that `systemctl status`
+could not call an unreachable robot fine. Two costs surfaced when
+`fjarr-agent net setup` was built ([docs/26](../26-robot-install-and-drivers.md#fjarr-agent-net-setup),
+[docs/18 #32](../18-open-questions.md)):
+
+- A robot with no WAN at boot — a basement, a field, a warehouse without
+  its uplink yet — never sends `READY`, so systemd kills the agent at the
+  start timeout (90 s by default) and `Restart=on-failure` relaunches it,
+  forever, and the watchdog never engages. Offline is a robot's normal state,
+  not a failed start.
+- The tunnel's ordering rule ([docs/27](../27-network-tunnel.md#lifecycle))
+  needs the customer's software to start after the agent has *attached* the
+  device — a Fast DDS participant created before that never sees it — and
+  `After=fjarr-agent.service` waits for `READY`. With `READY` on `hello-ack`
+  that made the robot's bringup wait for the WAN.
+
+Decided: **`READY=1` once the capabilities are configured and the core loop
+runs**, before any server is reached; **`STATUS=`** carries the connection
+(`connecting to <url>`, `online`, `offline: <reason>`), which is the line
+`systemctl status` shows, so the truth that `READY` used to deliver is still
+there. The watchdog is unchanged: the core loop was always what fed it. Exit
+codes are unchanged. Embedders get the seam as `Supervision::status`.
+
+The supervision rig ([docs/23](../23-agent-core-architecture.md#testing-docs15))
+now asserts the opposite of what it did: `READY` arrives with no server at
+all, and a `STATUS` line says so. `net setup`'s drop-in orders the customer's
+units after both `fjarr-net.service` and `fjarr-agent.service`.
+
 ## Consequences
 
 Slice 3 ships without IPC. The measurable trigger for revisiting is a

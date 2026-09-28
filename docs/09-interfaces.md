@@ -25,7 +25,7 @@ agent.register_capability(std::make_unique<acme::ArmTeachCapability>());
 agent.on_session_event([](const fjarr::SessionEvent& ev) { /* audit */ });
 // SessionEvent { type: "started"|"ended"|"error"|"audio-uplink"; session_id;
 //                operator_info {id,label}; reason (ended); code (error) }
-agent.supervision({ .ready = …, .watchdog = …, .watchdog_interval_ms = … });  // sd_notify seam (ADR-0019)
+agent.supervision({ .ready = …, .status = …, .watchdog = …, .watchdog_interval_ms = … });  // sd_notify seam (ADR-0019): READY once configured and running, STATUS= the connection
 agent.stop_on_signal(SIGTERM);  // orderly stop as a core-loop callback (never in signal context), bounded by stop_deadline_ms
 int rc = agent.run();   // blocks; exit code 0/1/2 per ADR-0019; or agent.start()/stop() on the host's loop
 // fjarr::probe_source("v4l2src device=/dev/video0") — what `fjarr-agent --probe-source` prints

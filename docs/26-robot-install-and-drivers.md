@@ -278,8 +278,14 @@ the machines that need the ordering. "No" skips the ordering and DDS steps
 └  fjarr-agent --check: all net rows ok · undo: fjarr-agent setup --undo net
 ```
 
-The ordering is a systemd drop-in (`After=` and `Wants=fjarr-net.service`) per
-chosen unit, which is the ordering rule applied to the customer's own services.
+The ordering is a systemd drop-in per chosen unit — `After=` and `Wants=` of
+both `fjarr-net.service` (the device exists) and `fjarr-agent.service` (the
+agent has attached it, which is when it has carrier: the condition a Fast DDS
+participant needs, docs/27#lifecycle) — which is the ordering rule applied to
+the customer's own services. The wait is bounded by the robot, not the WAN:
+the agent's `READY` comes once its capabilities are configured and its loop
+runs, before any server is reached
+([ADR-0019](adr/0019-agent-process-model.md), second addendum).
 When ROS runs in containers, the unit to order is the container runtime
 (`docker.service`) or the unit that starts the compose stack, and the containers
 need host networking to see `fjarr0` (as in
@@ -292,7 +298,7 @@ What it leaves on the device, each recorded for `--undo net`:
 | `/etc/fjarr/fjarr.toml` | `capabilities."fjarr.net".enabled = true`, and `address` when `--address` pinned it; only those keys, comments and order kept |
 | `fjarr0` | created now, owned by the agent's account (the profile's `[net] owner`), `<address> peer 100.64.0.1`, at the chunk MTU |
 | `fjarr-net.service` | enabled and started; at every boot it runs `fjarr-setup net up`, which reads the config, asks `fjarr-agent --net-address` and recreates the same device (a no-op when it is already there) |
-| `/etc/systemd/system/<unit>.d/50-fjarr-net.conf` | the ordering drop-in, one per `--ros-units` entry |
+| `/etc/systemd/system/<unit>.d/50-fjarr-net.conf` | the ordering drop-in, one per `--ros-units` entry: after `fjarr-net.service` and `fjarr-agent.service` |
 | `/etc/fjarr/cyclonedds.xml` | with `--dds cyclone`: [docs/27](27-network-tunnel.md#ros2)'s file with the tunnel and the LAN interface (the default route's, or `--lan-interface`); the ROS 2 processes take it through `CYCLONEDDS_URI` |
 | `/var/lib/fjarr/setup-changes.json` | the record, with a replaced file's previous contents beside it under `setup-backups/` |
 
@@ -302,12 +308,10 @@ detected), `--ros-units a.service,b.service`, `--dds cyclone|fastdds|none`,
 attaches now; a stopped one is left alone. It ends with `fjarr-agent --check`,
 whose `net` rows verify the unit and the device.
 
-**Known gap, Fast DDS ([#32](18-open-questions.md)):** the drop-in orders the
-customer's units after the *device*, and docs/27's measured fact is that a Fast
-DDS participant created before the *agent attaches* never sees the interface.
-Ordering after `fjarr-agent.service` is not the answer today, because the
-agent's `READY` is its first `hello-ack` ([docs/23](23-agent-core-architecture.md#configuration)),
-which would hold a robot's bringup on the WAN. Cyclone is unaffected.
+Before 2026-09-28 the drop-in ordered after the device alone, because
+`READY` waited for the first `hello-ack` and ordering after the agent would
+have held a robot's bringup on the WAN; that was [#32](18-open-questions.md),
+closed by the ADR-0019 addendum above.
 
 ### `fjarr-agent setup desktop`
 

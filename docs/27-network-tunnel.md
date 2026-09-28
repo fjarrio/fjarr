@@ -138,6 +138,11 @@ Three rules follow:
 2. **The agent's systemd unit orders before the robot's software.** Carrier
    is down while nothing is attached, and a participant created then ignores
    the interface permanently. This is an ordering dependency, not a nicety.
+   `fjarr-agent net setup` writes it as a drop-in on the robot's own units
+   ([docs/26](26-robot-install-and-drivers.md#fjarr-agent-net-setup)), and
+   since [ADR-0019](adr/0019-agent-process-model.md)'s second addendum the
+   agent's `READY` does not wait for the server, so the ordering never waits
+   for the WAN.
 3. **Agent restarts are safe.** The device and its address survive the agent
    exiting, and participants that bound earlier keep advertising the tunnel
    address straight through the restart. No ROS 2 restart is needed to

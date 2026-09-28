@@ -67,10 +67,16 @@ without systemd run with the watchdog off and say so at startup:
 | 1 | configuration/startup error (bad config, missing elements — the doctor's job at runtime) | do **not** restart in a loop; log loudly |
 | 2 | "restart me": the recovery ladder is exhausted (docs/15 "agent SIGKILL mid-session" and "media plane hang" rows) | restart with the unit's backoff |
 
-The daemon writes `READY=1` after the first `hello-ack` and `WATCHDOG=1`
-from the core loop every `WatchdogSec/3`; a wedged core loop is therefore
-killed by systemd, which is the only defense against a deadlock in our own
-code — which is why the packaged agent does not run without it.
+The daemon writes `READY=1` once its capabilities are configured (the tunnel
+attached, docs/27) and the core loop runs — before the first `hello-ack`,
+since 2026-09-28 ([ADR-0019](adr/0019-agent-process-model.md), second
+addendum) — and `STATUS=` carries the connection (`connecting to <url>`,
+`online`, `offline: <reason>`), so `systemctl status` still tells the truth
+about an unreachable robot without the unit sitting in `activating` until
+the start timeout kills it. `WATCHDOG=1` comes from the core loop every
+`WatchdogSec/3`; a wedged core loop is therefore killed by systemd, which is
+the only defense against a deadlock in our own code — which is why the
+packaged agent does not run without it.
 
 ## Threading model
 
@@ -1660,10 +1666,13 @@ gate green.
   unix datagram socket, name it in `NOTIFY_SOCKET`, set `WATCHDOG_USEC`, and
   the daemon's real `sd_notify` path runs against it. `SIGSTOP` is then an
   honest whole-process hang — the process genuinely cannot run, so it
-  genuinely cannot ping, which is the property systemd relies on. Pinning
-  "READY is not claimed before the first `hello-ack`" came free from the same
-  rig and matters as much: an agent that reports ready while it has never
-  reached the server makes `systemctl status` lie about an unreachable robot.
+  genuinely cannot ping, which is the property systemd relies on. The same
+  rig pins the `READY` contract. Until 2026-09-28 that was "not before the
+  first `hello-ack`", so that `systemctl status` could not call an unreachable
+  robot fine; it now asserts `READY` **with no server at all**, within a
+  bounded time, plus a `STATUS=` line that says the server is not reached —
+  the same truth, delivered without holding the unit in `activating`
+  ([ADR-0019](adr/0019-agent-process-model.md), second addendum).
 - *A killed agent is noticed by the server, not by the heartbeat.* SIGKILL
   closes the agent's socket, so the operator saw `peer-gone:agent-disconnected`
   **629 ms** after the kill — far inside the heartbeat budget, which is the
