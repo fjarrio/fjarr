@@ -9,3 +9,5 @@ inspiration/
 website/.astro/
 .env
 *.log
+# The images are built FROM the .debs (docs/26#releases, ADR-0031): make deb puts them here first.
+!dist/deb

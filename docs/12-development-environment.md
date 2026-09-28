@@ -304,17 +304,19 @@ what `/verify` and the e2e tests assert against.
 The demo robot runs in the dev image with the workspace mounted, so an
 agent change is `make agent-build` and a container restart, never an
 image rebuild. The product artifact is the `fjarr-agent` image
-(`docker/agent/Dockerfile`, repo-root context: a node stage builds the
-viewer, a build stage the library and daemon, the runtime stage is Ubuntu
-26.04 with the runtime GStreamer and VA-API packages, no compilers, a
-non-root user, the viewer under `/usr/share/fjarr/viewer`, a healthcheck
-on the endpoint, and a build that fails if `x264enc` is present — the
-doctor's rule applied to the artifact; `.dockerignore` keeps `build/`,
-`node_modules/` and `inspiration/` out of the context). A `demo` stage
-layers the demo robot binary on the runtime image, the topology an
-embedding customer uses. To run the demo from it:
+(`docker/agent/Dockerfile`, repo-root context), built **from the
+`.deb`s** since M2.5 (docs/26#releases), so run `make deb` first. The
+runtime stage is Ubuntu 26.04 plus the `fjarr-agent` package and VA-API
+drivers: no compilers, the `fjarr` user with the published uid 10001, the
+viewer under `/usr/share/fjarr/viewer`, a healthcheck on the live endpoint,
+and a build that fails if anything GPL the agent could load is present
+(`x264enc`, `avdec_*`, `libx264`, `libxvidcore` — ADR-0011, docs/14). A
+`demo` stage builds the demo robot against `libfjarr-dev` with
+`find_package(fjarr)` and puts it on the runtime image, which is the
+topology an embedding customer uses. To run the demo from it:
 
 ```bash
+make deb
 docker compose -f docker-compose.yml -f docker-compose.image.yml --profile demo up -d --build demo-robot
 ```
 

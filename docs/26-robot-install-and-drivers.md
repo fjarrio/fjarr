@@ -151,7 +151,6 @@ on this machine" instead of failing an install.
 
 | `fjarr-agent setup desktop` | makes a desktop robot reachable unattended ([ADR-0006](adr/0006-desktop-backend-selection.md)): chooses or creates the auto-login account (no password, no remote login), enables auto-login, the GDM watchdog and the session helper's user unit; for X11 kiosks the output layout; for headless robots, on request, a forced connector with an EDID on the kernel command line |
 | `fjarr-agent setup --undo <feature>` | reverses every change `setup` recorded for that feature (GDM, GRUB, accounts, units) |
-| `fjarr-agent --check --health` | the container health check: the same profile verification, exit status only |
 
 `setup` never guesses silently: every proposed track and every install
 is shown and confirmed (`--yes` for provisioning scripts), and the result
@@ -182,7 +181,13 @@ needs from the host:
 | Tunnel | `cap_add: NET_ADMIN`, `/dev/net/tun`, host networking | the agent creates the persistent `fjarr0` in the host's namespace; ROS containers `depends_on` the agent being healthy, which is the ordering rule ([docs/27](27-network-tunnel.md#lifecycle)) in compose |
 | Desktop | the host installs `fjarr-desktop-session` from the `.deb`; its socket `/run/fjarr/desktop.sock` is bind-mounted into the container | the helper has to run inside the desktop user's session; descriptors cross a bind-mounted socket unchanged |
 
-The image runs as `fjarr` with a **fixed, published uid**. The helper checks
+The image runs as `fjarr` with a **fixed, published uid: 10001**. The Dockerfile
+creates the user before installing the package, and the package's sysusers
+entry then only adds `video` and `render`; on an apt robot the uid is dynamic.
+The image's health check is **live**: the running agent's introspection
+endpoint answers. That says more about a running container than a static
+check of its files (corrected 2026-09-28 from a `--check --health` that was
+never built). The helper checks
 the agent's uid (ADR-0028), so user-namespace remapping (rootless Docker,
 `userns-remap`) is either off or its mapped uid is configured. On an X11
 kiosk, `/tmp/.X11-unix` is bind-mounted, and the package creates a host account
