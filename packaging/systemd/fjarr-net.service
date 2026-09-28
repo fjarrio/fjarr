@@ -1,0 +1,18 @@
+# spec: docs/27-network-tunnel.md#lifecycle · docs/26-robot-install-and-drivers.md#fjarr-agent-net-setup
+# The tunnel device does not survive a reboot, and DDS picks its interfaces when a participant is
+# created, so the device is recreated here at every boot: before the agent, and before any of the
+# robot's own services that `net setup` ordered after this unit. Shipped disabled; `net setup`
+# enables it. Inert until fjarr.net is configured (`net up` does nothing when it is not enabled).
+[Unit]
+Description=Fjarr tunnel device: fjarr0 exists before the robot's software starts
+Documentation=https://fjarr.io/27-network-tunnel/
+Before=fjarr-agent.service
+ConditionPathExists=/etc/fjarr/fjarr.toml
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/fjarr/fjarr-setup net up
+
+[Install]
+WantedBy=multi-user.target

@@ -5,9 +5,13 @@
 #include <chrono>
 #include <csignal>
 #include <cstdio>
+#include <cerrno>
 #include <cstring>
 #include <string>
 #include <thread>
+#include <vector>
+
+#include <unistd.h>
 
 #include <gst/gst.h>
 
@@ -23,6 +27,7 @@ namespace {
 
 int usage() {
     std::printf("fjarr-agent [--config /etc/fjarr/fjarr.toml] [--check] [--probe-source '<description|type>'] [--diagnostics [out.tar.gz]]\n"
+                "fjarr-agent setup [--undo <feature>] | net setup | net up | drivers …   (fjarr-setup, docs/26#the-setup-tool)\n"
                 "  --check          the doctor: encoder, configured sources, endpoint (exit 0/1)\n"
                 "  --net-address    this robot's tunnel address, to create the interface with (docs/27)\n"
                 "  --probe-source   bring one source up standalone and report caps + fps\n"
@@ -44,9 +49,27 @@ int probe_source(const std::string& spec) {
     return r.ok ? 0 : 1;
 }
 
+// `setup`, `net` and `drivers` are fjarr-setup's, handed over unchanged so the commands keep their
+// names; the daemon itself never grows installer UX (docs/26#the-setup-tool).
+int hand_to_setup(int argc, char** argv) {
+    const char* env = std::getenv("FJARR_SETUP");
+    const std::string path = env && *env ? env : "/usr/lib/fjarr/fjarr-setup";
+    std::vector<char*> args;
+    args.push_back(const_cast<char*>("fjarr-setup"));
+    for (int i = 1; i < argc; i++) args.push_back(argv[i]);
+    args.push_back(nullptr);
+    ::execv(path.c_str(), args.data());
+    std::fprintf(stderr, "fjarr-agent: cannot run %s (%s): it ships in the fjarr-agent package\n", path.c_str(), std::strerror(errno));
+    return 1;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
+    if (argc >= 2) {
+        const std::string first = argv[1];
+        if (first == "setup" || first == "net" || first == "drivers") return hand_to_setup(argc, argv);
+    }
     gst_init(&argc, &argv);
     std::setvbuf(stdout, nullptr, _IOLBF, 0);
     std::string config_path;

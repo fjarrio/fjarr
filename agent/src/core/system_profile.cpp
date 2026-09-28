@@ -93,10 +93,15 @@ void check_net(const toml::table& net, const System& sys, std::vector<Row>& rows
     const std::string dev = net["device"].value_or(std::string("fjarr0"));
     const std::string owner = net["owner"].value_or(std::string("fjarr"));
     const int mtu = net["mtu"].value_or(1184);
-    const auto nd = sys.netdev(dev);
     // spec: docs/27#lifecycle — created before the robot's software starts, owned by the agent's
-    // account so it attaches without privilege; the one piece of setup that needs root.
-    const std::string create = "sudo ip tuntap add dev " + dev + " mode tun user " + owner + "  # then the address from fjarr-agent --net-address";
+    // account so it attaches without privilege; the one piece of setup that needs root. `net setup`
+    // creates it now and enables the unit that recreates it at every boot (docs/26#fjarr-agent-net-setup).
+    const std::string create = "sudo fjarr-agent net setup";
+    for (const auto& unit : strings(net["units"])) {
+        const bool on = sys.unit_enabled(unit);
+        rows.push_back({"net", "unit " + unit, on, on ? "enabled" : "not enabled: the device would be gone after a reboot", on ? "" : create});
+    }
+    const auto nd = sys.netdev(dev);
     if (!nd || !nd->tun) {
         rows.push_back({"net", "device " + dev, false, nd ? "exists but is not a tun device" : "missing", create});
         return;

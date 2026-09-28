@@ -11,12 +11,19 @@ override_dh_auto_configure:
 
 override_dh_auto_build:
 	dh_auto_build
-	cd signaling && cargo build --release --locked -p fjarr-connect
+	cd signaling && cargo build --release --locked -p fjarr-connect -p fjarr-setup
 
 # The fjarr user comes from debian/fjarr-agent.sysusers. dh_installsysusers is only in the default
 # sequence from compat 14, so at 13 it is called here, before the unit that runs as that user.
 execute_before_dh_installsystemd:
 	dh_installsysusers
+
+# Two units, two policies (docs/26#packages): fjarr-agent.service is enabled by the package and
+# waits for its config; fjarr-net.service ships disabled and `net setup` enables it, because a
+# tunnel device is only wanted where fjarr.net is configured.
+override_dh_installsystemd:
+	dh_installsystemd -p fjarr-agent --name=fjarr-net --no-enable --no-start
+	dh_installsystemd -p fjarr-agent fjarr-agent.service
 
 # The tests run in CI against the dev image (make agent-test, signaling-test); a package build
 # does not repeat them.
@@ -31,3 +38,5 @@ override_dh_auto_install:
 	install -D -m 0644 packaging/fjarr.toml.example debian/fjarr-agent/usr/share/fjarr/fjarr.toml.example
 	install -D -m 0644 packaging/profile.toml debian/fjarr-agent/usr/share/fjarr/profile.toml
 	install -D -m 0755 signaling/target/release/fjarr-connect debian/fjarr-tools/usr/bin/fjarr-connect
+	@# The setup tool, handed `setup`, `net` and `drivers` by fjarr-agent (docs/26#the-setup-tool).
+	install -D -m 0755 signaling/target/release/fjarr-setup debian/fjarr-agent/usr/lib/fjarr/fjarr-setup

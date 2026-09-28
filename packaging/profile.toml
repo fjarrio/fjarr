@@ -17,3 +17,4 @@ dirs    = [
 device = "fjarr0"                                 # persistent, created before the robot's software starts
 owner  = "fjarr"                                  # so the agent attaches without privilege
 mtu    = 1184                                     # one SCTP chunk (ADR-0027)
+units  = ["fjarr-net.service"]                    # enabled by `net setup`: recreates the device at every boot

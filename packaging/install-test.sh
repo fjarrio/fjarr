@@ -27,6 +27,18 @@ grep -q '^ConditionPathExists=/etc/fjarr/fjarr.toml' "$unit" || fail "the unit d
 [ -e /etc/systemd/system/multi-user.target.wants/fjarr-agent.service ] || fail "the service is not enabled"
 ok "unit installed and enabled: $unit"
 [ -f /usr/lib/tmpfiles.d/fjarr-agent.conf ] || fail "no tmpfiles entry for /run/fjarr"; ok "tmpfiles entry present"
+# The tunnel's boot unit ships disabled: `net setup` enables it where fjarr.net is wanted (docs/26#packages).
+netunit=$(ls /usr/lib/systemd/system/fjarr-net.service /lib/systemd/system/fjarr-net.service 2>/dev/null | head -1)
+[ -n "$netunit" ] || fail "no fjarr-net.service installed"
+grep -q '^Before=fjarr-agent.service' "$netunit" || fail "fjarr-net.service is not ordered before the agent"
+[ ! -e /etc/systemd/system/multi-user.target.wants/fjarr-net.service ] || fail "fjarr-net.service is enabled by the package; net setup enables it"
+ok "fjarr-net.service installed, not enabled"
+# The setup tool, and the hand-off (docs/26#the-setup-tool): `fjarr-agent net …` is fjarr-setup's.
+[ -x /usr/lib/fjarr/fjarr-setup ] || fail "no /usr/lib/fjarr/fjarr-setup"
+fjarr-agent net --help 2>&1 | grep -q '^Usage: fjarr-setup net' || fail "fjarr-agent does not hand `net` to fjarr-setup"
+# Root here, no config yet: the tool must refuse and name the fix, not "set up" a device that is not configured.
+fjarr-agent net setup --yes --ros no 2>&1 | grep -q 'does not exist.*fjarr-agent setup' || fail "net setup without a config did not name setup as the fix"
+ok "fjarr-agent hands setup/net/drivers to fjarr-setup"
 [ ! -e /etc/fjarr/fjarr.toml ] || fail "the package shipped /etc/fjarr/fjarr.toml; setup writes it"; ok "no config shipped (setup writes it)"
 
 [ -f /usr/share/fjarr/viewer/index.html ] || fail "the viewer is missing"; ok "viewer installed"

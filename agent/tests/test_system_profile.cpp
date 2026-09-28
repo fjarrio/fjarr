@@ -25,6 +25,7 @@ dirs    = [ { path = "/var/lib/fjarr", owner = "fjarr", mode = "0700" }, { path 
 device = "fjarr0"
 owner  = "fjarr"
 mtu    = 1184
+units  = ["fjarr-net.service"]
 )";
 
 struct Fake {
@@ -33,7 +34,7 @@ struct Fake {
     std::map<std::string, System::Stat> files{{"/etc/fjarr/fjarr.toml", {0, 0644, false}},
                                               {"/var/lib/fjarr", {997, 0700, true}},
                                               {"/run/fjarr", {997, 0755, true}}};
-    std::set<std::string> enabled{"fjarr-agent.service"};
+    std::set<std::string> enabled{"fjarr-agent.service", "fjarr-net.service"};
     std::map<std::string, System::NetDev> devs{{"fjarr0", {true, 997u, 1184}}};
 
     System system() const {
@@ -117,13 +118,26 @@ TEST(SystemProfile, aTunnelDeviceMustBeATunOwnedByTheAgentWithTheChunkMtu) {
     f.devs["fjarr0"] = {true, 1000u, 1280}; // owned by someone else, the old MTU
     auto rows = check(profile_file(), true, f.system());
     EXPECT_FALSE(find(rows, "device fjarr0")->ok);
-    EXPECT_NE(find(rows, "device fjarr0")->fix.find("mode tun user fjarr"), std::string::npos);
+    EXPECT_NE(find(rows, "device fjarr0")->fix.find("fjarr-agent net setup"), std::string::npos);
     EXPECT_EQ(find(rows, "fjarr0 mtu")->fix, "sudo ip link set fjarr0 mtu 1184");
 
     f.devs.clear();
     rows = check(profile_file(), true, f.system());
     EXPECT_FALSE(find(rows, "device fjarr0")->ok);
     EXPECT_EQ(find(rows, "device fjarr0")->detail, "missing");
+    EXPECT_EQ(find(rows, "device fjarr0")->fix, "sudo fjarr-agent net setup");
+}
+
+TEST(SystemProfile, theBootUnitMustBeEnabledOrTheDeviceIsGoneAfterAReboot) {
+    Fake f;
+    f.enabled.erase("fjarr-net.service"); // the device exists now, but nothing recreates it at boot
+    auto rows = check(profile_file(), true, f.system());
+    const Row* u = find(rows, "unit fjarr-net.service");
+    ASSERT_TRUE(u);
+    EXPECT_FALSE(u->ok);
+    EXPECT_EQ(u->fix, "sudo fjarr-agent net setup");
+    EXPECT_TRUE(find(rows, "device fjarr0")->ok) << "the device row is judged on its own";
+    EXPECT_EQ(find(check(profile_file(), false, f.system()), "unit fjarr-net.service"), nullptr) << "not a row when the tunnel is off";
 }
 
 TEST(SystemProfile, aMissingAccountStopsTheRowsThatNeedIt) {

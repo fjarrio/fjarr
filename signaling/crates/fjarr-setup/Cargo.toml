@@ -1,0 +1,29 @@
+[package]
+name = "fjarr-setup"
+description = "fjarr-agent's setup commands: net setup, net up, and undo (docs/26#the-setup-tool)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+# The prompts (docs/26#the-setup-tool): one library for fjarr-setup and, after its migration,
+# fjarr-connect. MIT (docs/14).
+cliclack = "0.5"
+serde = { workspace = true }
+serde_json = { workspace = true }
+# /etc/fjarr/fjarr.toml is edited in place, comments and order kept: it is the customer's file.
+toml_edit = "0.22"
+libc = "0.2"
+tokio = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+fjarr-netdev = { path = "../fjarr-netdev" }
+# The routing table, for the range check and the LAN interface Cyclone keeps (same crate as netdev).
+rtnetlink = "0.23.0"
+futures-util = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
