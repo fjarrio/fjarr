@@ -17,10 +17,11 @@ COPY dist/deb/${TARGETARCH}/fjarr-agent_*.deb /tmp/debs/
 # The image's user is created FIRST, with the published uid (docs/26#containerized-robots), so the
 # package's sysusers entry finds it and only adds video and render. On an apt robot the uid is dynamic.
 # systemd-standalone-sysusers satisfies the package's sysusers dependency without pulling systemd in.
+# intel-media-va-driver (iHD) exists for amd64 only; arm64 devices get VA-API from mesa-va-drivers.
 RUN groupadd -r -g 10001 fjarr && useradd -r -u 10001 -g fjarr -d /var/lib/fjarr -s /usr/sbin/nologin fjarr \
     && apt-get update && apt-get install -y --no-install-recommends \
        systemd-standalone-sysusers ca-certificates curl gstreamer1.0-tools \
-       intel-media-va-driver mesa-va-drivers \
+       mesa-va-drivers $([ "$TARGETARCH" = amd64 ] && echo intel-media-va-driver) \
        /tmp/debs/fjarr-agent_*.deb \
     && rm -rf /var/lib/apt/lists/* /tmp/debs \
     && install -d -o fjarr -g fjarr -m 0700 /var/lib/fjarr \

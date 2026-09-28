@@ -288,6 +288,8 @@ jobs:
         run: make deb-install-test DEB_ARCH=${{ matrix.arch }}
       - name: embed libfjarr from the package (demo-robot out of tree)
         run: make deb-embed-test DEB_ARCH=${{ matrix.arch }}
+      - name: the runtime image builds from them (what release.yml publishes)
+        run: docker build -f docker/agent/Dockerfile --target runtime -t fjarr-agent:ci .
       - uses: actions/upload-artifact@v4
         with:
           name: debs-${{ matrix.arch }}
