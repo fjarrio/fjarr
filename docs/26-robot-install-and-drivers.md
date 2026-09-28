@@ -147,7 +147,7 @@ on this machine" instead of failing an install.
 | `fjarr-agent drivers detect` | hardware currently attached, matched against the catalog, with the package each needs |
 | `fjarr-agent --check` | the doctor: every configured source and backend with element availability, plus the one-line fix for each missing one (`install: sudo fjarr-agent drivers install realsense`). **Always a `desktop` row** (ADR-0021, slice 2c): available with the backend serving it, or unavailable naming the package to install — and never a failure, because a robot with no desktop is the normal case |
 | `fjarr-agent --probe-source …` | bring up one source standalone ([docs/09](09-interfaces.md#the-video-source-contract)) |
-| `fjarr-agent net setup` (M4.5) | creates the persistent tunnel interface owned by the `fjarr` user, derives the robot's address, checks the configured range against existing routes, writes the systemd ordering so the agent attaches before the robot's software, and offers to write the Cyclone DDS configuration file ([docs/27](27-network-tunnel.md)) |
+| `fjarr-agent net setup` | the tunnel's one-time setup: address, `fjarr-net.service` recreating the device at every boot, optional ROS ordering and DDS file ([below](#fjarr-agent-net-setup), [docs/27](27-network-tunnel.md)) |
 
 | `fjarr-agent setup desktop` | makes a desktop robot reachable unattended ([ADR-0006](adr/0006-desktop-backend-selection.md)): chooses or creates the auto-login account (no password, no remote login), enables auto-login, the GDM watchdog and the session helper's user unit; for X11 kiosks the output layout; for headless robots, on request, a forced connector with an EDID on the kernel command line |
 | `fjarr-agent setup --undo <feature>` | reverses every change `setup` recorded for that feature (GDM, GRUB, accounts, units) |
@@ -167,6 +167,154 @@ the agent does not disturb anything bound to it
 ([docs/27](27-network-tunnel.md#lifecycle)). `fjarr-agent --check` reports
 the interface, its address, whether the agent is attached, and whether the
 configured range overlaps a route that already exists on the machine.
+
+## The setup tool {#the-setup-tool}
+
+Decided 2026-09-28. `setup`, `setup desktop`, `net setup` and `drivers` are one
+small **Rust** program, `fjarr-setup`, shipped in the `fjarr-agent` package at
+`/usr/lib/fjarr/fjarr-setup`. `fjarr-agent` hands those subcommands over to it
+unchanged, so the commands above keep their names. Why a separate tool:
+
+- **It is installer UX and system configuration, not device runtime.** An
+  embedder of libfjarr never needs it, so it does not grow the C++ daemon.
+- **It reuses tested code.** The boot-time tunnel device is created over
+  netlink by the same module `fjarr-connect` uses for its own persistent device
+  (docs/27).
+- **One prompt library across the operator's machine and the device:**
+  [cliclack](https://crates.io/crates/cliclack). `fjarr-connect` moves from
+  dialoguer to cliclack in the same slice, after its filter mode is confirmed
+  to serve the device picker as well as dialoguer's fuzzy select does. The
+  repository then carries one prompt library (docs/14).
+
+Rules for every command:
+
+- **Say "device", not "robot".** The tool is for any connected machine. (The
+  configuration and protocol field `robot_id` keeps its name; renaming it
+  would be a protocol change, taken separately if ever.)
+- **Every prompt has a flag** (`--yes`, `--server`, `--device-id`,
+  `--ros-units`, `--dds none|cyclone|fastdds`, …), so a fleet provisions with
+  a script and the prompts are only the friendly face.
+- **Every change is recorded** in `/var/lib/fjarr/setup-changes.json`, and
+  `fjarr-agent setup --undo <feature>` reverses exactly those changes.
+- **System changes are applied only on Ubuntu with apt.** Elsewhere the tool
+  prints the options to set. It never replaces the ecosystem's package manager.
+- **Each command ends with `fjarr-agent --check`**, whose profile rows verify
+  what it did.
+
+### `fjarr-agent setup`
+
+The first run, which the install script calls. It detects the machine (OS,
+architecture, hardware H.264 encode, display server, ROS if any, cameras via
+`gst-device-monitor-1.0` matched against the catalog), then asks:
+
+```text
+┌  fjarr setup
+│
+◇  This device: Ubuntu 26.04 · amd64 · VA-API H.264 ✔ · GNOME on Wayland · ROS 2 Jazzy
+│
+◆  Where does it connect?
+│  ● Your own fjarr-server   ○ Fjarr Cloud
+◇  Server: wss://fleet.acme.com/ws
+◇  Device id: dev-024 (from the hostname)
+◆  Enrollment token (from your dashboard):  ••••••••
+◇  Enrolled ✔  device key in /var/lib/fjarr (0600)
+│
+◆  Cameras found. Which should stream?
+│  ◼ Front  Logitech C920 (usb-046d_C920…)   mjpeg 1280×720@30
+│  ◻ Depth  Intel RealSense D435  → needs the realsense driver
+◆  Install the realsense driver? (adds Intel's apt repository)   Yes
+│
+◆  Also set up:
+│  ◼ Terminal       → as which account?  operator
+│  ◼ Tunnel         → runs `net setup` next
+│  ◻ Remote desktop → runs `setup desktop` next
+│
+◇  /etc/fjarr/fjarr.toml written · fjarr-agent started · online ✔
+└  fjarr-agent --check: all rows ok · undo: fjarr-agent setup --undo
+```
+
+### `fjarr-agent net setup`
+
+The tunnel's one hard rule is that its device exists **before** any software
+that should use it starts (docs/27#lifecycle), because DDS picks its interfaces
+when a participant is created. `net setup` derives or takes the address, checks
+the range against existing routes, enables `fjarr.net` in the config, and
+installs `fjarr-net.service`: a oneshot that recreates the device **at every
+boot** (owned by `fjarr`, at the chunk MTU, before `fjarr-agent`), because a
+tun device does not survive a reboot. The ROS steps are **optional**. When no
+ROS is detected they are skipped, and each has an explicit "none":
+
+```text
+┌  fjarr net setup
+│
+◇  Device id: dev-024 → tunnel address 100.70.118.224 (derived)
+◇  Range 100.64.0.0/10 is free on this machine ✔
+│
+◆  Which services use ROS/DDS? They must start after the tunnel.
+│  ◼ bringup.service
+│  ◻ docker.service
+│  ○ None: nothing on this machine uses ROS/DDS
+│
+◆  Which DDS?
+│  ● Cyclone DDS (writes /etc/fjarr/cyclonedds.xml, LAN interface enp3s0)
+│  ○ Fast DDS (no file needed)
+│  ○ None
+│
+◇  fjarr-net.service installed · 1 ordering drop-in · config updated
+└  fjarr-agent --check: all net rows ok · undo: fjarr-agent setup --undo net
+```
+
+The ordering is a systemd drop-in (`After=` and `Wants=fjarr-net.service`) per
+chosen unit, which is the ordering rule applied to the customer's own services.
+
+### `fjarr-agent setup desktop`
+
+The appliance pieces the M2 spikes showed a desktop device needs
+([ADR-0006](adr/0006-desktop-backend-selection.md),
+[ADR-0028](adr/0028-desktop-session-helper.md)):
+
+```text
+┌  fjarr setup desktop
+│
+◇  Session: GNOME 50 on Wayland under GDM → backend: mutter
+◇  Monitors: 1 (DELL U2422H on HDMI-1)
+│
+◆  Which account should the desktop run as? It logs in by itself at boot.
+│  ● Create "desktop" (no password, no remote login)   ○ Use existing: operator
+│
+◇  Auto-login enabled for desktop in GDM
+◇  GDM watchdog enabled (restarts the login if the session dies)
+◇  Session helper enabled for desktop · group fjarr-desktop
+│
+▲  desktop must log in once for its group to apply. Reboot now?   Yes / Later
+└  Undo: fjarr-agent setup --undo desktop
+```
+
+On an X11 kiosk it installs the output-layout helper and the `xhost` grant
+instead. With no monitor it offers a forced connector: it shows which connector
+and resolution, edits the kernel command line, installs the EDID, and says a
+reboot is needed.
+
+### `fjarr-agent drivers`
+
+Mostly output, for people and scripts alike (`--json`):
+
+```text
+$ fjarr-agent drivers list
+  NAME        STATUS          PACKAGE              NOTE
+  v4l2        built in        —
+  realsense   available       fjarr-gst-realsense  needs Intel's apt repository (added for you)
+  zed         needs manual    fjarr-gst-zed        SDK behind a EULA: see the link
+  jetson-csi  not for amd64   fjarr-gst-argus
+
+$ fjarr-agent drivers detect
+  /dev/video0     Logitech C920         → v4l2 (built in)
+  usb 8086:0b07   Intel RealSense D435  → realsense (not installed)
+```
+
+`sudo fjarr-agent drivers install realsense` shows the prerequisites, asks
+before adding a vendor repository, installs, reloads udev, and finishes with a
+`--probe-source` of the device it found.
 
 ## Containerized robots {#containerized-robots}
 
