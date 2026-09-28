@@ -1,0 +1,12 @@
+#!/bin/sh
+# fjarr-connect creates its interface and routes in-process over netlink, and needs nothing else
+# (docs/27#the-operator-client). A file capability is not inherited by children, which is why it
+# must be the binary itself that holds it. Permitted, not effective: fjarr-connect raises it for the
+# link alone, and with +ep the kernel would refuse to run the binary at all wherever the capability
+# is outside the bounding set (containers, CI), even for `shell` (docs/27#the-operator-client).
+set -e
+if [ "$1" = configure ]; then
+    setcap cap_net_admin+p /usr/bin/fjarr-connect
+fi
+#DEBHELPER#
+exit 0

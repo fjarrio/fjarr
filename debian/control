@@ -1,0 +1,33 @@
+Source: fjarr
+Section: net
+Priority: optional
+Maintainer: Fjarr <dev@fjarr.io>
+Build-Depends: debhelper-compat (= 13),
+ cmake, ninja-build, pkg-config, git, ca-certificates,
+ libgstreamer1.0-dev, libgstreamer-plugins-base1.0-dev, libgstreamer-plugins-bad1.0-dev,
+ libva-dev, nlohmann-json3-dev, libtomlplusplus-dev, libsystemd-dev, libsoup-3.0-dev
+Standards-Version: 4.7.0
+Homepage: https://fjarr.io
+Rules-Requires-Root: no
+# Not expressible here: the Rust toolchain (rust-toolchain.toml's exact pin, installed by rustup in
+# the builder image) and the prebuilt introspection viewer (web/apps/introspect-viewer/dist).
+# `make deb` provides both (docs/26#releases).
+
+Package: fjarr-agent
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends},
+ gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad,
+ gstreamer1.0-nice, glib-networking
+Recommends: mesa-va-drivers | intel-media-va-driver, fjarr-tools
+Description: Fjarr agent: peer-to-peer connectivity for robots
+ Streams cameras and the desktop, gives operators a terminal and a network
+ link, over WebRTC. Runs as its own unprivileged account. The service starts
+ once /etc/fjarr/fjarr.toml exists; `fjarr-agent setup` writes it.
+
+Package: fjarr-tools
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libcap2-bin
+Description: Fjarr operator tools: fjarr-connect
+ fjarr-connect is the native operator client: a network link to a robot
+ (given cap_net_admin at install) and `fjarr-connect shell`, the robot's
+ terminal in yours.

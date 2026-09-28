@@ -1,0 +1,4 @@
+# spec: docs/10 (the agent's own unprivileged account) · docs/26#packages
+u fjarr - "Fjarr agent" /var/lib/fjarr
+m fjarr video
+m fjarr render

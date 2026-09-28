@@ -1,0 +1,5 @@
+fjarr (0.0.1~dev) unstable; urgency=medium
+
+  * Development build. Release builds generate this entry from the tag (docs/26#releases).
+
+ -- Fjarr <dev@fjarr.io>  Mon, 28 Sep 2026 08:00:00 +0200

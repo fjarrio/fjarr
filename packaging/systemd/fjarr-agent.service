@@ -1,0 +1,27 @@
+# spec: docs/26-robot-install-and-drivers.md#packages · ADR-0019 (Type=notify, watchdog, on-failure)
+[Unit]
+Description=Fjarr agent: peer-to-peer connectivity for this robot
+Documentation=https://fjarr.io/26-robot-install-and-drivers/
+Wants=network-online.target
+After=network-online.target
+# Written by `fjarr-agent setup`. Until then the unit stays inactive instead of restarting in a loop.
+ConditionPathExists=/etc/fjarr/fjarr.toml
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/fjarr-agent --config /etc/fjarr/fjarr.toml
+User=fjarr
+Group=fjarr
+SupplementaryGroups=video render
+# The device key lives here (docs/10): owned by fjarr, 0700.
+StateDirectory=fjarr
+StateDirectoryMode=0700
+WatchdogSec=30
+Restart=on-failure
+RestartSec=2
+# Deliberately no ProtectSystem/ProtectHome/NoNewPrivileges: fjarr.terminal gives operators a shell
+# as this account and fjarr.net a link into the robot, and both must see the real system (sudo
+# included, where the robot allows it). The account's own rights are the boundary (docs/10).
+
+[Install]
+WantedBy=multi-user.target

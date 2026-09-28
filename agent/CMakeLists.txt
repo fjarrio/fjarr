@@ -89,4 +89,13 @@ set_target_properties(fjarr-agent PROPERTIES RUNTIME_OUTPUT_DIRECTORY
   ${CMAKE_BINARY_DIR}/agent/daemon)
 
 add_subdirectory(tools/opsim)
-add_subdirectory(tests)
+# Package builds (debian/rules) turn the tests off: they need GoogleTest and a GStreamer runtime the
+# builder has, but a .deb must not depend on either to exist.
+option(FJARR_BUILD_TESTS "Build the agent's unit and loop tests" ON)
+if(FJARR_BUILD_TESTS)
+  add_subdirectory(tests)
+endif()
+
+# What the packages install (docs/26#packages). libfjarr-dev's install rules come with its own slice.
+include(GNUInstallDirs)
+install(TARGETS fjarr-agent RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

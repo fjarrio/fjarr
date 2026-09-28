@@ -257,3 +257,28 @@ jobs:
       - uses: actions/checkout@v4
       - name: build standalone from signaling/ only
         run: docker build -f docker/signaling/Dockerfile signaling/
+
+  packages:
+    # docs/26#releases, ADR-0031: the .debs built natively per architecture — never emulated — and
+    # installed on a clean Ubuntu 26.04 that checks what they promise (packaging/install-test.sh).
+    name: packages (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: build the .debs
+        run: make deb DEB_ARCH=${{ matrix.arch }}
+      - name: install them on a clean Ubuntu 26.04
+        run: make deb-install-test DEB_ARCH=${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs-${{ matrix.arch }}
+          path: dist/deb/${{ matrix.arch }}/*.deb
+          retention-days: 14

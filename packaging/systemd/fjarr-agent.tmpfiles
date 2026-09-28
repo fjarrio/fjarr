@@ -1,0 +1,2 @@
+# /run/fjarr holds the desktop helper's socket (ADR-0028); the agent owns it.
+d /run/fjarr 0755 fjarr fjarr -

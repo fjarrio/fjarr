@@ -58,7 +58,7 @@ invasive happens as a side effect of `apt install`.
 | Package | Installs | Switched on by |
 |---|---|---|
 | `libfjarr-dev` | the **static** library, headers and the CMake package (`find_package(fjarr)`) | the customer, for embedding |
-| `fjarr-agent` | the daemon, linked statically against libfjarr; `fjarr-agent.service`; the `fjarr` user (sysusers) in `video` and `render`; `/run/fjarr` and `/var/lib/fjarr` (tmpfiles); an example `fjarr.toml`; the viewer, the driver catalog and the system profile under `/usr/share/fjarr/`; the boot unit that creates the tunnel device before the robot's software starts, inert unless `fjarr.net` is configured | the package enables the service, which starts only once `/etc/fjarr/fjarr.toml` exists (`ConditionPathExists`); `setup` writes that file |
+| `fjarr-agent` | the daemon, linked statically against libfjarr; `fjarr-agent.service`; the `fjarr` user (sysusers) in `video` and `render`; `/run/fjarr` and `/var/lib/fjarr` (tmpfiles); `/usr/share/fjarr/fjarr.toml.example`; the viewer, the driver catalog and the system profile under `/usr/share/fjarr/`; the boot unit that creates the tunnel device before the robot's software starts, inert unless `fjarr.net` is configured | the package enables the service, which starts only once `/etc/fjarr/fjarr.toml` exists (`ConditionPathExists`); `setup` writes that file |
 | `fjarr-desktop-wayland` | the Wayland module; `fjarr-desktop-session` and its **user** unit ([ADR-0028](adr/0028-desktop-session-helper.md)); the `fjarr-desktop` group; the GDM watchdog unit; the fake-monitor EDIDs for headless robots | `setup desktop` |
 | `fjarr-desktop-x11` | the X11 module; the kiosk session's `xhost +si:localuser:fjarr` grant as an autostart entry; the output-layout helper and its RandR listener | `setup desktop` |
 | `fjarr-tools` | `fjarr-connect` (given `cap_net_admin` at install) | nothing |
@@ -204,6 +204,11 @@ with the image's uid so the `xhost` grant can name it.
   manual, protected promotion to `stable` that copies the same artifacts and
   never rebuilds them, then publishes the crates and npm packages. Release
   notes come from the conventional commits since the last tag.
+- **Building locally**: `make deb` builds the packages for the host's
+  architecture in a throwaway builder container (`docker/deb-builder`) into
+  `dist/deb/<arch>/`. `make deb-install-test` installs them on a clean Ubuntu
+  26.04 and checks every promise in the table above
+  (`packaging/install-test.sh`). CI runs both on native amd64 and arm64 runners.
 - **The install script** (`get.fjarr.io`) only does what apt cannot do by
   itself. It detects Ubuntu 26.04 and the architecture, adds the key and the
   repository, installs `fjarr-agent` and runs `setup`. On anything else it

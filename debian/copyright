@@ -1,0 +1,9 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: fjarr
+Source: https://github.com/fjarrio/fjarr
+
+Files: *
+Copyright: 2026 Fjarr
+License: AGPL-3.0-only
+ Fjarr is dual-licensed: AGPL-3.0 or a commercial license (ADR-0011).
+ The full AGPL-3.0 text is in LICENSE in the source repository.

@@ -1,0 +1,14 @@
+# Example /etc/fjarr/fjarr.toml. `fjarr-agent setup` writes the real one; the service starts only
+# once that file exists. Reference: docs/23 (configuration) and docs/06 (per capability).
+
+[agent]
+robot_id        = "robot-001"
+server_url      = "wss://signaling.example.com/ws"   # your fjarr-server, or Fjarr Cloud
+credential_file = "/var/lib/fjarr/credential"        # written at enrollment (docs/10)
+
+# [capabilities."fjarr.camera".tracks.front]
+# label  = "Front"
+# source = { type = "v4l2", device = "usb-Acme_Front-video-index0", format = "mjpeg", width = 1280, height = 720, fps = 30 }
+
+[introspect]
+viewer_dir = "/usr/share/fjarr/viewer"   # installed by the fjarr-agent package (docs/24#the-viewer)

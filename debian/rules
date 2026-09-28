@@ -1,0 +1,32 @@
+#!/usr/bin/make -f
+# spec: docs/26-robot-install-and-drivers.md#packages · ADR-0031
+%:
+	dh $@ --buildsystem=cmake+ninja
+
+# debhelper disconnects FetchContent (the Debian norm: no network in a build). Ours fetches the
+# pinned json-schema-validator (docs/14, no Ubuntu package) and cargo fetches crates, so the builder
+# has network by design (docs/26#releases); the pins, not the sandbox, are what keep it reproducible.
+override_dh_auto_configure:
+	dh_auto_configure -- -DCMAKE_BUILD_TYPE=Release -DFJARR_BUILD_TESTS=OFF -DFETCHCONTENT_FULLY_DISCONNECTED=OFF
+
+override_dh_auto_build:
+	dh_auto_build
+	cd signaling && cargo build --release --locked -p fjarr-connect
+
+# The fjarr user comes from debian/fjarr-agent.sysusers. dh_installsysusers is only in the default
+# sequence from compat 14, so at 13 it is called here, before the unit that runs as that user.
+execute_before_dh_installsystemd:
+	dh_installsysusers
+
+# The tests run in CI against the dev image (make agent-test, signaling-test); a package build
+# does not repeat them.
+override_dh_auto_test:
+
+override_dh_auto_install:
+	dh_auto_install --destdir=debian/fjarr-agent
+	@test -f web/apps/introspect-viewer/dist/index.html || { echo "the introspection viewer is not built: run make deb, which builds it first"; exit 1; }
+	mkdir -p debian/fjarr-agent/usr/share/fjarr/viewer
+	cp -a web/apps/introspect-viewer/dist/. debian/fjarr-agent/usr/share/fjarr/viewer/
+	@# Not under /usr/share/doc: Ubuntu's minimal and container images drop that path at install.
+	install -D -m 0644 packaging/fjarr.toml.example debian/fjarr-agent/usr/share/fjarr/fjarr.toml.example
+	install -D -m 0755 signaling/target/release/fjarr-connect debian/fjarr-tools/usr/bin/fjarr-connect
