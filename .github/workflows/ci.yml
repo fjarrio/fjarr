@@ -256,6 +256,14 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: every workspace member is in the Dockerfile's dependency layer
+        # cargo cannot resolve the workspace without every member's manifest, so a crate added to
+        # signaling/ and not to docker/signaling/Dockerfile breaks this image and the browser lab that
+        # builds it — which is what fjarr-netdev did, unnoticed for four pushes (2026-09-28).
+        run: |
+          missing=$(python3 -c "import tomllib; print(' '.join(tomllib.load(open('signaling/Cargo.toml','rb'))['workspace']['members']))" \
+            | tr ' ' '\n' | while read -r m; do grep -q "COPY $m/Cargo.toml" docker/signaling/Dockerfile || echo "$m"; done)
+          [ -z "$missing" ] || { echo "missing from docker/signaling/Dockerfile: $missing"; exit 1; }
       - name: build standalone from signaling/ only
         run: docker build -f docker/signaling/Dockerfile signaling/
 

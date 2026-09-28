@@ -16,11 +16,16 @@ COPY crates/fjarr-protocol/Cargo.toml crates/fjarr-protocol/Cargo.toml
 COPY crates/fjarr-signaling/Cargo.toml crates/fjarr-signaling/Cargo.toml
 COPY crates/fjarr-server/Cargo.toml crates/fjarr-server/Cargo.toml
 COPY crates/fjarr-connect/Cargo.toml crates/fjarr-connect/Cargo.toml
+COPY crates/fjarr-netdev/Cargo.toml crates/fjarr-netdev/Cargo.toml
+COPY crates/fjarr-setup/Cargo.toml crates/fjarr-setup/Cargo.toml
 RUN mkdir -p crates/fjarr-protocol/src crates/fjarr-signaling/src crates/fjarr-server/src crates/fjarr-connect/src \
+       crates/fjarr-netdev/src crates/fjarr-setup/src \
     && echo 'pub fn placeholder() {}' > crates/fjarr-protocol/src/lib.rs \
     && echo 'pub fn placeholder() {}' > crates/fjarr-signaling/src/lib.rs \
     && echo 'fn main() {}' > crates/fjarr-server/src/main.rs \
     && echo 'fn main() {}' > crates/fjarr-connect/src/main.rs \
+    && echo 'pub fn placeholder() {}' > crates/fjarr-netdev/src/lib.rs \
+    && echo 'fn main() {}' > crates/fjarr-setup/src/main.rs \
     && (cargo build --release --locked -p fjarr-server 2>/dev/null || cargo build --release -p fjarr-server) \
     && rm -rf crates/*/src
 
