@@ -203,7 +203,7 @@ flowing through it.
 | building | all enabled tracks have fixed caps, or no media tracks | offered | `session-accept`, then `offer{sdp, tracks(manifest with mid), manifest_version:1}`; negotiation watchdog (15 s) armed with milestones |
 | offered | `answer` | offered | set remote description; queued remote ICE applied; trickle continues |
 | offered | DTLS connected **and** control DC open | connected | watchdog cleared; heartbeat liveness armed; `bandwidth-stats` sampler (1 s) started; `SessionEvent{started}` to the embedder |
-| connected | `<cap>/select-tracks` (docs/08#track-control, served by the core for every track-owning capability) | connected | valves + tier + keyframe request; `result{ok}`; unknown `track_id` → `payload-invalid`, nothing applied |
+| connected | `<cap>/select-tracks` (docs/08#track-control, served by the core for every track-owning capability) | connected | valves + tier + keyframe request — held for a track whose m-section is not answered yet, applied when the answer is; `result{ok}`; unknown `track_id`, or one this peer's answer rejected → `payload-invalid`, nothing applied |
 | connected | capability `update_tracks` / hot-plug | connected (renegotiating) | coalesce into the renegotiation queue: one un-answered offer at a time, `manifest_version++`, unchanged tracks keep `mid` and keep flowing (docs/08#renegotiation) |
 | connected | `ice-restart` from the operator | closing → (operator reopens) | on every `webrtcbin` release to date (1.28 included): `session-close{reason:"ice-restart", retry:true}` — the operator opens a new session at once; on a stack with ICE restart: a new offer with fresh ICE credentials, same manifest and `manifest_version`, queued like a renegotiation |
 | connected | operator ping | connected | `pong{t0,t1,t2}`; liveness timer reset |
@@ -252,6 +252,21 @@ exact API sequences):
   from the encoder configuration, so enabling later is a valve flip, never
   a renegotiation. An `offer_creation_started` latch makes the gate
   idempotent under `on-negotiation-needed` racing the probes (Q2).
+- **A valve opens only on an answered m-section.** `webrtcbin` holds a
+  sink pad's buffers until the transceiver behind it is negotiated — for a
+  pad added by renegotiation, until the answer to that offer is applied;
+  for an m-section the answer rejected, for good. A streaming thread parked
+  there holds the payloader's stream lock, and tearing the branch down
+  (`remove_track`, which waits on that lock) then never returns: the core
+  loop that would apply the releasing answer is the one stuck, so it is a
+  permanent hang, not a delay (reproduced 2026-09-29 by enabling a
+  renegotiated track before its answer, and by enabling one the answer
+  rejected, then removing it). So the consumer records each track's
+  negotiation state from the applied answer, `select-tracks` on a track not
+  yet answered records the demand and opens the valve (and requests the
+  keyframe) when the answer is applied, and a track the answer rejected is
+  refused. An enable before negotiation carried nothing to the peer anyway;
+  this only stops it reaching `webrtcbin`.
 - **Manifest `mid` comes from the offer SDP.** The transceiver's `mid`
   property stays NULL until the *answer* is applied (Q2), so the manifest
   builder parses `a=mid:` per m-section from the offer it just created.
