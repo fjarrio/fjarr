@@ -478,8 +478,38 @@ needs from the host:
 | WebRTC | `network_mode: host` | bridged networking hides the robot's addresses from ICE and adds a NAT hop |
 | Encoder, cameras | `devices: /dev/dri, /dev/video*`; `group_add` with the host's render GID | group ids differ per host |
 | Config and device key | volumes for `/etc/fjarr` and `/var/lib/fjarr` (`0700`) | the key survives image upgrades |
-| Tunnel | `cap_add: NET_ADMIN`, `/dev/net/tun`, host networking | the agent creates the persistent `fjarr0` in the host's namespace; ROS containers `depends_on` the agent being healthy, which is the ordering rule ([docs/27](27-network-tunnel.md#lifecycle)) in compose |
+| Tunnel | `user: "0"`, `cap_add: NET_ADMIN`, `/dev/net/tun`, host networking | the container's entrypoint does what `fjarr-net.service` does on an apt device — `fjarr-setup net up` creates `fjarr0` owned by `fjarr` — then drops to `fjarr` with no capabilities before the agent starts, so the agent itself never holds `CAP_NET_ADMIN` ([docs/27](27-network-tunnel.md#lifecycle), rule 1); it runs on every container start, which is every boot. ROS containers wait for **carrier** on `fjarr0` before starting ROS (rule 2): compose's `depends_on` orders only `docker compose up`, not the daemon restarting containers after a reboot |
 | Desktop | the host installs `fjarr-desktop-session` from the `.deb`; its socket `/run/fjarr/desktop.sock` is bind-mounted into the container | the helper has to run inside the desktop user's session; descriptors cross a bind-mounted socket unchanged |
+
+The reference file is `packaging/compose/docker-compose.yml`, published with
+each release. It is written for one job — the agent next to the customer's own
+containers — and the first run is the setup tool inside the image, which writes
+the configuration into the volume and, having no systemd to start, says so:
+
+```sh
+docker compose run --rm fjarr-agent setup --server wss://… --device-id dev-024 --net yes --ros no
+docker compose up -d
+docker compose exec fjarr-agent fjarr-agent --check
+```
+
+The image's entrypoint runs the setup tool as root (`setup`, `net`, `drivers`);
+for the agent it creates the tunnel device when `fjarr.net` is enabled and then
+`setpriv`s to `fjarr` — no capabilities, keeping the supplementary groups
+compose added (`group_add` render) along with `fjarr`'s own. Started as `fjarr`
+(the image's default user, as without the tunnel) it runs the agent directly.
+A ROS container keeps its image's entrypoint behind a wait for carrier:
+
+```yaml
+entrypoint: ["/bin/sh", "-c", "until [ \"$$(cat /sys/class/net/fjarr0/carrier 2>/dev/null)\" = 1 ]; do sleep 0.5; done; exec /ros_entrypoint.sh \"$$@\"", "wait-for-fjarr0"]
+```
+
+Carrier is up exactly while the agent is attached, which is the condition a
+participant needs — so the wait holds however the container was started,
+including by the daemon after a reboot in whatever order it restarts them.
+`make compose-gate` proves the file: setup in the image, `--check`, a ROS
+container started *before* the agent that waits and then finds the tunnel
+address, an agent restart the device survives, and real IP over the tunnel
+from an operator.
 
 The image runs as `fjarr` with a **fixed, published uid: 10001**. The Dockerfile
 creates the user before installing the package, and the package's sysusers

@@ -143,6 +143,11 @@ Three rules follow:
    since [ADR-0019](adr/0019-agent-process-model.md)'s second addendum the
    agent's `READY` does not wait for the server, so the ordering never waits
    for the WAN.
+   In a container ([docs/26](26-robot-install-and-drivers.md#containerized-robots))
+   the image's entrypoint plays the installer on every start — `net up` as
+   root, then `setpriv` to `fjarr` with no capabilities before the agent runs —
+   and a ROS container orders itself by waiting for carrier on `fjarr0`, since
+   the daemon restarts containers after a reboot in no particular order.
 3. **Agent restarts are safe.** The device and its address survive the agent
    exiting, and participants that bound earlier keep advertising the tunnel
    address straight through the restart. No ROS 2 restart is needed to
