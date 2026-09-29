@@ -56,6 +56,10 @@ void check_core(const toml::table& core, const System& sys, std::vector<Row>& ro
         rows.push_back({"core", *cfg, there, there ? "present" : "missing: the service waits for it", there ? "" : "sudo fjarr-agent setup"});
     }
     for (const auto& unit : strings(core["units"])) {
+        if (!sys.systemd) {
+            rows.push_back({"core", "unit " + unit, true, "no systemd (a container): the container runtime starts the agent", ""});
+            continue;
+        }
         const bool on = sys.unit_enabled(unit);
         rows.push_back({"core", "unit " + unit, on, on ? "enabled" : "not enabled", on ? "" : "sudo systemctl enable --now " + unit});
     }
@@ -98,6 +102,11 @@ void check_net(const toml::table& net, const System& sys, std::vector<Row>& rows
     // creates it now and enables the unit that recreates it at every boot (docs/26#fjarr-agent-net-setup).
     const std::string create = "sudo fjarr-agent net setup";
     for (const auto& unit : strings(net["units"])) {
+        if (!sys.systemd) {
+            // docs/26#containerized-robots: the entrypoint runs `net up` at every container start.
+            rows.push_back({"net", "unit " + unit, true, "no systemd (a container): the image's entrypoint creates the device at every start", ""});
+            continue;
+        }
         const bool on = sys.unit_enabled(unit);
         rows.push_back({"net", "unit " + unit, on, on ? "enabled" : "not enabled: the device would be gone after a reboot", on ? "" : create});
     }
@@ -168,6 +177,7 @@ System System::real() {
         if (::stat(path.c_str(), &st) != 0) return std::nullopt;
         return Stat{static_cast<unsigned>(st.st_uid), static_cast<unsigned>(st.st_mode & 07777), S_ISDIR(st.st_mode)};
     };
+    s.systemd = std::filesystem::is_directory("/run/systemd/system");
     s.unit_enabled = [](const std::string& unit) {
         // Enabled = linked into some target's .wants, where `systemctl enable` and the package's
         // postinst put it. Read directly so the check needs neither systemctl nor a running systemd

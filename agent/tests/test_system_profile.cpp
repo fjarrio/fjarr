@@ -140,6 +140,27 @@ TEST(SystemProfile, theBootUnitMustBeEnabledOrTheDeviceIsGoneAfterAReboot) {
     EXPECT_EQ(find(check(profile_file(), false, f.system()), "unit fjarr-net.service"), nullptr) << "not a row when the tunnel is off";
 }
 
+TEST(SystemProfile, inAContainerUnitsAreSatisfiedByWhatDoesTheirJobThere) {
+    // docs/26#the-system-profile: no systemd, no enabled links — the image's entrypoint recreates
+    // the device at every container start and the runtime starts the agent. The device itself is
+    // still checked like everywhere else.
+    Fake f;
+    f.enabled.clear();
+    System sys = f.system();
+    sys.systemd = false;
+    auto rows = check(profile_file(), true, sys);
+    const Row* net = find(rows, "unit fjarr-net.service");
+    const Row* core = find(rows, "unit fjarr-agent.service");
+    ASSERT_TRUE(net && core);
+    EXPECT_TRUE(net->ok) << net->detail;
+    EXPECT_NE(net->detail.find("entrypoint"), std::string::npos) << net->detail;
+    EXPECT_TRUE(core->ok) << core->detail;
+    f.devs.clear();
+    sys = f.system();
+    sys.systemd = false;
+    EXPECT_FALSE(find(check(profile_file(), true, sys), "device fjarr0")->ok) << "a container without the device still fails on it";
+}
+
 TEST(SystemProfile, aMissingAccountStopsTheRowsThatNeedIt) {
     Fake f;
     f.users.clear();

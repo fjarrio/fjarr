@@ -318,9 +318,12 @@ pub async fn setup(
     ))?;
 
     let mut drop_ins = 0;
-    for u in &ros_units {
-        write_recorded(&mut record, &system::drop_in_path(u), &drop_in_text(u))?;
-        drop_ins += 1;
+    // Ordering drop-ins are systemd's; in a container, ROS orders itself on carrier (docs/26).
+    if system::systemd_running() {
+        for u in &ros_units {
+            write_recorded(&mut record, &system::drop_in_path(u), &drop_in_text(u))?;
+            drop_ins += 1;
+        }
     }
     let mut cyclone_note = None;
     if dds == Dds::Cyclone {
@@ -343,20 +346,31 @@ pub async fn setup(
     }
     record.save(state)?;
 
-    system::systemctl(&["daemon-reload"])?;
-    system::systemctl(&["enable", UNIT])?;
-    record.add(FEATURE, Change::UnitEnabled { unit: UNIT.into() });
-    record.save(state)?;
-    // The unit is idempotent (`net up` on a device that exists is a no-op), so starting it now makes
-    // this boot look like every later one.
-    system::systemctl(&["start", UNIT])?;
-    // A running agent attaches on restart; a stopped one is left alone.
-    system::restart_agent_if_running()?;
+    if system::systemd_running() {
+        system::systemctl(&["daemon-reload"])?;
+        system::systemctl(&["enable", UNIT])?;
+        record.add(FEATURE, Change::UnitEnabled { unit: UNIT.into() });
+        record.save(state)?;
+        // The unit is idempotent (`net up` on a device that exists is a no-op), so starting it now
+        // makes this boot look like every later one.
+        system::systemctl(&["start", UNIT])?;
+        // A running agent attaches on restart; a stopped one is left alone.
+        system::restart_agent_if_running()?;
 
-    log::success(format!(
-        "{UNIT} installed · {drop_ins} ordering drop-in{} · config updated · fjarr-agent restarted if it was running",
-        if drop_ins == 1 { "" } else { "s" }
-    ))?;
+        log::success(format!(
+            "{UNIT} installed · {drop_ins} ordering drop-in{} · config updated · fjarr-agent restarted if it was running",
+            if drop_ins == 1 { "" } else { "s" }
+        ))?;
+    } else {
+        // A container (docs/26#containerized-robots): the image's entrypoint does what the unit does,
+        // at every container start, and ROS containers order themselves on the device's carrier.
+        log::warning(format!(
+            "systemd is not running here (a container?): {UNIT} was not installed. The image's \
+             entrypoint creates {} at every start; start ROS containers once it has carrier \
+             (the reference compose file's wait-for-fjarr0)",
+            net.interface
+        ))?;
+    }
     if let Some(n) = cyclone_note {
         log::info(n)?;
     }

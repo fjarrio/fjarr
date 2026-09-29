@@ -33,6 +33,9 @@ struct System {
     std::function<std::vector<std::string>(const std::string& user)> groups_of;
     std::function<std::optional<Stat>(const std::string& path)> stat;
     std::function<bool(const std::string& unit)> unit_enabled;
+    /// systemd runs here (`/run/systemd/system`). Without it — a container — units are satisfied
+    /// by what does their job there (docs/26#the-system-profile).
+    bool systemd = true;
     std::function<std::optional<NetDev>(const std::string& name)> netdev;
 
     /// The running machine: getpwnam/getgrouplist, stat, systemd's .wants links, /sys/class/net.

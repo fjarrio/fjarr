@@ -5,6 +5,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdio>
+#include <filesystem>
 #include <cerrno>
 #include <cstring>
 #include <string>
@@ -96,6 +97,9 @@ int main(int argc, char** argv) {
 
     fjarr::AgentConfig config;
     try {
+        // spec: docs/26#packages — what setup wrote is the default, so `fjarr-agent --check` on a device
+        // (or `docker compose exec` in a container, which bypasses the entrypoint) checks the real config.
+        if (config_path.empty() && std::filesystem::exists("/etc/fjarr/fjarr.toml")) config_path = "/etc/fjarr/fjarr.toml";
         if (!config_path.empty()) config = fjarr::AgentConfig::from_file(config_path);
         config.apply_env();
         if (config.capabilities.find("fjarr.test") == config.capabilities.end())
