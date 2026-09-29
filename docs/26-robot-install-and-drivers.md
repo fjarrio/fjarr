@@ -88,7 +88,11 @@ A data file in the repository (`packaging/profile.toml`), installed as
 units, udev rules, kernel arguments and GDM settings that feature needs. It is
 used three ways. The package scripts and `setup` apply it where the OS allows.
 `--check` verifies it on every robot, however it was installed, and names each
-missing piece. Later channels (a NixOS module, a Yocto layer) render the same
+missing piece. Units are the exception in a container: with no systemd
+(`/run/systemd/system` absent) a unit row is satisfied by what does its job
+there — the image's entrypoint for `fjarr-net.service`, the container runtime
+for `fjarr-agent.service` — and says so rather than reporting it missing
+([containerized devices](#containerized-robots)). Later channels (a NixOS module, a Yocto layer) render the same
 data declaratively.
 
 Every package declares its architecture and its vendor prerequisites
@@ -484,7 +488,9 @@ needs from the host:
 The reference file is `packaging/compose/docker-compose.yml`, published with
 each release. It is written for one job — the agent next to the customer's own
 containers — and the first run is the setup tool inside the image, which writes
-the configuration into the volume and, having no systemd to start, says so:
+the configuration into the volume and, having no systemd, says so: it starts no
+agent, and `net setup` installs no `fjarr-net.service` (the entrypoint below
+does its job) and writes no drop-ins:
 
 ```sh
 docker compose run --rm fjarr-agent setup --server wss://… --device-id dev-024 --net yes --ros no
@@ -497,6 +503,10 @@ for the agent it creates the tunnel device when `fjarr.net` is enabled and then
 `setpriv`s to `fjarr` — no capabilities, keeping the supplementary groups
 compose added (`group_add` render) along with `fjarr`'s own. Started as `fjarr`
 (the image's default user, as without the tunnel) it runs the agent directly.
+The agent reads `/etc/fjarr/fjarr.toml` whenever it exists and no `--config`
+is given — on an apt device too, so `fjarr-agent --check` checks what setup
+wrote — and the file sets `FJARR_AGENT_ALLOW_UNSUPERVISED=1` beside
+`restart: unless-stopped`: the runtime is the supervisor ADR-0019 asks for.
 A ROS container keeps its image's entrypoint behind a wait for carrier:
 
 ```yaml
