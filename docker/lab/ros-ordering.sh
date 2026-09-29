@@ -38,19 +38,26 @@ restart_participant() {
 # even when the topic was right there — which is how this script first reported two facts broken
 # that were fine.
 sees_topic() {
-  local log; log=$(mktemp)
+  # 0 = visible, 1 = not visible (the ros2 check ran and did not see it), 2 = inconclusive (it never
+  # ran: no session, no tunnel). Inconclusive is never read as "not visible" — that is how fact A
+  # passed vacuously for Fast DDS while the agent was still offline (nightly 2026-09-29).
+  local log rc=2; log=$(mktemp)
   docker compose exec -T dev ./build/release/agent/tools/fjarr-opsim \
     --server ws://fjarr-server:8080/ws --robot "${OPSIM_ROBOT:-demo-robot-01}" \
     --grant-secret "${FJARR_GRANT_HS256_SECRET:-dev-only-grant-secret}" \
     --introspect http://demo-robot:7381 --introspect-token "${FJARR_INTROSPECT_TOKEN:-dev-only-introspect-token}" \
     --timeout 240 --ice-policy relay --scenario tunnel \
     --exec 'docker/lab/tunnel-checks.sh ros2' >"$log" 2>&1 || true
-  if grep -q "^PASS exec" "$log"; then rm -f "$log"; return 0; fi
-  grep -E "^FAIL" "$log" | head -3 | sed 's/^/    /'
-  rm -f "$log"; return 1
+  if grep -q "^PASS exec" "$log"; then rc=0; elif grep -q "^FAIL exec" "$log"; then rc=1; fi
+  [ "$rc" = 0 ] || grep -E "^FAIL" "$log" | head -3 | sed 's/^/    /'
+  rm -f "$log"; return "$rc"
 }
+online_count() { docker compose logs --no-color demo-robot 2>/dev/null | grep -c "hello-ack: online" || true; }
+# Waits for a NEW hello-ack after `before`: grepping for the line matched the one from before the
+# kill and returned while the agent was still down (the Makefile's tun-up counts for the same reason).
 wait_online() {
-  for _ in $(seq 60); do docker compose logs --no-color demo-robot 2>/dev/null | tail -40 | grep -q "hello-ack: online" && return 0; sleep 1; done
+  local before=$1
+  for _ in $(seq 60); do [ "$(online_count)" -gt "$before" ] && return 0; sleep 1; done
   return 1
 }
 
@@ -60,32 +67,37 @@ fail=0
 
 say "B: a participant created while the agent is attached"
 restart_participant || { echo "FAIL B: the participant never started"; exit 1; }
-if sees_topic; then echo "PASS B: the topic is visible over the link"; else echo "FAIL B: attached at creation and still not visible"; fail=1; fi
+if sees_topic; then echo "PASS B: the topic is visible over the link"; else echo "FAIL B: attached at creation and not seen (or not checked)"; fail=1; fi
 
 say "C: the same participant across an agent restart"
+before=$(online_count)
 robot_sh "pkill -f 'demos/demo-robot/demo-robot'" >/dev/null 2>&1 || true
-wait_online || { echo "FAIL C: the agent did not come back"; exit 1; }
+wait_online "$before" || { echo "FAIL C: the agent did not come back"; exit 1; }
 robot_sh "grep -c fjarr0 /proc/net/dev" >/dev/null || { echo "FAIL C: the interface did not survive the restart"; exit 1; }
-if sees_topic; then echo "PASS C: still visible after the agent restarted, with no ROS restart"; else echo "FAIL C: the restart cost the participant its tunnel"; fail=1; fi
+if sees_topic; then echo "PASS C: still visible after the agent restarted, with no ROS restart"; else echo "FAIL C: not seen after the restart (or not checked)"; fail=1; fi
 
 say "A: a participant created while the agent is detached"
+before=$(online_count)
 robot_sh "touch $HOLD; pkill -f 'demos/demo-robot/demo-robot'" >/dev/null 2>&1 || true
 sleep 3
 robot_sh "grep -q fjarr0 /proc/net/dev" || { echo "FAIL A: the interface vanished with the agent"; exit 1; }
 restart_participant || { echo "FAIL A: the participant never started"; exit 1; }
 robot_sh "rm -f $HOLD" >/dev/null
-wait_online || { echo "FAIL A: the agent did not come back"; exit 1; }
+wait_online "$before" || { echo "FAIL A: the agent did not come back"; exit 1; }
 # Fact A is a Fast DDS property, not a DDS one. Fast DDS discovers interfaces when a participant is
 # created and ignores one without a carrier; Cyclone, given docs/27's file, binds the interface it is
 # NAMED and sends to its peers by address, carrier or not — measured 2026-09-27, #29. So each is held to
 # its own behaviour, and a change in either is a finding rather than noise.
-if [ "${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}" = rmw_cyclonedds_cpp ]; then
-  if sees_topic; then
+seen=0; sees_topic || seen=$?
+if [ "$seen" = 2 ]; then
+  echo "FAIL A: inconclusive — the ros2 check never ran over the tunnel"; fail=1
+elif [ "${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}" = rmw_cyclonedds_cpp ]; then
+  if [ "$seen" = 0 ]; then
     echo "PASS A (Cyclone): visible — Cyclone binds the named interface whatever its carrier, so the ordering rule does not bind it"
   else
     echo "FAIL A (Cyclone): not visible, which Cyclone with docs/27's file has not done before"; fail=1
   fi
-elif sees_topic; then
+elif [ "$seen" = 0 ]; then
   echo "FAIL A: it is visible, so docs/27's ordering rule is not the constraint it claims"; fail=1
 else
   echo "PASS A: not visible — a participant created with the carrier down never sees the interface"
