@@ -96,7 +96,7 @@ jobs:
       # all — and runs first, so a red ordering run can be read against a green or red baseline.
       - name: ROS 2 over the link, then the tunnel-interface ordering regression (docs/27#lifecycle)
         run: |
-          docker compose --profile demo --profile ros build robot-ros operator-ros
+          docker compose --profile demo --profile ros build robot-ros operator-ros robot-services
           make tun-up ROS=1 LAB_FILE_MB=64
           make tunnel-ros
           make tunnel-ros-ordering
