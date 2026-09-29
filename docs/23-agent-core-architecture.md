@@ -1102,6 +1102,7 @@ expects the agent to end in:
 | `smoke` | connect, `select-tracks` on, first frame, `echo`, close | media on both tracks' stamps advance; echo round trip; `session-close` reaches the server |
 | `toggle` | enable/disable `test-pattern` 20× | valve state via `/pipelines/session:<id>.json`; keyframe on every enable; no frames while disabled |
 | `hotplug` | `hotplug{plugged:true}` then `false` while streaming | re-offer with `manifest_version` 2 then 3; `test-pattern` stamp counter has no gap > 1 frame; `test-second` flows then disappears |
+| `rejected-track` | `hotplug{plugged:true}`, answer rejecting `test-second`'s m-line (port 0, out of BUNDLE), `select-tracks` on it, 1.5 s, then `hotplug{plugged:false}` | the enable is refused `payload-invalid` ("rejected by this peer's answer"); the unplug is answered and re-offered promptly and `echo` still answers — before the [valve rule](#offer-construction-and-renegotiation) the accepted enable parked a thread on the never-released pad and the unplug hung the core loop; `test-pattern` has no gap > 1 frame |
 | `silent-operator` | stop sending pings | agent closes with `session-close{reason:"heartbeat"}` within 15–20 s; `release_all_input` observed as `deadman{expired}` |
 | `no-answer` | never answer the offer | `session-close{reason:"negotiation-timeout:offer-created"}` at 15 s |
 | `socket-drop` | drop the operator's socket mid-stream | agent gets `peer-gone`, closes the session, census returns to baseline |

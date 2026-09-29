@@ -161,7 +161,7 @@ opsim: ## Run one fjarr-opsim scenario against the demo robot, from inside its c
 
 .PHONY: opsim-all
 opsim-all: ## Every CI opsim scenario (docs/23: all but soak and netem-*)
-	@log=$$(mktemp); for s in smoke toggle hotplug silent-operator no-answer socket-drop ice-restart deadman; do echo "== $$s"; \
+	@log=$$(mktemp); for s in smoke toggle hotplug rejected-track silent-operator no-answer socket-drop ice-restart deadman; do echo "== $$s"; \
 	  $(OPSIM_RUN) --scenario $$s $(OPSIM_EXTRA) >$$log 2>&1; rc=$$?; cat $$log; \
 	  if [ $$rc -ge 128 ]; then \
 	    if grep -q "SUMMARY $$s: .*, 0 failed" $$log; then \

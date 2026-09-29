@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <sstream>
 #include <condition_variable>
 #include <cstdarg>
 #include <cstdio>
@@ -95,7 +96,7 @@ void usage() {
                  "                   [--json out.json] [--timeout 60] [--ice-policy all|relay] [--cycles 200] [--hold 0]\n"
                  "                   [--introspect http://127.0.0.1:7381] [--introspect-token <t>] [--verbose]\n"
                  "                   [--exec '<command>'] (tunnel: run it with the link up, $FJARR_ADDR set)\n"
-                 "scenarios: smoke toggle hotplug silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer tunnel\n"
+                 "scenarios: smoke toggle hotplug rejected-track silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer tunnel\n"
                  "           soak (--cycles N, needs --introspect)\n"
                  "           netem-{lan,wifi-ok,4g,lossy,bad} (the profile is applied externally: docker/lab/netem.sh)\n"
                  "exit: 0 all assertions pass, 1 any fail, 2 usage, 3 timeout\n");
@@ -509,6 +510,43 @@ class Signaling {
 };
 
 // -------------------------------------------------------------------- peer
+
+/// An answer with one m-line rejected (RFC 8843: port 0, not in the BUNDLE group). Line-based on
+/// purpose: it edits the SDP a peer sends without touching what that peer's webrtcbin applied.
+std::string reject_mline(const std::string& sdp, const std::string& mid) {
+    std::vector<std::string> lines;
+    {
+        std::istringstream in(sdp);
+        std::string line;
+        while (std::getline(in, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            lines.push_back(line);
+        }
+    }
+    // the m= line of the section whose a=mid is `mid`
+    std::size_t section = std::string::npos;
+    for (std::size_t i = 0; i < lines.size(); i++) {
+        if (lines[i].rfind("m=", 0) == 0) section = i;
+        if (lines[i] == "a=mid:" + mid && section != std::string::npos) {
+            const auto sp1 = lines[section].find(' ');
+            const auto sp2 = lines[section].find(' ', sp1 + 1);
+            lines[section] = lines[section].substr(0, sp1 + 1) + "0" + lines[section].substr(sp2);
+            break;
+        }
+    }
+    std::string out;
+    for (auto& line : lines) {
+        if (line.rfind("a=group:BUNDLE", 0) == 0) {
+            std::istringstream words(line);
+            std::string w, kept;
+            while (words >> w)
+                if (w != mid) kept += (kept.empty() ? "" : " ") + w;
+            line = kept;
+        }
+        out += line + "\r\n";
+    }
+    return out;
+}
 
 /// The answerer: one GstPipeline with a webrtcbin (reuse-source-pads=TRUE,
 /// bundle-policy=max-bundle), decode branches per received track, data
@@ -1158,7 +1196,9 @@ class Operator {
     }
 
     /// Apply an offer (initial or renegotiation): record the manifest, answer, send the answer.
-    void answer_offer(const json& offer) {
+    /// `reject_mid`: answer that m-line as a peer that cannot take it would — port 0 and out of the
+    /// BUNDLE group — in the answer SENT; this webrtcbin keeps its own (the agent never sends there).
+    void answer_offer(const json& offer, const std::string& reject_mid = "") {
         {
             std::lock_guard<std::mutex> lk(sh_.mu);
             sh_.mid_by_track.clear();
@@ -1170,7 +1210,8 @@ class Operator {
                 }
             sh_.manifest_version = offer.value("manifest_version", 0u);
         }
-        const std::string sdp = peer_->answer(offer.value("sdp", ""));
+        std::string sdp = peer_->answer(offer.value("sdp", ""));
+        if (!reject_mid.empty()) sdp = reject_mline(sdp, reject_mid);
         json m = protocol::signaling_base("answer");
         m["session_id"] = session_id();
         m["sdp"] = sdp;
@@ -2059,6 +2100,63 @@ void scenario_hotplug(Operator& op) {
     close_and_assert(op);
 }
 
+/// docs/08#track-control, docs/23#offer-construction-and-renegotiation: a peer that rejects a
+/// renegotiated track's m-line. Enabling it is refused, and unplugging it — the removal that once
+/// parked a streaming thread on webrtcbin's never-released pad and hung the agent's core loop —
+/// completes while the other track keeps flowing.
+void scenario_rejected_track(Operator& op) {
+    Report& r = op.report();
+    connect_and_report(op);
+    stream_and_assert(op, "test-pattern");
+    op.watch_reset("test-pattern");
+    const std::uint64_t pattern_frames_start = op.frames("test-pattern");
+
+    std::size_t mark = op.sig_mark();
+    auto plug = op.request("fjarr.test", "hotplug", json{{"plugged", true}});
+    r.check("hotplug-plug-result", plug && plug->payload.value("ok", false), plug ? plug->payload.dump() : "no result within 5 s");
+    auto offer2 = op.wait_signal(mark, "offer", 8000);
+    std::string second_mid;
+    if (offer2)
+        for (const auto& t : offer2->value("tracks", json::array()))
+            if (t.value("track_id", "") == "test-second") second_mid = t.value("mid", "");
+    r.check("reoffer-with-test-second", offer2 && !second_mid.empty(),
+            offer2 ? "test-second is mid " + (second_mid.empty() ? std::string("(absent)") : second_mid) : "no re-offer within 8 s");
+    if (!offer2 || second_mid.empty()) return;
+    op.answer_offer(*offer2, second_mid);
+    logf("answered manifest_version=%u rejecting mid %s", op.manifest_version(), second_mid.c_str());
+    op.sleep_ms(300); // the answer goes through the server; select-tracks on control could overtake it
+
+    auto sel = op.request("fjarr.test", "select-tracks", json{{"tracks", json::array({{{"track_id", "test-second"}, {"enabled", true}, {"tier", "active"}}})}});
+    const json err = sel ? sel->payload.value("error", json::object()) : json::object();
+    const bool refused = sel && !sel->payload.value("ok", true) && err.value("code", "") == "payload-invalid" &&
+                         err.value("message", "").find("rejected") != std::string::npos;
+    r.check("select-rejected-track-refused", refused, sel ? "result " + sel->payload.dump() : "no result within 5 s");
+    // Long enough for an enable that was (wrongly) accepted to push frames — the first waits for a
+    // keyframe — into the pad webrtcbin never releases, which is what the removal then hung on.
+    op.sleep_ms(1500);
+
+    // The removal: the agent must answer the unplug and re-offer, not hang its loop.
+    mark = op.sig_mark();
+    const std::int64_t t0 = g_get_monotonic_time();
+    auto unplug = op.request("fjarr.test", "hotplug", json{{"plugged", false}});
+    r.check("unplug-answered", unplug && unplug->payload.value("ok", false),
+            unplug ? "result in " + ms_str(g_get_monotonic_time() - t0) + ": " + unplug->payload.dump() : "no result within 5 s: the agent's loop is stuck");
+    auto offer3 = op.wait_signal(mark, "offer", 8000);
+    r.check("reoffer-without-test-second", offer3.has_value(), offer3 ? "manifest_version=" + std::to_string(offer3->value("manifest_version", 0u)) : "no re-offer within 8 s");
+    if (!offer3) return;
+    op.answer_offer(*offer3);
+
+    auto echo = op.request("fjarr.test", "echo", json{{"after", "unplug"}});
+    r.check("agent-responsive", echo && echo->payload.value("ok", false), echo ? "echo answered" : "no echo within 5 s");
+    op.sleep_ms(1000);
+    auto t = op.track_snapshot("test-pattern");
+    const bool cont = t && t->max_delta <= 2 && t->frames > pattern_frames_start + 30;
+    r.check("test-pattern-continuity", cont,
+            t ? "max stamp gap " + std::to_string(t->max_delta ? t->max_delta - 1 : 0) + " frame(s), " + std::to_string(t->frames - pattern_frames_start) + " frames decoded"
+              : "test-pattern not received");
+    close_and_assert(op);
+}
+
 void scenario_silent_operator(Operator& op) {
     Report& r = op.report();
     connect_and_report(op);
@@ -2616,7 +2714,7 @@ using ScenarioFn = void (*)(Operator&);
 const std::map<std::string, ScenarioFn> kScenarios = {
     {"smoke", scenario_smoke},       {"toggle", scenario_toggle},   {"hotplug", scenario_hotplug},     {"silent-operator", scenario_silent_operator},
     {"no-answer", scenario_no_answer}, {"socket-drop", scenario_socket_drop}, {"ice-restart", scenario_ice_restart}, {"deadman", scenario_deadman},
-    {"congested-viewer", scenario_congested_viewer},
+    {"congested-viewer", scenario_congested_viewer}, {"rejected-track", scenario_rejected_track},
     {"relay-only", scenario_relay_only}, {"tunnel", scenario_tunnel}, {"soak", scenario_soak},
     // netem-<profile>: one function, the profile is read from the scenario name (unknown profile → usage, exit 2).
     {"netem-lan", scenario_netem},     {"netem-wifi-ok", scenario_netem}, {"netem-4g", scenario_netem},     {"netem-lossy", scenario_netem},
