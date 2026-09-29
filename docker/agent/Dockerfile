@@ -34,12 +34,14 @@ RUN groupadd -r -g 10001 fjarr && useradd -r -u 10001 -g fjarr -d /var/lib/fjarr
 # libx265 IS present: Ubuntu's plugins-bad depends on it for x265enc, an encoder nothing autoplugs and
 # the agent never selects (docs/14).
 ENV FJARR_INTROSPECT_VIEWER_DIR=/usr/share/fjarr/viewer
+# Root only for the tunnel device, then setpriv to fjarr with no capabilities (docs/26#containerized-robots).
+COPY --chmod=0755 docker/agent/entrypoint.sh /usr/lib/fjarr/container-entrypoint
 USER fjarr
 EXPOSE 7381
 # Live, not static: the running agent's introspection endpoint answers (docs/24).
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s \
   CMD curl -fsS ${FJARR_INTROSPECT_TOKEN:+-H "Authorization: Bearer $FJARR_INTROSPECT_TOKEN"} "http://127.0.0.1:${FJARR_INTROSPECT_PORT:-7381}/pipelines" >/dev/null || exit 1
-ENTRYPOINT ["fjarr-agent"]
+ENTRYPOINT ["/usr/lib/fjarr/container-entrypoint"]
 
 # ------------------------------------------------------------ demo-build --
 # demo-robot is the "customer's robot software" (docs/02): built here the way an embedder builds, from

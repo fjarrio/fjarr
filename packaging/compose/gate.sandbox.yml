@@ -1,0 +1,18 @@
+# make compose-gate on a workstation: the file's `network_mode: host` becomes a sandbox namespace on
+# the lab network, so fjarr0 and its route are not created in the developer's own host namespace.
+# CI (a throwaway runner) runs without this file: real host networking, exactly as shipped.
+services:
+  gate-host:
+    image: ${FJARR_GATE_IMAGE:-fjarr-agent:compose-gate}
+    user: "0"
+    entrypoint: ["sleep", "infinity"]
+    networks: [lab]
+  fjarr-agent:
+    network_mode: !override service:gate-host
+    depends_on: [gate-host]
+  ros:
+    network_mode: !override service:gate-host
+networks:
+  lab:
+    name: fjarr_default
+    external: true

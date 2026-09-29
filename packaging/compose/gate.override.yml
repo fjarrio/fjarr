@@ -1,0 +1,15 @@
+# make compose-gate only (packaging/compose/gate.sh): the reference file under test, with the image
+# built from this tree's .debs, no GPU, and the agent's introspection reachable over the tunnel
+# so the operator's IP check has something to talk to. Nothing else is changed.
+services:
+  fjarr-agent:
+    image: ${FJARR_GATE_IMAGE:-fjarr-agent:compose-gate}
+    devices: !override
+      - /dev/net/tun
+    group_add: !override []
+    environment:
+      FJARR_INTROSPECT_BIND: "0.0.0.0"
+      FJARR_INTROSPECT_TOKEN: dev-only-introspect-token
+  ros:
+    # What ROS sees when it finally starts: carrier on the tunnel device, recorded in its log.
+    command: ["sh", "-c", "echo \"ros-start carrier=$$(cat /sys/class/net/fjarr0/carrier)\"; exec ros2 topic pub --rate 1 /robot/hello std_msgs/msg/String '{data: hello}'"]

@@ -178,6 +178,15 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.image.yml --profile demo up -d --build demo-robot
           sleep 8 && docker compose logs --no-color demo-robot | tail -20
           pnpm --filter '@fjarr/e2e' exec playwright test tests/stack/viewer.spec.ts tests/stack/introspect.spec.ts tests/stack/dashboard.spec.ts
+      - name: the reference compose file (docs/26#containerized-robots, M2.5 gate)
+        # Exactly as shipped, host networking included: this runner is thrown away, so fjarr0 in its
+        # namespace harms nothing (a workstation runs the gate in a sandbox namespace instead).
+        # Setup in the image, a ROS container that waits for carrier, an agent with no privileges,
+        # a restart the device survives, and the tunnel scenario from an operator. Uses the .debs
+        # the image step built.
+        env:
+          FJARR_GATE_SANDBOX: "0"
+        run: make compose-gate
       - name: lab artifacts (summaries, captures, traces)
         if: always()
         uses: actions/upload-artifact@v4

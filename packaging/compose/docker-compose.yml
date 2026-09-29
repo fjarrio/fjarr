@@ -1,0 +1,58 @@
+# Fjarr agent next to your own containers — the reference compose file (docs/26#containerized-robots).
+#
+# First run, then every boot is just the containers starting:
+#   docker compose run --rm fjarr-agent setup --server wss://<your server>/ws --device-id <id> --net yes --ros no
+#   docker compose up -d
+#   docker compose exec fjarr-agent fjarr-agent --check
+#
+# Without the tunnel: drop `user`, `cap_add` and /dev/net/tun below, answer `--net no`, and run
+# setup with `docker compose run --rm --user 0 fjarr-agent setup …`.
+
+services:
+  fjarr-agent:
+    image: ghcr.io/fjarrio/fjarr-agent:${FJARR_VERSION:-latest}
+    # WebRTC needs the machine's real addresses (a bridge hides them from ICE and adds a NAT hop),
+    # and the tunnel device lives in the host's namespace, where your ROS containers see it.
+    network_mode: host
+    # Root only for the image's entrypoint: it creates fjarr0 the way fjarr-net.service does on an
+    # apt device, then drops to `fjarr` (uid 10001) with no capabilities before the agent starts.
+    user: "0"
+    cap_add: [NET_ADMIN]
+    devices:
+      - /dev/net/tun
+      - /dev/dri # VA-API encode; remove on a machine without a GPU (setup then picks software)
+      # - /dev/video0            # cameras: list each, or use the by-id links under /dev/v4l/by-id
+    # The host's render group: `stat -c %g /dev/dri/renderD128`. Group ids differ per host.
+    group_add: ["${RENDER_GID:-109}"]
+    volumes:
+      - fjarr-config:/etc/fjarr # fjarr.toml, written by setup
+      - fjarr-state:/var/lib/fjarr # the device key: keep it across image upgrades
+    # The container runtime is the supervisor here (ADR-0019 wants one: outside systemd the agent
+    # refuses to start unless told who restarts it).
+    restart: unless-stopped
+    environment:
+      FJARR_AGENT_ALLOW_UNSUPERVISED: "1"
+    # The image's health check asks the running agent's introspection endpoint (docs/24).
+
+  # Your ROS 2 container, as an example. It must see fjarr0, so it shares the host's network, and it
+  # must start ROS only once the agent has attached the device — carrier up — because DDS picks its
+  # interfaces when a participant is created (docs/27#lifecycle). `depends_on` covers
+  # `docker compose up`; the wait covers the daemon restarting containers after a reboot.
+  ros:
+    image: ros:jazzy-ros-core
+    network_mode: host
+    entrypoint:
+      - /bin/sh
+      - -c
+      - until [ "$$(cat /sys/class/net/fjarr0/carrier 2>/dev/null)" = 1 ]; do sleep 0.5; done; exec /ros_entrypoint.sh "$$@"
+      - wait-for-fjarr0
+    command: ["ros2", "topic", "pub", "--rate", "1", "/robot/hello", "std_msgs/msg/String", "{data: hello}"]
+    depends_on:
+      fjarr-agent:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles: [example]
+
+volumes:
+  fjarr-config:
+  fjarr-state:
