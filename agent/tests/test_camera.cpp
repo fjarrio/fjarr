@@ -86,14 +86,24 @@ TEST(CameraCapability, hotPlugReoffersEverySessionWithWhatIsAvailable) {
         cam.session_attached(ctx, nlohmann::json::object());
     });
     EXPECT_EQ(ctx.added, (std::vector<std::string>{"pattern", "webcam"})); // attach offers everything; the core holds back the missing one
+    // ctx.updates is written on the loop thread, so it is read there too: a copy taken by call_sync.
+    const auto updates_after = [&](std::size_t n) {
+        std::vector<std::vector<std::string>> seen;
+        for (int i = 0; i < 300; i++) {
+            loop.call_sync([&] { seen = ctx.updates; });
+            if (seen.size() >= n) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return seen;
+    };
     { std::FILE* f = std::fopen((dir / "usb-Fake-video-index0").c_str(), "w"); std::fclose(f); } // the camera arrives
-    for (int i = 0; i < 300 && ctx.updates.empty(); i++) std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    ASSERT_EQ(ctx.updates.size(), 1u);
-    EXPECT_EQ(ctx.updates[0], (std::vector<std::string>{"pattern", "webcam"}));
+    auto updates = updates_after(1);
+    ASSERT_EQ(updates.size(), 1u);
+    EXPECT_EQ(updates[0], (std::vector<std::string>{"pattern", "webcam"}));
     std::filesystem::remove(dir / "usb-Fake-video-index0"); // and leaves: re-offered without it, so the core removes it
-    for (int i = 0; i < 300 && ctx.updates.size() < 2; i++) std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    ASSERT_EQ(ctx.updates.size(), 2u);
-    EXPECT_EQ(ctx.updates[1], (std::vector<std::string>{"pattern"}));
+    updates = updates_after(2);
+    ASSERT_EQ(updates.size(), 2u);
+    EXPECT_EQ(updates[1], (std::vector<std::string>{"pattern"}));
     loop.call_sync([&] {
         cam.session_detached(ctx.sid, DetachReason::Closed, "");
         cam.shutdown();
