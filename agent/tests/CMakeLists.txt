@@ -24,6 +24,7 @@ add_executable(fjarr-tests
   test_control_domains.cpp
   test_control.cpp
   test_loop_media.cpp
+  test_consumer_negotiation.cpp
   test_introspect.cpp
   test_sources.cpp
   test_camera.cpp

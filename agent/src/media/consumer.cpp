@@ -1,6 +1,8 @@
 #include "consumer.hpp"
 
 #include <limits>
+#include <set>
+#include <sstream>
 
 #include <gst/sdp/sdp.h>
 #include <gst/video/video.h>
@@ -221,6 +223,8 @@ ConsumerTrack* ConsumerPipeline::add_track(const TrackSpec& spec, const std::str
             reuse->cap = cap;
             reuse->pooled = false;
             reuse->enabled = false;
+            reuse->negotiated = false; // settled again by the answer to the offer that re-adds it
+            reuse->rejected = false;
             if (reuse->transceiver) g_object_set(reuse->transceiver.get(), "direction", GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDONLY, nullptr);
             if (!build_branch(*reuse)) return nullptr;
             ConsumerTrack* raw = reuse.get();
@@ -440,6 +444,12 @@ void ConsumerPipeline::create_offer() {
             }
             milestone("offer-created");
             GstWebRTCSessionDescription* d = shared->get();
+            // What this offer sends on: its answer settles exactly these m-lines (docs/23).
+            offered_sendonly_.clear();
+            for (guint i = 0; i < gst_sdp_message_medias_len(d->sdp); i++) {
+                const GstSDPMedia* m = gst_sdp_message_get_media(d->sdp, i);
+                if (gst_sdp_media_get_attribute_val(m, "sendonly") || gst_sdp_media_get_attribute_val(m, "sendrecv")) offered_sendonly_.insert(i);
+            }
             // mids from the offer SDP, by m-line index (spike Q2).
             for (auto& [_, t] : tracks_) {
                 if (t->mline < gst_sdp_message_medias_len(d->sdp)) {
@@ -470,15 +480,47 @@ void ConsumerPipeline::set_remote_answer(const std::string& sdp_text) {
         if (hooks_.on_error) hooks_.on_error("answer SDP unparseable");
         return;
     }
+    // Per m-line: did the peer accept what we send? A live port or a place in the BUNDLE group,
+    // and a direction that receives. Anything else leaves webrtcbin holding that pad for good.
+    std::set<std::string> bundled;
+    for (guint i = 0; i < gst_sdp_message_attributes_len(msg); i++) {
+        const GstSDPAttribute* a = gst_sdp_message_get_attribute(msg, i);
+        if (!a->key || std::string(a->key) != "group" || !a->value) continue;
+        std::istringstream words(a->value);
+        std::string w;
+        if (words >> w && w == "BUNDLE")
+            while (words >> w) bundled.insert(w);
+    }
+    auto accepted = std::make_shared<std::vector<bool>>();
+    for (guint i = 0; i < gst_sdp_message_medias_len(msg); i++) {
+        const GstSDPMedia* m = gst_sdp_message_get_media(msg, i);
+        const gchar* mid = gst_sdp_media_get_attribute_val(m, "mid");
+        const bool live = gst_sdp_media_get_port(m) != 0 || (mid && bundled.count(mid));
+        const bool receives = gst_sdp_media_get_attribute_val(m, "recvonly") || gst_sdp_media_get_attribute_val(m, "sendrecv");
+        accepted->push_back(live && receives);
+    }
     glib::SdpPtr answer(gst_webrtc_session_description_new(GST_WEBRTC_SDP_TYPE_ANSWER, msg));
     milestone("answer-received");
     std::weak_ptr<bool> alive = alive_;
-    GstPromise* promise = glib::make_promise([this, alive](GstPromiseResult, glib::GstStructurePtr) {
-        post_([this, alive] {
+    GstPromise* promise = glib::make_promise([this, alive, accepted](GstPromiseResult, glib::GstStructurePtr) {
+        post_([this, alive, accepted] {
             if (alive.expired()) return;
             offer_in_flight_ = false;
             remote_described_ = true;
             milestone("remote-description-set");
+            // spec: docs/23-agent-core-architecture.md#offer-construction-and-renegotiation — the answer
+            // settles the m-lines its offer sent on; a held enable takes effect now, with a keyframe.
+            for (auto& [id, t] : tracks_) {
+                if (t->pooled || !offered_sendonly_.count(t->mline)) continue;
+                const bool ok = t->mline < accepted->size() && (*accepted)[t->mline];
+                const bool opens = ok && !t->negotiated && t->enabled;
+                t->negotiated = ok;
+                t->rejected = !ok;
+                if (!ok) log::warn("consumer", "the answer rejected a track's m-section", {{"session", sid8_}, {"track", id}});
+                apply_valve(*t);
+                if (opens && hooks_.on_keyframe_request) hooks_.on_keyframe_request(id);
+            }
+            offered_sendonly_.clear();
             for (auto& [mline, cand] : ice_queue_) add_ice_candidate(mline, cand);
             ice_queue_.clear();
             // mids are final after the answer (spike Q2): refresh from the transceivers.
@@ -505,7 +547,14 @@ void ConsumerPipeline::set_enabled(const std::string& track_id, bool enabled) {
     ConsumerTrack* t = track(track_id);
     if (!t || !t->valve) return; // pooled: no branch
     t->enabled = enabled;
-    g_object_set(t->valve.get(), "drop", enabled ? FALSE : TRUE, nullptr);
+    apply_valve(*t);
+}
+
+void ConsumerPipeline::apply_valve(ConsumerTrack& t) {
+    // spec: docs/23-agent-core-architecture.md#offer-construction-and-renegotiation — never let a
+    // buffer reach a webrtcbin pad that is not negotiated: a thread parked there hangs teardown.
+    if (!t.valve) return;
+    g_object_set(t.valve.get(), "drop", (t.enabled && t.negotiated) ? FALSE : TRUE, nullptr);
 }
 
 std::shared_ptr<FrameSink> ConsumerPipeline::sink_for(const std::string& track_id) {

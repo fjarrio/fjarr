@@ -830,6 +830,14 @@ void Session::handle_select_tracks(const Envelope& env, const AttachedCapability
             reply_error(env, error_codes::payload_invalid, "enabled must be a boolean");
             return;
         }
+        // docs/08#track-control: a track this peer's answer refused never opens (docs/23).
+        if (t["enabled"].get<bool>() && consumer_) {
+            const auto* ct = consumer_->track(id);
+            if (ct && ct->rejected) {
+                reply_error(env, error_codes::payload_invalid, "track " + id + " was rejected by this peer's answer");
+                return;
+            }
+        }
         const std::string tier = t.value("tier", "active");
         if (tier != "active" && tier != "thumbnail") {
             reply_error(env, error_codes::payload_invalid, "tier must be active|thumbnail");

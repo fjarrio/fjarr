@@ -9,6 +9,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -44,7 +45,9 @@ struct ConsumerTrack {
     std::uint32_t ssrc = 0;
     std::string mid;  // from the offer SDP
     unsigned mline = 0;
-    bool enabled = false;
+    bool enabled = false;    // the client's demand; the valve is open only while this AND negotiated
+    bool negotiated = false; // this peer's applied answer accepted the m-section (docs/23: valves open only then)
+    bool rejected = false;   // this peer's applied answer refused it: select-tracks is payload-invalid
     std::string tier = "active";          // what is sent (the effective tier)
     std::string demanded_tier = "active"; // what the client asked for (docs/23 rate control may send lower)
     double allotment_bps = 0;             // this viewer's share of its estimate for the track
@@ -168,6 +171,8 @@ class ConsumerPipeline {
     int next_pt_ = 96;
     bool offer_in_flight_ = false;
     bool remote_described_ = false;
+    std::set<unsigned> offered_sendonly_; // m-lines the in-flight offer sends on: what its answer settles
+    void apply_valve(ConsumerTrack& t);
     std::vector<std::pair<unsigned, std::string>> ice_queue_;
     bool stopped_ = false;
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);

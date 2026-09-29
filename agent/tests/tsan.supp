@@ -16,3 +16,7 @@ race:libnice.so*
 race:libsoup-3.0.so*
 race:libsrtp2.so*
 race:libusrsctp.so*
+# OpenSSL: webrtcbin's DTLS (dtlsdec/dtlsenc) runs the handshake on GStreamer threads; first
+# exercised by a unit test in test_consumer_negotiation.cpp (loopback peer, 2026-09-29).
+race:libssl.so*
+race:libcrypto.so*
