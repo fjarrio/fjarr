@@ -19,8 +19,10 @@ echo "robot-services: $PAYLOAD is ${MB} MiB, sha256 $(cat "$PAYLOAD.sha256")"
 # the operator container's uid because ssh refuses a private key anyone else can read, and this
 # container has no idea who that is otherwise.
 if [ -d /srv/fjarr-lab-key ]; then
-  install -m 600 -o "${FJARR_LAB_KEY_UID:-1000}" -g "${FJARR_LAB_KEY_GID:-1000}" \
-    /etc/fjarr-lab-key /srv/fjarr-lab-key/id_ed25519
+  # install, then chown: 26.04's uutils install -o refuses a uid with no passwd entry here, and the
+  # operator's uid rarely has one; chown takes any number.
+  install -m 600 /etc/fjarr-lab-key /srv/fjarr-lab-key/id_ed25519
+  chown "${FJARR_LAB_KEY_UID:-1000}:${FJARR_LAB_KEY_GID:-1000}" /srv/fjarr-lab-key/id_ed25519
   echo "robot-services: published the lab key to uid ${FJARR_LAB_KEY_UID:-1000} for the operator side"
 fi
 
