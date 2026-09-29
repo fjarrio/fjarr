@@ -97,6 +97,7 @@ jobs:
       - name: ROS 2 over the link, then the tunnel-interface ordering regression (docs/27#lifecycle)
         run: |
           docker compose --profile demo --profile ros build robot-ros operator-ros
+          make tun-up ROS=1
           make tunnel-ros
           make tunnel-ros-ordering
       # Cyclone DDS with docs/27's file, the same two gates (#29, closed 2026-09-27). Fact A is held to
