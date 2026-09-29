@@ -10,6 +10,7 @@
 #include "media/frame_hub.hpp"
 #include "media/producer.hpp"
 #include "media/sources.hpp"
+#include "watchdog.hpp"
 
 namespace glib = fjarr::glib;
 using namespace fjarr::media;
@@ -328,23 +329,13 @@ TEST(LoopMedia, aTierStoppedWhileItsStartIsStillSettlingIsTornDownCleanly) {
     for (int i = 0; i < 300 && active->frames < 5; i++) std::this_thread::sleep_for(std::chrono::milliseconds(10));
     ASSERT_GE(active->frames, 5);
     // Before the fix this failed within 27 cycles every run; the varying gap walks the stop across
-    // the settling window. A hung stop blocks call_sync for good, so a watchdog turns it into a
-    // failure instead of a stuck suite.
-    std::atomic<bool> churned{false};
-    std::thread watchdog([&] {
-        for (int i = 0; i < 600 && !churned; i++) std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        if (!churned) {
-            std::fprintf(stderr, "stop_tier hung under thumbnail churn\n");
-            std::abort();
-        }
-    });
+    // the settling window. A hung stop blocks call_sync for good; the watchdog guards each one.
     for (int i = 0; i < 80; i++) {
         loop.call_sync([&] { producer->start_tier("thumbnail"); });
         std::this_thread::sleep_for(std::chrono::microseconds(100 * (i % 40)));
+        fjarr::testing::Watchdog dog("stop_tier under thumbnail churn");
         loop.call_sync([&] { producer->stop_tier("thumbnail"); });
     }
-    churned = true;
-    watchdog.join();
     const int before = active->frames;
     for (int i = 0; i < 300 && active->frames < before + 10; i++) std::this_thread::sleep_for(std::chrono::milliseconds(10));
     EXPECT_GE(active->frames, before + 10) << "the active tier stalled under thumbnail churn";

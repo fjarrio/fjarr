@@ -23,6 +23,7 @@
 #include "media/frame_hub.hpp"
 #include "media/producer.hpp"
 #include "media/sources.hpp"
+#include "watchdog.hpp"
 
 using namespace fjarr::media;
 
@@ -227,24 +228,6 @@ struct Harness {
     }
 };
 
-/// Turns a hung call_sync into a failure instead of a stuck suite. 60 s is generous even under
-/// valgrind for one teardown; the old hang never returned at all.
-struct Watchdog {
-    std::atomic<bool> done{false};
-    std::thread t;
-    explicit Watchdog(const char* what) : t([this, what] {
-        for (int i = 0; i < 600 && !done; i++) std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        if (!done) {
-            std::fprintf(stderr, "%s hung\n", what);
-            std::abort();
-        }
-    }) {}
-    ~Watchdog() {
-        done = true;
-        t.join();
-    }
-};
-
 } // namespace
 
 TEST(LoopMedia, anEnableThatOvertakesItsAnswerIsHeldAndARemovalMeanwhileReturns) {
@@ -272,7 +255,7 @@ TEST(LoopMedia, anEnableThatOvertakesItsAnswerIsHeldAndARemovalMeanwhileReturns)
             EXPECT_FALSE(h.valve_open("b")) << "cycle " << i << ": the valve opened before the answer";
             std::this_thread::sleep_for(std::chrono::milliseconds(20 + 5 * (i % 10)));
             {
-                Watchdog dog("remove_track before the answer");
+                fjarr::testing::Watchdog dog("remove_track before the answer");
                 h.loop.call_sync([&] {
                     h.hub.unsubscribe(HubKey{"t", "active"}, sink);
                     h.consumer->remove_track("b");
@@ -334,7 +317,7 @@ TEST(LoopMedia, aTrackTheAnswerRejectedNeverOpensAndStillRemovesCleanly) {
     EXPECT_FALSE(h.valve_open("b"));
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     {
-        Watchdog dog("remove_track of a rejected track");
+        fjarr::testing::Watchdog dog("remove_track of a rejected track");
         h.loop.call_sync([&] {
             h.hub.unsubscribe(HubKey{"t", "active"}, sink);
             h.consumer->remove_track("b");
