@@ -314,8 +314,14 @@ void Producer::stop_tier(const std::string& tier) {
     Tier* t = it->second.get();
     // Unlink first (the tee stops pushing into this branch), then tear it down: deactivating
     // the queue's pad waits on its stream lock, so no probe is needed to fence the streaming thread.
+    // Lock the branch's state before that: a tier started moments ago can leave the pipeline's
+    // state change in flight, and its completion sets every child still in the bin back to
+    // PLAYING — mid-teardown, which disposed elements un-NULLed and could hang the next stop.
     glib::GstPadPtr qsink = glib::adopt_pad(gst_element_get_static_pad(t->queue.get(), "sink"));
     gst_pad_unlink(t->tee_pad.get(), qsink.get());
+    gst_element_set_locked_state(t->sink.get(), TRUE);
+    gst_element_set_locked_state(t->encode.get(), TRUE);
+    gst_element_set_locked_state(t->queue.get(), TRUE);
     gst_element_set_state(t->sink.get(), GST_STATE_NULL);
     gst_element_set_state(t->encode.get(), GST_STATE_NULL);
     gst_element_set_state(t->queue.get(), GST_STATE_NULL);

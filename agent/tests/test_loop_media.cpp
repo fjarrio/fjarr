@@ -1,4 +1,5 @@
 // Loop test: a test-pattern producer through the real encoder path into the FrameHub.
+#include <atomic>
 #include <mutex>
 #include <thread>
 
@@ -288,4 +289,70 @@ TEST(LoopMedia, aSourceSlowerThanTheTierCeilingStillStreamsOnBothTiers) {
     plane->hub().unsubscribe(HubKey{"slowcam", "thumbnail"}, thumb);
     loop.call_sync([&] { plane.reset(); });
     loop.stop();
+}
+
+TEST(LoopMedia, aTierStoppedWhileItsStartIsStillSettlingIsTornDownCleanly) {
+    // A tier started on a playing pipeline leaves the pipeline's own state change in flight; when
+    // it completes, the bin sets every child it still holds to PLAYING again. stop_tier running in
+    // that window saw its branch put back to PLAYING between set_state(NULL) and removal: elements
+    // disposed un-NULLed (leaking the parser's buffers — the 2026-09-29 nightly memcheck), and
+    // within a few dozen cycles a stop that never returned. Locking the branch's state first is
+    // what keeps the parent's hands off it.
+    struct Criticals {
+        static std::atomic<int>& count() {
+            static std::atomic<int> n{0};
+            return n;
+        }
+        static void handler(const gchar* domain, GLogLevelFlags level, const gchar* message, gpointer) {
+            if (level & G_LOG_LEVEL_CRITICAL) count()++;
+            g_log_default_handler(domain, level, message, nullptr);
+        }
+    };
+    Criticals::count() = 0;
+    GLogFunc previous = g_log_set_default_handler(&Criticals::handler, nullptr);
+    fjarr::CoreLoop loop;
+    loop.start();
+    FrameHub hub(61);
+    ProducerConfig cfg;
+    cfg.encoder = {EncoderKind::Software, "software"};
+    cfg.gop_seconds = 1;
+    cfg.active_kbps = 1000;
+    cfg.thumbnail_kbps = 200;
+    fjarr::SourceRef src{std::make_shared<TestPatternSource>("smpte", 640, 360, 30), "src"};
+    auto producer = std::make_unique<Producer>("t", src, true, cfg, hub, loop.context());
+    bool built = false;
+    loop.call_sync([&] { built = producer->build() && producer->start_tier("active"); });
+    ASSERT_TRUE(built) << producer->error();
+    auto active = std::make_shared<CountingSink>();
+    hub.subscribe(HubKey{"t", "active"}, active);
+    for (int i = 0; i < 300 && active->frames < 5; i++) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    ASSERT_GE(active->frames, 5);
+    // Before the fix this failed within 27 cycles every run; the varying gap walks the stop across
+    // the settling window. A hung stop blocks call_sync for good, so a watchdog turns it into a
+    // failure instead of a stuck suite.
+    std::atomic<bool> churned{false};
+    std::thread watchdog([&] {
+        for (int i = 0; i < 600 && !churned; i++) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (!churned) {
+            std::fprintf(stderr, "stop_tier hung under thumbnail churn\n");
+            std::abort();
+        }
+    });
+    for (int i = 0; i < 80; i++) {
+        loop.call_sync([&] { producer->start_tier("thumbnail"); });
+        std::this_thread::sleep_for(std::chrono::microseconds(100 * (i % 40)));
+        loop.call_sync([&] { producer->stop_tier("thumbnail"); });
+    }
+    churned = true;
+    watchdog.join();
+    const int before = active->frames;
+    for (int i = 0; i < 300 && active->frames < before + 10; i++) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    EXPECT_GE(active->frames, before + 10) << "the active tier stalled under thumbnail churn";
+    loop.call_sync([&] {
+        producer->stop_tier("active");
+        producer.reset();
+    });
+    loop.stop();
+    g_log_set_default_handler(previous, nullptr);
+    EXPECT_EQ(Criticals::count().load(), 0) << "a tier's elements were disposed outside NULL";
 }
