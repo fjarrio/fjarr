@@ -1,3 +1,10 @@
+fjarr (0.1.1) unstable; urgency=medium
+
+  * The first published release. 0.1.0 reached testing only: its arm64
+    image needed intel-media-va-driver, which has no arm64 build.
+
+ -- Fjarr <dev@fjarr.io>  Tue, 29 Sep 2026 07:26:33 +0200
+
 fjarr (0.1.0) unstable; urgency=medium
 
   * First release: fjarr-agent, fjarr-tools (fjarr-connect) and libfjarr-dev,
