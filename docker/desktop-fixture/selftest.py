@@ -80,8 +80,9 @@ def capture(bus, rd, stream):
     check("capture", hits * 10 >= total * 9, f"{w}x{h} from PipeWire node {node['id']}, {100 * hits // total}% the window's colour")
 
 
-def inject(rd):
-    """libei over mutter's EIS socket, as backend E will: keyboard, absolute pointer, buttons."""
+def drive_eis(eis_fd):
+    """As backend E will over an EIS socket: a click to focus the window, keys f and j, a click at
+    321,234. Returns an error string, or "" once the events are sent. Also used by fixture-helper-check."""
     lib = ctypes.CDLL("libei.so.1")
     P, U32, U64, I = ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint64, ctypes.c_int
     for name, res, args in [
@@ -101,12 +102,10 @@ def inject(rd):
     CAP_ABS, CAP_KBD, CAP_BTN = 1 << 1, 1 << 2, 1 << 5  # libei.h
     EV_SEAT_ADDED, EV_DEVICE_ADDED, EV_DEVICE_RESUMED, EV_DISCONNECT = 3, 5, 8, 2
 
-    eis_fd = rd.ConnectToEIS({}).take()
     ei = lib.ei_new_sender(None)
     lib.ei_configure_name(ei, b"fjarr-fixture-selftest")
     if lib.ei_setup_backend_fd(ei, eis_fd) != 0:
-        check("input", False, "ei_setup_backend_fd failed")
-        return
+        return "ei_setup_backend_fd failed"
     devices, resumed, seq = [], set(), [1]
 
     def pump(timeout):
@@ -135,8 +134,7 @@ def inject(rd):
         pump(0.2)
     kbd, ptr = find(CAP_KBD), find(CAP_ABS)
     if not (kbd and ptr):
-        check("input", False, f"EIS devices after 5 s: keyboard={bool(kbd)} absolute pointer={bool(ptr)}")
-        return
+        return f"EIS devices after 5 s: keyboard={bool(kbd)} absolute pointer={bool(ptr)}"
     btn = ptr if lib.ei_device_has_capability(ptr, CAP_BTN) else find(CAP_BTN)
 
     def click(x, y):
@@ -147,8 +145,6 @@ def inject(rd):
             lib.ei_device_frame(btn, lib.ei_now(ei))
         pump(0.3)
 
-    open(LOG, "a").close()
-    start = os.path.getsize(LOG)
     click(640, 360)  # focus first: nothing has focus on a headless desktop until something clicks
     time.sleep(0.3)
     for key in (33, 36):  # evdev KEY_F, KEY_J
@@ -158,6 +154,17 @@ def inject(rd):
         pump(0.2)
     click(321, 234)
     time.sleep(0.8)
+    return ""
+
+
+def inject(rd):
+    """libei over mutter's own EIS socket (ConnectToEIS), checked in the window's log."""
+    open(LOG, "a").close()
+    start = os.path.getsize(LOG)
+    err = drive_eis(rd.ConnectToEIS({}).take())
+    if err:
+        check("input", False, err)
+        return
     with open(LOG) as f:
         f.seek(start)
         seen = f.read()

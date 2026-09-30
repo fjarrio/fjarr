@@ -82,6 +82,14 @@ if(SYSTEMD_FOUND)
   target_compile_definitions(fjarr PRIVATE FJARR_HAVE_SYSTEMD=1)
 endif()
 
+# fjarr-desktop-session (ADR-0028, M3): the desktop user's side of the handover — mutter over the
+# session bus, descriptors to the agent's module over /run/fjarr/desktop.sock. It links nothing of
+# libfjarr: it runs as another account and knows only the helper protocol.
+pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0 gio-unix-2.0)
+add_executable(fjarr-desktop-session desktop-session/main.cpp desktop-session/mutter.cpp src/desktop/helper_protocol.cpp)
+target_include_directories(fjarr-desktop-session PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(fjarr-desktop-session PRIVATE PkgConfig::GIO nlohmann_json::nlohmann_json)
+
 add_executable(fjarr-agent daemon/main.cpp)
 target_link_libraries(fjarr-agent PRIVATE fjarr::fjarr PkgConfig::GST)
 # The reference daemon, unlike the demos, may use libfjarr's internals for installation concerns an

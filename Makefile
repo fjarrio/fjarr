@@ -506,9 +506,9 @@ lab-runner-install: ## ON A LAB MACHINE, as root: install fjarr-lab, its units a
 	@echo "lab-runner-install: set RUNNER_SERVICE in /etc/fjarr-lab.conf, then: sudo fjarr-lab window 00:00-06:00 && fjarr-lab status"
 
 .PHONY: desktop-fixture-test
-desktop-fixture-test: ## M3 3.0: headless mutter in a container proves capture and EIS input (docs/15#the-desktop-test-lab)
+desktop-fixture-test: ## M3: headless mutter proves capture and EIS input, then the session helper's handover of both (docs/15#the-desktop-test-lab)
 	docker compose --profile desktop up -d --build --wait desktop-fixture
-	@docker compose --profile desktop exec -T desktop-fixture fixture-selftest; rc=$$?; \
+	@docker compose --profile desktop exec -T desktop-fixture sh -c 'fixture-selftest && fixture-helper-check /usr/local/bin/fjarr-desktop-session'; rc=$$?; \
 	  [ $$rc -eq 0 ] || docker compose --profile desktop logs --no-color --tail 30 desktop-fixture; \
 	  docker compose --profile desktop stop desktop-fixture >/dev/null 2>&1; exit $$rc
 

@@ -65,7 +65,9 @@ services:
   # capture and EIS input on every push, with no GPU and no lab machine. `make desktop-fixture-test`.
   desktop-fixture:
     profiles: [desktop]
-    build: docker/desktop-fixture
+    build:
+      context: .
+      dockerfile: docker/desktop-fixture/Dockerfile
     image: fjarr-desktop-fixture
 
   robot-sim:
