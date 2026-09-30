@@ -494,6 +494,54 @@ What the module and the package take from it:
   `systemd --user` keeps its old groups. The installer restarts the session
   or says that it must.
 
+### The helper protocol {#desktop-helper-protocol}
+
+What crosses `/run/fjarr/desktop.sock` between `fjarr-desktop-session` and
+backend module E (specified 2026-09-30 for M3 slice 3.1; ADR-0028 and its
+addendum). The protocol is internal: both ends ship in the same packages, and
+its name is bumped with the module seam's.
+
+- **Transport.** `AF_UNIX`, `SOCK_SEQPACKET`: every message is one datagram, so
+  there is no framing to write, and descriptors travel with the message that
+  names them (`SCM_RIGHTS`). A message is one JSON object, at most 64 KiB, with a
+  `type`. The agent's module listens (mode `0660`, the desktop group), the helper
+  connects and reconnects, and the module accepts a connection only when
+  `SO_PEERCRED` says the configured desktop uid. One helper at a time; a second
+  connection is refused while one is live.
+- **Handshake.** The helper sends `hello {protocol: "fjarr-desktop-1", helper,
+  session: {type: "wayland", desktop, compositor: "mutter"}}`. The module answers
+  `welcome {protocol}`, or `refuse {reason}` and closes. A protocol it does not
+  speak is refused by name, so a mismatched package pair says so rather than
+  failing later.
+- **Monitors.** The helper sends `monitors {monitors: [{connector, name,
+  identity: {vendor, product, serial}, x, y, width, height, scale, primary,
+  kind: "physical" | "virtual"}]}` after `welcome`, and again whenever the layout
+  changes. `identity` comes from the EDID, which is what monitor ids are made of
+  (docs/09).
+- **Capture.** The module sends `start-capture {id, connector, cursor:
+  "embedded" | "metadata" | "hidden"}`. The helper records that monitor into its
+  one RemoteDesktop session with a linked ScreenCast (starting the session on the
+  first capture) and replies `capture-started {id, node, x, y, width, height}`
+  with **one descriptor: a PipeWire connection**, or `capture-failed {id,
+  reason}`. `stop-capture {id}` ends it. The module reads the stream with
+  `pipewiresrc fd=… path=<node> keepalive-time=<ms>`: mutter's stream is
+  damage-driven and silent on a static screen, and the keepalive re-sends the
+  last frame so the encoder keeps producing. Silence is never capture loss.
+  **Until slice 3.3 the connection is handed over unnarrowed, as the spike did;
+  narrowing it to the one node is 3.3's gating item** (above).
+- **Input.** `open-input {}` makes the helper call `ConnectToEIS` on the running
+  session and reply `input-opened {}` with **one descriptor: the EIS socket**. The
+  module is its libei sender (keyboard, absolute pointer, buttons), mapping a
+  track-local point to the stream's `x, y` plus that point.
+- **Loss.** The helper sends `capture-lost {id, reason: "monitor-gone" |
+  "stream-stopped"}` when mutter ends a stream. A closed socket is
+  `SessionEnded` for every capture (`CaptureLost`, docs/09): the desktop session
+  ended or the helper died, and the capability rebuilds its tracks when a helper
+  connects again.
+- **Growth.** Later slices add message types (clipboard in 3.5, virtual
+  monitors, hot-plug details in 3.4) within `fjarr-desktop-1`. An end ignores a
+  type it does not know. Changing the meaning of an existing type bumps the name.
+
 ### Encoders and tiers
 
 The core owns encoding through the `EncoderAdapter` seam, so a source never
