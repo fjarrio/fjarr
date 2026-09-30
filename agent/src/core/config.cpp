@@ -1,6 +1,8 @@
 // AgentConfig: TOML (toml++) + FJARR_* environment overrides.
 // spec: docs/23-agent-core-architecture.md#configuration
 #include <cstdlib>
+#include <cerrno>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 
@@ -117,7 +119,13 @@ AgentConfig AgentConfig::from_toml(const std::string& text) {
 
 AgentConfig AgentConfig::from_file(const std::string& path) {
     std::ifstream in(path);
-    if (!in) throw FjarrError("config", "cannot read " + path);
+    if (!in) {
+        const int err = errno;
+        // setup writes it 0640 root:fjarr: an ordinary user typing `fjarr-agent --check` lands here.
+        if (err == EACCES)
+            throw FjarrError("config", "cannot read " + path + ": permission denied (it is root:fjarr 0640) — run as root: sudo fjarr-agent --check");
+        throw FjarrError("config", "cannot read " + path + (err ? ": " + std::string(std::strerror(err)) : ""));
+    }
     std::stringstream ss;
     ss << in.rdbuf();
     return from_toml(ss.str());

@@ -161,6 +161,25 @@ TEST(SystemProfile, inAContainerUnitsAreSatisfiedByWhatDoesTheirJobThere) {
     EXPECT_FALSE(find(check(profile_file(), true, sys), "device fjarr0")->ok) << "a container without the device still fails on it";
 }
 
+TEST(SystemProfile, aPathThisUserCannotSeeIsReportedAsSuchNeverAsMissing) {
+    // `fjarr-agent --check` without sudo: /etc/fjarr is 0750 root:fjarr, so stat fails with EACCES.
+    // It said "missing" and named setup, and the operator went looking for a config that was there.
+    Fake f;
+    f.files["/etc/fjarr/fjarr.toml"] = {0, 0, false, true};
+    auto rows = check(profile_file(), false, f.system());
+    const Row* r = find(rows, "/etc/fjarr/fjarr.toml");
+    ASSERT_TRUE(r);
+    EXPECT_FALSE(r->ok);
+    EXPECT_EQ(r->detail.find("missing"), std::string::npos) << r->detail;
+    EXPECT_NE(r->detail.find("permission denied"), std::string::npos) << r->detail;
+    EXPECT_EQ(r->fix, "sudo fjarr-agent --check");
+    f.files["/var/lib/fjarr"] = {0, 0, false, true};
+    const auto rows2 = check(profile_file(), false, f.system());
+    const Row* d = find(rows2, "/var/lib/fjarr");
+    ASSERT_TRUE(d);
+    EXPECT_EQ(d->fix, "sudo fjarr-agent --check") << d->detail;
+}
+
 TEST(SystemProfile, aMissingAccountStopsTheRowsThatNeedIt) {
     Fake f;
     f.users.clear();

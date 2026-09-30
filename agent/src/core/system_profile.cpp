@@ -1,5 +1,7 @@
 #include "system_profile.hpp"
 
+#include <cerrno>
+
 #include <algorithm>
 #include <climits>
 #include <cstdio>
@@ -31,6 +33,10 @@ std::string read_line(const std::filesystem::path& p) {
     return s;
 }
 
+// Run without root, a path under a 0750 directory cannot be looked at; that is not "missing", and
+// saying so sent an operator looking for a config that was there all along (the mini-PC, 2026-09-30).
+std::string denied_detail() { return "cannot see it as uid " + std::to_string(::getuid()) + " (permission denied): check as root"; }
+
 std::vector<std::string> strings(const toml::node_view<const toml::node>& v) {
     std::vector<std::string> out;
     if (auto arr = v.as_array())
@@ -52,8 +58,13 @@ void check_core(const toml::table& core, const System& sys, std::vector<Row>& ro
         }
     }
     if (auto cfg = core["config"].value<std::string>()) {
-        const bool there = sys.stat(*cfg).has_value();
-        rows.push_back({"core", *cfg, there, there ? "present" : "missing: the service waits for it", there ? "" : "sudo fjarr-agent setup"});
+        const auto st = sys.stat(*cfg);
+        if (st && st->denied) {
+            rows.push_back({"core", *cfg, false, denied_detail(), "sudo fjarr-agent --check"});
+        } else {
+            const bool there = st.has_value();
+            rows.push_back({"core", *cfg, there, there ? "present" : "missing: the service waits for it", there ? "" : "sudo fjarr-agent setup"});
+        }
     }
     for (const auto& unit : strings(core["units"])) {
         if (!sys.systemd) {
@@ -73,8 +84,11 @@ void check_core(const toml::table& core, const System& sys, std::vector<Row>& ro
             const auto st = sys.stat(path);
             const auto owner_uid = owner.empty() ? std::nullopt : sys.uid_of(owner);
             std::string detail, fix;
-            bool ok = st && st->is_dir;
-            if (!ok) {
+            bool ok = st && !st->denied && st->is_dir;
+            if (st && st->denied) {
+                detail = denied_detail();
+                fix = "sudo fjarr-agent --check";
+            } else if (!ok) {
                 detail = "missing";
                 fix = path == "/var/lib/fjarr" ? "created when the service first starts (sudo fjarr-agent setup starts it)"
                                                : "sudo systemd-tmpfiles --create fjarr-agent.conf";
@@ -174,7 +188,10 @@ System System::real() {
     };
     s.stat = [](const std::string& path) -> std::optional<Stat> {
         struct ::stat st {};
-        if (::stat(path.c_str(), &st) != 0) return std::nullopt;
+        if (::stat(path.c_str(), &st) != 0) {
+            if (errno == EACCES) return Stat{0, 0, false, true};
+            return std::nullopt;
+        }
         return Stat{static_cast<unsigned>(st.st_uid), static_cast<unsigned>(st.st_mode & 07777), S_ISDIR(st.st_mode)};
     };
     s.systemd = std::filesystem::is_directory("/run/systemd/system");

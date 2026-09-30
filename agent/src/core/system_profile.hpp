@@ -23,6 +23,8 @@ struct System {
         unsigned uid = 0;
         unsigned mode = 0; // permission bits only
         bool is_dir = false;
+        /// It may exist, but this user cannot look (EACCES): run --check as root. Never "missing".
+        bool denied = false;
     };
     struct NetDev {
         bool tun = false;

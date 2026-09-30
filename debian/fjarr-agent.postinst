@@ -1,0 +1,11 @@
+#!/bin/sh
+# The fjarr user before anything that names it. debhelper's generated snippets run tmpfiles
+# (`d /run/fjarr 0755 fjarr fjarr`) BEFORE sysusers, so on a fresh install tmpfiles met an unknown
+# user, failed behind its `|| true`, and /run/fjarr was missing until the next boot (0.1.2, found on
+# the mini-PC). sysusers is idempotent; the generated snippet below runs it again harmlessly.
+set -e
+if [ "$1" = configure ] && command -v systemd-sysusers >/dev/null 2>&1; then
+    systemd-sysusers ${DPKG_ROOT:+--root="$DPKG_ROOT"} fjarr-agent.conf
+fi
+#DEBHELPER#
+exit 0

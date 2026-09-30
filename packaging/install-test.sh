@@ -8,8 +8,16 @@ ok() { echo "ok   $*"; }
 apt-get update -qq >/dev/null
 # What a robot installs: the runtime packages. libfjarr-dev is for an embedder's build machine and has
 # its own test (embed-test.sh); its GStreamer -dev dependencies bring FFmpeg's, which docs/14 records.
+# A real Ubuntu has systemd-tmpfiles, so the package's tmpfiles step runs at install time; without it
+# that step is skipped and a /run/fjarr the package failed to create went unnoticed (0.1.2, found on
+# the mini-PC). The standalone build is the one a container without systemd can have.
+apt-get install -y -qq systemd-standalone-tmpfiles >/dev/null 2>&1 || fail "could not install systemd-standalone-tmpfiles"
 cp /debs/fjarr-agent_*.deb /debs/fjarr-tools_*.deb /tmp/ && apt-get install -y -qq /tmp/*.deb >/tmp/apt.log 2>&1 || { tail -20 /tmp/apt.log; fail "apt could not install the packages"; }
 ok "apt installed: $(ls /tmp/*.deb | xargs -n1 basename | tr '\n' ' ')"
+# The package creates /run/fjarr for the agent at install (tmpfiles), which needs the fjarr user to
+# exist first (sysusers) — debhelper orders the two the other way round unless the postinst does it.
+[ "$(stat -c '%U %a' /run/fjarr 2>/dev/null)" = "fjarr 755" ] || fail "/run/fjarr was not created at install, owned by fjarr: $(stat -c '%U %a' /run/fjarr 2>&1)"
+ok "/run/fjarr created at install, owned by fjarr (sysusers before tmpfiles)"
 
 # --help exits 2 by design (usage); what matters is that it ran, so match its first line.
 fjarr-agent --help 2>&1 | grep -q '^fjarr-agent \[' || fail "fjarr-agent does not run (a missing library?)"; ok "fjarr-agent runs"
@@ -54,9 +62,6 @@ if FJARR_MEDIA_ENCODER=software fjarr-agent --config "$cfg" --check >/tmp/check.
 fi
 grep -q 'profile core    /etc/fjarr/fjarr.toml .*MISSING.*sudo fjarr-agent setup' /tmp/check.log || { cat /tmp/check.log; fail "--check did not name setup as the fix"; }
 ok "before setup, --check fails and names the fix"
-# What boot does: /run is empty at every boot and systemd-tmpfiles recreates /run/fjarr. This
-# container runs no systemd, so the step is done by hand here, the way the tmpfiles entry says.
-install -d -o fjarr -g fjarr -m 0755 /run/fjarr
 
 # The driver catalog and `drivers` (docs/26#fjarr-agent-drivers): shipped, and the built-in entries only.
 [ -f /usr/share/fjarr/catalog.toml ] || fail "no driver catalog installed"
@@ -93,6 +98,13 @@ ok "setup --offline wrote the config (0640 root:fjarr, keys the agent reads, sof
 fjarr-agent --config /etc/fjarr/fjarr.toml --check >/tmp/check.log 2>&1 || { cat /tmp/check.log; fail "--check fails on setup's config"; }
 grep -q '^profile core' /tmp/check.log || { cat /tmp/check.log; fail "--check printed no profile rows"; }
 ok "after setup, --check passes with every profile row ok"
+# Without sudo, --check cannot see inside /etc/fjarr: it must say so, not call the config missing
+# (the mini-PC, 2026-09-30: the operator went looking for a config that was there).
+setpriv --reuid=65534 --regid=65534 --clear-groups fjarr-agent --check >/tmp/check-user.log 2>&1 || true
+if grep -q 'fjarr.toml .*MISSING' /tmp/check-user.log || ! grep -q 'permission denied.*sudo fjarr-agent --check' /tmp/check-user.log; then
+    cat /tmp/check-user.log; fail "--check as an ordinary user called the config missing instead of saying it cannot see it"
+fi
+ok "--check without root says it cannot see the config, and to check as root"
 fjarr-agent setup --undo >/tmp/undo.log 2>&1 || { cat /tmp/undo.log; fail "setup --undo failed"; }
 [ ! -e /etc/fjarr/fjarr.toml ] || fail "--undo left the config in place"
 grep -q '"changes": \[\]' /var/lib/fjarr/setup-changes.json || fail "--undo left changes recorded: $(cat /var/lib/fjarr/setup-changes.json)"
