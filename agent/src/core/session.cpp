@@ -411,6 +411,7 @@ void Session::attach(std::vector<AttachedCapability> caps) {
         close("media-error");
         return;
     }
+    for (const auto& dc : consumer_->channels()) connect_inbound(dc.get(), glib::str_prop(dc.get(), "label"));
     milestone("channels-created");
     for (auto& [cap, spec] : pending_tracks_) {
         std::string reason;
@@ -476,20 +477,7 @@ void Session::on_signal(const protocol::SignalingMessage& msg) {
 
 void Session::on_channel_open(GstWebRTCDataChannel* dc, const std::string& label) {
     channels_[label] = glib::GObjectPtr<GstWebRTCDataChannel>(glib::ref_object(dc));
-    // The handler runs on the SCTP thread: it may touch only the boxed context, never the session.
-    auto* boxed = new ChannelContext{weak_from_this(), generation_, deps_.loop, label};
-    dc_signals_.emplace_back(
-        dc, "on-message-string",
-        G_CALLBACK((+[](GstWebRTCDataChannel*, gchar* text, gpointer d) {
-            const auto* c = static_cast<const ChannelContext*>(d);
-            std::string t = text ? text : "";
-            c->loop->post([w = c->session, g = c->generation, label = c->label, t = std::move(t)] {
-                auto self = w.lock();
-                if (!self || self->generation_ != g) return;
-                self->on_channel_text(label, t);
-            });
-        })),
-        boxed, [](gpointer d, GClosure*) { delete static_cast<ChannelContext*>(d); });
+    // Receiving was set up when the channel was created (connect_inbound); this is the sending side.
     if (label == "fjarr:control") {
         auto s = std::make_unique<ControlSender>();
         s->dc = dc;
@@ -523,45 +511,70 @@ void Session::on_channel_open(GstWebRTCDataChannel* dc, const std::string& label
                 });
             })),
             drain_ctx, [](gpointer d, GClosure*) { delete static_cast<ChannelContext*>(d); });
-        // Inbound binary (docs/08#blob-frames): copied off the SCTP thread, framed on the loop.
-        auto* data_ctx = new ChannelContext{weak_from_this(), generation_, deps_.loop, label};
-        dc_signals_.emplace_back(
-            dc, "on-message-data",
-            G_CALLBACK((+[](GstWebRTCDataChannel*, GBytes* data, gpointer d) {
-                const auto* c = static_cast<const ChannelContext*>(d);
-                gsize n = 0;
-                const auto* p = static_cast<const char*>(data ? g_bytes_get_data(data, &n) : nullptr);
-                std::string bytes(p ? p : "", p ? n : 0);
-                c->loop->post([w = c->session, g = c->generation, label = c->label, bytes = std::move(bytes)] {
-                    auto self = w.lock();
-                    if (!self || self->generation_ != g) return;
-                    self->on_channel_data(label, bytes);
-                });
-            })),
-            data_ctx, [](gpointer d, GClosure*) { delete static_cast<ChannelContext*>(d); });
         pump_blobs(label); // blobs queued before the channel opened go out now
     } else if (label.rfind("fjarr:stream:", 0) == 0) {
         auto s = std::make_unique<StreamSender>();
         s->dc = dc;
         senders_[label] = std::move(s);
-        // Inbound, the same hand-off as bulk: copied off the SCTP thread, delivered on the loop.
         // No buffered-amount-low signal — nothing on this class waits for a drain.
-        auto* data_ctx = new ChannelContext{weak_from_this(), generation_, deps_.loop, label};
-        dc_signals_.emplace_back(
-            dc, "on-message-data",
-            G_CALLBACK((+[](GstWebRTCDataChannel*, GBytes* data, gpointer d) {
-                const auto* c = static_cast<const ChannelContext*>(d);
-                gsize n = 0;
-                const auto* p = static_cast<const char*>(data ? g_bytes_get_data(data, &n) : nullptr);
-                std::string bytes(p ? p : "", p ? n : 0);
-                c->loop->post([w = c->session, g = c->generation, label = c->label, bytes = std::move(bytes)] {
-                    auto self = w.lock();
-                    if (!self || self->generation_ != g) return;
-                    self->on_channel_data(label, bytes);
-                });
-            })),
-            data_ctx, [](gpointer d, GClosure*) { delete static_cast<ChannelContext*>(d); });
     }
+    // Anything that reached the loop before this on-open goes now, in the order it arrived.
+    auto early = early_inbound_.find(label);
+    if (early != early_inbound_.end()) {
+        auto held = std::move(early->second);
+        early_inbound_.erase(early);
+        for (auto& [text, body] : held) {
+            if (text) on_channel_text(label, body);
+            else on_channel_data(label, body);
+        }
+    }
+}
+
+void Session::connect_inbound(GstWebRTCDataChannel* dc, const std::string& label) {
+    // spec: docs/23-agent-core-architecture.md#offer-construction-and-renegotiation — connected at
+    // creation, so webrtcbin always has somewhere to put a message; connecting in on-open lost the
+    // operator's first request whenever the loop was busy as the channel opened (#33). The handlers
+    // run on the SCTP thread: they copy and post, touching only the boxed context.
+    auto* text_ctx = new ChannelContext{weak_from_this(), generation_, deps_.loop, label};
+    dc_signals_.emplace_back(
+        dc, "on-message-string",
+        G_CALLBACK((+[](GstWebRTCDataChannel*, gchar* text, gpointer d) {
+            const auto* c = static_cast<const ChannelContext*>(d);
+            std::string t = text ? text : "";
+            c->loop->post([w = c->session, g = c->generation, label = c->label, t = std::move(t)] {
+                auto self = w.lock();
+                if (!self || self->generation_ != g) return;
+                self->deliver_inbound(label, true, t);
+            });
+        })),
+        text_ctx, [](gpointer d, GClosure*) { delete static_cast<ChannelContext*>(d); });
+    // Binary (docs/08#blob-frames, #net-packets): bulk and stream classes only.
+    if (label.rfind("fjarr:bulk:", 0) != 0 && label.rfind("fjarr:stream:", 0) != 0) return;
+    auto* data_ctx = new ChannelContext{weak_from_this(), generation_, deps_.loop, label};
+    dc_signals_.emplace_back(
+        dc, "on-message-data",
+        G_CALLBACK((+[](GstWebRTCDataChannel*, GBytes* data, gpointer d) {
+            const auto* c = static_cast<const ChannelContext*>(d);
+            gsize n = 0;
+            const auto* p = static_cast<const char*>(data ? g_bytes_get_data(data, &n) : nullptr);
+            std::string bytes(p ? p : "", p ? n : 0);
+            c->loop->post([w = c->session, g = c->generation, label = c->label, bytes = std::move(bytes)] {
+                auto self = w.lock();
+                if (!self || self->generation_ != g) return;
+                self->deliver_inbound(label, false, bytes);
+            });
+        })),
+        data_ctx, [](gpointer d, GClosure*) { delete static_cast<ChannelContext*>(d); });
+}
+
+void Session::deliver_inbound(const std::string& label, bool text, const std::string& body) {
+    if (!channels_.count(label)) {
+        // Before this channel's on-open reached the loop: its senders are not set up yet.
+        early_inbound_[label].emplace_back(text, body);
+        return;
+    }
+    if (text) on_channel_text(label, body);
+    else on_channel_data(label, body);
 }
 
 void Session::on_channel_data(const std::string& label, const std::string& bytes) {

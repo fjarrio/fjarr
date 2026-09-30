@@ -4,6 +4,7 @@
 // bookkeeping visible without an answerer.
 // spec: docs/15-testing-strategy.md#safety-behaviors · docs/23 (session state machine)
 #include <algorithm>
+#include <mutex>
 #include <thread>
 
 #include <gtest/gtest.h>
@@ -15,6 +16,7 @@
 #include "media/encoder.hpp"
 #include "media/media_plane.hpp"
 #include "media/sources.hpp"
+#include "loopback_peer.hpp"
 
 using namespace fjarr;
 using namespace fjarr::core;
@@ -207,4 +209,88 @@ TEST(Session, negotiationWatchdogClosesAnUnansweredSession) {
     h.wait_for([&] { return h.session->state() == Session::State::Offered; });
     EXPECT_EQ(h.session->state(), Session::State::Offered);
     EXPECT_EQ(h.events.size(), 0u); // no `started` without a peer
+}
+
+// #33 (docs/18): the operator's first request on `fjarr:control` was lost when the agent's core loop
+// was busy as the channel opened. The message handler was connected in on_channel_open, which runs
+// on the loop, posted from webrtcbin's on-open — so a request arriving in between met no handler and
+// vanished, and the client timed out on an `open` the agent never saw. Reproduced by blocking the loop
+// while ICE, DTLS and SCTP come up (they run on GStreamer's threads) and sending as soon as the
+// client's control channel opens.
+TEST(Session, aRequestThatArrivesWhileTheLoopIsBusyAtChannelOpenIsAnswered) {
+    Harness h;
+    fjarr::testing::LoopbackPeer peer(true);
+    std::mutex m;
+    std::string reply;
+    GstWebRTCDataChannel* control = nullptr;
+    using Sink = std::pair<std::mutex*, std::string*>; // one type name: a comma would split the macro below
+    Sink sink{&m, &reply};
+    peer.on_candidate = [&](unsigned mline, std::string cand) {
+        h.loop.post([&h, mline, cand] {
+            if (h.session) h.session->on_signal(protocol::SignalingMessage{"ice", "", 0, {{"candidate", cand}, {"sdp_mline_index", mline}}, ""});
+        });
+    };
+    peer.on_channel = [&](GstWebRTCDataChannel* dc) {
+        gchar* label = nullptr;
+        g_object_get(dc, "label", &label, nullptr);
+        const bool is_control = label && std::string(label) == "fjarr:control";
+        g_free(label);
+        if (!is_control) return;
+        g_signal_connect(dc, "on-message-string", G_CALLBACK(+[](GstWebRTCDataChannel*, gchar* text, gpointer d) {
+                             auto* st = static_cast<Sink*>(d);
+                             std::lock_guard<std::mutex> l(*st->first);
+                             if (text && std::string(text).find("\"e-33\"") != std::string::npos) *st->second = text;
+                         }),
+                         &sink);
+        control = GST_WEBRTC_DATA_CHANNEL(g_object_ref(dc));
+        // The first thing a client does once its control channel is up — here while the agent's loop
+        // is still busy, so the agent's own on_channel_open is queued behind the blocker.
+        auto send = +[](GstWebRTCDataChannel* ch, gpointer) {
+            g_signal_emit_by_name(ch, "send-string",
+                                  R"({"v":1,"cap":"com.nobody","type":"hello","event_id":"e-33","kind":"request","payload":{}})");
+        };
+        GstWebRTCDataChannelState state = GST_WEBRTC_DATA_CHANNEL_STATE_CONNECTING;
+        g_object_get(dc, "ready-state", &state, nullptr);
+        if (state == GST_WEBRTC_DATA_CHANNEL_STATE_OPEN) send(dc, nullptr);
+        else g_signal_connect(dc, "on-open", G_CALLBACK(send), nullptr);
+    };
+    h.attach();
+    h.wait_for([&] { return h.session->state() == Session::State::Offered; }, 30000);
+    std::string offer;
+    std::vector<nlohmann::json> agent_candidates;
+    h.wait_for([&] {
+        for (const auto& s : h.sent)
+            if (s.value("type", "") == "ice" && s.value("candidate", "").empty()) return true;
+        return false;
+    }, 30000);
+    h.loop.call_sync([&] {
+        for (const auto& s : h.sent) {
+            if (s.value("type", "") == "offer") offer = s.value("sdp", "");
+            if (s.value("type", "") == "ice" && !s.value("candidate", "").empty()) agent_candidates.push_back(s);
+        }
+    });
+    ASSERT_FALSE(offer.empty());
+    const std::string answer = peer.answer(offer);
+    ASSERT_FALSE(answer.empty());
+    for (const auto& c : agent_candidates)
+        g_signal_emit_by_name(peer.wb, "add-ice-candidate", c.value("sdp_mline_index", 0u), c.value("candidate", "").c_str());
+    h.loop.call_sync([&] { h.session->on_signal(protocol::SignalingMessage{"answer", "", 0, {{"sdp", answer}}, ""}); });
+    // A busy loop, as in #33, from the moment the answer is in: ICE, DTLS and SCTP proceed on
+    // GStreamer's threads (the peer's candidates wait behind it; peer-reflexive pairs form anyway).
+    h.loop.post([] { std::this_thread::sleep_for(std::chrono::milliseconds(1500)); });
+    for (int i = 0; i < 6000; i++) {
+        {
+            std::lock_guard<std::mutex> l(m);
+            if (!reply.empty()) break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    std::string got;
+    {
+        std::lock_guard<std::mutex> l(m);
+        got = reply;
+    }
+    EXPECT_NE(got.find("capability-unknown"), std::string::npos)
+        << (control ? "the control channel opened, but the request sent on it was never answered" : "the control channel never opened") << "; reply: " << got;
+    if (control) gst_object_unref(control);
 }

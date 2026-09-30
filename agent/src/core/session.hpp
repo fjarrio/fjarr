@@ -197,6 +197,8 @@ class Session : public std::enable_shared_from_this<Session> {
     void on_channel_open(GstWebRTCDataChannel* dc, const std::string& label);
     void on_channel_text(const std::string& label, const std::string& text);
     void on_channel_data(const std::string& label, const std::string& bytes);
+    void connect_inbound(GstWebRTCDataChannel* dc, const std::string& label);
+    void deliver_inbound(const std::string& label, bool text, const std::string& body);
     void pump_blobs(const std::string& label);
     void route(const Envelope& env, const std::string& label);
     void handle_core(const Envelope& env);
@@ -253,6 +255,7 @@ class Session : public std::enable_shared_from_this<Session> {
     bool silent_media_ = false;
     std::map<std::string, glib::GObjectPtr<GstWebRTCDataChannel>> channels_; // label → dc
     std::vector<glib::SignalConnection> dc_signals_;
+    std::map<std::string, std::vector<std::pair<bool, std::string>>> early_inbound_; // label → (text?, body) held until on-open
     std::map<std::string, std::unique_ptr<ChannelSender>> senders_; // label → sender
     std::unique_ptr<ChannelSender> denied_;
     std::map<std::string, BlobPump> blob_pumps_; // bulk label → outbound blobs (docs/08#blob-frames)
