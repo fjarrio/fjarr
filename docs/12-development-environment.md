@@ -386,9 +386,13 @@ Workflows pick machines **by label**, never by name. Every lab machine carries
 | Raspberry Pi 5 | `fjarr-lab` `arm64` `rpi5` `camera-libcamera` | the Pi camera; the Pi 5 has no hardware H.264 encoder, so the software path on ARM | planned |
 | Jetson | `fjarr-lab` `arm64` `jetson` `camera-zed` `nvv4l2` | the ZED vendor package; the `nvv4l2` family | planned |
 
-A machine joins by installing `fjarr-lab` (`make lab-runner-install`, which also
-installs the runner's service), registering the runner with its labels, setting
-its window, and adding its labels to the nightly matrix.
+A machine joins in four steps: register GitHub's runner with its labels and
+install it as a service (the runner's own `./svc.sh install`); install
+`fjarr-lab` as root (`make lab-runner-install`, which puts the script, its
+apply unit and two timers in place); set `RUNNER_SERVICE` in
+`/etc/fjarr-lab.conf` and the window (`sudo fjarr-lab window 00:00-06:00`); and
+add the machine's labels to the nightly matrix. `make lab-test` checks
+`fjarr-lab`'s logic anywhere, against a fake `systemctl`.
 
 ## Pipeline introspection
 

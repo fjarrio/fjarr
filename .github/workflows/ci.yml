@@ -209,12 +209,18 @@ jobs:
     # Backend E's compositor half on every push (M3 slice 3.0, ADR-0033): GNOME's mutter headless in a
     # container, no GPU — capture from its PipeWire stream and input through EIS, checked by reading the
     # test window's pixels and its log (docs/15#the-desktop-test-lab).
-    name: Desktop fixture (headless mutter — capture + EIS input)
+    name: Desktop lab (headless mutter — capture + EIS input; fjarr-lab)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - run: cp .env.example .env
       - run: make desktop-fixture-test
+      # fjarr-lab, the lab machines' schedule (docs/12#lab-machines-and-fjarr-lab): its logic against
+      # fake systemctl and pgrep, with shellcheck, here because it is the lab's other half.
+      - name: fjarr-lab — tests and shellcheck
+        run: |
+          make lab-test
+          docker run --rm -v "$PWD/tools/fjarr-lab":/mnt:ro koalaman/shellcheck:stable -x fjarr-lab test.sh
 
   rust:
     name: Signaling (test + clippy + fmt)

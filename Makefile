@@ -492,6 +492,19 @@ website-build: ## Production build of fjarr.io
 # --------------------------------------------------------------- packaging --
 # docs/26#releases, ADR-0031. Run on the HOST: they start their own throwaway containers.
 DEB_ARCH ?= $(shell dpkg --print-architecture 2>/dev/null || uname -m)
+.PHONY: lab-test lab-runner-install
+lab-test: ## fjarr-lab's tests: schedule, reservations, graceful stop, against fake systemctl (docs/12#lab-machines-and-fjarr-lab)
+	@tools/fjarr-lab/test.sh
+
+lab-runner-install: ## ON A LAB MACHINE, as root: install fjarr-lab, its units and a config (the GitHub runner itself comes from its own ./svc.sh install)
+	install -m 0755 tools/fjarr-lab/fjarr-lab /usr/local/bin/fjarr-lab
+	install -m 0644 tools/fjarr-lab/fjarr-lab-apply.service tools/fjarr-lab/fjarr-lab-open.timer tools/fjarr-lab/fjarr-lab-close.timer /etc/systemd/system/
+	[ -f /etc/fjarr-lab.conf ] || install -m 0644 tools/fjarr-lab/fjarr-lab.conf.example /etc/fjarr-lab.conf
+	systemctl daemon-reload
+	systemctl enable fjarr-lab-apply.service fjarr-lab-open.timer fjarr-lab-close.timer
+	systemctl start fjarr-lab-open.timer fjarr-lab-close.timer
+	@echo "lab-runner-install: set RUNNER_SERVICE in /etc/fjarr-lab.conf, then: sudo fjarr-lab window 00:00-06:00 && fjarr-lab status"
+
 .PHONY: desktop-fixture-test
 desktop-fixture-test: ## M3 3.0: headless mutter in a container proves capture and EIS input (docs/15#the-desktop-test-lab)
 	docker compose --profile desktop up -d --build --wait desktop-fixture

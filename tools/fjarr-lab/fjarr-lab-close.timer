@@ -1,0 +1,12 @@
+# fjarr-lab: the CI window's close edge. `fjarr-lab window` sets the time in a drop-in; this one is
+# the default until it has run. The timer only triggers `fjarr-lab apply`, which decides.
+[Unit]
+Description=fjarr-lab: CI window close
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+Persistent=false
+Unit=fjarr-lab-apply.service
+
+[Install]
+WantedBy=timers.target

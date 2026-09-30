@@ -1,0 +1,13 @@
+# fjarr-lab: make the runner match the schedule (docs/12#lab-machines-and-fjarr-lab). Run at boot, so
+# a job that reboots the machine gets its runner back, and by the window timers.
+[Unit]
+Description=fjarr-lab: the runner's schedule
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/fjarr-lab apply
+
+[Install]
+WantedBy=multi-user.target
