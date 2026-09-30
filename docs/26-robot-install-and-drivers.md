@@ -88,7 +88,9 @@ A data file in the repository (`packaging/profile.toml`), installed as
 units, udev rules, kernel arguments and GDM settings that feature needs. It is
 used three ways. The package scripts and `setup` apply it where the OS allows.
 `--check` verifies it on every robot, however it was installed, and names each
-missing piece. Units are the exception in a container: with no systemd
+missing piece. It is run as root (`sudo fjarr-agent --check`): a path an ordinary
+user cannot look at is reported as *permission denied, check as root*, never
+as missing. Units are the exception in a container: with no systemd
 (`/run/systemd/system` absent) a unit row is satisfied by what does its job
 there — the image's entrypoint for `fjarr-net.service`, the container runtime
 for `fjarr-agent.service` — and says so rather than reporting it missing
