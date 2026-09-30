@@ -7,6 +7,8 @@ add_executable(fjarr-tests
   test_protocol.cpp
   test_config.cpp
   test_desktop_modules.cpp
+  test_helper_protocol.cpp
+  ${CMAKE_SOURCE_DIR}/agent/src/desktop/helper_protocol.cpp
   test_frame_hub.cpp
   test_channels.cpp
   test_blob.cpp
