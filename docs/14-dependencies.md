@@ -15,7 +15,7 @@ groups with comments.
 |---|---|---|---|---|
 | GStreamer core + base/good/bad plugins | 1.28.2 | pipelines, RTP, WebRTC; `gstreamer1.0-plugins-base-apps` for `gst-device-monitor-1.0`, which `fjarr-agent setup` and `drivers detect` run to find cameras (docs/26), a package dependency since 2026-09-28 | LGPL-2.1 (dynamic) | yes |
 | `libx265` (pulled by Ubuntu's `gstreamer1.0-plugins-bad` for its `x265enc`) | 26.04 | **nothing**: present on disk, never loaded by the agent. `x265enc` is an encoder, encoders are never autoplugged, and the agent's encoder is explicit (VA-API, openh264). Recorded 2026-09-28, when the image's GPL guard was sharpened | GPL-2.0 | present, not a dependency: the rule (ADR-0011) is about what enters the agent's process. The image guard fails on `x264enc`, `avdec_*`, `libx264` and `libxvidcore` instead, which are what decodebin or a GPL encoder would load |
-| `gstreamer1.0-nice` (libnice) | 0.1.23 | ICE for webrtcbin | LGPL-2.1/MPL | yes |
+| `gstreamer1.0-nice` (libnice) | 0.1.23 | ICE for webrtcbin; the agent also links libnice directly (`libnice-dev` at build) to give it the local addresses to gather from, without the tunnel interface (docs/23, #34) | LGPL-2.1/MPL | yes |
 | `gstreamer1.0-pipewire` | 1.6.2 | Wayland capture (`pipewiresrc`) | MIT | yes |
 | libva + intel-media-driver (iHD; amd64 only — arm64 uses mesa's VA drivers) | 2.22 / 26.1 | VA-API H.264 encode | MIT | yes (driver from distro) |
 | libx11 / libxtst / libxfixes / libxrandr / libxi | 26.04 | X11 backend | MIT/X11 | yes — in `fjarr-desktop-x11` only ([ADR-0021](adr/0021-desktop-backends-as-runtime-modules.md)) |

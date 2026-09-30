@@ -326,6 +326,16 @@ exact API sequences):
   customer's router is not Fjarr's to decide, and TURN is the path for what
   direct candidates cannot reach. Found in the 2026-09-28 review: it had been on
   since M1, hidden behind a leak and a race suppression for its discovery thread.
+  **A Fjarr tunnel interface never carries ICE.** The consumer hands libnice an
+  explicit list of local addresses before it gathers — every address libnice
+  would find itself (up, not loopback), minus those on the tunnel interfaces:
+  the one `fjarr.net` is configured with (default `fjarr0`) and any other named
+  `fjarr*`. Left to itself libnice offered the robot's tunnel address as a host
+  candidate (#34, [docs/18](18-open-questions.md), seen on the mini-PC): a pair
+  between the two tunnel addresses works exactly while the link is up, and the
+  link would then ride on itself. Excluded by name, not by the 100.64.0.0/10
+  range: that range is also carrier-grade NAT space a 4G robot really uses.
+  If nothing is left after the exclusion, libnice gathers as it would have.
   TURN via `add-turn-server` (`turn(s)://user:pass@host:port[?transport=tcp]`,
   Q6) with credentials from config (dev) or the docs/10 scheme (M5);
   `ice-transport-policy` from config for relay-only tests.

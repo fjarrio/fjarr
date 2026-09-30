@@ -246,7 +246,12 @@ other privilege. The capability is **permitted, not effective**: `fjarr-connect`
 raises it itself, before its runtime starts and only for the link command, so
 `shell`, `login` and `list` never hold it. With `+ep`, the kernel refuses to run
 the binary at all wherever the capability is outside the bounding set (a
-container, CI), which the M2.5 install test found. Every such change is made **in the client's own process**, over
+container, CI), which the M2.5 install test found. Its ICE never uses a tunnel
+interface: it binds an explicit list of local addresses rather than the
+wildcard, every up, non-loopback, non-link-local address minus those on its own
+and any other `fjarr*` interface — the second robot's link would otherwise
+offer the first link's address, a path the second robot reaches only through
+its own tunnel ([docs/23](23-agent-core-architecture.md#offer-construction-and-renegotiation), #34). Every such change is made **in the client's own process**, over
 netlink: a file capability is not inherited by a child process, so a client that
 shelled out to `ip` would work under `sudo` and fail under `setcap` with
 `Operation not permitted`. Doing it in-process also means the binary needs no
