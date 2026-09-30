@@ -42,6 +42,8 @@ pub struct Options<'a> {
     pub timeout: Duration,
     /// Off only for the lab, which ends a session under a live shell by withholding them.
     pub heartbeat: bool,
+    /// Interfaces ICE never binds besides `fjarr*` — the configured `[net] interface` (#34).
+    pub tunnel_interfaces: &'a [String],
 }
 
 /// How the attached session ended.
@@ -74,8 +76,11 @@ async fn attach(robot: &str, grant: &str, opts: &Options<'_>) -> anyhow::Result<
         robot,
         opts.server,
         grant,
-        opts.stun,
-        opts.relay_only,
+        peer::Ice {
+            stun: opts.stun,
+            relay_only: opts.relay_only,
+            tunnel_interfaces: opts.tunnel_interfaces,
+        },
         opts.timeout,
         &[peer::CONTROL],
     )

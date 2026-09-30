@@ -244,7 +244,7 @@ jobs:
             clang-21 libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
             libgstreamer-plugins-bad1.0-dev gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
             gstreamer1.0-nice nlohmann-json3-dev libtomlplusplus-dev \
-            libsoup-3.0-dev libsystemd-dev libgtest-dev
+            libsoup-3.0-dev libsystemd-dev libgtest-dev libnice-dev
       - uses: hendrikmuhs/ccache-action@v1
         with:
           key: cpp-${{ runner.os }}

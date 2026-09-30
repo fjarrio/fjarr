@@ -74,6 +74,10 @@ bool ConsumerPipeline::build(const std::string& ice_policy, const std::optional<
     // Before anything gathers: the robot never asks its router to open ports (docs/23 ICE).
     if (!disable_upnp(webrtc_.get()))
         log::warn("consumer", "could not turn libnice UPnP-IGD off (ICE agent is not libnice?)", {{"session", sid8_}});
+    // A Fjarr tunnel interface never carries ICE: a pair of tunnel addresses would carry the link
+    // over itself (docs/23 ICE, #34).
+    const std::size_t gather_from = restrict_gathering(webrtc_.get(), local_interface_addresses(), tunnel_interfaces_);
+    log::debug("consumer", "ICE gathers from explicit local addresses", {{"session", sid8_}, {"addresses", std::to_string(gather_from)}});
     if (ice_policy == "relay") g_object_set(webrtc_.get(), "ice-transport-policy", GST_WEBRTC_ICE_TRANSPORT_POLICY_RELAY, nullptr);
     if (turn) {
         for (const auto& url : turn->urls) {

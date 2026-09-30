@@ -8,7 +8,8 @@ pkg_check_modules(GST REQUIRED IMPORTED_TARGET
   gstreamer-app-1.0
   gstreamer-video-1.0
   gstreamer-webrtc-1.0
-  gstreamer-sdp-1.0)
+  gstreamer-sdp-1.0
+  nice) # the local addresses libnice gathers from, without the tunnel interface (docs/23, #34)
 pkg_check_modules(SOUP REQUIRED IMPORTED_TARGET libsoup-3.0>=3.4)
 pkg_check_modules(SYSTEMD IMPORTED_TARGET libsystemd)
 find_package(nlohmann_json 3.11 REQUIRED)

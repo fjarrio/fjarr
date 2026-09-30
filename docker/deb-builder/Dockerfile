@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential debhelper devscripts equivs fakeroot curl ca-certificates git \
     cmake ninja-build pkg-config \
     libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstreamer-plugins-bad1.0-dev \
-    libva-dev nlohmann-json3-dev libtomlplusplus-dev libsystemd-dev libsoup-3.0-dev \
+    libva-dev nlohmann-json3-dev libtomlplusplus-dev libsystemd-dev libsoup-3.0-dev libnice-dev \
     nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 ARG RUST_VERSION=1.98.0

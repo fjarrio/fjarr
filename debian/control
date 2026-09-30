@@ -5,7 +5,7 @@ Maintainer: Fjarr <dev@fjarr.io>
 Build-Depends: debhelper-compat (= 13),
  cmake, ninja-build, pkg-config, git, ca-certificates,
  libgstreamer1.0-dev, libgstreamer-plugins-base1.0-dev, libgstreamer-plugins-bad1.0-dev,
- libva-dev, nlohmann-json3-dev, libtomlplusplus-dev, libsystemd-dev, libsoup-3.0-dev
+ libva-dev, nlohmann-json3-dev, libtomlplusplus-dev, libsystemd-dev, libsoup-3.0-dev, libnice-dev
 Standards-Version: 4.7.0
 Homepage: https://fjarr.io
 Rules-Requires-Root: no
@@ -29,7 +29,7 @@ Section: libdevel
 Architecture: any
 Depends: ${misc:Depends}, pkgconf,
  libgstreamer1.0-dev, libgstreamer-plugins-base1.0-dev, libgstreamer-plugins-bad1.0-dev,
- libsoup-3.0-dev, libsystemd-dev, nlohmann-json3-dev, libtomlplusplus-dev
+ libsoup-3.0-dev, libsystemd-dev, nlohmann-json3-dev, libtomlplusplus-dev, libnice-dev
 Description: Fjarr robot library: static library, headers and CMake package
  For robot software that embeds Fjarr: find_package(fjarr) and link
  fjarr::fjarr. Static in 0.x, until the ABI is stable (docs/26).

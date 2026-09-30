@@ -21,6 +21,7 @@ use clap::{Args as ClapArgs, Parser, Subcommand};
 mod addressing;
 mod config;
 mod connection;
+mod ice_addrs;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod link;
 mod login;
@@ -460,12 +461,14 @@ async fn do_shell(
             return shell::UNKNOWN;
         }
     };
+    let tunnels = vec![cfg.net.interface.clone()];
     let opts = shell::Options {
         server: &s.server,
         stun: &s.stun,
         relay_only: s.relay_only,
         timeout: std::time::Duration::from_secs(s.timeout),
         heartbeat: !s.no_heartbeat,
+        tunnel_interfaces: &tunnels,
     };
     shell::run(&target.0, &target.1, &opts).await
 }
@@ -485,6 +488,7 @@ async fn do_connect(cfg: &config::Config, args: ConnectArgs) -> Result<()> {
         .unwrap_or_else(|| cfg.net.interface.clone());
     let targets = resolve_targets(cfg, &args.robots, &args.grant, None).await?;
     let s = &args.session;
+    let tunnels = vec![dev.clone(), cfg.net.interface.clone()];
 
     if args.dry_run {
         for (robot, grant) in &targets {
@@ -509,8 +513,11 @@ async fn do_connect(cfg: &config::Config, args: ConnectArgs) -> Result<()> {
             robot,
             &s.server,
             grant,
-            &s.stun,
-            s.relay_only,
+            peer::Ice {
+                stun: &s.stun,
+                relay_only: s.relay_only,
+                tunnel_interfaces: &tunnels,
+            },
             std::time::Duration::from_secs(s.timeout),
         )
         .await?;

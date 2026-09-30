@@ -401,6 +401,8 @@ void Session::attach(std::vector<AttachedCapability> caps) {
     consumer_ = std::make_unique<media::ConsumerPipeline>(
         id_, deps_.loop->context(), [loop = deps_.loop](std::function<void()> fn) { loop->post(std::move(fn)); }, std::move(hooks),
         deps_.config->media.gop_seconds);
+    if (auto net = deps_.config->capabilities.find("fjarr.net"); net != deps_.config->capabilities.end() && net->second.is_object())
+        consumer_->set_tunnel_interfaces({net->second.value("interface", std::string{"fjarr0"})});
     if (!consumer_->build(deps_.config->agent.ice_policy, turn_, channels)) {
         // Nothing was accepted yet: reject (docs/08), do not close what never opened.
         nlohmann::json r = protocol::signaling_base("session-reject");

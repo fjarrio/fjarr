@@ -334,6 +334,7 @@ struct Shared {
     int ws_close_code = 0;
     std::string ws_error;
     std::vector<json> sig_in; // every parsed inbound signaling message, in order
+    std::vector<std::string> robot_candidates; // every ICE candidate the robot trickled
     std::string session_id;
     std::optional<json> turn;
     // peer
@@ -1220,6 +1221,7 @@ class Operator {
     }
 
     unsigned manifest_version() { return locked<unsigned>([this] { return sh_.manifest_version; }); }
+    std::vector<std::string> robot_candidates() { return locked<std::vector<std::string>>([this] { return sh_.robot_candidates; }); }
     int connected_ms() const { return connected_ms_; }
 
     void start_pings() {
@@ -1581,6 +1583,10 @@ class Operator {
         if (type == "ice") {
             const std::string cand = m.value("candidate", "");
             const unsigned mline = m.value("sdp_mline_index", 0u);
+            {
+                std::lock_guard<std::mutex> lk(sh_.mu);
+                if (!cand.empty()) sh_.robot_candidates.push_back(cand);
+            }
             std::lock_guard<std::mutex> lk(early_mu_);
             if (peer_ready_ && peer_) peer_->add_remote_candidate(mline, cand);
             else early_candidates_.emplace_back(mline, cand);
@@ -1846,6 +1852,20 @@ void scenario_tunnel(Operator& op) {
                               : "open refused: " + opened->payload.dump())
                    : "no result within 5 s");
     if (!open_ok) return;
+    // #34 (docs/23 ICE): the robot never offers its own tunnel address — a pair of tunnel addresses
+    // would carry the link over itself. A candidate's address is its fifth field.
+    {
+        std::string offending;
+        for (const auto& c : op.robot_candidates()) {
+            std::istringstream f(c);
+            std::string tok, addr;
+            for (int i = 0; i < 5 && (f >> tok); i++) addr = tok;
+            if (addr == robot_addr) offending = c;
+        }
+        r.check("no-candidate-on-the-tunnel", offending.empty(),
+                offending.empty() ? std::to_string(op.robot_candidates().size()) + " robot candidates, none on its tunnel address " + robot_addr
+                                  : "the robot offered its tunnel address: " + offending);
+    }
     const auto self = fjarr::net::parse_address(op_addr);
     const auto peer = fjarr::net::parse_address(robot_addr);
     if (!self || !peer) {

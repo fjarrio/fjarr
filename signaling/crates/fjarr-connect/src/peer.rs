@@ -149,13 +149,26 @@ pub struct Peer<P: PeerConnection> {
     channels: Channels,
 }
 
+/// How this end does ICE: extra STUN servers, relay-only, and the tunnel interfaces it never binds
+/// besides `fjarr*` (docs/23 ICE, #34).
+#[derive(Clone, Copy)]
+pub struct Ice<'a> {
+    pub stun: &'a [String],
+    pub relay_only: bool,
+    pub tunnel_interfaces: &'a [String],
+}
+
 /// Answer `offer`, returning the answer SDP once ICE has gathered.
 pub async fn answer(
     offer: &str,
     turn: Option<&TurnCredentials>,
-    stun: &[String],
-    relay_only: bool,
+    ice: Ice<'_>,
 ) -> Result<(Peer<impl PeerConnection>, String, mpsc::Receiver<Event>)> {
+    let Ice {
+        stun,
+        relay_only,
+        tunnel_interfaces,
+    } = ice;
     let runtime = default_runtime().ok_or_else(|| anyhow!("no async runtime for webrtc"))?;
     let (events_tx, events_rx) = mpsc::channel::<Event>(1024);
     let channels: Channels = Arc::new(Mutex::new(Vec::new()));
@@ -213,7 +226,11 @@ pub async fn answer(
             channels: channels.clone(),
         }))
         .with_runtime(runtime)
-        .with_udp_addrs(vec!["0.0.0.0:0".to_string()])
+        // Never a Fjarr tunnel interface (docs/23 ICE, #34): the wildcard's own enumeration, minus them.
+        .with_udp_addrs(crate::ice_addrs::udp_bind_addrs(
+            &crate::ice_addrs::local_interface_addresses(),
+            tunnel_interfaces,
+        ))
         .build()
         .await?;
 

@@ -141,6 +141,9 @@ class ConsumerPipeline {
     const std::vector<glib::GObjectPtr<GstWebRTCDataChannel>>& channels() const { return channels_; }
     std::string connection_state() const;
     void stop();
+    /// Interfaces ICE must never gather on besides the `fjarr*` ones — fjarr.net's configured
+    /// interface (docs/23 ICE, #34). Set before build().
+    void set_tunnel_interfaces(std::vector<std::string> names) { tunnel_interfaces_ = std::move(names); }
     std::string name() const { return "session:" + sid8_; }
 
   private:
@@ -169,6 +172,7 @@ class ConsumerPipeline {
     std::vector<glib::GObjectPtr<GstWebRTCDataChannel>> channels_;
     std::map<std::string, std::unique_ptr<ConsumerTrack>> tracks_;
     int next_pt_ = 96;
+    std::vector<std::string> tunnel_interfaces_;
     bool offer_in_flight_ = false;
     bool remote_described_ = false;
     std::set<unsigned> offered_sendonly_; // m-lines the in-flight offer sends on: what its answer settles

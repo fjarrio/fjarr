@@ -104,8 +104,7 @@ pub async fn open(
     robot: &str,
     server: &str,
     grant: &str,
-    stun: &[String],
-    relay_only: bool,
+    ice: peer::Ice<'_>,
     timeout: std::time::Duration,
 ) -> Result<Opened<impl PeerConnection>> {
     let started = std::time::Instant::now();
@@ -113,8 +112,7 @@ pub async fn open(
         robot,
         server,
         grant,
-        stun,
-        relay_only,
+        ice,
         timeout,
         &[peer::CONTROL, peer::NET_STREAM],
     )
