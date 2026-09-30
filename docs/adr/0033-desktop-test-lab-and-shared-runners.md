@@ -90,3 +90,14 @@ and [docs/15](../15-testing-strategy.md#the-desktop-test-lab).
   are planned in docs/12's table now and wired when the boards arrive.
 - Revisit if headless mutter stops providing RemoteDesktop/ScreenCast without a
   real GPU, or if the nightly window becomes too short for the fleet's jobs.
+
+## Addendum (2026-09-30): the fixture's assumption, measured
+
+The slice-3.0 spike (`spikes/desktop-e-headless/`) ran `mutter --headless
+--virtual-monitor 1280x720` in a plain Ubuntu 26.04 container with no GPU. Both
+RemoteDesktop and ScreenCast were on its session bus, a PipeWire frame came back
+with the test window's content (100 % of the expected colour), and `ConnectToEIS`
+gave a keyboard and an absolute pointer whose click, keys and position all
+reached the window. The fallback is not needed. One rule for the fixture:
+nothing has focus on a headless desktop until something clicks, so it focuses
+its test window before keyboard tests.
