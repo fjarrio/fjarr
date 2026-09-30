@@ -605,6 +605,10 @@ engineer should see up front:
   the RDP or VNC client negotiates, over a path with a 1184-byte MTU
   ([ADR-0027](adr/0027-tunnel-mtu-one-sctp-chunk.md)).
 
+RDP and sftp are two of many. [What you can run over the tunnel](28-tunnel-ideas.md)
+collects the rest: debuggers, CAN, USB devices over USB/IP, monitoring, ROS
+tools, and what does not fit.
+
 ## Degradation
 
 From the probe, over the network profiles in [docs/25](25-browser-lab.md):

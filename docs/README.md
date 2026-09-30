@@ -41,6 +41,7 @@ with rationale).
 | 25 | [Browser lab](25-browser-lab.md) | CDP-driven Chromium in the stack: e2e, traffic introspection, network emulation, profiling — for people and agents | review |
 | 26 | [Robot install & drivers](26-robot-install-and-drivers.md) | One-line install; the driver catalog, `setup`, `drivers` and `--check`; only the drivers a use case needs | draft |
 | 27 | [Network tunnel](27-network-tunnel.md) | `fjarr.net`: a session-scoped IP link to one robot — ssh, scp, UDP bridges and ROS 2 tooling; why it is a link and not a VPN | draft |
+| 28 | [What you can run over the tunnel](28-tunnel-ideas.md) | Ideas for `fjarr.net`: shells, desktops, files, debuggers, ROS, CAN, USB/IP, monitoring — what is verified, what fits, and the safety notes | review |
 
 ## Architecture decision records
 
