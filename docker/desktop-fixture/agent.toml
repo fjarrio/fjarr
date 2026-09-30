@@ -1,0 +1,9 @@
+# The desktop fixture's agent (make desktop-see; docs/15#the-desktop-test-lab). Identity, server and
+# token come from the environment, as for the demo robot; this file carries what only a file can:
+# the desktop capability's helper and where the built backend module is.
+[capabilities."fjarr.desktop"]
+module_dir = "/workspace/build/release/agent/desktop-modules"
+
+[capabilities."fjarr.desktop".helper]
+socket = "/run/fjarr/desktop.sock"
+uid = 10002          # the fixture's desktop account: SO_PEERCRED must say exactly this (ADR-0028)

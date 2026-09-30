@@ -90,6 +90,15 @@ add_executable(fjarr-desktop-session desktop-session/main.cpp desktop-session/mu
 target_include_directories(fjarr-desktop-session PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(fjarr-desktop-session PRIVATE PkgConfig::GIO nlohmann_json::nlohmann_json)
 
+# Backend module E (ADR-0006, ADR-0021): mutter through the session helper, as its own shared object
+# in desktop-modules/ — where FJARR_DESKTOP_MODULE_DIR points in the lab, and what the
+# fjarr-desktop-wayland package installs to /usr/lib/fjarr/desktop (M3 3.3).
+add_library(fjarr-desktop-mutter MODULE modules/desktop-mutter/backend.cpp src/desktop/helper_protocol.cpp src/desktop/monitor_identity.cpp)
+target_include_directories(fjarr-desktop-mutter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(fjarr-desktop-mutter PRIVATE PkgConfig::GST PkgConfig::GIO nlohmann_json::nlohmann_json)
+set_target_properties(fjarr-desktop-mutter PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/desktop-modules" PREFIX "lib" CXX_VISIBILITY_PRESET hidden)
+
 add_executable(fjarr-agent daemon/main.cpp)
 target_link_libraries(fjarr-agent PRIVATE fjarr::fjarr PkgConfig::GST)
 # The reference daemon, unlike the demos, may use libfjarr's internals for installation concerns an

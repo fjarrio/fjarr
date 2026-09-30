@@ -183,9 +183,13 @@ public:
   virtual void on_capture_lost(std::function<void(MonitorId, CaptureLost)>) = 0;
   // Returns immediately and never waits for a first frame. Capture may be
   // variable-rate: a still screen produces no frames, not even a first one.
-  // The backend provokes a first frame where it can; the media plane repeats
-  // the last frame to the encoder.
-  virtual CaptureSource start_capture(MonitorId, CaptureOptions) = 0;  // {cursor_in_video}
+  // The backend provokes a first frame where it can, and repeats the last one
+  // (pipewiresrc keepalive-time on mutter). The result is the track's source
+  // (the video source contract): unavailable until the display server has
+  // handed the stream over, then available, so the capability declares the
+  // track at once and the core adds it when it is ready. Null for an unknown
+  // monitor. (Changed 2026-09-30 from an opaque CaptureSource, M3 3.1.)
+  virtual std::shared_ptr<VideoSource> start_capture(MonitorId, CaptureOptions) = 0;  // {cursor_in_video}
   virtual void stop_capture(MonitorId) = 0;             // never disturbs other captures
   // Virtual monitors: headless robots, or a monitor sized to the operator's
   // window. The size must be asked for (unasked, mutter made it 1x1). It lives
@@ -195,7 +199,7 @@ public:
   virtual void destroy_virtual_monitor(MonitorId) = 0;
   // Desktop audio: what the robot's speakers play (the default sink's
   // monitor). Returns an invalid source when unsupported.
-  virtual CaptureSource start_audio_capture() = 0;
+  virtual std::shared_ptr<VideoSource> start_audio_capture() = 0;
   virtual void stop_audio_capture() = 0;
   // Local-cursor mode (docs/22#cursor-strategy): the shape, on every change,
   // for captures started without the cursor in the video.
@@ -208,7 +212,7 @@ public:
   virtual void pointer_wheel(double dx, double dy) = 0;
   virtual void key(LinuxKeycode, bool down) = 0;
   virtual void release_all_input() = 0;   // MUST be called on session end
-  virtual ClipboardHandle clipboard() = 0;
+  virtual ClipboardHandle* clipboard() = 0;
 };
 
 } // namespace fjarr
@@ -221,7 +225,10 @@ Implementations, per [ADR-0006](adr/0006-desktop-backend-selection.md):
 what the running session offers. The Wayland ones run in the agent but reach the
 desktop through `fjarr-desktop-session`, a helper running as the desktop user.
 It hands them a PipeWire descriptor and an EIS descriptor
-([ADR-0028](adr/0028-desktop-session-helper.md)). `UinputInjector` stays a designed override
+([ADR-0028](adr/0028-desktop-session-helper.md), [the helper protocol](23-agent-core-architecture.md#desktop-helper-protocol)).
+Backends are runtime modules ([ADR-0021](adr/0021-desktop-backends-as-runtime-modules.md)): the
+core hands a module's factory its configuration, the core loop's `GMainContext`
+(every callback runs there) and a log sink. `UinputInjector` stays a designed override
 that no chosen backend needs.
 
 ### The video source contract {#the-video-source-contract}

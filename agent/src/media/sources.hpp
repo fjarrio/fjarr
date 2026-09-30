@@ -146,6 +146,8 @@ class SourceRegistry final : public SourceFactory {
     /// validated against the type's schema.
     std::unique_ptr<VideoSource> create(const nlohmann::json& config) const override;
     std::vector<std::string> types() const override;
+    /// The core loop's context (null for tools without a loop): what capabilities hand modules.
+    GMainContext* context() const { return ctx_; }
 
   private:
     GMainContext* ctx_;

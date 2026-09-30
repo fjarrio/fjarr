@@ -19,7 +19,7 @@ namespace fjarr {
 
 /// spec: docs/08-protocol.md#track-manifest
 struct MonitorInfo {
-    std::string id; // stable identity (connector name) — never key on index
+    std::string id; // stable identity: the EDID slug, docs/08#track-manifest — never key on index or connector
     int index = 0;
     bool primary = false;
     int x = 0, y = 0, w = 0, h = 0;

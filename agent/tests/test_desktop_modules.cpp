@@ -62,7 +62,8 @@ TEST(DesktopModules, loadsAModuleFromItsOwnSharedObjectAndMakesABackend) {
     const Found* chosen = loader.select("auto");
     ASSERT_NE(chosen, nullptr);
     std::string error;
-    auto backend = loader.create(*chosen, &error);
+    const fjarr::desktop::ModuleHost host{"{}", nullptr, [](int, const char*, const char*) {}};
+    auto backend = loader.create(*chosen, host, &error);
     EXPECT_NE(backend, nullptr) << error;
     EXPECT_TRUE(backend->monitors().empty());
 }

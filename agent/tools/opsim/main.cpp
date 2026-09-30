@@ -96,7 +96,7 @@ void usage() {
                  "                   [--json out.json] [--timeout 60] [--ice-policy all|relay] [--cycles 200] [--hold 0]\n"
                  "                   [--introspect http://127.0.0.1:7381] [--introspect-token <t>] [--verbose]\n"
                  "                   [--exec '<command>'] (tunnel: run it with the link up, $FJARR_ADDR set)\n"
-                 "scenarios: smoke toggle hotplug rejected-track silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer tunnel\n"
+                 "scenarios: smoke toggle hotplug rejected-track desktop-see silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer tunnel\n"
                  "           soak (--cycles N, needs --introspect)\n"
                  "           netem-{lan,wifi-ok,4g,lossy,bad} (the profile is applied externally: docker/lab/netem.sh)\n"
                  "exit: 0 all assertions pass, 1 any fail, 2 usage, 3 timeout\n");
@@ -1221,6 +1221,14 @@ class Operator {
     }
 
     unsigned manifest_version() { return locked<unsigned>([this] { return sh_.manifest_version; }); }
+    /// The track ids of the manifest last answered.
+    std::vector<std::string> track_ids() {
+        return locked<std::vector<std::string>>([this] {
+            std::vector<std::string> ids;
+            for (const auto& [id, _] : sh_.mid_by_track) ids.push_back(id);
+            return ids;
+        });
+    }
     std::vector<std::string> robot_candidates() { return locked<std::vector<std::string>>([this] { return sh_.robot_candidates; }); }
     int connected_ms() const { return connected_ms_; }
 
@@ -1302,8 +1310,9 @@ class Operator {
     }
 
     /// select-tracks for one track; true when the agent answered ok.
-    bool select(const std::string& track_id, bool enabled, const std::string& tier = "active", int timeout_ms = 5000) {
-        auto r = request("fjarr.test", "select-tracks", json{{"tracks", json::array({{{"track_id", track_id}, {"enabled", enabled}, {"tier", tier}}})}}, timeout_ms);
+    bool select(const std::string& track_id, bool enabled, const std::string& tier = "active", int timeout_ms = 5000,
+                const std::string& cap = "fjarr.test") {
+        auto r = request(cap, "select-tracks", json{{"tracks", json::array({{{"track_id", track_id}, {"enabled", enabled}, {"tier", tier}}})}}, timeout_ms);
         if (!r) {
             logf("select-tracks %s enabled=%d: no result", track_id.c_str(), enabled);
             return false;
@@ -2177,6 +2186,32 @@ void scenario_rejected_track(Operator& op) {
     close_and_assert(op);
 }
 
+/// M3 slice 3.1 (docs/17#m3): the robot's screen as a track. Against the desktop fixture's agent
+/// (make desktop-see): a desk-* track from the session helper and backend module E, frames that
+/// decode, and a still screen that keeps producing — mutter's stream is damage-driven, and the
+/// module's keepalive repeats the last frame (docs/23#desktop-helper-protocol).
+void scenario_desktop_see(Operator& op) {
+    Report& r = op.report();
+    connect_and_report(op);
+    std::string desk;
+    for (const auto& id : op.track_ids())
+        if (id.rfind("desk-", 0) == 0) desk = id;
+    r.check("desktop-track", !desk.empty(), desk.empty() ? "no desk-* track in the manifest (is the session helper connected?)" : "the manifest carries " + desk);
+    if (desk.empty()) return;
+    const std::uint64_t before = op.frames(desk);
+    const std::int64_t t0 = g_get_monotonic_time();
+    const bool ok = op.select(desk, true, "active", 5000, "fjarr.desktop");
+    const bool flows = ok && op.wait_frames(desk, before, 10, 10000);
+    r.check("desktop-frames", flows,
+            flows ? "10 decoded frames within " + ms_str(g_get_monotonic_time() - t0) + " of enable" : (ok ? "no frames within 10 s" + why_no_frames(op) : "select-tracks failed"));
+    if (!flows) return;
+    const std::uint64_t f0 = op.frames(desk);
+    op.sleep_ms(3000);
+    const std::uint64_t f1 = op.frames(desk);
+    r.check("desktop-still-screen", f1 - f0 >= 10, std::to_string(f1 - f0) + " frames in 3 s of a screen that does not change");
+    close_and_assert(op);
+}
+
 void scenario_silent_operator(Operator& op) {
     Report& r = op.report();
     connect_and_report(op);
@@ -2735,6 +2770,7 @@ const std::map<std::string, ScenarioFn> kScenarios = {
     {"smoke", scenario_smoke},       {"toggle", scenario_toggle},   {"hotplug", scenario_hotplug},     {"silent-operator", scenario_silent_operator},
     {"no-answer", scenario_no_answer}, {"socket-drop", scenario_socket_drop}, {"ice-restart", scenario_ice_restart}, {"deadman", scenario_deadman},
     {"congested-viewer", scenario_congested_viewer}, {"rejected-track", scenario_rejected_track},
+    {"desktop-see", scenario_desktop_see},
     {"relay-only", scenario_relay_only}, {"tunnel", scenario_tunnel}, {"soak", scenario_soak},
     // netem-<profile>: one function, the profile is read from the scenario name (unknown profile → usage, exit 2).
     {"netem-lan", scenario_netem},     {"netem-wifi-ok", scenario_netem}, {"netem-4g", scenario_netem},     {"netem-lossy", scenario_netem},
@@ -2761,6 +2797,7 @@ int main(int argc, char** argv) {
     // The tunnel is as consequential as a shell (docs/10#network-tunnel), so the grant claims it
     // only for the scenario that exercises it.
     if (opts.scenario == "tunnel") opts.capabilities.push_back("fjarr.net");
+    if (opts.scenario == "desktop-see") opts.capabilities.push_back("fjarr.desktop");
     gst_init(&argc, &argv);
 
     Shared sh;

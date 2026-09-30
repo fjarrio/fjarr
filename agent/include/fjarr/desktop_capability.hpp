@@ -22,6 +22,9 @@ class DesktopCapability final : public Capability {
     void session_attached(SessionContext& ctx, const nlohmann::json& granted_params) override;
     void session_detached(const SessionId& id, DetachReason reason, std::string_view detail) override;
     void on_message(SessionContext& ctx, const Envelope& msg) override;
+    /// Session end, and the desktop domain changing hands: every held key and button released
+    /// (docs/15#safety-behaviors). Forwarded to the backend.
+    void release_all_input(const SessionId& id) override;
     /// One row describing the desktop: available with the backend that serves it, or unavailable
     /// with the package to install — which is what `GET /sources` and `--check` print (docs/26).
     std::vector<ConfiguredSource> configured_sources() const override;

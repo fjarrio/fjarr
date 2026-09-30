@@ -20,6 +20,11 @@ done
 GDK_BACKEND=wayland fixture-testwin >/run/desktop/testwin-app.log 2>&1 &
 for _ in $(seq 40); do grep -q '^.* start ' "$FJARR_FIXTURE_LOG" && break; sleep 0.25; done
 grep -q ' start ' "$FJARR_FIXTURE_LOG" || { echo "fixture: the test window never started"; cat /run/desktop/testwin-app.log; exit 1; }
+# The session helper, as a real desktop session starts it (a user unit on a robot, ADR-0028): only
+# when an agent's socket directory is shared in (make desktop-see), so the self-tests run without one.
+if [ -d /run/fjarr ]; then
+  FJARR_DESKTOP_SOCK=/run/fjarr/desktop.sock fjarr-desktop-session >/run/desktop/helper-live.log 2>&1 &
+fi
 touch /run/desktop/ready
 echo "fixture: desktop ${FIXTURE_WIDTH}x${FIXTURE_HEIGHT} ready (mutter $(mutter --version 2>/dev/null | head -1 | awk '{print $2}'))"
 wait "$mutter_pid"

@@ -69,6 +69,36 @@ services:
       context: .
       dockerfile: docker/desktop-fixture/Dockerfile
     image: fjarr-desktop-fixture
+    # The agent's socket, shared with desktop-robot. Its group is the agent's own here, as
+    # fjarr-desktop is on a robot: the desktop account is a member; SO_PEERCRED still decides.
+    group_add: ["${USER_GID:-1000}"]
+    volumes:
+      - desktop-socket:/run/fjarr
+
+  # An agent attached to the fixture's desktop (M3 3.1): the reference daemon with backend module E
+  # from the build, reached by the fixture's session helper over the shared socket. make desktop-see.
+  desktop-robot:
+    profiles: [desktop]
+    image: fjarr-dev
+    depends_on: [fjarr-server]
+    working_dir: /workspace
+    volumes:
+      - .:/workspace:cached
+      - desktop-socket:/run/fjarr
+    environment:
+      FJARR_SERVER_URL: ws://fjarr-server:8080/ws
+      FJARR_ROBOT_ID: desktop-robot-01
+      FJARR_DEV_DEVICE_TOKEN: ${FJARR_DEV_DEVICE_TOKEN:-dev-only-device-token}
+      FJARR_AGENT_ALLOW_UNSUPERVISED: "1"
+      FJARR_MEDIA_ENCODER: software   # the fixture has no GPU
+      FJARR_LOG_LEVEL: ${FJARR_LOG_LEVEL:-info}
+      # opsim reads the robot's own view of its tracks when frames do not arrive (docs/24).
+      FJARR_INTROSPECT_BIND: "0.0.0.0"
+      FJARR_INTROSPECT_TOKEN: ${FJARR_INTROSPECT_TOKEN:-dev-only-introspect-token}
+    command: >
+      bash -c "test -x ./build/release/agent/daemon/fjarr-agent && test -f ./build/release/agent/desktop-modules/libfjarr-desktop-mutter.so
+      || { echo 'the agent or backend module E is not built yet: make agent-build'; sleep infinity; };
+      exec ./build/release/agent/daemon/fjarr-agent --config docker/desktop-fixture/agent.toml"
 
   robot-sim:
     build: docker/robot-sim
@@ -383,6 +413,10 @@ services:
       - "49160-49200:49160-49200/udp"
 
 volumes:
+  # The session helper's socket between desktop-fixture and desktop-robot: a tmpfs both mount, open to
+  # the agent's user for creating it (the socket itself is 0660; M3 3.1).
+  desktop-socket:
+    driver_opts: {type: tmpfs, device: tmpfs, o: "mode=1777"}
   lab-key: # the lab's throwaway ssh key, robot-services -> dev (docs/27)
   x11sock:
   cargo-registry:

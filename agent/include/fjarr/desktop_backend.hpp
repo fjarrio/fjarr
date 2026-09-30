@@ -6,8 +6,11 @@
 // spec: docs/07-desktop-backends.md — implementations chosen by ADR-0006.
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
+
+#include <fjarr/video_source.hpp>
 
 namespace fjarr {
 
@@ -75,9 +78,6 @@ struct CursorShape {
     std::vector<std::uint8_t> rgba; // width*height*4, straight alpha
 };
 
-/// Opaque handle to a capture source; yields a GStreamer element/bin in the
-/// M1 core. Kept opaque here so public headers stay GStreamer-free.
-class CaptureSource;
 class ClipboardHandle;
 
 class DesktopBackend {
@@ -100,7 +100,10 @@ class DesktopBackend {
     /// Returns at once and never waits for a first frame: capture may be variable-rate, and a
     /// still screen produces no frames at all. The backend provokes a first frame where it can;
     /// the media plane repeats the last frame to the encoder.
-    virtual CaptureSource* start_capture(MonitorId monitor, CaptureOptions options) = 0;
+    /// The capture as a track's source: unavailable until the display server has handed the stream
+    /// over, then available (on_availability_changed), so the capability declares it at once and the
+    /// core adds it when it is ready. Null when the monitor is unknown.
+    virtual std::shared_ptr<VideoSource> start_capture(MonitorId monitor, CaptureOptions options) = 0;
     /// MUST NOT disturb captures of other monitors.
     virtual void stop_capture(MonitorId monitor) = 0;
 
@@ -111,7 +114,7 @@ class DesktopBackend {
     virtual void destroy_virtual_monitor(MonitorId monitor) = 0;
 
     /// What the robot's speakers play: the default sink's monitor. Null when unsupported.
-    virtual CaptureSource* start_audio_capture() = 0;
+    virtual std::shared_ptr<VideoSource> start_audio_capture() = 0;
     virtual void stop_audio_capture() = 0;
 
     /// Local-cursor mode: every shape change, for captures started with cursor_in_video=false.

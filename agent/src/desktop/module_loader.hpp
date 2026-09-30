@@ -36,7 +36,7 @@ class ModuleLoader {
     /// The module for `want` ("auto" picks the first usable one), or null.
     const Found* select(const std::string& want) const;
     /// Create a backend from a selected module; null (with `error`) when it refuses.
-    std::unique_ptr<DesktopBackend> create(const Found& module, std::string* error) const;
+    std::unique_ptr<DesktopBackend> create(const Found& module, const ModuleHost& host, std::string* error) const;
 
     /// The line a robot should be told when nothing usable is installed: which package to install,
     /// or why the installed one cannot run here. Never a bare "unavailable".

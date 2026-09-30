@@ -19,11 +19,11 @@ class StubBackend final : public DesktopBackend {
     std::vector<Monitor> monitors() override { return {}; }
     void on_monitors_changed(std::function<void(std::vector<Monitor>)>) override {}
     void on_capture_lost(std::function<void(MonitorId, CaptureLost)>) override {}
-    CaptureSource* start_capture(MonitorId, CaptureOptions) override { return nullptr; }
+    std::shared_ptr<VideoSource> start_capture(MonitorId, CaptureOptions) override { return nullptr; }
     void stop_capture(MonitorId) override {}
     MonitorId create_virtual_monitor(int, int) override { return INVALID_MONITOR; }
     void destroy_virtual_monitor(MonitorId) override {}
-    CaptureSource* start_audio_capture() override { return nullptr; }
+    std::shared_ptr<VideoSource> start_audio_capture() override { return nullptr; }
     void stop_audio_capture() override {}
     void on_cursor_shape(std::function<void(const CursorShape&)>) override {}
     void pointer_motion(MonitorId, double, double) override {}
@@ -39,7 +39,7 @@ const char* probe() {
     return (why && *why) ? why : nullptr;
 }
 
-DesktopBackend* create() {
+DesktopBackend* create(const desktop::ModuleHost*) {
     if (std::getenv("FJARR_STUB_NO_BACKEND")) return nullptr;
     return new StubBackend();
 }

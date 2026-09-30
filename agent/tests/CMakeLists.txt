@@ -8,6 +8,8 @@ add_executable(fjarr-tests
   test_config.cpp
   test_desktop_modules.cpp
   test_helper_protocol.cpp
+  test_monitor_identity.cpp
+  ${CMAKE_SOURCE_DIR}/agent/src/desktop/monitor_identity.cpp
   ${CMAKE_SOURCE_DIR}/agent/src/desktop/helper_protocol.cpp
   test_frame_hub.cpp
   test_channels.cpp
@@ -45,7 +47,7 @@ gtest_discover_tests(fjarr-tests DISCOVERY_TIMEOUT 60)
 # would prove nothing about loading it.
 add_library(fjarr-desktop-stub MODULE desktop_module_stub.cpp)
 target_include_directories(fjarr-desktop-stub PRIVATE ${CMAKE_SOURCE_DIR}/agent/src ${CMAKE_SOURCE_DIR}/agent/include)
-target_link_libraries(fjarr-desktop-stub PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(fjarr-desktop-stub PRIVATE PkgConfig::GST nlohmann_json::nlohmann_json)
 set_target_properties(fjarr-desktop-stub PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/desktop-modules" PREFIX "lib")
 add_dependencies(fjarr-tests fjarr-desktop-stub)

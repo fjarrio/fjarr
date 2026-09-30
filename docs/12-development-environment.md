@@ -38,6 +38,7 @@ Or without VS Code: `docker compose up -d dev robot-sim`, then
 | `coturn` | `turn` | TURN relay in `use-auth-secret` mode (ephemeral creds only) |
 | `browser` | `lab` | headless Chromium with CDP on <http://localhost:9222> and fake media devices — the [browser lab](25-browser-lab.md) |
 | `desktop-fixture` | `desktop` | GNOME's mutter headless with one virtual monitor, PipeWire and a test window: backend E's capture and EIS input without a GPU or a lab machine. `make desktop-fixture-test` ([docs/15](15-testing-strategy.md#the-desktop-test-lab)) |
+| `desktop-robot` | `desktop` | the reference daemon with backend module E from the build, attached to the fixture's desktop through the session helper's socket: `make desktop-see` ([docs/23](23-agent-core-architecture.md#desktop-helper-protocol)) |
 
 `make demo-up` = `docker compose --profile demo up -d` — the full customer
 topology. The `dev` and `robot-sim` containers share `/tmp/.X11-unix` via the

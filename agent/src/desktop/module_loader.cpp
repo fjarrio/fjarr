@@ -89,7 +89,7 @@ const Found* ModuleLoader::select(const std::string& want) const {
     return nullptr;
 }
 
-std::unique_ptr<DesktopBackend> ModuleLoader::create(const Found& module, std::string* error) const {
+std::unique_ptr<DesktopBackend> ModuleLoader::create(const Found& module, const ModuleHost& host, std::string* error) const {
     for (std::size_t i = 0; i < impl_->found.size(); i++) {
         if (&impl_->found[i] != &module) continue;
         const ModuleV1* m = impl_->descriptors[i];
@@ -97,7 +97,7 @@ std::unique_ptr<DesktopBackend> ModuleLoader::create(const Found& module, std::s
             if (error) *error = "module has no factory";
             return nullptr;
         }
-        DesktopBackend* b = m->create();
+        DesktopBackend* b = m->create(&host);
         if (!b && error) *error = "the module refused to create a backend";
         return std::unique_ptr<DesktopBackend>(b);
     }
