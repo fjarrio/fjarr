@@ -1,6 +1,6 @@
 {
   "name": "@fjarr/core",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Framework-agnostic Fjarr sessions, transport, protocol types, subscriptions, publishing and demand-driven media (zero runtime dependencies)",
   "license": "AGPL-3.0-only",
   "type": "module",

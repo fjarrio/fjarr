@@ -1,3 +1,19 @@
+fjarr (0.1.2) unstable; urgency=medium
+
+  * Agent: stopping a quality tier moments after starting it no longer leaks
+    or hangs the agent (the tier's elements are locked before teardown).
+  * Agent: a track's media flows only once the viewer's answer accepted it;
+    a track the answer rejected is refused. Removing such a track could hang
+    the agent's core loop (docs/08#track-control).
+  * Agent: a request sent as soon as the control channel opens is no longer
+    lost when the agent is busy; fjarr-connect's unanswered open (#33).
+  * Agent: reads /etc/fjarr/fjarr.toml when no --config is given.
+  * Containers: the reference compose file (apt.fjarr.io/docker-compose.yml);
+    the image creates the tunnel device and drops to fjarr with no
+    capabilities; setup, net setup and --check work without systemd.
+
+ -- Fjarr <dev@fjarr.io>  Wed, 30 Sep 2026 07:47:20 +0200
+
 fjarr (0.1.1) unstable; urgency=medium
 
   * The first published release. 0.1.0 reached testing only: its arm64

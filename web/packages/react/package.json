@@ -1,6 +1,6 @@
 {
   "name": "@fjarr/react",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "React bindings and headless-first components for Fjarr sessions",
   "license": "AGPL-3.0-only",
   "type": "module",
