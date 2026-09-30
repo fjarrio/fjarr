@@ -207,4 +207,4 @@ jobs:
       - name: verify stable through get.fjarr.io
         run: |
           docker run --rm ubuntu:26.04 sh -c \
-            'apt-get update -qq >/dev/null && apt-get install -y -qq curl ca-certificates >/dev/null && curl -fsSL https://get.fjarr.io | sh </dev/null && fjarr-agent --help 2>&1 | head -1'
+            'apt-get update -qq >/dev/null && apt-get install -y -qq wget ca-certificates >/dev/null && wget -qO- https://get.fjarr.io | sh </dev/null && fjarr-agent --help 2>&1 | head -1'

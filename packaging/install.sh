@@ -1,5 +1,5 @@
 #!/bin/sh
-# Fjarr's installer: curl -fsSL https://get.fjarr.io | sh    (docs/26#releases)
+# Fjarr's installer: wget -qO- https://get.fjarr.io | sudo sh    (docs/26#releases)
 #
 # Only what apt cannot do by itself: check the system, add Fjarr's signing key (refused unless its
 # fingerprint is the one below) and its repository, install fjarr-agent, and run `fjarr-agent setup`.
@@ -7,7 +7,7 @@
 #
 #   --channel stable|testing   which suite (default stable)
 #   --dry-run                  print every step, change nothing
-# Pass options through curl with: curl -fsSL https://get.fjarr.io | sh -s -- --channel testing
+# Pass options through the pipe with: wget -qO- https://get.fjarr.io | sudo sh -s -- --channel testing
 set -eu
 
 REPO_URL=${FJARR_REPO_URL:-https://apt.fjarr.io}
@@ -47,7 +47,7 @@ case "$ARCH" in amd64|arm64) ;; *) refuse "architecture $ARCH is not built" ;; e
 if [ "$(id -u)" != 0 ] && [ -z "$DRY" ]; then
     command -v sudo >/dev/null 2>&1 || { say "run this as root"; exit 1; }
     say "re-running with sudo"
-    tmp=$(mktemp); cat "$0" > "$tmp" 2>/dev/null || { say "piped from curl: rerun as: curl -fsSL https://get.fjarr.io | sudo sh"; exit 1; }
+    tmp=$(mktemp); cat "$0" > "$tmp" 2>/dev/null || { say "piped: rerun with sudo in the pipe: wget -qO- https://get.fjarr.io | sudo sh"; exit 1; }
     exec sudo FJARR_REPO_URL="$REPO_URL" FJARR_KEY_FINGERPRINT="$KEY_FINGERPRINT" sh "$tmp" --channel "$CHANNEL"
 fi
 

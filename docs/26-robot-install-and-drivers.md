@@ -33,7 +33,7 @@ description: How the agent is installed on a robot and how a customer discovers,
 | **apt repository** (`https://apt.fjarr.io`, suites `stable` and `testing`, component `main`) | the packages [below](#packages) | robots on Ubuntu 26.04 LTS (the supported platform, docs/04, ADR-0022) |
 | **Container images** | `ghcr.io/fjarrio/fjarr-agent:<ver>` (core) and per-vendor variants `…:<ver>-zed`, `…:<ver>-realsense`, plus `-desktop-x11`/`-wayland`; **built from the same `.deb`s**, multi-arch, cosign-signed with an SBOM. The core image exists from slice 5b (`docker/agent/Dockerfile`, built and smoke-tested in CI, amd64, unpublished — [docs/12](12-development-environment.md#running-the-demo-robot-from-the-agent-image)); the variants, arm64 and publishing are this milestone | containerized robot stacks ([below](#containerized-robots)), the demo, CI |
 | **Embedding** | `libfjarr` as a CMake package (`find_package(fjarr)`), headers = docs/09; the customer's app links the core and installs the driver packages it wants | robot companies embedding the library in their own daemon |
-| **Install script** | `curl -fsSL https://get.fjarr.io \| sh` — adds the repository, installs `fjarr-agent`, runs `fjarr-agent setup` | first contact |
+| **Install script** | `wget -qO- https://get.fjarr.io \| sudo sh` (`wget` rather than `curl`: a fresh Ubuntu desktop has only the former; the script falls back to whichever is present) — adds the repository, installs `fjarr-agent`, runs `fjarr-agent setup` | first contact |
 
 The `fjarr-agent` package installs the introspection viewer's static
 files under `/usr/share/fjarr/viewer` and points `introspect.viewer_dir`

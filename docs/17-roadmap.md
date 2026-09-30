@@ -235,7 +235,7 @@ repository and signing, the install script, the reference compose file.
 configure the session helper and backend M3 builds; in M2.5 they would set up
 an auto-login for a helper that does not exist yet.
 **Gate:** a fresh Ubuntu 26.04 machine (the spike machine, reinstalled) goes
-from `curl … | sh` to a test pattern in the dashboard with no hand-written
+from `wget … | sudo sh` to a test pattern in the dashboard with no hand-written
 config; a containerized robot runs from the reference compose file, tunnel
 included;
 `--check` reports a correct profile on both; the package set and images build

@@ -6,7 +6,7 @@ set -eu
 export DEBIAN_FRONTEND=noninteractive
 fail() { echo "FAIL: $*"; exit 1; }
 ok() { echo "ok   $*"; }
-apt-get update -qq >/dev/null && apt-get install -y -qq apt-utils gnupg python3 curl >/dev/null 2>&1
+apt-get update -qq >/dev/null && apt-get install -y -qq apt-utils gnupg python3 wget >/dev/null 2>&1
 
 export GNUPGHOME=$(mktemp -d)
 gpg --batch --passphrase '' --quick-gen-key "install-script test <t@t>" ed25519 sign 1d 2>/dev/null

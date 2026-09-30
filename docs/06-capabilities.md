@@ -354,7 +354,7 @@ Peer consumer, built into `libfjarr` as the public class
 `fjarr::TestCapability` and enabled by config. It exists for two reasons:
 it proves the core end to end before any real capability exists
 ([docs/23](23-agent-core-architecture.md#slices-3a-3b-3c-and-their-gates)), and it is the
-customer's **install smoke test** — after `curl … | sh`, a test pattern in
+customer's **install smoke test** — after `wget … | sudo sh`, a test pattern in
 the dashboard proves the robot, the server and the grant flow work before
 a single camera is configured ([docs/26](26-robot-install-and-drivers.md)).
 It ships in the `fjarr-agent` package for that reason; its hooks are inert
