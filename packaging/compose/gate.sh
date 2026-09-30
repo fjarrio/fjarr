@@ -41,6 +41,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
+if [ "$SANDBOX" != 1 ] && ss -ltnH 2>/dev/null | awk '{print $4}' | grep -qE '(^|:)7381$'; then
+  fail "host networking: port 7381 is taken on this host (the lab's demo-robot publishes it: docker compose stop demo-robot)"
+fi
 ls dist/deb/"$ARCH"/fjarr-agent_*.deb >/dev/null 2>&1 || fail "no dist/deb/$ARCH/fjarr-agent_*.deb — run 'make deb' first"
 say "image $FJARR_GATE_IMAGE from dist/deb/$ARCH"
 docker build -q -f docker/agent/Dockerfile --target runtime -t "$FJARR_GATE_IMAGE" . >/dev/null

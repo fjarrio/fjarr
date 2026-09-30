@@ -186,7 +186,11 @@ jobs:
         # the image step built.
         env:
           FJARR_GATE_SANDBOX: "0"
-        run: make compose-gate
+        # The lab robot publishes its introspection on the host's 7381, which is where a host-network
+        # agent listens too (and where the tunnel scenario looks). Nothing after this step needs it.
+        run: |
+          docker compose stop demo-robot
+          make compose-gate
       - name: lab artifacts (summaries, captures, traces)
         if: always()
         uses: actions/upload-artifact@v4
