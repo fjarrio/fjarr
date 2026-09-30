@@ -230,6 +230,20 @@ their queues would otherwise be reported); the RAII kit pairs its own
 hand-offs (posts, sources, promises, thread-pool jobs) with an acquire/release
 so a race with both ends in fjarr code is always reported.
 
+## Ubuntu 26.04's coreutils are uutils {#uutils}
+
+The 26.04 base image ships the Rust rewrite of coreutils (`install --version`
+says `uutils`), and it is not GNU in every corner. The one that has bitten:
+`install -o 1002 -g 1002` fails with "invalid user" when that uid has no
+passwd entry in the container, where GNU `install` takes the bare number.
+`chown 1002:1002` does take it. A script that hands a file to a host-supplied
+uid (the lab's `robot-services` publishes its ssh key to the operator's uid)
+therefore does `install -m 600 …` and then `chown` (found 2026-09-29: every
+nightly `tun-up` failed on the self-hosted runner, uid 1002, while GitHub's
+runner passed because its uid 1001 is the image's `robot` user by chance).
+When a coreutils command behaves unlike GNU in a 26.04 container, suspect
+uutils first.
+
 ## Debugging a hung process {#debugging-a-hung-process}
 
 A test or agent that hangs says nothing until its stacks are read, and the

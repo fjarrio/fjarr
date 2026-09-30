@@ -518,6 +518,21 @@ period (10 s), so an idle robot encodes nothing. `select-tracks` therefore
 selects `(track_id, tier)` in the FrameHub, and switching tiers is a
 subscription change plus a keyframe request, not a renegotiation.
 
+**A tier's branch is locked before it is torn down.** Starting a tier on a
+playing producer syncs the new branch's state with the pipeline and leaves the
+pipeline's own asynchronous state change in flight; when it completes, the bin
+sets every child it still holds back to PLAYING. A stop in that window
+(`stop_tier` moments after `start_tier`) had its branch re-PLAYed between
+`set_state(NULL)` and removal: elements disposed un-NULLed (the parser's
+buffers leaked) and, within a few dozen start/stop cycles, a stop that never
+returned. So `stop_tier` calls `gst_element_set_locked_state(TRUE)` on the
+branch's elements first, which keeps the parent's hands off them — the rule for
+any branch removed from a running pipeline (found by the nightly memcheck,
+2026-09-29; `LoopMedia.aTierStoppedWhileItsStartIsStillSettlingIsTornDownCleanly`).
+The consumer's branches have a different hazard, a thread parked on an
+un-negotiated `webrtcbin` pad, and a different rule ([valves open only on
+answered m-sections](#offer-construction-and-renegotiation)).
+
 ### FrameHub
 
 One mutex, one entry per `(track_id, tier)`: the latest keyframe, a ring
