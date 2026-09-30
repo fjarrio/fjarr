@@ -155,7 +155,7 @@ struct Harness {
 
 } // namespace
 
-TEST(LoopMedia, anEnableThatOvertakesItsAnswerIsHeldAndARemovalMeanwhileReturns) {
+TEST(ConsumerNegotiation, anEnableThatOvertakesItsAnswerIsHeldAndARemovalMeanwhileReturns) {
     criticals() = 0;
     GLogFunc previous = g_log_set_default_handler(&count_criticals, nullptr);
     {
@@ -196,7 +196,7 @@ TEST(LoopMedia, anEnableThatOvertakesItsAnswerIsHeldAndARemovalMeanwhileReturns)
     EXPECT_EQ(criticals().load(), 0);
 }
 
-TEST(LoopMedia, aHeldEnableOpensWhenItsAnswerLands) {
+TEST(ConsumerNegotiation, aHeldEnableOpensWhenItsAnswerLands) {
     Harness h(true);
     ASSERT_TRUE(h.start()) << "the loopback never connected";
     EXPECT_TRUE(h.valve_open("a")) << "the negotiated track is not flowing";
@@ -217,7 +217,7 @@ TEST(LoopMedia, aHeldEnableOpensWhenItsAnswerLands) {
     h.stop();
 }
 
-TEST(LoopMedia, aTrackTheAnswerRejectedNeverOpensAndStillRemovesCleanly) {
+TEST(ConsumerNegotiation, aTrackTheAnswerRejectedNeverOpensAndStillRemovesCleanly) {
     // A peer without BUNDLE refuses the agent's bundle-only m-lines (port 0, no group): the first
     // m-line is accepted, a second one is rejected.
     Harness h(false);

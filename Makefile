@@ -121,13 +121,17 @@ agent-memcheck: ## valgrind memcheck on the loop tests (nightly, docs/15): the e
 	G_SLICE=always-malloc G_DEBUG=gc-friendly GST_TRACERS= valgrind --leak-check=full --show-leak-kinds=definite --errors-for-leak-kinds=definite \
 	  --error-exitcode=9 --suppressions=/usr/share/glib-2.0/valgrind/glib.supp --suppressions=agent/tests/valgrind/gstreamer.supp \
 	  --suppressions=agent/tests/valgrind/fjarr.supp --gen-suppressions=all --log-file=build/memcheck/loop-tests.log \
-	  ./build/$(BUILD_PRESET)/agent/tests/fjarr-tests --gtest_filter='LoopMedia.*:FrameHub.*:Introspect.*:Session.*' >/dev/null; rc=$$?; \
+	  ./build/$(BUILD_PRESET)/agent/tests/fjarr-tests --gtest_filter='LoopMedia.*:ConsumerNegotiation.*:FrameHub.*:Introspect.*:Session.*' >/dev/null; rc=$$?; \
 	grep -E "ERROR SUMMARY|definitely lost:|indirectly lost:" build/memcheck/loop-tests.log | tail -4; \
 	[ $$rc -eq 0 ] && echo "agent-memcheck: clean (build/memcheck/loop-tests.log)" || { echo "agent-memcheck: valgrind exit $$rc — see build/memcheck/loop-tests.log (each error carries a ready suppression block: only GLib/GStreamer-internal ones belong in agent/tests/valgrind/fjarr.supp)"; exit $$rc; }
 
 .PHONY: agent-heaptrack
 agent-heaptrack: ## heaptrack the streaming loop test and print the allocators in fjarr code (nightly, docs/16 hot-path budget)
 	@mkdir -p build/heaptrack && rm -f build/heaptrack/loop-media.gz build/heaptrack/loop-media.zst
+	@# The streaming hot path only: no test that completes DTLS. libsrtp's first init loads and dlcloses
+	@# NSS, and heaptrack's allocation hook takes the dynamic-loader lock under its own — a lock-order
+	@# deadlock with any thread allocating at that moment (nightly 2026-09-30). ConsumerNegotiation and
+	@# the Session DTLS test are covered by memcheck instead.
 	GST_TRACERS= heaptrack -o build/heaptrack/loop-media ./build/$(BUILD_PRESET)/agent/tests/fjarr-tests --gtest_filter='LoopMedia.*' >/dev/null 2>&1 || true
 	@f=$$(ls build/heaptrack/loop-media.* 2>/dev/null | head -1); [ -n "$$f" ] || { echo "agent-heaptrack: no profile written"; exit 1; }; \
 	heaptrack_print "$$f" -a 25 -p 0 -l 0 -t 0 2>/dev/null | tee build/heaptrack/loop-media.txt | grep -B1 -A2 -E "fjarr::" | head -60; \
