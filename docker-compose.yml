@@ -80,7 +80,9 @@ services:
   desktop-robot:
     profiles: [desktop]
     image: fjarr-dev
-    depends_on: [fjarr-server]
+    depends_on:
+      # Not required: `--profile desktop` alone (the fixture test) must still be a valid project.
+      fjarr-server: { condition: service_started, required: false }
     working_dir: /workspace
     volumes:
       - .:/workspace:cached
