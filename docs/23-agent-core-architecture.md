@@ -245,6 +245,17 @@ exact API sequences):
   creates all DataChannels, then requests `sink_%u` pads, so the initial
   offer carries `m=application` and the control channel is open by the
   time DTLS completes (Q1).
+- **Receive handlers exist before the channel opens.** Each channel's
+  `on-message-string`/`on-message-data` handler is connected when the channel
+  is created, and posts to the core loop from then on; `on-open` only sets up
+  the sending side. Connecting them in the loop's `on-open` handler lost the
+  operator's first request whenever the loop was busy as the channel came up:
+  the client, which sends as soon as its end is open, got ahead of the posted
+  `on-open`, `webrtcbin` had no handler, and the message was gone — the
+  unanswered `fjarr.net/open` of #33 ([docs/18](18-open-questions.md),
+  reproduced 2026-09-30 by blocking the loop while DTLS and SCTP came up). A
+  message that reaches the loop before its channel's `on-open` is held and
+  delivered right after it.
 - **Caps-gated offer.** A `GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM` probe on
   each track's payloader source pad waits for caps with fixed `payload`
   and `ssrc` (1–3 ms after PLAYING); the offer is created only when every
