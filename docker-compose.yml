@@ -61,6 +61,13 @@ services:
     working_dir: /workspace
     command: sleep infinity
 
+  # GNOME's compositor headless, for backend E (M3 slice 3.0, ADR-0033, docs/15#the-desktop-test-lab):
+  # capture and EIS input on every push, with no GPU and no lab machine. `make desktop-fixture-test`.
+  desktop-fixture:
+    profiles: [desktop]
+    build: docker/desktop-fixture
+    image: fjarr-desktop-fixture
+
   robot-sim:
     build: docker/robot-sim
     image: fjarr-robot-sim

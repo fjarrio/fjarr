@@ -492,6 +492,13 @@ website-build: ## Production build of fjarr.io
 # --------------------------------------------------------------- packaging --
 # docs/26#releases, ADR-0031. Run on the HOST: they start their own throwaway containers.
 DEB_ARCH ?= $(shell dpkg --print-architecture 2>/dev/null || uname -m)
+.PHONY: desktop-fixture-test
+desktop-fixture-test: ## M3 3.0: headless mutter in a container proves capture and EIS input (docs/15#the-desktop-test-lab)
+	docker compose --profile desktop up -d --build --wait desktop-fixture
+	@docker compose --profile desktop exec -T desktop-fixture fixture-selftest; rc=$$?; \
+	  [ $$rc -eq 0 ] || docker compose --profile desktop logs --no-color --tail 30 desktop-fixture; \
+	  docker compose --profile desktop stop desktop-fixture >/dev/null 2>&1; exit $$rc
+
 .PHONY: compose-gate
 compose-gate: ## M2.5 gate: the reference compose file runs a robot, tunnel included (host-run; needs make deb + the lab stack; docs/26#containerized-robots)
 	@BUILD_PRESET=$(BUILD_PRESET) DEB_ARCH=$(DEB_ARCH) packaging/compose/gate.sh

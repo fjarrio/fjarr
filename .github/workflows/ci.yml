@@ -205,6 +205,17 @@ jobs:
         if: failure()
         run: docker compose --profile lab --profile stack --profile demo logs --no-color --tail 200 browser fjarr-server demo-robot demo-backend
 
+  desktop-fixture:
+    # Backend E's compositor half on every push (M3 slice 3.0, ADR-0033): GNOME's mutter headless in a
+    # container, no GPU — capture from its PipeWire stream and input through EIS, checked by reading the
+    # test window's pixels and its log (docs/15#the-desktop-test-lab).
+    name: Desktop fixture (headless mutter — capture + EIS input)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp .env.example .env
+      - run: make desktop-fixture-test
+
   rust:
     name: Signaling (test + clippy + fmt)
     runs-on: ubuntu-24.04

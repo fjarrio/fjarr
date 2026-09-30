@@ -37,6 +37,7 @@ Or without VS Code: `docker compose up -d dev robot-sim`, then
 | `rtsp-sim` | `demo` | a network-camera stand-in: GStreamer's RTSP server on `rtsp://rtsp-sim:8554/pattern`, the demo robot's `fjarr.camera` `rtsp` track (slice 4) |
 | `coturn` | `turn` | TURN relay in `use-auth-secret` mode (ephemeral creds only) |
 | `browser` | `lab` | headless Chromium with CDP on <http://localhost:9222> and fake media devices — the [browser lab](25-browser-lab.md) |
+| `desktop-fixture` | `desktop` | GNOME's mutter headless with one virtual monitor, PipeWire and a test window: backend E's capture and EIS input without a GPU or a lab machine. `make desktop-fixture-test` ([docs/15](15-testing-strategy.md#the-desktop-test-lab)) |
 
 `make demo-up` = `docker compose --profile demo up -d` — the full customer
 topology. The `dev` and `robot-sim` containers share `/tmp/.X11-unix` via the
