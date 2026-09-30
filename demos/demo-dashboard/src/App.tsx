@@ -19,6 +19,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ConnectButton,
   ConnectionQuality,
+  DesktopView,
   FjarrProvider,
   SessionScope,
   SessionStatus,
@@ -28,6 +29,7 @@ import {
   isFjarrError,
   useControl,
   useFjarrClient,
+  useMonitors,
   usePublisher,
   useSession,
   useSessionState,
@@ -64,6 +66,7 @@ const FAKE_ROBOTS: Robot[] = [
   { id: "demo-robot-01", name: "Demo Robot 01", site: "Lab" },
   { id: "demo-robot-02", name: "Demo Robot 02", site: "Warehouse" },
   { id: "demo-robot-03", name: "Demo Robot 03", site: "Yard" },
+  { id: "desktop-robot-01", name: "Desktop Robot 01", site: "Lab" },
 ];
 
 // The HOST APP owns auth: grants are fetched from the company's backend.
@@ -179,6 +182,7 @@ function RemoteView() {
   // Losing `motion` (someone took control) remounts the teleop panel: that releases its publisher, so our
   // deadman heartbeat stops and cannot re-claim the domain the moment the new driver releases it.
   const motion = useControl(session, "motion");
+  const monitors = useMonitors(session);
   const [driveEpoch, setDriveEpoch] = useState(0);
   const wasDriving = useRef(false);
   useEffect(() => {
@@ -190,8 +194,13 @@ function RemoteView() {
       <Panel title="Robot status (host-owned, built on useTelemetry)">
         <code style={{ fontSize: 12 }}>{JSON.stringify(status)}</code>
       </Panel>
+      {monitors.length > 0 && (
+        <Panel title="Desktop (fjarr.desktop — the robot's screen; input arrives in M3 slice 3.2)">
+          <DesktopView session={session} style={{ maxHeight: "70vh", borderRadius: 8, overflow: "hidden" }} />
+        </Panel>
+      )}
       <Panel title="Cameras (demand-driven: only visible tiles are streamed)">
-        <VideoGrid session={session} />
+        <VideoGrid session={session} filter={(e) => e.manifest.cap !== "fjarr.desktop"} />
         {state !== "connected" && <small style={{ color: "#8b93a1" }}>waiting for media — session is {state}</small>}
       </Panel>
       <Panel title="Teleop (fjarr.test drive: publisher with deadman; unmounting stops the robot; one driver at a time)">

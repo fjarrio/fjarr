@@ -337,6 +337,13 @@ media capabilities, `developer` additionally `fjarr.introspect`
 part of this contract, kept so the demo never grants everything to
 everyone.
 
+A grant names only capabilities the robot has. The robot checks every name
+against its own configuration and refuses the whole session with
+`capability-denied` if any is missing ([docs/10](10-security.md)). A backend
+that serves robots with different capabilities therefore records what each
+robot has, and grants the role's capabilities that the robot also has. The
+demo backend's registry does this, because its desktop robot has no camera.
+
 ### b) Webhooks (fjarr-server → customer backend)
 
 HMAC-signed POSTs, at-least-once, retried with backoff:
@@ -466,7 +473,7 @@ always. Transport is injected — the host app decides how grants are fetched.
 <FjarrProvider client={client}>
   <SessionScope session={client.sessions.open("robot-024")}>
     <VideoTile trackId="cam-front" tier="active" />
-    <DesktopView monitorId="HDMI-1" />          {/* M3 */}
+    <DesktopView />  {/* M3: the primary monitor; monitorId="<EDID slug>" pins one */}
     <TerminalView />                            {/* M2 */}
     <SessionStatus />   {/* re-renders on state change — guaranteed */}
   </SessionScope>

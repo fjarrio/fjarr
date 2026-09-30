@@ -5,9 +5,9 @@
  */
 import { act, render, screen, cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createFjarrClient, type FjarrClient } from "@fjarr/core";
+import { createFjarrClient, type FjarrClient, type MonitorInfo } from "@fjarr/core";
 import { MockAgent } from "@fjarr/core/testing";
-import { FjarrProvider, SessionScope, SessionStatus, VideoGrid, VideoTile, usePublisher, useTelemetry } from "../src/index.js";
+import { DesktopView, FjarrProvider, SessionScope, SessionStatus, VideoGrid, VideoTile, pickMonitor, usePublisher, useTelemetry } from "../src/index.js";
 
 const tick = async (n = 6) => {
   for (let i = 0; i < n; i++) await act(() => vi.advanceTimersByTimeAsync(0));
@@ -385,5 +385,89 @@ describe("@fjarr/react review pass 2", () => {
     view.unmount();
     expect(client.focus.owner.getSnapshot()).toBeNull();
     expect(lost).toEqual(["desk"]);
+  });
+});
+
+describe("<DesktopView> (M3 3.1: video only)", () => {
+  const mon = (id: string, index: number, primary = false): MonitorInfo => ({ id, index, primary, x: index * 1280, y: 0, w: 1280, h: 720, scale: 1, connector: `Meta-${index}` });
+  const desk = (m: MonitorInfo, mid: string) => ({ track_id: `desk-${m.id}`, cap: "fjarr.desktop", kind: "video" as const, label: m.id, codec: "H264", pt: 96 + Number(mid), mid, monitor: m });
+  const a = mon("virtual-1", 0, true);
+  const b = mon("del-dell-u2422h-gk19rp3", 1);
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("IntersectionObserver", undefined);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("pickMonitor: an id binds to that monitor only; otherwise the primary, or the first by index", () => {
+    expect(pickMonitor([b, a])?.id).toBe("virtual-1");
+    expect(pickMonitor([{ ...b, primary: true }, { ...a, primary: false }])?.id).toBe(b.id);
+    expect(pickMonitor([b, { ...a, primary: false }], undefined, "first")?.id).toBe("virtual-1");
+    expect(pickMonitor([a], b.id)).toBeUndefined();
+    expect(pickMonitor([])).toBeUndefined();
+  });
+
+  it("demands the primary monitor's track for sharp text, and follows the primary flag when it moves", async () => {
+    const { agent, client } = setup({ tracks: [desk(a, "0"), desk(b, "1")] });
+    const session = client.sessions.open("robot-1");
+    await tick();
+    const view = render(
+      <FjarrProvider client={client}>
+        <DesktopView session={session} />
+      </FjarrProvider>,
+    );
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    const selects = () => agent.received.filter((e) => e.type === "select-tracks").map((e) => e.payload);
+    expect(selects()).toEqual([{ tracks: [{ track_id: "desk-virtual-1", enabled: true, tier: "active", preference: "sharpness" }] }]);
+    expect(view.container.querySelector("[data-fjarr-track]")?.getAttribute("data-fjarr-track")).toBe("desk-virtual-1");
+
+    act(() => agent.sendMonitors([{ ...a, primary: false }, { ...b, primary: true }]));
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    expect(view.container.querySelector("[data-fjarr-track]")?.getAttribute("data-fjarr-track")).toBe(`desk-${b.id}`);
+    const last = selects().at(-1) as { tracks: { track_id: string; enabled: boolean }[] };
+    expect(last.tracks).toEqual(expect.arrayContaining([expect.objectContaining({ track_id: `desk-${b.id}`, enabled: true }), expect.objectContaining({ track_id: "desk-virtual-1", enabled: false })]));
+  });
+
+  it("a bound monitor that goes away leaves a placeholder and releases demand; it rebinds when the monitor returns", async () => {
+    const { agent, client } = setup({ tracks: [desk(a, "0"), desk(b, "1")] });
+    const session = client.sessions.open("robot-1");
+    await tick();
+    const view = render(
+      <FjarrProvider client={client}>
+        <DesktopView session={session} monitorId={b.id} />
+      </FjarrProvider>,
+    );
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    const status = () => view.container.querySelector("[data-fjarr-status]")?.getAttribute("data-fjarr-status");
+    expect(status()).toBe("requested");
+
+    act(() => agent.sendMonitors([a]));
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    expect(status()).toBe("monitor-disconnected");
+    expect(session.consumerCount).toBe(0);
+
+    act(() => agent.sendMonitors([a, b]));
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    expect(view.container.querySelector("[data-fjarr-track]")?.getAttribute("data-fjarr-track")).toBe(`desk-${b.id}`);
+    expect(session.consumerCount).toBe(1);
+  });
+
+  it("no monitors: \"no display connected\", and no demand", async () => {
+    const { agent, client } = setup({ tracks: [] });
+    const session = client.sessions.open("robot-1");
+    await tick();
+    const view = render(
+      <FjarrProvider client={client}>
+        <DesktopView session={session} />
+      </FjarrProvider>,
+    );
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    expect(view.container.textContent).toContain("no display connected");
+    expect(agent.received.filter((e) => e.type === "select-tracks")).toEqual([]);
   });
 });

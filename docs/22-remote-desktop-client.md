@@ -49,9 +49,10 @@ TypeScript gets the hard part without React:
   surfaces, focus and Keyboard Lock, fullscreen, and presentation mode. They
   wire `DesktopInput` to the DOM and the session, and add nothing to the input
   model.
-- **The demo dashboard** gets a **Desktop** tab per robot: `<DesktopView>` with
-  a toolbar of take-control, monitor switch, presentation mode and clipboard. It
-  uses only the public API, like every demo.
+- **The demo dashboard** gets a **Desktop** panel for a robot that has a
+  monitor: `<DesktopView>` with a toolbar of take-control, monitor switch,
+  presentation mode and clipboard. It uses only the public API, like every
+  demo.
 
 ## Monitors and geometry
 

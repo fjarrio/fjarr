@@ -68,16 +68,22 @@ function mintGrant(robotId: string, operator: { id: string; label: string }, cap
 /** The company's own roles → the Fjarr capabilities each may open (a demo-only convention, docs/09). */
 // A shell is a different risk class from watching a camera (docs/10#terminal), so only the
 // developer role carries it — the demo's stand-in for "their auth decides".
+// The desktop is for both: watching it is like a camera, and driving it takes the `desktop` control
+// domain (docs/10#session-ownership), as driving the robot takes `motion`.
 const ROLES: Record<string, string[]> = {
-  operator: ["fjarr.test", "fjarr.camera"],
-  developer: ["fjarr.test", "fjarr.camera", "fjarr.introspect", "fjarr.terminal"],
+  operator: ["fjarr.test", "fjarr.camera", "fjarr.desktop"],
+  developer: ["fjarr.test", "fjarr.camera", "fjarr.desktop", "fjarr.introspect", "fjarr.terminal"],
 };
 
-/** The company's own robot registry — their data, not Fjarr's. */
+/** The company's own robot registry — their data, not Fjarr's. It knows what each robot has, and a
+ *  grant names only those: the robot refuses a session whose grant names a capability it lacks (docs/10). */
+const FLEET_ROBOT = ["fjarr.test", "fjarr.camera", "fjarr.desktop", "fjarr.introspect", "fjarr.terminal"];
 const robots = [
-  { id: "demo-robot-01", name: "Demo Robot 01", site: "Lab" },
-  { id: "demo-robot-02", name: "Demo Robot 02", site: "Warehouse" },
-  { id: "demo-robot-03", name: "Demo Robot 03", site: "Yard" },
+  { id: "demo-robot-01", name: "Demo Robot 01", site: "Lab", capabilities: FLEET_ROBOT },
+  { id: "demo-robot-02", name: "Demo Robot 02", site: "Warehouse", capabilities: FLEET_ROBOT },
+  { id: "demo-robot-03", name: "Demo Robot 03", site: "Yard", capabilities: FLEET_ROBOT },
+  // A robot with a screen and no camera: the headless-mutter fixture (`make desktop-see`, docs/12#services).
+  { id: "desktop-robot-01", name: "Desktop Robot 01", site: "Lab", capabilities: ["fjarr.test", "fjarr.desktop", "fjarr.introspect"] },
 ];
 
 // ---------------------------------------------------------------- the operator API (docs/09#operator-api)
@@ -173,12 +179,13 @@ const server = createServer(async (req, res) => {
   // (docs/24) — nobody gets everything by default.
   if (url.pathname === "/api/fjarr/grant" && req.method === "POST") {
     const robotId = url.searchParams.get("robot") ?? "demo-robot-01";
-    if (!robots.some((r) => r.id === robotId)) return respond(404, { error: `unknown robot ${robotId}` });
+    const robot = robots.find((r) => r.id === robotId);
+    if (!robot) return respond(404, { error: `unknown robot ${robotId}` });
     const role = url.searchParams.get("role") ?? "operator";
     const grants = ROLES[role];
     if (!grants) return respond(400, { error: `unknown role ${role} (operator | developer)` });
     const operator = { id: `${role}@example.com`, label: role === "developer" ? "Demo Developer" : "Demo Operator" };
-    const capabilities = grants.map((name) => ({ name }));
+    const capabilities = grants.filter((name) => robot.capabilities.includes(name)).map((name) => ({ name }));
     return respond(200, { grant: mintGrant(robotId, operator, capabilities), robot_id: robotId, role, capabilities });
   }
 

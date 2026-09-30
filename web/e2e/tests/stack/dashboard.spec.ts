@@ -52,3 +52,28 @@ test("the Terminal panel gives a developer a working shell, and tells an operato
   await dashboard.waitForState(env.robotId, "connected");
   await expect(page.locator("[data-demo-terminal]")).toContainText("not available for this role", { timeout: 20_000 });
 });
+
+test("the Desktop panel shows the desktop robot's screen: <DesktopView> on the primary monitor's track (M3 3.1)", async ({ dashboard, stack, page }) => {
+  await stack.requireServer();
+  test.skip(!(await stack.dashboardReachable()), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
+  // The headless-mutter robot (docs/12#services): up with `make desktop-see`, not with the demo profile.
+  const desktopRobot = process.env.E2E_DESKTOP_ROBOT_HTTP ?? "http://desktop-robot:7381";
+  const up = await fetch(desktopRobot, { signal: AbortSignal.timeout(2000) }).then(() => true, () => false);
+  test.skip(!up, `desktop-robot is not running at ${desktopRobot} — \`make desktop-see\``);
+
+  await dashboard.goto();
+  await page.getByRole("button", { name: /Desktop Robot 01/ }).click();
+  await dashboard.connect("desktop-robot-01");
+  await dashboard.waitForState("desktop-robot-01", "connected");
+  const view = page.locator('[data-fjarr-track^="desk-"]');
+  await expect(view).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
+  const size = await view.locator("video").evaluate(async (v: HTMLVideoElement) => {
+    for (let i = 0; i < 100 && !(v.videoWidth > 0 && v.readyState >= 2); i++) await new Promise((r) => setTimeout(r, 100));
+    return { width: v.videoWidth, height: v.videoHeight };
+  });
+  dashboard.out.note("desktopVideo", `${size.width}x${size.height}`, `desktop track decoded at ${size.width}x${size.height}`);
+  expect(size.width).toBeGreaterThan(0);
+  // A desktop is not a camera: the Cameras grid leaves its track to the Desktop panel.
+  expect(await page.locator("[data-fjarr-grid] [data-fjarr-track^='desk-']").count()).toBe(0);
+  await page.screenshot({ path: dashboard.out.path("desktop.png") });
+});

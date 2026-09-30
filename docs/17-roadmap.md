@@ -306,7 +306,7 @@ desktop view exist only as M2 spikes. Scope
   narrowing. Backend module E owns the stream, the cursor reader and libei
   ([ADR-0028, addendum 2026-09-30](adr/0028-desktop-session-helper.md)).
 - **The web client**: `DesktopInput` in `@fjarr/core`, `<DesktopView>` and its
-  hooks in `@fjarr/react`, and a Desktop tab in the demo dashboard
+  hooks in `@fjarr/react`, and a Desktop panel in the demo dashboard
   ([docs/22](22-remote-desktop-client.md#anatomy-of-desktopview)).
 - **Ghost screens** for headless robots, beside real monitors
   ([ADR-0032](adr/0032-ghost-screens.md), [docs/26](26-robot-install-and-drivers.md#ghost-screens)).
@@ -336,6 +336,15 @@ unattended after a reboot, and `--undo desktop` restores it; the mini-PC headles
 with two ghost screens plus a real monitor, all streaming with distinct ids; an
 X11 kiosk from `fjarr-desktop-x11`; a containerized robot's desktop through the
 reference compose file. No release until M3 closes (decided 2026-09-30).
+
+**Progress 2026-10-01:** 3.0 done 2026-09-30 (the fixture and `fjarr-lab` in
+CI). **3.1 done:** `fjarr-desktop-session` hands module E the PipeWire
+descriptor over `fjarr-desktop-1`
+([docs/23](23-agent-core-architecture.md#desktop-helper-protocol)); the agent
+offers `desk-virtual-1`, and `pipewiresrc keepalive-time` keeps a still screen
+producing frames. `make desktop-see` asserts both in CI through opsim. In the
+lab browser, the demo dashboard's Desktop panel (`<DesktopView>`) decodes the
+fixture's screen (`web/e2e/tests/stack/dashboard.spec.ts`). Next: 3.2.
 
 ## M3.5 — Hear the robot {#m35}
 
