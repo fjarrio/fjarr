@@ -12,7 +12,9 @@ the tunnel in Fjarr's own lab or on a real robot.
 
 ## How to read this page
 
-Bring the link up and point any tool at the robot's tunnel address:
+Every row below has a short step-by-step in
+[How-tos over the tunnel](29-tunnel-howtos.md), in the same order. Bring the
+link up and point any tool at the robot's tunnel address:
 
 ```console
 $ fjarr-connect robot-024
@@ -134,10 +136,35 @@ internet. To hear and talk to a robot from a browser, `fjarr.audio`
 ([M3.5](17-roadmap.md#m35)) uses WebRTC's jitter buffers and echo
 cancellation, and is the better path.
 
+## Why layer 2 does not cross {#layer-2}
+
+Networking is layered. **Layer 2** is the local network: Ethernet frames
+addressed by MAC address within one broadcast domain, where ARP, DHCP,
+broadcasts, Wake-on-LAN and industrial protocols such as EtherCAT and PROFINET
+RT live. **Layer 3** is IP, routed between networks, with TCP and UDP on top:
+almost every application.
+
+`fjarr.net` is a layer-3 link: a TUN device carrying IP packets between exactly
+two addresses, not a TAP device carrying Ethernet frames. That is deliberate:
+
+- **Isolation is built on IP.** A layer-2 link would plug your laptop into the
+  robot's local network, with its PLC, its cameras and its broadcasts. That is
+  the lateral access the tunnel exists to rule out
+  ([docs/27](27-network-tunnel.md#isolation)).
+- **The protocols that truly need layer 2 cannot work over the internet
+  anyway.** EtherCAT and PROFINET RT need microsecond, deterministic timing on a
+  dedicated wire; an internet path adds tens of milliseconds of jitter.
+- **It keeps the link predictable**: one MTU, no broadcast traffic, no stranger's
+  device flooding it.
+
+What is lost is small: broadcast-based discovery in some vendor tools, and
+Wake-on-LAN. Run the tool on the robot, enter the device's IP address by hand,
+or hop through the robot to one device ([how-to](29-tunnel-howtos.md#a-device-on-the-robots-network)).
+
 ## What does not fit
 
-- **Layer 2**: EtherCAT, PROFINET RT, anything that needs raw Ethernet frames or
-  broadcast domains.
+- **Layer 2** ([above](#layer-2)): EtherCAT, PROFINET RT, raw Ethernet frames,
+  broadcasts, Wake-on-LAN.
 - **Timing-critical USB**: webcams, audio interfaces and anything isochronous
   over USB/IP. The camera and audio capabilities are the way to get those.
 - **Reaching the robot's LAN directly**: only through a hop on the robot that
