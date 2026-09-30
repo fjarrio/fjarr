@@ -166,6 +166,24 @@ The agent wraps a C object system, so lifetime bugs get their own ladder
 | Uninitialised reads, invalid frees sanitizers miss | valgrind memcheck on loop tests | nightly | trend → gate at M3 |
 | Allocations on the hot path | heaptrack on a streaming scenario | nightly | docs/16 budget (one buffer header per subscriber per frame, nothing else) |
 
+Two traps the instrumented runs have hit, both found by the nightly hanging
+rather than failing:
+
+- **heaptrack deadlocks on `dlclose` under concurrent allocation.** `libsrtp`'s
+  first `srtp_init` loads and unloads NSS; `dlclose` holds glibc's
+  dynamic-loader lock and frees into heaptrack, while another thread inside
+  heaptrack's `malloc` hook holds heaptrack's lock and calls
+  `dl_iterate_phdr` for the loader lock. So the heaptrack step profiles the
+  streaming hot path only (`LoopMedia.*`) and **no test that completes DTLS
+  runs under it** — those (`ConsumerNegotiation.*`, the `Session` DTLS test)
+  are memcheck's. Found 2026-09-30 with gdb, [docs/12](12-development-environment.md#debugging-a-hung-process).
+- **valgrind is ~30× slower, so a watchdog guards one call, never a loop.**
+  A regression test for a hang (`fjarr::testing::Watchdog`,
+  `agent/tests/watchdog.hpp`) wraps the single teardown call that used to
+  hang; a budget over a whole churn loop tripped on slowness alone in the
+  nightly memcheck. Waits in tests are polls with generous bounds, so a fast
+  run is not slowed down.
+
 Every tool prints a one-screen verdict and writes JSON, so an AI agent
 running `make agent-test-asan` or `curl :7381/memory` gets an answer it
 can act on, not a wall of output.

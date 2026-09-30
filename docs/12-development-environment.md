@@ -230,6 +230,44 @@ their queues would otherwise be reported); the RAII kit pairs its own
 hand-offs (posts, sources, promises, thread-pool jobs) with an acquire/release
 so a race with both ends in fjarr code is always reported.
 
+## Debugging a hung process {#debugging-a-hung-process}
+
+A test or agent that hangs says nothing until its stacks are read, and the
+`dev` container cannot attach a debugger: Docker's default profile withholds
+`CAP_SYS_PTRACE`, so `gdb -p` fails ("ptrace: Inappropriate ioctl for
+device") even as root.
+
+- **If it hangs reproducibly, launch it under gdb** — a child needs no
+  ptrace capability. `timeout -s INT` stops it where it hangs:
+
+  ```bash
+  timeout -s INT 40 gdb -q -batch -ex run -ex 'thread apply all bt 30' \
+    --args build/debug/agent/tests/fjarr-tests --gtest_filter='Suite.name'
+  ```
+
+- **If gdb changes the timing or the tool around it matters** (heaptrack,
+  valgrind), run it in a throwaway container from the same image with ptrace
+  allowed, and attach as root once it hangs:
+
+  ```bash
+  docker run -d --name hang --cap-add SYS_PTRACE --security-opt seccomp=unconfined \
+    -v "$PWD":/workspace -w /workspace fjarr-dev sleep infinity
+  docker exec -d hang sh -c 'heaptrack -o /tmp/ht ./build/release/agent/tests/fjarr-tests ... > /tmp/run.log 2>&1'
+  docker exec hang pgrep -af fjarr-tests                      # its pid, once it hangs
+  docker exec -u root hang gdb -q -batch -p <pid> -ex 'thread apply all bt 30' > bt.txt
+  docker rm -f hang
+  ```
+
+  `docker exec` runs as the image's user, which cannot ptrace: `-u root` is
+  needed.
+- **Symbols for the distro's libraries** come from Ubuntu's debuginfod:
+  `DEBUGINFOD_URLS=https://debuginfod.ubuntu.com gdb -ex 'set debuginfod enabled on' …`.
+- Read the stacks for **two threads waiting on each other** (a lock one holds
+  that the other wants); `g_cond_wait` inside `gst_pad_push` is a blocking pad
+  probe, and `__lll_lock_wait` under `dl_iterate_phdr` is the dynamic-loader
+  lock — [docs/15](15-testing-strategy.md#memory-safety-c) has the heaptrack
+  case this found.
+
 ## Nightly CI and the self-hosted GPU runner
 
 `.github/workflows/nightly.yml` (docs/15) runs the 200-cycle soak, valgrind,
