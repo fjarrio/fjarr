@@ -194,7 +194,7 @@ independent, so they land in this order for the reason each gives):
 the API amended + re-reviewed); a desktop backend loads as a module from
 a separate package on the dev stack.
 
-## M2.5 — Packaging & install
+## M2.5 — Packaging & install *(done)* {#m25--packaging--install}
 
 Everything a robot needs to *receive* the product, so M3 can ship
 features into it rather than build the delivery: the apt repository and
@@ -229,8 +229,24 @@ the spike machine across a reboot. Later the same day: `fjarr-agent setup`
 terminal, the agent started and online, `--undo`) and `drivers list|detect|install`
 with the built-in catalog (`packaging/catalog.toml`), proven on the spike
 machine against the lab server and in the package install test
-([docs/26](26-robot-install-and-drivers.md#fjarr-agent-setup)). Left: the
-repository and signing, the install script, the reference compose file.
+([docs/26](26-robot-install-and-drivers.md#fjarr-agent-setup)). Then the
+signed repository on R2, `install.sh` behind `get.fjarr.io`, one version
+everywhere and the release workflow (0.1.1 on 2026-09-29, 0.1.2 on
+2026-09-30), and the reference compose file with the image's own tunnel
+entrypoint, proven by `make compose-gate` in CI with host networking.
+**Closed 2026-09-30.** The gate, met: the mini-PC reinstalled with Ubuntu
+26.04 went from `wget -qO- https://get.fjarr.io | sudo sh` (0.1.2) to the
+test pattern in the demo dashboard with no hand-written config, `sudo
+fjarr-agent --check` all green; the compose robot passes setup, `--check`,
+ROS ordered on carrier, an unprivileged agent and the tunnel scenario on every
+push; packages and images for amd64 and arm64 in CI; tag → `testing` →
+`stable` twice. The fresh install found a real bug — `/run/fjarr` missing
+until the next boot, the package ordering tmpfiles before sysusers — fixed for
+0.1.3 with an install test that now catches it. The two trials over
+`fjarr.net` worked: RDP with Remmina to the robot's gnome-remote-desktop, and
+Nautilus over `sftp://` ([docs/27](27-network-tunnel.md#byo-remote-desktop)).
+Docs versioning (`/vX.Y/` snapshots, docs/19) is postponed until the roadmap
+settles, by decision: the pages change too fast now for a snapshot to help.
 **Moved to M3 (2026-09-28):** the desktop packages and `setup desktop`. They
 configure the session helper and backend M3 builds; in M2.5 they would set up
 an auto-login for a helper that does not exist yet.

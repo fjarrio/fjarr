@@ -564,11 +564,15 @@ rewrite traffic.
 
 ## Your own remote-desktop client over the link {#byo-remote-desktop}
 
-**Unverified.** This is noted 2026-09-27 and is to be tried on the spike
-machine once the agent is installed there (M2.5). The same trial covers the
-file-manager equivalent: Nautilus mounting the robot over sftp
-(`sftp://<user>@<tunnel address>/`), which needs `sshd` on the robot and
-carries the same second-door caveat. Fjarr's own answer for files is the
+**Verified 2026-09-30** (M2.5): on the reinstalled mini-PC (Ubuntu 26.04,
+agent 0.1.2 from `get.fjarr.io`), with the link brought up by `fjarr-connect`
+from an operator workstation on the same LAN (up in 0.8 s), Remmina's RDP
+client reached the robot's own gnome-remote-desktop (Settings → System →
+Remote Desktop, Desktop Sharing with remote control; the RDP username and
+password are its own, and the domain field stays empty) at the tunnel address,
+and Nautilus mounted the robot over sftp (`sftp://<user>@<tunnel address>/`,
+`openssh-server` installed on the robot). Both worked well. The sftp mount
+carries the same second-door caveat as RDP. Fjarr's own answer for files is the
 WebDAV drive of [ADR-0029](adr/0029-robot-files-as-a-webdav-drive.md).
 
 An engineer who already lives in Remmina, or in the Windows Remote Desktop
