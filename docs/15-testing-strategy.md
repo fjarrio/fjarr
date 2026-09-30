@@ -190,9 +190,32 @@ can act on, not a wall of output.
 
 ## Unattended-access test (the industrial gate)
 
-Scripted per desktop-backend spike and kept forever after: reboot the
-robot-sim (later: a real NUC), wait, assert a session can start and see the
-display **with zero local interaction**. This test decides ADR-0006.
+Reboot the robot, wait, and assert that an operator session can start, see the
+display and type into it **with zero local interaction**. Its phase-1 results
+decided ADR-0006. From M3 it is scripted and kept forever on the mini-PC, the
+desktop lab machine ([below](#the-desktop-test-lab)). It runs in two phases: the
+job installs the build and runs `setup desktop`, reboots the machine, and a
+second job, picked up by the same runner once `fjarr-lab` brings it back online,
+connects with `fjarr-opsim` and asserts video and an injected keystroke. A
+failure names the step: GDM auto-login, the session helper, the agent's
+backend, or the stream.
+
+## The desktop test lab {#the-desktop-test-lab}
+
+`fjarr.desktop` is tested in two places ([ADR-0033](adr/0033-desktop-test-lab-and-shared-runners.md)):
+
+| Where | Runs | Covers |
+|---|---|---|
+| **Headless mutter** (slice 3.0): a container with `mutter --headless --virtual-monitor WxH`, its own D-Bus session, PipeWire and WirePlumber, the session helper, and a test window that records what it receives | `ci.yml`, every push, hosted runners | backend E's capture from a PipeWire stream, including the repeated frame on a static screen; input through EIS (the oracle checks keys, text and pointer positions); clipboard; virtual-monitor hot-plug; the helper's handover and `SO_PEERCRED`; PipeWire narrowing (the agent must fail to open anything but the granted stream) |
+| **The mini-PC** (`fjarr-lab`, labels `desktop` `gnome`) | nightly, in its CI window | the unattended-access test above; ghost screens ([ADR-0032](adr/0032-ghost-screens.md)) beside a real monitor and the 3-monitor DisplayPort chain; hot-plug on real connectors; input-to-photon against the docs/16 budgets on real hardware |
+
+Backend A (X11 kiosk, slice 3.7) uses robot-sim, the Xvfb service CI already
+runs, with scripted `xrandr` monitor changes.
+
+Every lab job starts from a baseline: `setup --undo desktop`, install the build
+under test, then `setup desktop` with the job's own settings. The machine's
+state after a run is documented, and a person's experiments before it do not
+decide its result.
 
 ## What CI runs
 

@@ -27,7 +27,7 @@ found by a customer:
 |---|---|---|---|
 | **`vaapi`** (Intel iHD) | **Primary** | wanted | `vah264enc` via GStreamer `va`; Gen9+ iGPU incl. Meteor Lake NUCs; `LIBVA_DRIVER_NAME=iHD`; DMABuf straight into `vapostproc` |
 | `nvcodec` (NVIDIA dGPU) | Planned, M2.6 | **yes** (`gpu-desktop`, RTX 2080 Ti) | `nvh264enc`, CUDA memory, x86-64; needs the container toolkit's `video` capability (`NVIDIA_DRIVER_CAPABILITIES`), and the CUDA runtime compiler for device-side convert/scale |
-| `nvv4l2` (Jetson) | Planned, M2.6 | no board yet | `nvv4l2h264enc`, NVMM, arm64, L4T packages from NVIDIA |
+| `nvv4l2` (Jetson) | Planned, M2.6 | planned: a Jetson lab machine with a ZED camera ([docs/12](12-development-environment.md#lab-machines-and-fjarr-lab)) | `nvv4l2h264enc`, NVMM, arm64, L4T packages from NVIDIA |
 | `software` | Explicit choice only | every runner | `openh264enc` for machines with no usable hardware family — never chosen silently ([docs/16](16-performance-budgets.md), [docs/23](23-agent-core-architecture.md)) |
 | `x264enc` | **Forbidden in shipped artifacts** | — | GPL — [ADR-0011](adr/0011-license-open-core.md); doctor enforces absence |
 
@@ -85,7 +85,7 @@ A native client, because a browser cannot create a network interface
 | | Status | Notes |
 |---|---|---|
 | **Linux x86-64** | **Primary** | run in the lab against real robots every slice: interface, per-robot /32 routes, `ssh`, a hash-verified 1 GiB `scp`, `ros2 topic list`. Configures the interface over netlink in-process, so `setcap cap_net_admin+ep` is enough and no `iproute2` is needed |
-| Linux arm64 | Expected to work, unverified | same code paths, no arm64 runner yet |
+| Linux arm64 | Expected to work, unverified | same code paths; the release builds and install-tests arm64 packages on hosted runners, and Raspberry Pi 4/5 and Jetson lab machines are planned ([docs/12](12-development-environment.md#lab-machines-and-fjarr-lab)) |
 | **macOS (Apple silicon)** | **Written, type-checked, never run** | `utun` instead of `/dev/net/tun`, a 4-byte address-family header on every packet, `ifconfig`/`route` under `sudo` because macOS has no `setcap` equivalent. CI type-checks it for `aarch64-apple-darwin` on every change (`make connect-platform-check`); it does **not** link the binary — webrtc-rs pulls `ring`, whose build script needs the Apple SDK — and nothing has run on macOS hardware. Until it has, treat this row as an intention with a compiler behind it, not as support |
 | Windows | Not targeted | WSL2 is the free answer; native Wintun is [question #24](18-open-questions.md) |
 | **`fjarr-connect shell`, every platform** | **Linux primary; macOS and Windows type-checked, never run** | the [shell](27-network-tunnel.md#shell) needs no interface and no privilege, so it is not tied to a tunnel platform: raw mode is termios on Linux and macOS and the console API (with virtual-terminal input) on Windows, where the window size is polled because there is no `SIGWINCH`. `make connect-platform-check` type-checks that code for `aarch64-apple-darwin` and `x86_64-pc-windows-msvc`, the same way and with the same limit as the macOS row above: it does not link the binary, and nothing has run on either |

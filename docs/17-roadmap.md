@@ -284,44 +284,80 @@ doctor names the family it chose and why, and the nightly runs the media
 suites on that runner. Jetson's row in the matrix stays **untested** until a
 board is in CI, per ADR-0025.
 
-## M3 — See, control and hear the robot
+## M3 — The robot's desktop {#m3}
 
-`fjarr.desktop` MVP per [docs/22](22-remote-desktop-client.md): video +
-pointer + keyboard with the full input pipeline (focus model,
-browser-reserved shortcuts + Keyboard Lock, no-auto-repeat, composed text,
-client-side release-all), local-cursor mode where the backend allows,
-`sharpness` preference and `latencyMode: interactive`, clipboard text;
-`release_all_input` safety; `fjarr-desktop-session` and the descriptor
-handover (proven on the spike machine 2026-09-28,
-[docs/23](23-agent-core-architecture.md#desktop-descriptor-handover)), **with
-the handed PipeWire connection narrowed to the granted stream**, so that the
-agent cannot open the desktop user's microphones (not yet verified; it gates
-M3) ([ADR-0028](adr/0028-desktop-session-helper.md));
-unattended-access test green on the spike machine
-(the Ryzen mini-PC from 2b); local cursor on Wayland through Fjarr's own
-PipeWire reader ([docs/22](22-remote-desktop-client.md#cursor-strategy));
-clipboard in both directions on every chosen backend (verified for mutter's interface
-([docs/07](07-desktop-backends.md#decision-2026-09-27)); the portal and X11 remain);
-**presentation mode** (multi-monitor fullscreen, one window per monitor)
-with the **portal-vs-route spike** that fixes the default per browser
-(open question #19).
-**Plus `fjarr.audio`** (robot microphone downlink, push-to-talk uplink via
-the pre-allocated transceiver, audited) and **desktop audio** on
-`fjarr.desktop`.
-**Plus** the first vendor camera packages ([ADR-0020](adr/0020-vendor-sources-as-gstreamer-plugins.md))
-chosen by the design partner's hardware, delivered through the M2.5
-repository and catalog.
-**Plus, moved from M2.5:** the `fjarr-desktop-wayland` and `fjarr-desktop-x11`
-packages and `fjarr-agent setup desktop` with `--undo desktop`
-([docs/26](26-robot-install-and-drivers.md#fjarr-agent-setup-desktop)).
-**Gate:** capability acceptance criteria ([docs/06](06-capabilities.md))
-for desktop and audio; input-to-photon within budgets; `apt install
-fjarr-desktop-wayland` plus `setup desktop` gives remote desktop on the spike
-machine, and `setup --undo desktop` restores it; a containerized robot's
-desktop through the reference compose file; the design partner
-installs from the repository with `setup`, adds their camera with
-`drivers install`, and no config is hand-written; the first
-**design-partner demo** (docs/03 GTM).
+`fjarr.desktop`: an operator sees the robot's screens in the browser and uses
+them as their own, on a robot that nobody attends. Planned 2026-09-30 from an
+inventory of what exists. What exists is the backend module seam
+([ADR-0021](adr/0021-desktop-backends-as-runtime-modules.md)), a `fjarr.desktop` that
+reports only its availability, the session core's control domains and
+`release_all_input`, and the web client's slice-2 primitives (focus registry,
+monitors, `latencyMode`, `preference`). The backends, the helper and the
+desktop view exist only as M2 spikes. Scope
+([docs/22](22-remote-desktop-client.md), [docs/07](07-desktop-backends.md#decision-2026-09-27),
+[ADR-0006](adr/0006-desktop-backend-selection.md),
+[ADR-0028](adr/0028-desktop-session-helper.md)):
+
+- **Backend E** (mutter, GNOME on Wayland) first, then **A** (X11 kiosk).
+  **Backend C** (the portals, for non-GNOME Wayland) is deferred until a robot
+  needs it: E covers stock Ubuntu and A covers kiosks, and a third backend
+  without a user is a third to keep working.
+- **The session helper** in C++ in the agent's tree, owning D-Bus and PipeWire
+  narrowing. Backend module E owns the stream, the cursor reader and libei
+  ([ADR-0028, addendum 2026-09-30](adr/0028-desktop-session-helper.md)).
+- **The web client**: `DesktopInput` in `@fjarr/core`, `<DesktopView>` and its
+  hooks in `@fjarr/react`, and a Desktop tab in the demo dashboard
+  ([docs/22](22-remote-desktop-client.md#anatomy-of-desktopview)).
+- **Ghost screens** for headless robots, beside real monitors
+  ([ADR-0032](adr/0032-ghost-screens.md), [docs/26](26-robot-install-and-drivers.md#ghost-screens)).
+- **The test lab**: headless mutter in CI, and the mini-PC as a shared nightly
+  runner under `fjarr-lab`
+  ([ADR-0033](adr/0033-desktop-test-lab-and-shared-runners.md)).
+
+Slices, in dependency order. Each ends in something demonstrable and tested:
+
+| Slice | What | Done when |
+|---|---|---|
+| **3.0 Lab foundation** | The headless-mutter fixture in CI ([docs/15](15-testing-strategy.md#the-desktop-test-lab)). `fjarr-lab` and the mini-PC and GPU desktop as lab runners ([docs/12](12-development-environment.md#lab-machines-and-fjarr-lab)) | CI captures a frame from a mutter desktop on every push; the nightly reaches the mini-PC inside its window, and `fjarr-lab reserve` holds it |
+| **3.1 See** | `fjarr-desktop-session` and backend module E for one monitor: the helper hands over the PipeWire descriptor, and the agent turns it into a video track that repeats its last frame on a static screen. `<DesktopView>` shows it | the mini-PC's screen is live in the demo dashboard; the fixture asserts frames from a static screen |
+| **3.2 Control** | `DesktopInput` and `<DesktopView>`'s input: pointer, wheel, keys by `code`, no auto-repeat, composition, reserved shortcuts and Keyboard Lock, `release-all`. libei injection in module E. The desktop control domain wired to it. An input-to-photon harness | åäö and Alt+Tab reach the robot; disconnecting mid-keydown leaves no key held (docs/15 safety); input-to-photon within [docs/16](16-performance-budgets.md) on the mini-PC |
+| **3.3 Appliance** | The helper as a systemd user unit, with `SO_PEERCRED` and **PipeWire narrowing (proven first; the gating item)**. `fjarr-desktop-wayland` and `setup desktop` / `--undo desktop`: auto-login account, GDM watchdog, helper, **ghost screens** and `fjarr-agent ghosts`. The unattended-access test | `apt install fjarr-desktop-wayland` plus `setup desktop` gives remote desktop after a reboot with nobody at the machine, nightly; `--undo` restores the machine; the agent cannot open the desktop user's microphone |
+| **3.4 Multi-monitor** | Monitor ids from EDIDs, one track per monitor, hot-plug by renegotiation, placeholders, mode changes, ghosts and real monitors together | the docs/06 hot-plug criteria on the mini-PC with a real monitor, the DisplayPort chain and two ghosts, each with its own stable id |
+| **3.5 Comfort** | Local cursor through Fjarr's own PipeWire reader ([docs/22](22-remote-desktop-client.md#cursor-strategy)); clipboard both ways (mutter's interface); `sharpness` in the agent; per-session virtual monitors | the cursor is drawn locally with no lag; copy and paste both ways in the fixture and on the mini-PC |
+| **3.6 Presentation** | The portal-vs-route spike ([open question #19](18-open-questions.md)), then presentation mode: one window per robot monitor, fullscreen | on two-screen Chromium one click fills both screens, Alt+Tab reaches the robot on either, closing the tab closes both; Firefox works with manual placement |
+| **3.7 X11 kiosk** | Backend A and `fjarr-desktop-x11`: the `xhost` grant and the layout helper. robot-sim becomes its CI fixture, with scripted `xrandr` changes | an X11 kiosk robot works from the package, tested on every push |
+| **3.8 Containers** | A containerized robot's desktop through the reference compose file, with the helper's socket bind-mounted ([docs/26](26-robot-install-and-drivers.md#containerized-robots)) | the compose gate extended to the desktop |
+
+**Gate:** the `fjarr.desktop` acceptance criteria ([docs/06](06-capabilities.md));
+input-to-photon within budget on the mini-PC; `apt install
+fjarr-desktop-wayland` plus `setup desktop` gives remote desktop on the mini-PC,
+unattended after a reboot, and `--undo desktop` restores it; the mini-PC headless
+with two ghost screens plus a real monitor, all streaming with distinct ids; an
+X11 kiosk from `fjarr-desktop-x11`; a containerized robot's desktop through the
+reference compose file. No release until M3 closes (decided 2026-09-30).
+
+## M3.5 — Hear the robot {#m35}
+
+**`fjarr.audio`** (robot microphone downlink, push-to-talk uplink through the
+pre-allocated transceiver, a hard volume cap in the agent's config, uplink only
+when the grant says `talk`, audited) and **desktop audio** on `fjarr.desktop`
+(the sink monitor, measured unattended in the M2 spikes). The web side exists
+already: `usePushToTalk`, `useAudioTrack`, `<AudioSink>`, the audited
+`audio-uplink` event and the answer direction taken from the offer. What is left
+is the agent: the capability, the Opus pipeline, the recvonly transceiver and
+the output. Open questions #3 and #17 are settled before it starts. **Gate:** the
+`fjarr.audio` acceptance criteria ([docs/06](06-capabilities.md)).
+
+## Vendor cameras and the design-partner demo {#vendor-cameras}
+
+The first vendor camera packages ([ADR-0020](adr/0020-vendor-sources-as-gstreamer-plugins.md)),
+delivered through the repository and the driver catalog, and the first
+**design-partner demo** (docs/03 GTM). Scheduled when the design partner's
+hardware is known, rather than holding the desktop gate. The lab's planned
+Raspberry Pi 4/5 (Pi cameras) and Jetson (ZED) machines are the likely first
+targets ([docs/12](12-development-environment.md#lab-machines-and-fjarr-lab)).
+**Gate:** the design partner installs from the repository with `setup`, adds
+their camera with `drivers install`, and writes no config by hand.
 
 ## M4 — Files, telemetry, logs, sensors
 

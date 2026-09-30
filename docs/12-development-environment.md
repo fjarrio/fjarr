@@ -297,7 +297,8 @@ falling back to GitHub's `ubuntu-24.04`.
 > which a fork cannot trigger. **`ci.yml` must stay on hosted runners** —
 > it runs on `push` and `pull_request`. Also set Settings → Actions →
 > *Fork pull request workflows* to require approval for all outside
-> collaborators, and prefer a machine that is not someone's daily desktop.
+> collaborators. A machine that is also someone's desktop shares its time
+> through [`fjarr-lab`](#lab-machines-and-fjarr-lab): CI's by night, theirs by day.
 
 Setting one up:
 
@@ -334,6 +335,59 @@ runner takes `FJARR_LATENCY_LABEL` (the hardware, for the CSV) and
 `FJARR_LATENCY_STRICT=1` (hold the run to the docs/16 budgets). Turn strict
 on only for a machine nobody is using: the budgets assume a quiet host, and
 the harness refuses a run that could not decode the source rate anyway.
+
+## Lab machines and `fjarr-lab` {#lab-machines-and-fjarr-lab}
+
+Some tests need real hardware: monitors and ghost screens, a GPU encoder, a
+camera, a reboot. Those run on **lab machines**, self-hosted runners that are
+also people's machines by day ([ADR-0033](adr/0033-desktop-test-lab-and-shared-runners.md)).
+The rules in the box above apply to all of them. They serve only workflows
+that trigger on `schedule` and `workflow_dispatch` from `main`, never `push` or
+`pull_request`, and they are registered on the repository.
+
+**`fjarr-lab`** runs on each of them: a shell script with systemd units, no
+build step, the same on amd64 and on arm64 boards. It decides when the runner
+is online:
+
+```text
+fjarr-lab status                # CI (job, since) · idle in the CI window · reserved (by whom, until) · next change
+fjarr-lab reserve               # the machine is yours now: waits for a running job, then takes the runner offline
+fjarr-lab release               # back to the schedule
+fjarr-lab window 00:00-06:00    # the CI window, in /etc/fjarr-lab.conf
+fjarr-lab window off            # no schedule: online unless reserved (a dedicated runner)
+```
+
+- **The CI window.** Two systemd timers start and stop the runner's service at
+  the window's edges. At boot the unit works out the right state for the time
+  of day, so a job that reboots the machine (the unattended-access test) gets
+  its runner back.
+- **A reservation wins** over the window until `release`, so an evening at the
+  machine is not interrupted at midnight.
+- **Nothing is killed halfway.** When the window closes, or someone reserves the
+  machine, the runner stops taking jobs, waits for a running one (grace 30 min
+  by default, then it is cancelled), and goes offline. `status` shows which of
+  these is happening.
+- **Jobs start from a baseline**: undo the previous configuration, install the
+  build under test, apply the job's own settings. Manual experiments and CI runs
+  do not poison each other ([docs/15](15-testing-strategy.md#the-desktop-test-lab)).
+- **CI's side.** Lab jobs are scheduled shortly after the windows open (00:15)
+  and must finish, reboots included, before they close. A job dispatched by hand
+  during the day waits in GitHub's queue until the machine's window opens.
+
+Workflows pick machines **by label**, never by name. Every lab machine carries
+`fjarr-lab`, its architecture, and what it can test:
+
+| Machine | Labels | Tests | Status |
+|---|---|---|---|
+| mini-PC (Ryzen 7 5700U, GNOME 50) | `fjarr-lab` `amd64` `desktop` `gnome` `vaapi` | M3 desktop: backend E on hardware, ghost and chained monitors, unattended access after a reboot, input-to-photon | M3 |
+| GPU desktop (RTX 2080 Ti) | `fjarr-lab` `amd64` `nvcodec` | the `nvcodec` family (M2.6) and the nightly media suites | M3 (in use by day; CI window at night) |
+| Raspberry Pi 4 | `fjarr-lab` `arm64` `rpi4` `camera-libcamera` `v4l2m2m` | the Pi camera; the Pi 4's hardware H.264 encoder | planned |
+| Raspberry Pi 5 | `fjarr-lab` `arm64` `rpi5` `camera-libcamera` | the Pi camera; the Pi 5 has no hardware H.264 encoder, so the software path on ARM | planned |
+| Jetson | `fjarr-lab` `arm64` `jetson` `camera-zed` `nvv4l2` | the ZED vendor package; the `nvv4l2` family | planned |
+
+A machine joins by installing `fjarr-lab` (`make lab-runner-install`, which also
+installs the runner's service), registering the runner with its labels, setting
+its window, and adding its labels to the nightly matrix.
 
 ## Pipeline introspection
 

@@ -161,6 +161,13 @@ non-GNOME compositors and as E's fallback), and **A** is for X11 kiosks. D is
 dropped and B is not built. Headless robots get a forced connector. The
 hypotheses below are kept as they were written.
 
+**Build order (M3 planning, 2026-09-30).** E first, then A. C stays second in
+the ADR's ranking but is not built in M3: E covers stock Ubuntu and A covers
+kiosks, and C waits for a robot that needs a non-GNOME compositor
+([docs/17](17-roadmap.md#m3)). Forced connectors became
+[ghost screens](26-robot-install-and-drivers.md#ghost-screens)
+([ADR-0032](adr/0032-ghost-screens.md)).
+
 **Clipboard, verified after the ADR (2026-09-27).** Mutter's RemoteDesktop
 session carries a clipboard: `EnableClipboard`, `SetSelection`,
 `SelectionRead`, `SelectionWrite`, `SelectionTransfer` and

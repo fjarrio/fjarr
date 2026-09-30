@@ -62,7 +62,7 @@ invasive happens as a side effect of `apt install`.
 | `fjarr-desktop-wayland` | the Wayland module; `fjarr-desktop-session` and its **user** unit ([ADR-0028](adr/0028-desktop-session-helper.md)); the `fjarr-desktop` group; the GDM watchdog unit; the fake-monitor EDIDs for headless robots | `setup desktop` |
 | `fjarr-desktop-x11` | the X11 module; the kiosk session's `xhost +si:localuser:fjarr` grant as an autostart entry; the output-layout helper and its RandR listener | `setup desktop` |
 | `fjarr-tools` | `fjarr-connect` (given `cap_net_admin` at install) | nothing |
-| `fjarr-gst-<vendor>` | camera drivers, per vendor and architecture | `drivers install` (M3, per design partner) |
+| `fjarr-gst-<vendor>` | camera drivers, per vendor and architecture | `drivers install` ([with the design partner's hardware](17-roadmap.md#vendor-cameras)) |
 
 `fjarr-inputd` is not packaged: none of the chosen desktop backends needs it
 (ADR-0006).
@@ -112,7 +112,7 @@ later, and versioned with the agent), is the single source the tools read.
 `rtsp`, each `builtin = true` with `source` naming its `type` in `fjarr.toml`
 and `element` what the doctor checks. Vendor entries and their packages are
 M3, chosen by the design partner's hardware; the desktop entries come with the
-desktop packages (M3). The shape, with the vendor entries as they will look:
+desktop packages (M3). Vendor entries arrive [with the design partner's hardware](17-roadmap.md#vendor-cameras). The shape, with the vendor entries as they will look:
 
 ```toml
 [v4l2]
@@ -173,6 +173,7 @@ vendor is an entry plus a plugin package.
 | `fjarr-agent net setup` | the tunnel's one-time setup: address, `fjarr-net.service` recreating the device at every boot, optional ROS ordering and DDS file ([below](#fjarr-agent-net-setup), [docs/27](27-network-tunnel.md)) |
 
 | `fjarr-agent setup desktop` | makes a desktop robot reachable unattended ([ADR-0006](adr/0006-desktop-backend-selection.md)): chooses or creates the auto-login account (no password, no remote login), enables auto-login, the GDM watchdog and the session helper's user unit; for X11 kiosks the output layout; for headless robots, on request, a forced connector with an EDID on the kernel command line |
+| `fjarr-agent ghosts list\|add\|remove` | [ghost screens](#ghost-screens) for a headless robot, on free root connectors, beside any real monitors ([ADR-0032](adr/0032-ghost-screens.md)); M3 |
 | `fjarr-agent setup --undo [<feature>]` | reverses every change `setup` recorded for that feature (`setup`, `net`; later `desktop`: GDM, GRUB, accounts, units); bare, every feature, newest change first |
 
 `setup` never guesses silently: every proposed track and every install
@@ -271,8 +272,8 @@ Until M5 builds enrollment ([docs/17](17-roadmap.md), [docs/10](10-security.md))
 to the configuration. The prompt becomes a one-time enrollment token, redeemed
 for the per-device key, when M5 lands. The flow around it does not change.
 The "Fjarr Cloud" choice joins the server prompt with M7; today the prompt is
-the server URL. Installing a vendor driver from this flow is M3 with the first
-vendor entry: a detected camera that needs one is shown with its entry and left
+the server URL. Installing a vendor driver from this flow arrives with the first
+vendor entry ([with the design partner's hardware](17-roadmap.md#vendor-cameras)): a detected camera that needs one is shown with its entry and left
 unchecked.
 
 What it does, in order, as built 2026-09-28 (`fjarr-setup`'s `setup.rs`):
@@ -432,14 +433,74 @@ M2 spikes showed a desktop device needs
 ◇  GDM watchdog enabled (restarts the login if the session dies)
 ◇  Session helper enabled for desktop · group fjarr-desktop
 │
+◆  Ghost screens for when no monitor is attached? (free: DP-2, HDMI-A-2)
+│  ○ None   ● 1   ○ 2          --ghost-screens N · change later: fjarr-agent ghosts
+│
 ▲  desktop must log in once for its group to apply. Reboot now?   Yes / Later
 └  Undo: fjarr-agent setup --undo desktop
 ```
 
 On an X11 kiosk it installs the output-layout helper and the `xhost` grant
-instead. With no monitor it offers a forced connector: it shows which connector
-and resolution, edits the kernel command line, installs the EDID, and says a
-reboot is needed.
+instead. With no monitor, or with `--ghost-screens N`, it offers
+[ghost screens](#ghost-screens) on the free connectors, and says a reboot is
+needed.
+
+### Ghost screens {#ghost-screens}
+
+A headless robot often wants screens its applications lay windows out on,
+with nobody's monitor attached. A **ghost screen** is a forced DRM connector
+carrying a Fjarr-generated EDID ("Fjarr Ghost N", its own serial, the requested
+mode). It exists from boot, whether or not anyone is connected, and GNOME and
+the capture backends treat it like any monitor
+([ADR-0032](adr/0032-ghost-screens.md); measured on the mini-PC with three at
+once). Real monitors can be plugged in beside ghosts, and the two never hide
+each other:
+
+- **Free root connectors only.** A ghost goes on a connector that is
+  `disconnected` when it is added, never on one a real monitor uses. Forcing a
+  used connector would replace that monitor's EDID with the ghost's.
+- **Never a DisplayPort MST branch.** A daisy-chain's `DP-1-1`, `DP-1-2`… are
+  created at runtime, so a boot-time kernel parameter cannot name them. Real
+  monitors on a chain are fully supported; the root connector the chain hangs
+  off counts as in use while the chain is plugged in.
+- **A distinct identity.** A ghost's monitor id is its EDID slug, unique by
+  construction, so a ghost and a real monitor never share a `track_id`
+  ([docs/09](09-interfaces.md#the-desktop-backend-interface-wayland-first-shape)).
+
+`fjarr-agent ghosts` manages them, as root, and `setup desktop --ghost-screens N`
+uses the same code:
+
+```text
+$ sudo fjarr-agent ghosts list
+  CONNECTOR  STATE        MONITOR                    GHOST
+  HDMI-A-1   connected    DELL U2422H (real)         —
+  DP-1       connected    MST chain: 2 monitors      — (not forceable: chain)
+  DP-2       free         —                          can be a ghost
+  HDMI-A-2   ghost        Fjarr Ghost 1  1920×1080   active
+
+$ sudo fjarr-agent ghosts add [--connector DP-2] [--mode 1920x1080@60]
+  DP-2 → Fjarr Ghost 2 (1920×1080@60) · takes effect after a reboot
+$ sudo fjarr-agent ghosts remove <connector|all>
+```
+
+What a change writes, each recorded for `setup --undo desktop`:
+
+| Where | What |
+|---|---|
+| `/etc/default/grub.d/fjarr-ghosts.cfg` | `video=<connector>:<mode>e drm.edid_firmware=<connector>:edid/fjarr-ghost-N.bin` per ghost, then `update-grub` |
+| `/usr/lib/firmware/edid/fjarr-ghost-N.bin` | the generated EDID |
+
+`add` without `--connector` takes the next free root connector, and when none
+is left it says how many ghosts this machine can have instead of failing after
+a reboot. `--check` adds rows for each configured ghost: *active* when the
+running kernel booted with it, *reboot pending* when it did not, and a failure
+when a real monitor is plugged into a ghost connector. That monitor shows up as
+the ghost, because the kernel forces the ghost's EDID on that port.
+
+A **virtual monitor** (mutter's `RecordVirtual`) is the other kind: an extra
+screen for one session, created when the operator asks and gone when they
+leave. It needs no reboot and no connector, and promises no persistence
+([docs/22](22-remote-desktop-client.md)).
 
 ### `fjarr-agent drivers`
 
@@ -471,7 +532,8 @@ which the `fjarr-agent` package depends on for exactly this.
 `fjarr-agent drivers install v4l2` says the entry is built in and exits 0.
 `sudo fjarr-agent drivers install realsense` will show the prerequisites, ask
 before adding a vendor repository, install, reload udev, and finish with a
-`--probe-source` of the device it found — with the first vendor entry, M3;
+`--probe-source` of the device it found — with the first vendor entry
+([with the design partner's hardware](17-roadmap.md#vendor-cameras));
 until then it says so and exits non-zero.
 
 ## Containerized robots {#containerized-robots}
@@ -631,6 +693,6 @@ the repository, the packages and their units, the system profile, the images
 and the reference compose file, the install script, the release pipeline,
 `setup` (with `--undo`), `drivers` and the catalog with
 the built-in entries; `setup desktop` and the desktop packages are M3 ([ADR-0031](adr/0031-distribution-apt-and-containers-first.md)). The first
-vendor packages are M3, chosen by the design partner's hardware. Slice 3
+vendor packages come [with the design partner's hardware](17-roadmap.md#vendor-cameras). Slice 3
 already ships the runtime half: `unavailable` with reason, `--check`,
 `--probe-source`, `/sources`.

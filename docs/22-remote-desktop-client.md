@@ -34,6 +34,25 @@ survives a tab switch. This document pins every one of those.
 Headless-first like every component (docs/05): the surfaces are hooks +
 minimal elements; the toolbar is a slot the host fills.
 
+**Where the logic lives** (decided 2026-09-30, M3 planning). The input model is
+framework-agnostic and belongs to `@fjarr/core`, so a customer on Vue or plain
+TypeScript gets the hard part without React:
+
+- **`@fjarr/core`: `DesktopInput`**, one per desktop view. It takes DOM events
+  and a monitor's geometry, and turns them into the wire messages
+  ([docs/08](08-protocol.md)): `code` → evdev keycode, no auto-repeat,
+  composition and `beforeinput` for text, held-key tracking and `release-all`,
+  wheel normalization, pointer coalescing, and normalized per-monitor
+  coordinates. It knows nothing about rendering and is unit-tested with
+  synthetic events.
+- **`@fjarr/react`: `<DesktopView>` and the hooks** above: the video and cursor
+  surfaces, focus and Keyboard Lock, fullscreen, and presentation mode. They
+  wire `DesktopInput` to the DOM and the session, and add nothing to the input
+  model.
+- **The demo dashboard** gets a **Desktop** tab per robot: `<DesktopView>` with
+  a toolbar of take-control, monitor switch, presentation mode and clipboard. It
+  uses only the public API, like every demo.
+
 ## Monitors and geometry
 
 The manifest carries one video track per monitor with

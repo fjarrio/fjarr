@@ -337,7 +337,7 @@ on either side (GStreamer `opusenc`/`opusdec`, browser `getUserMedia`).
 **Accepted when:** an operator hears the robot-sim's synthetic audio source
 within budget (docs/16); PTT delivers speech to the sim's sink with
 echo cancellation on; releasing PTT stops the uplink within 200 ms; audit
-events recorded. Milestone: **M3** ([roadmap](17-roadmap.md#m3--see-control-and-hear-the-robot)).
+events recorded. Milestone: **M3.5** ([roadmap](17-roadmap.md#m35)).
 
 ## `fjarr.logs` — live log tailing (planned)
 

@@ -118,3 +118,26 @@ been a second path for the reference daemon alone.
   deployment needs the desktop from more than one account at once (one helper
   per account would then need naming). Revisit if the descriptor handover
   costs measurable latency, which it should not, because nothing is copied.
+
+## Addendum (2026-09-30): what the helper is built in, and where the work splits
+
+Decided while planning M3 (docs/17).
+
+- **C++, in the agent's tree.** `fjarr-desktop-session` builds with the agent's
+  CMake, uses its RAII kit and GLib/GDBus loop discipline, and is tested by the
+  same harness. The deciding reason is PipeWire narrowing: restricting the
+  handed connection to the granted stream uses libpipewire's client-permission
+  API, which is C, and is what `xdg-desktop-portal` itself does. The Rust
+  bindings are thin there. The M2 Python spike (`spikes/desktop-helper/`)
+  translates almost line for line to GDBus.
+- **The split.** The **helper** owns everything that needs the desktop user's
+  rights: the D-Bus conversation with mutter (RemoteDesktop, ScreenCast,
+  clipboard), opening and narrowing the PipeWire connection, obtaining the EIS
+  socket, monitor and hot-plug events, and passing descriptors over
+  `/run/fjarr/desktop.sock`. **Backend module E** (in the agent's process)
+  owns what flows over the descriptors: the PipeWire stream into a video
+  track, Fjarr's own cursor-metadata reader (docs/22#cursor-strategy), and the
+  libei client that injects input.
+- **Narrowing is proven before anything is built on it** (slice 3.3, the M3
+  gate item). If libpipewire cannot restrict a client the helper hands over,
+  the fallback recorded in docs/23 applies: the helper proxies the one stream.
