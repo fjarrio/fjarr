@@ -486,7 +486,8 @@ needs from the host:
 | Desktop | the host installs `fjarr-desktop-session` from the `.deb`; its socket `/run/fjarr/desktop.sock` is bind-mounted into the container | the helper has to run inside the desktop user's session; descriptors cross a bind-mounted socket unchanged |
 
 The reference file is `packaging/compose/docker-compose.yml`, published with
-each release. It is written for one job — the agent next to the customer's own
+each stable release at `https://apt.fjarr.io/docker-compose.yml` (its image tag
+is `latest` unless `FJARR_VERSION` pins one). It is written for one job — the agent next to the customer's own
 containers — and the first run is the setup tool inside the image, which writes
 the configuration into the volume and, having no systemd, says so: it starts no
 agent, and `net setup` installs no `fjarr-net.service` (the entrypoint below
@@ -547,6 +548,7 @@ with the image's uid so the `xhost` grant can name it.
   | `dists/testing/`, `dists/stable/` | one **suite** per channel: `Release`, `InRelease`, `Release.gpg`, and `main/binary-{amd64,arm64}/Packages{,.gz}` |
   | `fjarr-archive-keyring.asc` | the public key, beside the repository it signs |
   | `install.sh` | the install script (`get.fjarr.io` redirects here) |
+  | `docker-compose.yml` | the [reference compose file](#containerized-robots) of the stable release |
 
   The indexes are generated with `apt-ftparchive` (`packaging/repo/`) from
   the pool, each suite listing exactly the packages of the version it
@@ -578,8 +580,8 @@ offline; its revocation certificate is kept offline with it.
   deployable only from `v*` tags). Images go to
   `ghcr.io/fjarrio/fjarr-agent` as one multi-arch manifest per version, tagged
   `X.Y.Z` and `testing`, with `latest` moved on promotion; each is signed with
-  cosign (keyless, GitHub's identity) and carries an SBOM. `install.sh` is
-  uploaded on promotion. The crates and npm packages join the promotion once
+  cosign (keyless, GitHub's identity) and carries an SBOM. `install.sh` and
+  the reference `docker-compose.yml` are uploaded on promotion. The crates and npm packages join the promotion once
   their registries are set up; no token for either exists yet. Release notes
   come from the conventional commits since the last tag.
 - **Building locally**: `make deb` builds the packages for the host's
