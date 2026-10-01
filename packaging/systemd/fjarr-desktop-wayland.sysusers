@@ -1,0 +1,4 @@
+# spec: docs/26#packages · docs/23#desktop-descriptor-handover — the helper's socket belongs to this
+# group; the agent's account is in it, and `setup desktop` adds the desktop account.
+g fjarr-desktop -
+m fjarr fjarr-desktop

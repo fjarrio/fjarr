@@ -12,7 +12,7 @@ apt-get update -qq >/dev/null
 # that step is skipped and a /run/fjarr the package failed to create went unnoticed (0.1.2, found on
 # the mini-PC). The standalone build is the one a container without systemd can have.
 apt-get install -y -qq systemd-standalone-tmpfiles >/dev/null 2>&1 || fail "could not install systemd-standalone-tmpfiles"
-cp /debs/fjarr-agent_*.deb /debs/fjarr-tools_*.deb /tmp/ && apt-get install -y -qq /tmp/*.deb >/tmp/apt.log 2>&1 || { tail -20 /tmp/apt.log; fail "apt could not install the packages"; }
+cp /debs/fjarr-agent_*.deb /debs/fjarr-tools_*.deb /debs/fjarr-desktop-wayland_*.deb /tmp/ && apt-get install -y -qq /tmp/*.deb >/tmp/apt.log 2>&1 || { tail -20 /tmp/apt.log; fail "apt could not install the packages"; }
 ok "apt installed: $(ls /tmp/*.deb | xargs -n1 basename | tr '\n' ' ')"
 # The package creates /run/fjarr for the agent at install (tmpfiles), which needs the fjarr user to
 # exist first (sysusers) — debhelper orders the two the other way round unless the postinst does it.
@@ -48,6 +48,19 @@ fjarr-agent net --help 2>&1 | grep -q '^Usage: fjarr-setup net' || fail "fjarr-a
 fjarr-agent net setup --yes --ros no 2>&1 | grep -q 'does not exist.*fjarr-agent setup' || fail "net setup without a config did not name setup as the fix"
 ok "fjarr-agent hands setup/net/drivers to fjarr-setup"
 [ ! -e /etc/fjarr/fjarr.toml ] || fail "the package shipped /etc/fjarr/fjarr.toml; setup writes it"; ok "no config shipped (setup writes it)"
+
+# fjarr-desktop-wayland (docs/26#packages): installs, switches nothing on. setup desktop does that.
+[ -f /usr/lib/fjarr/desktop/libfjarr-desktop-mutter.so ] || fail "no backend module E in /usr/lib/fjarr/desktop"
+# No session bus here, so it exits 1 at once ("no session bus"); 127 would be a library it cannot load.
+rc=0; /usr/lib/fjarr/fjarr-desktop-session >/tmp/helper.log 2>&1 </dev/null || rc=$?
+grep -q 'no session bus' /tmp/helper.log || fail "fjarr-desktop-session does not run (exit $rc): $(cat /tmp/helper.log)"
+getent group fjarr-desktop >/dev/null || fail "no fjarr-desktop group (sysusers)"
+id -nG fjarr | tr ' ' '\n' | grep -qx fjarr-desktop || fail "the agent's account is not in fjarr-desktop: $(id -nG fjarr)"
+[ -f /usr/lib/systemd/user/fjarr-desktop-session.service ] || fail "no user unit for the session helper"
+[ -z "$(find /etc/systemd/user -name 'fjarr-desktop-session.service' 2>/dev/null)" ] || fail "the helper's user unit is enabled for every user; setup desktop enables it for one account"
+[ -f /usr/lib/systemd/system/fjarr-desktop-watchdog.timer ] || fail "no watchdog timer"
+[ ! -e /etc/systemd/system/timers.target.wants/fjarr-desktop-watchdog.timer ] || fail "the watchdog is enabled by the package; setup desktop enables it"
+ok "fjarr-desktop-wayland: module, helper, group with fjarr in it, user unit and watchdog installed, nothing enabled"
 
 [ -f /usr/share/fjarr/viewer/index.html ] || fail "the viewer is missing"; ok "viewer installed"
 getcap /usr/bin/fjarr-connect | grep -q 'cap_net_admin=p' || fail "fjarr-connect lacks cap_net_admin: $(getcap /usr/bin/fjarr-connect)"

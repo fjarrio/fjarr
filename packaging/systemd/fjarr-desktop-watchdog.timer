@@ -1,0 +1,11 @@
+# Every 30 s (ADR-0006). Enabled by `fjarr-agent setup desktop`; the package ships it disabled.
+[Unit]
+Description=Fjarr desktop watchdog: check the automatic login every 30 s
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=30
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target

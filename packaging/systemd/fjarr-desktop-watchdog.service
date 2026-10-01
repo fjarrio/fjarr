@@ -1,0 +1,12 @@
+# One check of the GDM watchdog (ADR-0006): when GDM is up but the desktop account has had no
+# session on seat0 for two checks in a row, restart GDM so the automatic login runs again.
+# spec: docs/26-robot-install-and-drivers.md#fjarr-agent-setup-desktop
+[Unit]
+Description=Fjarr desktop watchdog: restore the automatic login if the session died
+Documentation=https://fjarr.io/26-robot-install-and-drivers/
+After=gdm.service
+ConditionPathExists=/etc/fjarr/fjarr.toml
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/fjarr/fjarr-setup desktop watchdog

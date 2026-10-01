@@ -1,0 +1,17 @@
+# The session helper (ADR-0028): runs as the desktop account inside its graphical session, talks to
+# mutter over the session bus, and hands the agent narrowed PipeWire and EIS descriptors over
+# /run/fjarr/desktop.sock. A user unit, enabled by `fjarr-agent setup desktop` for that account only.
+# spec: docs/26-robot-install-and-drivers.md#fjarr-agent-setup-desktop · docs/23#desktop-helper-protocol
+[Unit]
+Description=Fjarr desktop session helper
+Documentation=https://fjarr.io/26-robot-install-and-drivers/
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/lib/fjarr/fjarr-desktop-session
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

@@ -42,3 +42,15 @@ Description: Fjarr operator tools: fjarr-connect
  fjarr-connect is the native operator client: a network link to a robot
  (given cap_net_admin at install) and `fjarr-connect shell`, the robot's
  terminal in yours.
+
+Package: fjarr-desktop-wayland
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, fjarr-agent (= ${binary:Version}),
+ gstreamer1.0-pipewire
+Recommends: gdm3, gnome-shell
+Description: Fjarr remote desktop for GNOME on Wayland
+ The robot's screen as a video track, and the operator's pointer and keyboard
+ on it, through mutter. fjarr-desktop-session runs in the desktop account's
+ session and hands the agent a PipeWire connection narrowed to the screen and
+ an input socket; the agent keeps its own account. Nothing is switched on at
+ install: `fjarr-agent setup desktop` does that, and `--undo desktop` reverses it.

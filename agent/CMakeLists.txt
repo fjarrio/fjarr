@@ -132,6 +132,9 @@ endif()
 # time with no Ubuntu package, so its archive travels in fjarr's own export set, kept in a private
 # directory rather than beside the system's libraries.
 install(TARGETS fjarr-agent RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+# fjarr-desktop-wayland: the module where the agent looks for it (ADR-0021) and the session helper.
+install(TARGETS fjarr-desktop-mutter LIBRARY DESTINATION lib/fjarr/desktop)
+install(TARGETS fjarr-desktop-session RUNTIME DESTINATION lib/fjarr)
 install(TARGETS fjarr EXPORT fjarrTargets ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 # Its header is private to libfjarr (no embedder includes it); its PUBLIC_HEADER property names it
 # relative to its own directory, which does not resolve from here, so it is cleared, not installed.

@@ -529,7 +529,7 @@ compose-gate: ## M2.5 gate: the reference compose file runs a robot, tunnel incl
 	@BUILD_PRESET=$(BUILD_PRESET) DEB_ARCH=$(DEB_ARCH) packaging/compose/gate.sh
 
 .PHONY: deb deb-install-test deb-embed-test install-script-test set-version
-deb: ## Build the .debs (fjarr-agent, fjarr-tools) for this host's architecture into dist/deb/<arch>/
+deb: ## Build the .debs (fjarr-agent, fjarr-tools, fjarr-desktop-wayland, libfjarr-dev) for this host's architecture into dist/deb/<arch>/
 	@if [ -f /.dockerenv ]; then echo "make deb runs on the host (it starts its own builder container)"; exit 1; fi
 	docker build -q -t fjarr-deb-builder docker/deb-builder >/dev/null
 	mkdir -p dist/deb/$(DEB_ARCH)

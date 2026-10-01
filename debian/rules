@@ -24,6 +24,12 @@ execute_before_dh_installsystemd:
 override_dh_installsystemd:
 	dh_installsystemd -p fjarr-agent --name=fjarr-net --no-enable --no-start
 	dh_installsystemd -p fjarr-agent fjarr-agent.service
+	@# The desktop watchdog ships disabled; `setup desktop` enables it (docs/26#fjarr-agent-setup-desktop).
+	dh_installsystemd -p fjarr-desktop-wayland --name=fjarr-desktop-watchdog --no-enable --no-start fjarr-desktop-watchdog.timer fjarr-desktop-watchdog.service
+
+# The helper's user unit is enabled by `setup desktop` for the desktop account only; debhelper would
+# enable it globally, for every account that ever logs in (docs/26#fjarr-agent-setup-desktop).
+override_dh_installsystemduser:
 
 # The tests run in CI against the dev image (make agent-test, signaling-test); a package build
 # does not repeat them.
@@ -42,3 +48,6 @@ override_dh_auto_install:
 	install -D -m 0755 signaling/target/release/fjarr-connect debian/fjarr-tools/usr/bin/fjarr-connect
 	@# The setup tool, handed `setup`, `net` and `drivers` by fjarr-agent (docs/26#the-setup-tool).
 	install -D -m 0755 signaling/target/release/fjarr-setup debian/fjarr-agent/usr/lib/fjarr/fjarr-setup
+	@# The helper's user unit, installed but enabled for no one: `setup desktop` enables it for the
+	@# desktop account only (dh_installsystemduser would enable it for every user).
+	install -D -m 0644 packaging/systemd/fjarr-desktop-session.service debian/fjarr-desktop-wayland/usr/lib/systemd/user/fjarr-desktop-session.service
