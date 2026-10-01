@@ -1,6 +1,6 @@
 ---
 title: "ADR 0032: Ghost screens are forced connectors; virtual monitors stay per session"
-description: A headless robot's persistent screens come from forced DRM connectors with Fjarr-generated EDIDs, on free root connectors only, managed by fjarr-agent ghosts.
+description: A headless robot's persistent screens come from forced DRM connectors with Fjarr-generated EDIDs, on free root connectors only, managed by fjarr-agent display (renamed from ghosts, see the addendum).
 ---
 
 - **Status**: accepted
@@ -82,3 +82,11 @@ Details and the commands: [docs/26](../26-robot-install-and-drivers.md#ghost-scr
 - Revisit if mutter gains persistent virtual monitors with stable identities.
   That would remove the reboot and the connector limit. Revisit also if a vendor
   kernel (Jetson's L4T) does not honour `video=…e` or `drm.edid_firmware`.
+
+## Addendum 2026-10-01: the command is `fjarr-agent display`
+
+Renamed before any code existed (Erik, M3 slice 3.3): `fjarr-agent display
+list|add-ghost|remove-ghost`. `list` shows every connector, real monitors and
+DisplayPort chains included, so "display" names what the command is about;
+"ghost" stays in the verbs, where it says that no real monitor is being added.
+Everything else in this decision stands.
