@@ -1,0 +1,16 @@
+# Labels of the self-hosted lab machines (docs/12#lab-machines-and-fjarr-lab), so actionlint knows them.
+self-hosted-runner:
+  labels:
+    - fjarr-lab
+    - desktop
+    - gnome
+    - vaapi
+    - nvcodec
+    - gpu-desktop
+    - rpi4
+    - rpi5
+    - jetson
+    - camera-libcamera
+    - camera-zed
+    - v4l2m2m
+    - nvv4l2

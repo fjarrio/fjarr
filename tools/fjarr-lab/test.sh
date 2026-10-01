@@ -92,6 +92,13 @@ if [ $rc -ne 0 ] && grep -q "not a window" <<<"$out"; then ok "an impossible win
 lab_at 12:00 window off >/dev/null
 if [ ! -f "$T/units/fjarr-lab-open.timer.d/window.conf" ]; then ok "window off removes the timers"; else bad "window off left a timer"; fi
 
+# reboot: a lab job asks and ends; the reboot comes once no job runs, with the runner taken offline first.
+: > "$T/log"
+touch "$T/active" "$T/job"; echo 2 > "$T/job_polls"
+out=$(FJARR_LAB_FOREGROUND=1 FJARR_LAB_REBOOT_SETTLE=0 lab_at 00:20 reboot)
+contains "reboot waits for the running job, then reboots" "$out" "runner idle"
+expect "the runner goes offline before the reboot" "$(grep -E 'systemctl (stop|reboot)' "$T/log" | tr '\n' '|')" "systemctl stop actions.runner.test.service|systemctl reboot|"
+
 rm -rf "$T"
 echo "lab-test: $([ $fails -eq 0 ] && echo 'all passed' || echo "$fails failed")"
 exit $((fails > 0))

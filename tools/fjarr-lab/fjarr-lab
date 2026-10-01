@@ -10,6 +10,7 @@
 #   fjarr-lab release               back to the schedule
 #   fjarr-lab window HH:MM-HH:MM    set the CI window (may cross midnight); `window off` = online unless reserved
 #   fjarr-lab apply                 make the runner match the schedule (the timers and the boot unit run this)
+#   fjarr-lab reboot                a lab job's reboot: once the runner is idle (the job has ended), reboot
 #
 # Configuration: /etc/fjarr-lab.conf (RUNNER_SERVICE, WINDOW, GRACE_MIN, POLL_S).
 # Tests override FJARR_LAB_CONF, FJARR_LAB_STATE, FJARR_LAB_UNITS and FJARR_LAB_NOW (HH:MM).
@@ -153,13 +154,34 @@ cmd_window() {
   cmd_apply
 }
 
+# A job cannot outlive the reboot it causes, so it asks for one and ends: this waits in the background
+# until no job runs (the caller's has finished), takes the runner offline so nothing new starts, and
+# reboots. At boot the apply unit brings the runner back if the window is open (docs/15#unattended).
+cmd_reboot() {
+  need_service
+  if [ -z "${FJARR_LAB_FOREGROUND:-}" ]; then
+    FJARR_LAB_FOREGROUND=1 setsid "$0" reboot </dev/null >>"$STATE/reboot.log" 2>&1 &
+    say "rebooting once the runner is idle (log: $STATE/reboot.log)"
+    return 0
+  fi
+  local waited=0 limit=$((GRACE_MIN * 60))
+  sleep "${FJARR_LAB_REBOOT_SETTLE:-3}"
+  while job_running && [ "$waited" -lt "$limit" ]; do
+    sleep "$POLL_S"; waited=$((waited + POLL_S))
+  done
+  say "$(date -Is) runner idle: offline, then reboot"
+  systemctl stop "$RUNNER_SERVICE"
+  systemctl reboot
+}
+
 case "${1:-status}" in
   status) cmd_status ;;
   reserve) cmd_reserve ;;
   release) cmd_release ;;
   window) shift; cmd_window "${1:-}" ;;
   apply) cmd_apply ;;
+  reboot) mkdir -p "$STATE"; cmd_reboot ;;
   desired) desired ;;  # for tests and scripts
-  -h|--help|help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//' ;;
-  *) die "unknown command '$1' (status, reserve, release, window, apply)" ;;
+  -h|--help|help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) die "unknown command '$1' (status, reserve, release, window, apply, reboot)" ;;
 esac

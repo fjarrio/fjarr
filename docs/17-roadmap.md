@@ -384,8 +384,14 @@ brought a killed session back in **51 s** (two checks, then a GDM restart), with
 the helper, capture and input back a second later. Two bugs that only this
 hardware showed were fixed the same evening (0ce5475): the watchdog would have
 logged out a person at the machine, and amdgpu's chain root was not recognised.
-Still open in 3.L: the self-hosted runner and the nightly unattended test, and
-[#37](18-open-questions.md).
+Then, the same evening, #37 was answered: a real monitor on a ghost connector is
+found over DDC, and `display list` and `--check` fail on it. The mini-PC was
+registered as a runner (`fjarr-lab`, `amd64`, `desktop`, `gnome`, `vaapi`) under
+`fjarr-lab` with the 00:00–06:00 window. The unattended-access test is
+`lab-desktop-prepare` at 00:15 and `lab-desktop-verify` at 00:45, and its first
+run by hand passed every step from reboot to input (docs/15). **3.L done.** One
+question goes to 3.4: a desktop account created by `setup desktop` has no saved
+monitor layout, and mutter made the ghost its primary monitor.
 
 ## M3.5 — Hear the robot {#m35}
 

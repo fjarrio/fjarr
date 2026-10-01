@@ -870,15 +870,19 @@ class Peer {
         auto q = glib::make_element("queue", "rx-" + pname + "-queue");
         auto depay = glib::make_element("rtph264depay", "rx-" + pname + "-depay");
         auto parse = glib::make_element("h264parse", "rx-" + pname + "-parse");
-        auto dec = glib::make_element("avdec_h264", "rx-" + pname + "-dec");
+        // libav where it is (dev, CI); openh264 on a lab robot, which never carries GPL code (docs/15).
+        GstElementFactory* avdec = gst_element_factory_find("avdec_h264");
+        const bool libav = avdec != nullptr;
+        if (avdec) gst_object_unref(avdec);
+        auto dec = glib::make_element(libav ? "avdec_h264" : "openh264dec", "rx-" + pname + "-dec");
         auto conv = glib::make_element("videoconvert", "rx-" + pname + "-conv");
         auto cf = glib::make_element("capsfilter", "rx-" + pname + "-caps");
         auto sink = glib::make_element("fakesink", "rx-" + pname + "-sink");
         if (!q || !depay || !parse || !dec || !conv || !cf || !sink) {
-            logf("peer: decode branch elements missing (rtph264depay/h264parse/avdec_h264/videoconvert)");
+            logf("peer: decode branch elements missing (rtph264depay/h264parse/avdec_h264 or openh264dec/videoconvert)");
             return;
         }
-        g_object_set(dec.get(), "output-corrupt", FALSE, nullptr); // frames only after a valid keyframe
+        if (libav) g_object_set(dec.get(), "output-corrupt", FALSE, nullptr); // frames only after a valid keyframe
         glib::GstCapsPtr i420(gst_caps_from_string("video/x-raw,format=I420"));
         g_object_set(cf.get(), "caps", i420.get(), nullptr);
         g_object_set(sink.get(), "sync", FALSE, "async", FALSE, nullptr);
@@ -2352,9 +2356,16 @@ void scenario_desktop_control(Operator& op) {
         r.check("desktop-text-aao", nordic && lacks == json::array({"å", "ä", "ö"}), "this robot's layout has no åäö, and says so: " + (nordic ? nordic->payload.dump() : std::string("no answer")));
     }
     // Alt+Tab is the compositor's to take (a real robot's window switcher), so the window may or may
-    // not see Tab; what must hold is that the combo ran and left Alt up.
-    r.check("desktop-combo", combo && combo->payload.value("ok", false) && has("key Alt_L") && has("release Alt_L"),
-            std::string("Alt+Tab pressed and released") + (has("key Tab") ? "; Tab reached the window" : "; the compositor took Tab"));
+    // not see Tab. What must hold is that Alt went up again: either the window saw its release, or —
+    // on GNOME Shell, whose switcher grabs the keyboard and so takes the release (the mini-PC,
+    // 2026-10-01) — the window got focus back after Alt went down, which the switcher only does once
+    // Alt is released.
+    const auto alt = got.find("key Alt_L");
+    const bool alt_up = alt != std::string::npos &&
+                        (got.find("release Alt_L", alt) != std::string::npos || got.find("focus active=True", alt) != std::string::npos);
+    r.check("desktop-combo", combo && combo->payload.value("ok", false) && alt_up,
+            std::string(alt == std::string::npos ? "Alt never reached the window" : alt_up ? "Alt+Tab pressed and released" : "Alt went down and was never seen going up") +
+                (has("key Tab") ? "; Tab reached the window" : "; the compositor took Tab"));
     r.check("desktop-click", width > 0 && has("click button=1 x=321 y=234"), "a click at 321,234 of " + std::to_string(width) + "x" + std::to_string(height) + " landed there");
 
     // 3. Input-to-photon: F9 turns the window green while held; time key-down to the first decoded

@@ -1,0 +1,53 @@
+# The unattended-access test, first half (docs/15#unattended-access-test-the-industrial-gate): build,
+# install on the desktop lab machine, `setup desktop`, reboot. lab-desktop-verify checks it at 00:45.
+# Lab machines serve only schedule and workflow_dispatch from main (ADR-0033, docs/12): never push or
+# pull_request. A daytime dispatch waits in GitHub's queue until fjarr-lab opens the window (00:00).
+name: Lab desktop — prepare
+
+on:
+  schedule:
+    - cron: "15 22 * * *"   # 00:15 in Sweden (CEST); GitHub's cron is UTC
+  workflow_dispatch:
+
+concurrency:
+  group: lab-desktop
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build (debs, fjarr-server, fjarr-opsim)
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: make deb DEB_ARCH=amd64
+      - run: make lab-artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lab-desktop-build
+          path: |
+            dist/deb/amd64/fjarr-agent_*.deb
+            dist/deb/amd64/fjarr-tools_*.deb
+            dist/deb/amd64/fjarr-desktop-wayland_*.deb
+            dist/lab/fjarr-server
+            dist/lab/fjarr-opsim
+          retention-days: 3
+
+  prepare:
+    name: install, setup desktop, reboot (mini-PC)
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, fjarr-lab, desktop, gnome]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: lab-desktop-build
+          path: build-under-test
+      - name: prepare (ends by asking fjarr-lab to reboot once this job has finished)
+        run: |
+          mkdir -p build-under-test/flat
+          find build-under-test -type f \( -name '*.deb' -o -name 'fjarr-server' -o -name 'fjarr-opsim' \) -exec cp {} build-under-test/flat/ \;
+          chmod +x build-under-test/flat/fjarr-server build-under-test/flat/fjarr-opsim
+          sudo -n tools/fjarr-lab/unattended.sh prepare build-under-test/flat

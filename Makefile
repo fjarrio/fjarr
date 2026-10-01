@@ -538,6 +538,18 @@ deb: ## Build the .debs (fjarr-agent, fjarr-tools, fjarr-desktop-wayland, libfja
 	rm -f dist/deb/$(DEB_ARCH)/*.deb
 	docker run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp -v "$(CURDIR)":/src:ro -v "$(CURDIR)/dist/deb/$(DEB_ARCH)":/out fjarr-deb-builder
 
+.PHONY: lab-artifacts
+lab-artifacts: ## fjarr-server and fjarr-opsim for a lab machine's nightly (Ubuntu 26.04, built in the deb builder) into dist/lab/ (docs/15#unattended-access-test-the-industrial-gate)
+	@if [ -f /.dockerenv ]; then echo "make lab-artifacts runs on the host (it starts the builder container)"; exit 1; fi
+	docker build -q -t fjarr-deb-builder docker/deb-builder >/dev/null
+	mkdir -p dist/lab && rm -f dist/lab/fjarr-server dist/lab/fjarr-opsim
+	docker run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp -v "$(CURDIR)":/src:ro -v "$(CURDIR)/dist/lab":/out --entrypoint sh fjarr-deb-builder -euc '\
+	  mkdir -p /tmp/w && tar -C /src --exclude=./node_modules --exclude="./**/node_modules" --exclude=./build --exclude=./signaling/target --exclude=./dist --exclude=./inspiration -cf - . | tar -C /tmp/w -xf - && \
+	  cmake -S /tmp/w -B /tmp/w/b -G Ninja -DCMAKE_BUILD_TYPE=Release -DFJARR_BUILD_TESTS=OFF >/dev/null && cmake --build /tmp/w/b --target fjarr-opsim >/dev/null && \
+	  cp /tmp/w/b/agent/tools/fjarr-opsim /out/ && \
+	  cd /tmp/w/signaling && cargo build -q --release --locked -p fjarr-server && cp target/release/fjarr-server /out/'
+	@ls -l dist/lab
+
 deb-install-test: ## Install dist/deb/<arch>/*.deb on a clean Ubuntu 26.04 and check what they promise
 	@if [ -f /.dockerenv ]; then echo "make deb-install-test runs on the host"; exit 1; fi
 	docker run --rm -v "$(CURDIR)/dist/deb/$(DEB_ARCH)":/debs:ro -v "$(CURDIR)/packaging/install-test.sh":/install-test.sh:ro ubuntu:26.04 sh /install-test.sh

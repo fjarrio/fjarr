@@ -1,0 +1,24 @@
+# The unattended-access test, second half (docs/15#unattended-access-test-the-industrial-gate): after
+# lab-desktop-prepare's reboot, with nobody at the machine — GDM's automatic login, the session helper,
+# the agent's capture, then video and input through fjarr-opsim. A failure names the first step that
+# broke. Lab machines serve only schedule and workflow_dispatch from main (ADR-0033, docs/12).
+name: Lab desktop — verify
+
+on:
+  schedule:
+    - cron: "45 22 * * *"   # 00:45 in Sweden (CEST), 30 min after prepare
+  workflow_dispatch:
+
+concurrency:
+  group: lab-desktop
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: unattended access after the reboot (mini-PC)
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, fjarr-lab, desktop, gnome]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo -n tools/fjarr-lab/unattended.sh verify

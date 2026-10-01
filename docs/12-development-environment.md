@@ -357,6 +357,7 @@ fjarr-lab reserve               # the machine is yours now: waits for a running 
 fjarr-lab release               # back to the schedule
 fjarr-lab window 00:00-06:00    # the CI window, in /etc/fjarr-lab.conf
 fjarr-lab window off            # no schedule: online unless reserved (a dedicated runner)
+fjarr-lab reboot                # a lab job's reboot: waits until the runner is idle (the job has ended), then reboots
 ```
 
 - **The CI window.** Two systemd timers start and stop the runner's service at

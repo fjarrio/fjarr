@@ -193,12 +193,41 @@ can act on, not a wall of output.
 Reboot the robot, wait, and assert that an operator session can start, see the
 display and type into it **with zero local interaction**. Its phase-1 results
 decided ADR-0006. From M3 it is scripted and kept forever on the mini-PC, the
-desktop lab machine ([below](#the-desktop-test-lab)). It runs in two phases: the
-job installs the build and runs `setup desktop`, reboots the machine, and a
-second job, picked up by the same runner once `fjarr-lab` brings it back online,
-connects with `fjarr-opsim` and asserts video and an injected keystroke. A
-failure names the step: GDM auto-login, the session helper, the agent's
-backend, or the stream.
+desktop lab machine ([below](#the-desktop-test-lab)). It runs as **two scheduled
+workflows**, because a job cannot outlive the reboot it causes, and a second job
+in the same run could be handed to the runner in the seconds before the machine
+goes down (decided 2026-10-01, on the mini-PC):
+
+- **`lab-desktop-prepare`, 00:15.** A hosted job builds the `.deb`s,
+  `fjarr-server` and `fjarr-opsim`. On the lab machine, `tools/fjarr-lab/unattended.sh prepare`
+  undoes the previous `setup desktop`, installs the build, runs `setup desktop
+  --ghost-screens 1`, and points the agent at a `fjarr-server` on the machine
+  itself through a systemd drop-in. The person's own `/etc/fjarr/fjarr.toml` is
+  never touched. Then `fjarr-lab reboot` reboots the machine once the runner is
+  idle, which is after the job has finished.
+- **`lab-desktop-verify`, 00:45.** `unattended.sh verify` checks that the machine
+  really rebooted, then each step in order, so a failure names the first one
+  that broke: GDM's automatic login (a session of the account on seat0), the
+  session helper (the agent says it connected), the agent's backend (a capture
+  ready), and the stream and input (`fjarr-opsim desktop-see` and
+  `desktop-control` against the test window, run in the account's session). It
+  ends by removing the drop-in, so the agent returns to its own server.
+
+`fjarr-opsim` runs on the lab machine itself and decodes with `openh264dec`, which
+the robot already has for its software encoder. libav (GPL) is never installed on
+a machine under test. Its input-to-photon is not a number of record: the decoder
+shares the robot's CPU with the encoder (162 ms on the mini-PC against 53 ms from
+an operator on another machine, 2026-10-01). Input-to-photon is measured from
+another machine.
+
+First run by hand on the mini-PC, 2026-10-01: prepare installed the build and put
+the ghost on DP-2, because the HDMI port had a monitor on it. `fjarr-lab reboot`
+rebooted once the job had ended. Verify then passed the automatic login, the
+helper, the capture and `desktop-see`. Its one failure was in the oracle: GNOME
+Shell's Alt+Tab switcher grabs the keyboard, so the window never sees Alt's
+release. The check now also accepts the window getting focus back, which the
+switcher gives only once Alt is up. With that, `desktop-control` passed 12/12 on
+GNOME Shell.
 
 ## The desktop test lab {#the-desktop-test-lab}
 
