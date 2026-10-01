@@ -1578,6 +1578,26 @@ class Operator {
     const std::string& introspect() const { return opts_.introspect; }
     const std::string& desktop_oracle() const { return opts_.desktop_oracle; }
     const std::string& desktop_plug() const { return opts_.desktop_plug; }
+    /// The desk-* track of the primary monitor in the latest offer's manifest (docs/08 `monitor`),
+    /// else the first desk-* track; empty when there is none. A robot with several monitors offers
+    /// several, and the test window opens on the primary one.
+    std::string primary_desk() {
+        return locked<std::string>([this] {
+            std::string first;
+            for (auto it = sh_.sig_in.rbegin(); it != sh_.sig_in.rend(); ++it) {
+                if (it->value("type", "") != "offer") continue;
+                for (const auto& t : it->value("tracks", json::array())) {
+                    const std::string id = t.value("track_id", std::string());
+                    if (id.rfind("desk-", 0) != 0) continue;
+                    if (first.empty()) first = id;
+                    const auto& m = t.contains("monitor") ? t["monitor"] : json();
+                    if (m.is_object() && m.value("primary", false)) return id;
+                }
+                return first;
+            }
+            return first;
+        });
+    }
     /// Send an event on a data channel (input is events: docs/08#input-events-fjarrdesktop).
     bool event(const std::string& channel, const std::string& cap, const std::string& type, json payload) {
         return send_envelope(channel, protocol::make_envelope(cap, type, "event", std::move(payload)));
@@ -2243,8 +2263,7 @@ void scenario_desktop_see(Operator& op) {
     Report& r = op.report();
     connect_and_report(op);
     std::string desk;
-    for (const auto& id : op.track_ids())
-        if (id.rfind("desk-", 0) == 0) desk = id;
+    desk = op.primary_desk();
     r.check("desktop-track", !desk.empty(), desk.empty() ? "no desk-* track in the manifest (is the session helper connected?)" : "the manifest carries " + desk);
     if (desk.empty()) return;
     const std::uint64_t before = op.frames(desk);
@@ -2273,8 +2292,7 @@ void scenario_desktop_control(Operator& op) {
     }
     connect_and_report(op);
     std::string desk;
-    for (const auto& id : op.track_ids())
-        if (id.rfind("desk-", 0) == 0) desk = id;
+    desk = op.primary_desk();
     r.check("desktop-track", !desk.empty(), desk.empty() ? "no desk-* track in the manifest (is the session helper connected?)" : "the manifest carries " + desk);
     if (desk.empty()) return;
     const std::uint64_t f0 = op.frames(desk);
