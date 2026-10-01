@@ -553,13 +553,48 @@ its name is bumped with the module seam's.
   the fixture's end-to-end test types Shift-level characters and refuses "å",
   and a unit test types åäö against a Swedish keymap.
 - **Loss.** The helper sends `capture-lost {id, reason: "monitor-gone" |
-  "stream-stopped"}` when mutter ends a stream. A closed socket is
+  "stream-stopped"}` when a capture ends without being asked. mutter does not
+  say when a recorded monitor goes away: there is no `Stopped` on the stream and
+  no `Closed` on the session, only `MonitorsChanged`, and the session's other
+  streams keep producing (measured 2026-10-01, mutter 50, a monitor removed from
+  a two-stream session). So on every layout change the helper compares the
+  monitors with its captures, and sends `monitor-gone` for each capture whose
+  connector has left. A closed socket is
   `SessionEnded` for every capture (`CaptureLost`, docs/09): the desktop session
   ended or the helper died, and the capability rebuilds its tracks when a helper
   connects again.
 - **Growth.** Later slices add message types (clipboard in 3.5, virtual
   monitors, hot-plug details in 3.4) within `fjarr-desktop-1`. An end ignores a
   type it does not know. Changing the meaning of an existing type bumps the name.
+
+### The desktop's monitors (M3 slice 3.4) {#desktop-monitors}
+
+`fjarr.desktop` offers **one video track per monitor**, `desk-<wire id>`, with
+the monitor's geometry in the manifest
+([docs/08](08-protocol.md#track-manifest)). On every `monitors` message from the
+helper, the capability diffs the new set **by wire id**, never by connector or
+index:
+
+- **A monitor that arrived** gets a capture (`start_capture`) and a track. Its
+  source is unavailable until the helper hands the stream over, so the track
+  joins the offer when it can deliver frames.
+- **A monitor that left** has its capture stopped and its track removed. Its
+  wire id is remembered, so the same monitor returning gets the same
+  `track_id`.
+- **A monitor that changed** (mode, scale, position, the primary flag) keeps its
+  track and capture. Its `MonitorInfo` is updated in place, and the capture's
+  stream renegotiates its size by itself.
+- **Every change** sends `fjarr.desktop` `monitors {monitors, reason}` to each
+  session *before* `update_tracks` re-offers, as
+  [docs/08](08-protocol.md#input-events-fjarrdesktop) requires, so a client's
+  placeholders move at once. The reason is `initial` for a helper's first set,
+  `hotplug` when the set of ids changed, and `mode-change` otherwise.
+- **Zero monitors** is a valid state. The tracks go, the session stays, and
+  input has nowhere to land until a monitor returns.
+
+A capture costs little while nobody watches, because its producer starts on the
+first demand (above). Pointer input names its monitor by `track_id`, so it lands
+on that monitor whichever is primary.
 
 ### Encoders and tiers
 

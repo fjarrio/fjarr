@@ -540,6 +540,16 @@ the monitor's own EDID over the connector's DDC bus instead (`i2c-dev`, which
 `fjarr-desktop-wayland` loads at boot). A sink that answers there is a real
 monitor ([#37](18-open-questions.md), measured on the mini-PC).
 
+**A ghost is never the primary monitor while a real one is connected.** On a
+desktop account with no saved layout, mutter picked one of the ghosts as primary
+(the mini-PC, 2026-10-01, with a three-monitor chain beside it). The robot's own
+applications open on the primary monitor, and an operator's view follows it. So
+`fjarr-desktop-session` checks every layout change: when the primary is a ghost
+(manufacturer `FJR`) and a real monitor is connected, it makes the leftmost real
+monitor primary through mutter's `ApplyMonitorsConfig`, with every position, mode
+and scale kept, persistently, so the account's `monitors.xml` remembers it. With
+only ghosts connected, a ghost is primary, as it must be.
+
 A **virtual monitor** (mutter's `RecordVirtual`) is the other kind: an extra
 screen for one session, created when the operator asks and gone when they
 leave. It needs no reboot and no connector, and promises no persistence
