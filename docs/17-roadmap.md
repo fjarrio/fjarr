@@ -371,6 +371,22 @@ needs the mini-PC (3.L): a reboot into the automatic login, ghosts on real
 connectors, the watchdog bringing a killed session back, and the nightly
 unattended test.
 
+**3.L on the mini-PC, 2026-10-01** (Ryzen 7 5700U, Ubuntu 26.04.1, kernel
+7.0, GNOME 50, Swedish layout, three Dells on one DisplayPort chain):
+`fjarr-desktop-wayland` and `setup desktop --ghost-screens 1`, then a reboot.
+`desktop` logged in by itself, the helper connected 3 s after the agent
+started, and mutter reported 4 monitors: the chain's three and "Fjarr Ghost 1"
+on HDMI-A-1, whose EDID was ours. `desktop-see` 5/5 and `desktop-control` 12/12
+ran from the dev machine over the LAN: åäö and AltGr's "@" typed through the
+robot's own layout, a click landed on its pixel at 1920×1080, and
+**input-to-photon was p50 52 ms, p95 59 ms** (budget 150/250). The watchdog
+brought a killed session back in **51 s** (two checks, then a GDM restart), with
+the helper, capture and input back a second later. Two bugs that only this
+hardware showed were fixed the same evening (0ce5475): the watchdog would have
+logged out a person at the machine, and amdgpu's chain root was not recognised.
+Still open in 3.L: the self-hosted runner and the nightly unattended test, and
+[#37](18-open-questions.md).
+
 ## M3.5 — Hear the robot {#m35}
 
 **`fjarr.audio`** (robot microphone downlink, push-to-talk uplink through the

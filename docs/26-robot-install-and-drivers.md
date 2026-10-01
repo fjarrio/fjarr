@@ -519,7 +519,12 @@ reduced-blanking timing, and `di-edid-decode` reports it conforming. The GRUB
 snippet's `# fjarr-ghosts:` line is the one record of which ghosts exist. Proving
 it on hardware (a reboot into the ghosts, a chain beside them) is 3.L's, as is
 [open question #37](18-open-questions.md): telling that a real monitor is on a
-ghost connector.
+ghost connector. **On the mini-PC** (amdgpu, 2026-10-01) the ghost came up
+from the first reboot with the EDID only in `/usr/lib/firmware/edid`, because
+amdgpu is not in that machine's initramfs and loads after the root filesystem
+is mounted. A machine whose initramfs carries its GPU driver would need the
+EDID inside it too. `add-ghost` should check with `lsinitramfs` and add an
+initramfs hook when it does (owed).
 
 `add-ghost` without `--connector` takes the next free root connector, and when none
 is left it says how many ghosts this machine can have instead of failing after

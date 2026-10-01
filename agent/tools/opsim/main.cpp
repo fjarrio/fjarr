@@ -2320,7 +2320,11 @@ void scenario_desktop_control(Operator& op) {
     tap("KeyJ");
     key("ShiftLeft", false);
     auto text = op.request("fjarr.desktop", "text", json{{"text", "Hej @1"}});
-    auto refused = op.request("fjarr.desktop", "text", json{{"text", "på"}});
+    // No Latin layout has Δ: refused by name on any robot, before the 'p' is typed (docs/08 `text`).
+    auto refused = op.request("fjarr.desktop", "text", json{{"text", "pΔ"}});
+    // åäö type where the robot's layout has them (a Swedish robot), and are refused by name where it
+    // does not (the US fixture): either is right, a mix is not.
+    auto nordic = op.request("fjarr.desktop", "text", json{{"text", "åäö"}});
     auto combo = op.request("fjarr.desktop", "key-combo", json{{"codes", json::array({"AltLeft", "Tab"})}});
     if (width > 0) click(321.0 / width, 234.0 / height);
     op.sleep_ms(800);
@@ -2338,8 +2342,15 @@ void scenario_desktop_control(Operator& op) {
     r.check("desktop-text", text_ok && in_order, text_ok ? (in_order ? "'Hej @1' typed through the keymap, in order" : "the result said ok but the window saw: " + got.substr(0, 400))
                                                         : "text was not answered ok");
     const auto untypable = refused ? refused->payload.value("error", json::object()).value("data", json::object()).value("untypable", json::array()) : json::array();
-    r.check("desktop-untypable", refused && untypable == json::array({"å"}) && !has("key p text='p'"),
-            refused ? "'på' refused before anything was typed: " + refused->payload.dump() : "no answer to the untypable text");
+    r.check("desktop-untypable", refused && untypable == json::array({"Δ"}) && !has("key p text='p'"),
+            refused ? "'pΔ' refused before anything was typed: " + refused->payload.dump() : "no answer to the untypable text");
+    if (nordic && nordic->payload.value("ok", false)) {
+        const bool all = has("key aring text='å'") && has("key adiaeresis text='ä'") && has("key odiaeresis text='ö'");
+        r.check("desktop-text-aao", all, all ? "'åäö' typed through the robot's own layout" : "the result said ok but the window saw: " + got.substr(0, 400));
+    } else {
+        const auto lacks = nordic ? nordic->payload.value("error", json::object()).value("data", json::object()).value("untypable", json::array()) : json::array();
+        r.check("desktop-text-aao", nordic && lacks == json::array({"å", "ä", "ö"}), "this robot's layout has no åäö, and says so: " + (nordic ? nordic->payload.dump() : std::string("no answer")));
+    }
     // Alt+Tab is the compositor's to take (a real robot's window switcher), so the window may or may
     // not see Tab; what must hold is that the combo ran and left Alt up.
     r.check("desktop-combo", combo && combo->payload.value("ok", false) && has("key Alt_L") && has("release Alt_L"),
