@@ -112,6 +112,7 @@ impl Record {
 
     /// The feature's changes, newest first — the order `--undo` reverses them in — removed from
     /// the record.
+    #[cfg(test)]
     pub fn take(&mut self, feature: &str) -> Vec<Change> {
         let (mine, rest): (Vec<_>, Vec<_>) =
             self.changes.drain(..).partition(|e| e.feature == feature);
@@ -120,6 +121,7 @@ impl Record {
     }
 
     /// Every feature's changes, newest first: a bare `setup --undo`.
+    #[cfg(test)]
     pub fn take_all(&mut self) -> Vec<Change> {
         self.changes.drain(..).rev().map(|e| e.change).collect()
     }

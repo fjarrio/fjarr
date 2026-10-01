@@ -334,6 +334,11 @@ pub fn rows(connectors: &[Connector], ghosts: &[Ghost], booted: &[String]) -> Ve
             }
         } else if let Some(members) = chains.get(&c.name) {
             State::Chain(members.clone())
+        } else if booted.contains(&c.name) && c.ddc_monitor.is_none() {
+            // A ghost removed in this boot: the kernel still forces it until the next reboot, so it
+            // reads as connected, but nothing is plugged in (DDC is silent). It is free (the mini-PC,
+            // 2026-10-01: a removed ghost was taken for a real monitor and the next one went elsewhere).
+            State::Free
         } else if c.connected {
             State::Connected(
                 c.monitor
@@ -577,10 +582,15 @@ fn booted() -> Vec<String> {
 
 pub fn list() -> Result<i32> {
     let ghosts = load_ghosts();
-    let probe: Vec<String> = ghosts.iter().map(|g| g.connector.clone()).collect();
+    let booted = booted();
+    let probe: Vec<String> = ghosts
+        .iter()
+        .map(|g| g.connector.clone())
+        .chain(booted.iter().cloned())
+        .collect();
     let connectors = scan(&probe)?;
     println!("  {:<11}{:<13}{:<27}GHOST", "CONNECTOR", "STATE", "MONITOR");
-    for (name, state) in rows(&connectors, &ghosts, &booted()) {
+    for (name, state) in rows(&connectors, &ghosts, &booted) {
         let (st, monitor, ghost): (String, String, String) = match state {
             State::Connected(m) => ("connected".into(), format!("{m} (real)"), "—".to_string()),
             State::Chain(ms) => (
@@ -665,11 +675,17 @@ pub fn add_ghosts(
     if !system::ubuntu_with_apt() {
         bail!("ghost screens are set on the kernel command line with GRUB; this is not Ubuntu with apt, so nothing is changed (docs/26#ghost-screens)");
     }
-    let connectors = scan(&[])?;
     let mut ghosts = load_ghosts();
+    let booted = booted();
+    let probe: Vec<String> = ghosts
+        .iter()
+        .map(|g| g.connector.clone())
+        .chain(booted.iter().cloned())
+        .collect();
+    let connectors = scan(&probe)?;
     let mut added = Vec::new();
     for _ in 0..count {
-        let chosen = pick_free(&rows(&connectors, &ghosts, &booted()), connector)?;
+        let chosen = pick_free(&rows(&connectors, &ghosts, &booted), connector)?;
         let number = (1..)
             .find(|n| !ghosts.iter().any(|g| g.number == *n))
             .expect("a free number");
@@ -767,6 +783,23 @@ mod tests {
             mst_root: root.map(Into::into),
             ddc_monitor: None,
         }
+    }
+
+    #[test]
+    fn a_ghost_removed_in_this_boot_is_free_again_unless_a_real_monitor_answers() {
+        // The mini-PC, 2026-10-01: undo removed the DP-2 ghost; until the reboot the kernel still
+        // forces it, so it reads as connected with the ghost's EDID.
+        let forced = conn("DP-2", true, Some("Fjarr Ghost 1"), None);
+        let r = rows(std::slice::from_ref(&forced), &[], &["DP-2".into()]);
+        assert_eq!(r[0].1, State::Free);
+        assert_eq!(pick_free(&r, None).unwrap(), "DP-2");
+        let mut real = forced;
+        real.ddc_monitor = Some("DELL U2422H".into());
+        let r = rows(&[real], &[], &["DP-2".into()]);
+        assert!(
+            matches!(r[0].1, State::Connected(_)),
+            "a monitor plugged in there is not free"
+        );
     }
 
     #[test]

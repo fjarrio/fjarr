@@ -219,7 +219,11 @@ Rules for every command:
   `--ros-units`, `--dds none|cyclone|fastdds`, …), so a fleet provisions with
   a script and the prompts are only the friendly face.
 - **Every change is recorded** in `/var/lib/fjarr/setup-changes.json`, and
-  `fjarr-agent setup --undo <feature>` reverses exactly those changes.
+  `fjarr-agent setup --undo <feature>` reverses exactly those changes. Every
+  change is attempted. One that cannot be reversed is reported and kept in the
+  record for the next `--undo`, and the command exits non-zero, but the rest are
+  still reversed and the record is saved. An account `setup desktop` created
+  is removed only after its session has ended.
 - **System changes are applied only on Ubuntu with apt.** Elsewhere the tool
   prints the options to set. It never replaces the ecosystem's package manager.
 - **Each command ends with `fjarr-agent --check`**, whose profile rows verify
