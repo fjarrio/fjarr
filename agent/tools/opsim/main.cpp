@@ -76,6 +76,7 @@ struct Options {
     std::string introspect; // http://127.0.0.1:7381
     std::string introspect_token; // --introspect-token, else $FJARR_INTROSPECT_TOKEN (the demo exposes the endpoint with one, docs/24)
     std::string desktop_oracle;   // desktop-control: the fixture's test-window log, http://desktop-fixture:8090/testwin.log
+    std::string desktop_plug;     // desktop-hotplug: the fixture's monitor hot-plug, http://desktop-fixture:8091
     int timeout_s = 60;
     int cycles = 200; // soak: connect/stream/close cycles
     /// `smoke --hold N`: keep every track subscribed for N seconds before closing — a viewer that
@@ -98,7 +99,8 @@ void usage() {
                  "                   [--introspect http://127.0.0.1:7381] [--introspect-token <t>] [--verbose]\n"
                  "                   [--exec '<command>'] (tunnel: run it with the link up, $FJARR_ADDR set)\n"
                  "                   [--desktop-oracle <url of the fixture's test-window log>] (desktop-control)\n"
-                 "scenarios: smoke toggle hotplug rejected-track desktop-see desktop-control silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer tunnel\n"
+                 "                   [--desktop-plug <url of the fixture's monitor hot-plug>] (desktop-hotplug)\n"
+                 "scenarios: smoke toggle hotplug rejected-track desktop-see desktop-control desktop-hotplug silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer tunnel\n"
                  "           soak (--cycles N, needs --introspect)\n"
                  "           netem-{lan,wifi-ok,4g,lossy,bad} (the profile is applied externally: docker/lab/netem.sh)\n"
                  "exit: 0 all assertions pass, 1 any fail, 2 usage, 3 timeout\n");
@@ -138,6 +140,8 @@ bool parse_args(int argc, char** argv, Options& o) {
             if (!need(o.introspect_token)) return false;
         } else if (a == "--desktop-oracle") {
             if (!need(o.desktop_oracle)) return false;
+        } else if (a == "--desktop-plug") {
+            if (!need(o.desktop_plug)) return false;
         } else if (a == "--timeout") {
             if (!need(v)) return false;
             o.timeout_s = std::atoi(v.c_str());
@@ -1573,6 +1577,7 @@ class Operator {
     int pongs() { return locked<int>([this] { return sh_.pongs; }); }
     const std::string& introspect() const { return opts_.introspect; }
     const std::string& desktop_oracle() const { return opts_.desktop_oracle; }
+    const std::string& desktop_plug() const { return opts_.desktop_plug; }
     /// Send an event on a data channel (input is events: docs/08#input-events-fjarrdesktop).
     bool event(const std::string& channel, const std::string& cap, const std::string& type, json payload) {
         return send_envelope(channel, protocol::make_envelope(cap, type, "event", std::move(payload)));
@@ -2401,6 +2406,104 @@ void scenario_desktop_control(Operator& op) {
     r.check("desktop-release-on-close", released, released ? "Shift held at session-close was released by the agent" : "Shift was still held after the session closed: " + since(mark));
 }
 
+/// M3 3.4: monitor hot-plug against the fixture's virtual monitors (docs/06 hot-plug criteria,
+/// docs/23#desktop-monitors): a plugged monitor becomes a track within 2 s while the first keeps
+/// flowing, an unplugged one leaves, and a re-plugged one returns under the same track_id.
+void scenario_desktop_hotplug(Operator& op) {
+    Report& r = op.report();
+    if (op.desktop_plug().empty()) {
+        r.check("desktop-plug", false, "--desktop-plug not given: nothing can plug a monitor");
+        return;
+    }
+    connect_and_report(op);
+    auto desks_in = [](const json& tracks) {
+        std::vector<std::string> out;
+        for (const auto& t : tracks)
+            if (t.value("track_id", std::string()).rfind("desk-", 0) == 0) out.push_back(t.value("track_id", std::string()));
+        std::sort(out.begin(), out.end());
+        return out;
+    };
+    std::vector<std::string> first;
+    for (const auto& id : op.manifest_tracks())
+        if (id.rfind("desk-", 0) == 0) first.push_back(id);
+    r.check("desktop-tracks", first.size() == 1, std::to_string(first.size()) + " desk-* track(s) before the plug");
+    if (first.size() != 1) return;
+    const std::string d0 = first[0];
+    const std::uint64_t f0 = op.frames(d0);
+    if (!op.select(d0, true, "active", 5000, "fjarr.desktop") || !op.wait_frames(d0, f0, 5, 10000)) {
+        r.check("desktop-frames", false, "no frames from " + d0 + why_no_frames(op));
+        return;
+    }
+    auto monitors_event = [&](std::size_t mark, std::size_t n) {
+        return op.wait_envelope(mark, "fjarr.desktop", "monitors", "event", 5000,
+                                [n](const Envelope& e) { return e.payload.value("monitors", json::array()).size() == n; });
+    };
+    // A re-offer whose desk tracks number `n`, answered (a renegotiation the operator completes).
+    auto reoffer = [&](std::size_t sig_mark, std::size_t n) -> std::optional<std::vector<std::string>> {
+        std::size_t from = sig_mark;
+        for (int i = 0; i < 3; i++) {
+            auto offer = op.wait_signal(from, "offer", 5000);
+            if (!offer) return std::nullopt;
+            op.answer_offer(*offer);
+            from = op.sig_mark();
+            auto desks = desks_in(offer->value("tracks", json::array()));
+            if (desks.size() == n) return desks;
+        }
+        return std::nullopt;
+    };
+
+    // 1. Plug: the monitors event, then the re-offer with the new track, within docs/06's 2 s; the
+    //    first monitor keeps flowing.
+    op.watch_reset(d0);
+    std::size_t mark = op.inbox_mark(), smark = op.sig_mark();
+    std::int64_t t0 = g_get_monotonic_time();
+    auto plugged = op.http_get_url(op.desktop_plug() + "/plug");
+    r.check("desktop-plug", plugged.status == 200, "plugged " + plugged.body + (plugged.error.empty() ? "" : " " + plugged.error));
+    if (plugged.status != 200) return;
+    auto ev = monitors_event(mark, 2);
+    r.check("desktop-monitors-event", ev.has_value(),
+            ev ? "monitors{2, " + ev->payload.value("reason", std::string("?")) + "} " + ms_str(g_get_monotonic_time() - t0) + " after the plug" : "no monitors event with 2 monitors");
+    auto two = reoffer(smark, 2);
+    const std::int64_t add_us = g_get_monotonic_time() - t0;
+    std::string d1;
+    if (two)
+        for (const auto& d : *two)
+            if (d != d0) d1 = d;
+    r.check("desktop-hotplug-add", two && add_us <= 2'000'000,
+            two ? d1 + " offered " + ms_str(add_us) + " after the plug (docs/06: within 2 s)" : "no re-offer with a second desk-* track");
+    if (!two) return;
+    const std::uint64_t g0 = op.frames(d1);
+    const bool flows = op.select(d1, true, "active", 5000, "fjarr.desktop") && op.wait_frames(d1, g0, 5, 10000);
+    r.check("desktop-new-monitor-frames", flows, flows ? "frames from " + d1 : "no frames from " + d1 + why_no_frames(op));
+    const auto snap = op.track_snapshot(d0);
+    const std::int64_t gap = snap ? snap->max_gap_us : -1;
+    r.check("desktop-others-uninterrupted", gap >= 0 && gap < 500'000, d0 + "'s longest gap across the plug and the renegotiation: " + ms_str(gap));
+
+    // 2. Unplug: the monitors event, the track leaves the offer, the first monitor flows on.
+    mark = op.inbox_mark();
+    smark = op.sig_mark();
+    t0 = g_get_monotonic_time();
+    auto unplugged = op.http_get_url(op.desktop_plug() + "/unplug");
+    auto ev2 = monitors_event(mark, 1);
+    auto one = reoffer(smark, 1);
+    r.check("desktop-hotplug-remove", unplugged.status == 200 && ev2 && one,
+            one ? d1 + " left the offer " + ms_str(g_get_monotonic_time() - t0) + " after the unplug" : "the track did not leave: " + unplugged.body);
+    const std::uint64_t f1 = op.frames(d0);
+    r.check("desktop-first-still-flows", op.wait_frames(d0, f1, 5, 5000), d0 + " keeps producing after the unplug");
+
+    // 3. Re-plug: the same monitor returns under the same track_id.
+    smark = op.sig_mark();
+    auto again = op.http_get_url(op.desktop_plug() + "/plug");
+    auto back = again.status == 200 ? reoffer(smark, 2) : std::nullopt;
+    std::string d1b;
+    if (back)
+        for (const auto& d : *back)
+            if (d != d0) d1b = d;
+    r.check("desktop-replug-same-id", back && d1b == d1, back ? "re-plugged as " + d1b + " (was " + d1 + ")" : "no re-offer after the re-plug");
+    op.http_get_url(op.desktop_plug() + "/unplug");
+    close_and_assert(op);
+}
+
 void scenario_silent_operator(Operator& op) {
     Report& r = op.report();
     connect_and_report(op);
@@ -2959,7 +3062,7 @@ const std::map<std::string, ScenarioFn> kScenarios = {
     {"smoke", scenario_smoke},       {"toggle", scenario_toggle},   {"hotplug", scenario_hotplug},     {"silent-operator", scenario_silent_operator},
     {"no-answer", scenario_no_answer}, {"socket-drop", scenario_socket_drop}, {"ice-restart", scenario_ice_restart}, {"deadman", scenario_deadman},
     {"congested-viewer", scenario_congested_viewer}, {"rejected-track", scenario_rejected_track},
-    {"desktop-see", scenario_desktop_see}, {"desktop-control", scenario_desktop_control},
+    {"desktop-see", scenario_desktop_see}, {"desktop-control", scenario_desktop_control}, {"desktop-hotplug", scenario_desktop_hotplug},
     {"relay-only", scenario_relay_only}, {"tunnel", scenario_tunnel}, {"soak", scenario_soak},
     // netem-<profile>: one function, the profile is read from the scenario name (unknown profile → usage, exit 2).
     {"netem-lan", scenario_netem},     {"netem-wifi-ok", scenario_netem}, {"netem-4g", scenario_netem},     {"netem-lossy", scenario_netem},
@@ -2986,7 +3089,7 @@ int main(int argc, char** argv) {
     // The tunnel is as consequential as a shell (docs/10#network-tunnel), so the grant claims it
     // only for the scenario that exercises it.
     if (opts.scenario == "tunnel") opts.capabilities.push_back("fjarr.net");
-    if (opts.scenario == "desktop-see" || opts.scenario == "desktop-control") opts.capabilities.push_back("fjarr.desktop");
+    if (opts.scenario.rfind("desktop-", 0) == 0) opts.capabilities.push_back("fjarr.desktop");
     gst_init(&argc, &argv);
 
     Shared sh;

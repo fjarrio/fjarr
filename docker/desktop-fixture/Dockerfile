@@ -35,6 +35,7 @@ COPY --chmod=0755 docker/desktop-fixture/session.sh /usr/local/bin/fixture-sessi
 COPY --chmod=0755 docker/desktop-fixture/selftest.py /usr/local/bin/fixture-selftest
 COPY --chmod=0755 docker/desktop-fixture/helper_check.py /usr/local/bin/fixture-helper-check
 COPY --chmod=0755 docker/desktop-fixture/testwin.py /usr/local/bin/fixture-testwin
+COPY --chmod=0755 docker/desktop-fixture/plugd.py /usr/local/bin/fixture-plugd
 COPY --from=helper /fjarr-desktop-session /usr/local/bin/fjarr-desktop-session
 USER desktop
 WORKDIR /home/desktop

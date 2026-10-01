@@ -246,3 +246,54 @@ TEST(DesktopInput, safetyWhenInputMovesToAnotherSessionThePreviousHoldersKeysGoU
     r.send(r.b, "key", {{"code", "KeyC"}, {"down", true}}); // b took control: a's Ctrl must not make this Ctrl+C
     EXPECT_EQ(r.calls(), (std::vector<std::string>{"key 29 down", "release-all", "key 46 down"}));
 }
+
+// --- multi-monitor (M3 3.4) -------------------------------------------------------------------------
+// spec: docs/23-agent-core-architecture.md#desktop-monitors · docs/08 `monitors`
+#include <dlfcn.h>
+
+TEST(DesktopMonitors, oneTrackPerMonitorDiffedByIdWithTheMonitorsEventBeforeEachReoffer) {
+    InputRig r;
+    void* so = ::dlopen((std::string(FJARR_STUB_MODULE_DIR) + "/libfjarr-desktop-stub.so").c_str(), RTLD_NOW | RTLD_NOLOAD);
+    ASSERT_NE(so, nullptr) << "the stub module is loaded by the capability";
+    auto plug = reinterpret_cast<void (*)(const char*)>(::dlsym(so, "fjarr_stub_plug"));
+    ASSERT_NE(plug, nullptr);
+    auto events = [&] {
+        std::vector<std::pair<std::string, size_t>> out;
+        for (const auto& s : r.a.sent)
+            if (s.kind == "event" && s.type == "monitors") out.push_back({s.payload["reason"], s.payload["monitors"].size()});
+        return out;
+    };
+    auto last_tracks = [&] { return r.a.updates.empty() ? std::vector<std::string>{} : r.a.updates.back(); };
+
+    plug("virtual-1:1:0:1280:1");
+    EXPECT_EQ(events().back(), std::make_pair(std::string("initial"), size_t{1}));
+    EXPECT_EQ(last_tracks(), std::vector<std::string>{"desk-virtual-1"});
+
+    plug("virtual-1:1:0:1280:1;virtual-2:2:1280:1280:0");
+    EXPECT_EQ(events().back(), std::make_pair(std::string("hotplug"), size_t{2}));
+    EXPECT_EQ(last_tracks(), (std::vector<std::string>{"desk-virtual-1", "desk-virtual-2"}));
+    const auto& sent = r.a.sent;
+    const auto ev = std::find_if(sent.rbegin(), sent.rend(), [](const auto& s) { return s.type == "monitors"; });
+    EXPECT_EQ((*ev).payload["monitors"][1]["index"], 1) << "display order, left to right";
+    EXPECT_EQ((*ev).payload["monitors"][1]["connector"], "Meta-2");
+
+    const auto captures_before = r.calls().size();
+    plug("virtual-1:1:0:1280:1;virtual-2:2:1280:1920:0"); // a mode change: same track, no new capture
+    EXPECT_EQ(events().back(), std::make_pair(std::string("mode-change"), size_t{2}));
+    EXPECT_EQ(r.calls().size(), captures_before);
+
+    plug("virtual-1:1:0:1280:1"); // unplug
+    EXPECT_EQ(events().back(), std::make_pair(std::string("hotplug"), size_t{1}));
+    EXPECT_EQ(r.calls().back(), "stop 2");
+    EXPECT_EQ(last_tracks(), std::vector<std::string>{"desk-virtual-1"});
+
+    plug("virtual-1:1:0:1280:1;virtual-2:2:1280:1280:0"); // re-plug: the same track_id
+    EXPECT_EQ(last_tracks(), (std::vector<std::string>{"desk-virtual-1", "desk-virtual-2"}));
+
+    plug(""); // zero monitors is a state the session survives
+    EXPECT_EQ(events().back(), std::make_pair(std::string("hotplug"), size_t{0}));
+    EXPECT_TRUE(last_tracks().empty());
+    plug("virtual-1:1:0:1280:1");
+    EXPECT_EQ(last_tracks(), std::vector<std::string>{"desk-virtual-1"});
+    plug(""); // leave the stub with no monitors for the other tests
+}

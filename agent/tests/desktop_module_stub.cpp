@@ -20,11 +20,25 @@ void record(const std::string& line) {
     if (const char* f = std::getenv("FJARR_STUB_RECORD"); f && *f) std::ofstream(f, std::ios::app) << line << "\n";
 }
 
+/// A capture that is always available: what the capability's diffing needs, nothing more.
+class StubSource final : public VideoSource {
+  public:
+    SourceInfo describe() const override { return {}; }
+    GstBin* create_bin() override { return nullptr; }
+    bool available() const override { return true; }
+    void on_availability_changed(std::function<void(bool)>) override {}
+};
+
+/// Monitors the test plugs and unplugs through fjarr_stub_plug (below).
+std::vector<Monitor> g_monitors;
+std::function<void(std::vector<Monitor>)> g_monitors_cb;
+
 class StubBackend final : public DesktopBackend {
   public:
     Features features() override { return {}; }
     std::vector<Monitor> monitors() override {
         if (!std::getenv("FJARR_STUB_RECORD")) return {};
+        if (!g_monitors.empty()) return g_monitors;
         Monitor m;
         m.id = 7;
         m.wire_id = "virtual-1";
@@ -33,10 +47,14 @@ class StubBackend final : public DesktopBackend {
         m.primary = true;
         return {m};
     }
-    void on_monitors_changed(std::function<void(std::vector<Monitor>)>) override {}
+    void on_monitors_changed(std::function<void(std::vector<Monitor>)> cb) override { g_monitors_cb = std::move(cb); }
     void on_capture_lost(std::function<void(MonitorId, CaptureLost)>) override {}
-    std::shared_ptr<VideoSource> start_capture(MonitorId, CaptureOptions) override { return nullptr; }
-    void stop_capture(MonitorId) override {}
+    std::shared_ptr<VideoSource> start_capture(MonitorId m, CaptureOptions) override {
+        if (!std::getenv("FJARR_STUB_RECORD")) return nullptr;
+        record("capture " + std::to_string(m));
+        return std::make_shared<StubSource>();
+    }
+    void stop_capture(MonitorId m) override { record("stop " + std::to_string(m)); }
     MonitorId create_virtual_monitor(int, int) override { return INVALID_MONITOR; }
     void destroy_virtual_monitor(MonitorId) override {}
     std::shared_ptr<VideoSource> start_audio_capture() override { return nullptr; }
@@ -81,3 +99,33 @@ const desktop::ModuleV1 MODULE{
 } // namespace
 
 extern "C" const desktop::ModuleV1* fjarr_desktop_module_v1() { return &MODULE; }
+
+/// The test's hand on the monitors: "wire:id:x:width:primary;…" (empty: none), then the change is
+/// reported as a helper's `monitors` message would be.
+extern "C" void fjarr_stub_plug(const char* spec) {
+    g_monitors.clear();
+    std::string s = spec ? spec : "";
+    for (std::size_t at = 0; at < s.size();) {
+        const auto end = s.find(';', at) == std::string::npos ? s.size() : s.find(';', at);
+        const std::string item = s.substr(at, end - at);
+        at = end + 1;
+        if (item.empty()) continue;
+        Monitor m;
+        std::size_t p = 0;
+        auto next = [&] {
+            const auto q = item.find(':', p);
+            std::string f = item.substr(p, q == std::string::npos ? std::string::npos : q - p);
+            p = q == std::string::npos ? item.size() : q + 1;
+            return f;
+        };
+        m.wire_id = next();
+        m.id = static_cast<MonitorId>(std::stoul(next()));
+        m.x = std::stoi(next());
+        m.width = std::stoi(next());
+        m.height = 720;
+        m.primary = next() == "1";
+        m.connector = "Meta-" + std::to_string(m.id);
+        g_monitors.push_back(m);
+    }
+    if (g_monitors_cb) g_monitors_cb(g_monitors);
+}

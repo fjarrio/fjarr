@@ -213,6 +213,7 @@ nlohmann::json monitor_to_json(const MonitorInfo& m) {
     nlohmann::json j{{"id", m.id}, {"index", m.index}, {"primary", m.primary}, {"x", m.x}, {"y", m.y},
                      {"w", m.w},   {"h", m.h},         {"scale", m.scale}};
     if (!m.name.empty()) j["name"] = m.name;
+    if (!m.connector.empty()) j["connector"] = m.connector;
     return j;
 }
 

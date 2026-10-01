@@ -1,14 +1,17 @@
 // spec: docs/06-capabilities.md · docs/adr/0021-desktop-backends-as-runtime-modules.md
 #include <fjarr/desktop_capability.hpp>
 
+#include <algorithm>
 #include <map>
 #include <optional>
+#include <tuple>
 #include <set>
 
 #include <fjarr/errors.hpp>
 #include <fjarr/session_context.hpp>
 
 #include "core/log.hpp"
+#include "core/protocol.hpp"
 #include "desktop/keycodes.hpp"
 #include "desktop/module_loader.hpp"
 #include "media/sources.hpp"
@@ -30,9 +33,13 @@ struct DesktopCapability::Impl {
     nlohmann::json helper = nlohmann::json::object(); // the backend's own config (the session helper's socket and account)
     std::unique_ptr<DesktopBackend> driver; // the live backend from the module
     std::map<SessionId, SessionContext*> sessions;
-    // The primary monitor's track (M3 3.1; every monitor from 3.4).
-    std::optional<Monitor> primary;
-    std::shared_ptr<VideoSource> source;
+    // One track per monitor, keyed by wire id (docs/23#desktop-monitors).
+    struct Screen {
+        Monitor monitor;
+        std::shared_ptr<VideoSource> source;
+    };
+    std::map<std::string, Screen> screens; // by wire id
+    bool had_monitors = false;             // the first set is `initial`
     // Input (M3 3.2). The core lets only the desktop domain's holder through (docs/10); this is
     // the session whose input is on the desktop now, so only its end releases what it holds.
     std::optional<SessionId> input_session;
@@ -52,52 +59,90 @@ struct DesktopCapability::Impl {
         return std::nullopt;
     }
 
-    std::vector<TrackSpec> specs(bool available_only = false) const {
-        if (!primary || !source || (available_only && !source->available())) return {};
-        TrackSpec t;
-        t.track_id = "desk-" + primary->wire_id; // docs/08#track-manifest: from the identity, never the connector
-        t.label = primary->label.empty() ? primary->connector : primary->label;
-        t.kind = TrackKind::Video;
-        t.source = SourceRef{source, "src"};
+    /// Display order: left to right, then top to bottom (docs/22: `index` is order only).
+    std::vector<const Screen*> ordered() const {
+        std::vector<const Screen*> out;
+        for (const auto& [_, sc] : screens) out.push_back(&sc);
+        std::sort(out.begin(), out.end(), [](const Screen* a, const Screen* b) {
+            return std::tie(a->monitor.x, a->monitor.y, a->monitor.wire_id) < std::tie(b->monitor.x, b->monitor.y, b->monitor.wire_id);
+        });
+        return out;
+    }
+    static MonitorInfo info(const Monitor& m, int index) {
         MonitorInfo mi;
-        mi.id = primary->wire_id;
-        mi.primary = primary->primary;
-        mi.x = primary->x;
-        mi.y = primary->y;
-        mi.w = primary->width;
-        mi.h = primary->height;
-        mi.scale = primary->scale;
-        mi.name = primary->label;
-        t.monitor = mi;
-        return {t};
+        mi.id = m.wire_id;
+        mi.index = index;
+        mi.primary = m.primary;
+        mi.x = m.x;
+        mi.y = m.y;
+        mi.w = m.width;
+        mi.h = m.height;
+        mi.scale = m.scale;
+        mi.name = m.label;
+        mi.connector = m.connector;
+        return mi;
+    }
+    std::vector<TrackSpec> specs(bool available_only = false) const {
+        std::vector<TrackSpec> out;
+        int index = 0;
+        for (const Screen* sc : ordered()) {
+            const int i = index++;
+            if (!sc->source || (available_only && !sc->source->available())) continue;
+            TrackSpec t;
+            t.track_id = "desk-" + sc->monitor.wire_id; // docs/08#track-manifest: from the identity, never the connector
+            t.label = sc->monitor.label.empty() ? sc->monitor.connector : sc->monitor.label;
+            t.kind = TrackKind::Video;
+            t.source = SourceRef{sc->source, "src"};
+            t.monitor = info(sc->monitor, i);
+            out.push_back(std::move(t));
+        }
+        return out;
     }
     void reoffer() {
         for (auto& [_, ctx] : sessions) ctx->update_tracks(specs(true));
     }
-    /// The monitor set changed: capture the primary one, and re-offer if its track changed.
+    /// docs/08 `monitors`: the full current set, sent before the re-offer.
+    void announce(const char* reason) {
+        nlohmann::json list = nlohmann::json::array();
+        int index = 0;
+        for (const Screen* sc : ordered()) list.push_back(protocol::monitor_to_json(info(sc->monitor, index++)));
+        for (auto& [_, ctx] : sessions) ctx->event("monitors", {{"monitors", list}, {"reason", reason}});
+    }
+    /// The monitor set changed (docs/23#desktop-monitors): diff by wire id.
     void on_monitors(const std::vector<Monitor>& monitors) {
-        const Monitor* p = nullptr;
-        for (const auto& m : monitors)
-            if (m.primary) p = &m;
-        if (!p && !monitors.empty()) p = &monitors.front();
-        if (primary && (!p || p->wire_id != primary->wire_id)) {
-            driver->stop_capture(primary->id);
-            source.reset();
-            primary.reset();
+        bool set_changed = false;
+        std::set<std::string> present;
+        for (const auto& m : monitors) present.insert(m.wire_id);
+        for (auto it = screens.begin(); it != screens.end();) {
+            if (present.count(it->first)) {
+                ++it;
+                continue;
+            }
+            log::info("desktop", "monitor gone", {{"monitor", it->first}});
+            driver->stop_capture(it->second.monitor.id);
+            it = screens.erase(it);
+            set_changed = true;
         }
-        if (p && !primary) {
-            primary = *p;
-            source = driver->start_capture(p->id, CaptureOptions{});
-            if (source) {
-                const std::string id = "desk-" + p->wire_id;
-                source->on_availability_changed([this, id](bool now) {
+        for (const auto& m : monitors) {
+            auto it = screens.find(m.wire_id);
+            if (it != screens.end()) {
+                it->second.monitor = m; // same monitor: new geometry, mode or primary flag, same track
+                continue;
+            }
+            Screen sc{m, driver->start_capture(m.id, CaptureOptions{})};
+            if (sc.source) {
+                const std::string id = "desk-" + m.wire_id;
+                sc.source->on_availability_changed([this, id](bool now) {
                     log::info("desktop", now ? "track available" : "track unavailable", {{"track", id}});
                     reoffer();
                 });
             }
-        } else if (p && primary) {
-            primary = *p; // same monitor, new geometry
+            log::info("desktop", "monitor present", {{"monitor", m.wire_id}, {"connector", m.connector}, {"primary", m.primary ? "yes" : "no"}});
+            screens.emplace(m.wire_id, std::move(sc));
+            set_changed = true;
         }
+        announce(!had_monitors ? "initial" : set_changed ? "hotplug" : "mode-change");
+        had_monitors = had_monitors || !monitors.empty();
         reoffer();
     }
 };
@@ -282,7 +327,7 @@ std::vector<Capability::ConfiguredSource> DesktopCapability::configured_sources(
 
 void DesktopCapability::shutdown() {
     impl_->sessions.clear();
-    impl_->source.reset();
+    impl_->screens.clear();
     impl_->driver.reset();
 }
 

@@ -83,7 +83,7 @@ class Helper {
         captures_.clear();
         if (monitors_sub_) g_dbus_connection_signal_unsubscribe(bus_, monitors_sub_);
         monitors_sub_ = 0;
-        rd_.reset(); // stops mutter's session: nothing is captured for an agent that is gone
+        input_.reset(); // mutter's sessions stop with them: nothing is captured for an agent that is gone
         backoff_s_ = 1;
         retry_later();
     }
@@ -122,8 +122,7 @@ class Helper {
         } else if (type == "start-capture") {
             start_capture(m.body);
         } else if (type == "stop-capture") {
-            captures_.erase(m.body.value("id", 0));
-            if (captures_.empty()) rd_.reset(); // the last capture: mutter's session ends with it
+            captures_.erase(m.body.value("id", 0)); // its ScreenCast session stops; no other is touched
         } else if (type == "open-input") {
             open_input();
         } // unknown types are ignored: fjarr-desktop-1 grows by adding them
@@ -131,8 +130,23 @@ class Helper {
 
     void send_monitors() {
         std::string err;
+        const auto monitors = helper::current_monitors(bus_, &err);
+        // docs/26#ghost-screens: a ghost is never primary while a real monitor is connected. The
+        // change raises MonitorsChanged, and the corrected layout is what gets sent then.
+        if (enforce_primary(monitors)) return;
+        // docs/23#desktop-helper-protocol: mutter says nothing when a recorded monitor goes away.
+        for (auto it = captures_.begin(); it != captures_.end();) {
+            const bool there = std::any_of(monitors.begin(), monitors.end(), [&](const helper::MonitorInfo& m) { return m.connector == it->second.connector; });
+            if (there || it->second.connector.empty()) {
+                ++it;
+                continue;
+            }
+            send({{"type", "capture-lost"}, {"id", it->first}, {"reason", "monitor-gone"}});
+            say("capture " + std::to_string(it->first) + " of '" + it->second.connector + "' lost: the monitor is gone");
+            it = captures_.erase(it);
+        }
         json list = json::array();
-        for (const auto& m : helper::current_monitors(bus_, &err))
+        for (const auto& m : monitors)
             list.push_back({{"connector", m.connector}, {"name", m.name},
                             {"identity", {{"vendor", m.vendor}, {"product", m.product}, {"serial", m.serial}}},
                             {"x", m.x}, {"y", m.y}, {"width", m.width}, {"height", m.height}, {"scale", m.scale},
@@ -141,34 +155,42 @@ class Helper {
         send({{"type", "monitors"}, {"monitors", list}});
     }
 
-    helper::RemoteDesktop& rd() {
-        if (!rd_) {
-            rd_ = std::make_unique<helper::RemoteDesktop>(bus_);
-            rd_->on_closed([this] {
-                say("mutter closed the remote-desktop session");
-                for (const auto& [id, _] : captures_) send({{"type", "capture-lost"}, {"id", id}, {"reason", "stream-stopped"}});
-                captures_.clear();
-            });
+    /// Makes the leftmost real monitor primary when a ghost is (docs/26#ghost-screens). True when it
+    /// asked mutter for the change.
+    bool enforce_primary(const std::vector<helper::MonitorInfo>& monitors) {
+        auto ghost = [](const helper::MonitorInfo& m) { return m.vendor == "FJR"; };
+        const auto primary = std::find_if(monitors.begin(), monitors.end(), [](const helper::MonitorInfo& m) { return m.primary; });
+        if (primary == monitors.end() || !ghost(*primary)) return false;
+        const helper::MonitorInfo* best = nullptr;
+        for (const auto& m : monitors)
+            if (!ghost(m) && !m.is_virtual && (!best || m.x < best->x || (m.x == best->x && m.y < best->y))) best = &m;
+        if (!best) return false; // only ghosts: one of them is primary, as it must be
+        std::string err;
+        if (!helper::make_primary(bus_, best->connector, &err)) {
+            say("could not make " + best->connector + " primary instead of the ghost " + primary->connector + ": " + err);
+            return false;
         }
-        return *rd_;
+        say(best->connector + " made primary: " + primary->connector + " is a ghost screen");
+        return true;
     }
 
     void start_capture(const json& req) {
         const int id = req.value("id", 0);
         const std::string connector = req.value("connector", std::string{});
-        rd().record(connector, req.value("cursor", std::string{"embedded"}), [this, id, connector](bool ok, helper::StreamInfo info, std::string error) {
+        auto cap = helper::Capture::start(bus_, connector, req.value("cursor", std::string{"embedded"}), [this, id, connector](bool ok, helper::StreamInfo info, std::string error) {
             if (!ok) {
                 send({{"type", "capture-failed"}, {"id", id}, {"reason", error}});
                 say("capture " + std::to_string(id) + " of '" + connector + "' failed: " + error);
+                captures_.erase(id);
                 return;
             }
             std::string err;
             const int pw = helper::open_narrowed_pipewire(info.node, &err); // the screen and nothing else (docs/23)
             if (pw < 0) {
                 send({{"type", "capture-failed"}, {"id", id}, {"reason", err}});
+                captures_.erase(id);
                 return;
             }
-            captures_[id] = connector;
             send({{"type", "capture-started"}, {"id", id}, {"node", info.node}, {"x", info.x}, {"y", info.y},
                   {"width", info.width}, {"height", info.height}},
                  {pw});
@@ -176,13 +198,32 @@ class Helper {
             say("capture " + std::to_string(id) + " of '" + connector + "' started: node " + std::to_string(info.node) + ", " +
                 std::to_string(info.width) + "x" + std::to_string(info.height));
         });
+        if (!cap) return; // failed, and said so
+        cap->on_closed([this, id] {
+            // Deferred: this runs inside the capture's own signal handler.
+            g_idle_add([](gpointer d) {
+                auto* p = static_cast<std::pair<Helper*, int>*>(d);
+                auto [self, cid] = *p;
+                delete p;
+                if (self->captures_.erase(cid)) {
+                    self->send({{"type", "capture-lost"}, {"id", cid}, {"reason", "stream-stopped"}});
+                    say("capture " + std::to_string(cid) + ": mutter ended it");
+                }
+                return G_SOURCE_REMOVE;
+            }, new std::pair<Helper*, int>(this, id));
+        });
+        captures_[id] = Recording{connector, std::move(cap)};
     }
 
     void open_input() {
+        if (!input_) {
+            input_ = std::make_unique<helper::InputSession>(bus_);
+            input_->on_closed([this] { say("mutter closed the input session; the agent asks again"); });
+        }
         std::string err;
-        const int eis = rd_ ? rd_->connect_eis(&err) : -1;
+        const int eis = input_->connect_eis(&err);
         if (eis < 0) {
-            send({{"type", "input-failed"}, {"reason", rd_ ? err : "no capture running: input needs the session a capture starts"}});
+            send({{"type", "input-failed"}, {"reason", err}});
             return;
         }
         send({{"type", "input-opened"}}, {eis});
@@ -199,8 +240,12 @@ class Helper {
     unsigned backoff_s_ = 1;
     bool welcomed_ = false;
     bool waiting_logged_ = false;
-    std::unique_ptr<helper::RemoteDesktop> rd_;
-    std::map<int, std::string> captures_; // id → connector
+    struct Recording {
+        std::string connector;
+        std::unique_ptr<helper::Capture> capture;
+    };
+    std::unique_ptr<helper::InputSession> input_;
+    std::map<int, Recording> captures_; // by the agent's capture id
 };
 
 } // namespace

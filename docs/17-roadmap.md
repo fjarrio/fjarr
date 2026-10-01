@@ -393,6 +393,18 @@ run by hand passed every step from reboot to input (docs/15). **3.L done.** One
 question goes to 3.4: a desktop account created by `setup desktop` has no saved
 monitor layout, and mutter made the ghost its primary monitor.
 
+**3.4, agent side done (2026-10-01):** one track per monitor, diffed by wire id,
+with the `monitors` event before each re-offer. Two spikes first: a started
+RemoteDesktop session takes no new streams, and EIS's absolute pointer covers
+only linked monitors. So the helper keeps one unlinked RemoteDesktop session
+for input and one ScreenCast session per capture. It sends `monitor-gone`
+itself, and makes a real monitor primary when mutter picks a ghost. The
+fixture plugs mutter virtual monitors, and `desktop-hotplug` passes 12/12. The
+new track was offered 101 ms after the plug. The first monitor's longest gap was
+117 ms, which is its keepalive, so nothing was dropped. The unplugged track left
+21 ms after the unplug, and came back as the same `track_id`. Remaining in 3.4:
+`<DesktopLayout>` and the demo's monitor picker, then the mini-PC run.
+
 ## M3.5 — Hear the robot {#m35}
 
 **`fjarr.audio`** (robot microphone downlink, push-to-talk uplink through the

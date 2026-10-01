@@ -523,22 +523,29 @@ its name is bumped with the module seam's.
   changes. `identity` comes from the EDID, which is what monitor ids are made of
   (docs/09).
 - **Capture.** The module sends `start-capture {id, connector, cursor:
-  "embedded" | "metadata" | "hidden"}`. The helper records that monitor into its
-  one RemoteDesktop session with a linked ScreenCast (starting the session on the
-  first capture) and replies `capture-started {id, node, x, y, width, height}`
+  "embedded" | "metadata" | "hidden"}`. The helper records that monitor in a
+  **ScreenCast session of its own**, not linked to the input session (below),
+  starts it, and replies `capture-started {id, node, x, y, width, height}`
   with **one descriptor: a PipeWire connection**, or `capture-failed {id,
   reason}`. `stop-capture {id}` ends it. The module reads the stream with
   `pipewiresrc fd=… path=<node> keepalive-time=<ms>`: mutter's stream is
   damage-driven and silent on a static screen, and the keepalive re-sends the
   last frame so the encoder keeps producing. Silence is never capture loss.
   The connection is narrowed to that node before it is handed over (above), so
-  one connection serves one capture.
-- **Input.** `open-input {}` makes the helper call `ConnectToEIS` on the running
-  session and reply `input-opened {}` with **one descriptor: the EIS socket**. The
-  module is its libei sender (keyboard, absolute pointer, buttons, scroll),
-  mapping a track-local point to the stream's `x, y` plus that point. The module
-  asks for input once its first capture has started, because the EIS socket
-  belongs to the RemoteDesktop session a capture starts.
+  one connection serves one capture. One session per capture is what hot-plug
+  needs (measured 2026-10-01, mutter 50). A started RemoteDesktop session takes
+  no new linked ScreenCast session, and a `RecordMonitor` on its started
+  ScreenCast session is accepted but never produces a stream. A capture of its
+  own starts and stops without touching any other.
+- **Input.** `open-input {}` makes the helper start its one RemoteDesktop
+  session, if it has not, call `ConnectToEIS` on it, and reply `input-opened {}`
+  with **one descriptor: the EIS socket**. The module is its libei sender
+  (keyboard, absolute pointer, buttons, scroll), mapping a track-local point to
+  the stream's `x, y` plus that point. The session has **no linked ScreenCast**
+  on purpose. Its absolute pointer then covers every monitor in the layout, and
+  on a hot-plug mutter replaces the pointer device with one covering the new
+  layout. With a linked stream, the pointer covers only the linked monitors,
+  and a monitor plugged later is never added (both measured 2026-10-01).
 - **Typing text.** Keys are evdev codes, and the agent maps a client's
   `KeyboardEvent.code` to one. `text` ([docs/08](08-protocol.md#input-events-fjarrdesktop))
   has no such path: mutter 50 and libei 1.5 have no Unicode input, and mutter's

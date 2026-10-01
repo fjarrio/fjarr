@@ -24,6 +24,8 @@ grep -q ' start ' "$FJARR_FIXTURE_LOG" || { echo "fixture: the test window never
 # desktop-control scenario). Only the log is in the served directory.
 mkdir -p /run/desktop/oracle && ln -sf "$FJARR_FIXTURE_LOG" /run/desktop/oracle/testwin.log
 python3 -m http.server 8090 --bind 0.0.0.0 --directory /run/desktop/oracle >/run/desktop/oracle-http.log 2>&1 &
+# Monitor hot-plug on request (3.4): mutter virtual monitors, plugged and unplugged by the oracles.
+fixture-plugd >/run/desktop/plugd.log 2>&1 &
 # The session helper, as a real desktop session starts it (a user unit on a robot, ADR-0028): only
 # when an agent's socket directory is shared in (make desktop-see), so the self-tests run without one.
 if [ -d /run/fjarr ]; then

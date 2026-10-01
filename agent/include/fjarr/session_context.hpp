@@ -25,6 +25,7 @@ struct MonitorInfo {
     int x = 0, y = 0, w = 0, h = 0;
     double scale = 1.0;
     std::string name;
+    std::string connector; // informational only: changes on replug (docs/08#track-manifest)
 };
 
 struct OperatorInfo {
