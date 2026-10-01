@@ -41,6 +41,9 @@ struct System {
     std::function<std::optional<NetDev>(const std::string& name)> netdev;
     /// A small text file's contents (GDM's configuration, the ghost snippet, /proc/cmdline).
     std::function<std::optional<std::string>(const std::string& path)> read_file;
+    /// The name a sink gives over a connector's DDC bus, bypassing any EDID the kernel forces: on a
+    /// ghost connector, a real monitor (docs/18 #37). None when nothing answers or it cannot be read.
+    std::function<std::optional<std::string>(const std::string& connector)> ddc_monitor;
 
     /// The running machine: getpwnam/getgrouplist, stat, systemd's .wants links, /sys/class/net.
     static System real();

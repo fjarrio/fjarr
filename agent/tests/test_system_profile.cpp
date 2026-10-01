@@ -245,3 +245,19 @@ TEST(SystemProfile, aGhostIsActiveOnceBootedAndPendingIsNotAFailure) {
     EXPECT_EQ(find(rows, "ghost DP-2")->detail, "active");
     EXPECT_EQ(find(rows, "ghost HDMI-A-2")->detail, "reboot pending");
 }
+
+TEST(SystemProfile, aRealMonitorOnAGhostConnectorIsAFailureFoundOverDdc) {
+    // The mini-PC, 2026-10-01 (#37): a DELL on the ghost's HDMI-A-1 reads as the ghost through the
+    // kernel and as itself over the port's DDC bus.
+    Fake f = desktop_robot();
+    f.texts["/etc/default/grub.d/fjarr-ghosts.cfg"] = "# fjarr-ghosts: HDMI-A-1=1:1920x1080@60\n";
+    f.texts["/proc/cmdline"] = "quiet video=HDMI-A-1:1920x1080@60e";
+    auto sys = f.system();
+    sys.ddc_monitor = [](const std::string&) -> std::optional<std::string> { return "DELL U2422H"; };
+    auto rows = check(profile_file(), false, std::optional<std::string>("desktop"), sys);
+    EXPECT_FALSE(find(rows, "ghost HDMI-A-1")->ok);
+    EXPECT_EQ(find(rows, "ghost HDMI-A-1")->fix, "unplug it, or: sudo fjarr-agent display remove-ghost HDMI-A-1");
+    sys.ddc_monitor = [](const std::string&) -> std::optional<std::string> { return std::nullopt; }; // nothing answers
+    rows = check(profile_file(), false, std::optional<std::string>("desktop"), sys);
+    EXPECT_TRUE(find(rows, "ghost HDMI-A-1")->ok);
+}

@@ -284,8 +284,11 @@ pub struct Connector {
     pub connected: bool,
     /// For a connector on a DisplayPort chain: the root connector the chain hangs off.
     pub mst_root: Option<String>,
-    /// The monitor's name from its EDID, when connected.
+    /// The monitor's name from its EDID, when connected. On a ghost connector that is the ghost.
     pub monitor: Option<String>,
+    /// The name a sink gives over the connector's DDC bus, read only where `scan` was asked to:
+    /// on a ghost connector this is a real monitor, whatever EDID the kernel forces (#37).
+    pub ddc_monitor: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -319,14 +322,11 @@ pub fn rows(connectors: &[Connector], ghosts: &[Ghost], booted: &[String]) -> Ve
     let mut out = Vec::new();
     for c in connectors.iter().filter(|c| c.mst_root.is_none()) {
         let state = if let Some(g) = ghosts.iter().find(|g| g.connector == c.name) {
-            // A real monitor plugged into a ghost connector shows up as the ghost: the kernel forces
-            // the ghost's EDID on the port, so the EDID name only catches a driver that does not.
-            // A reliable signal is open question #37, for the mini-PC (3.L).
+            // A real monitor plugged into a ghost connector shows up as the ghost, because the kernel
+            // forces the ghost's EDID on the port; its own EDID still answers over DDC (#37, measured
+            // on the mini-PC). A ghost never answers there: it has no sink.
             let ghost_name = format!("Fjarr Ghost {}", g.number);
-            let real = c
-                .monitor
-                .clone()
-                .filter(|m| *m != ghost_name && c.connected);
+            let real = c.ddc_monitor.clone().filter(|m| *m != ghost_name);
             State::Ghost {
                 ghost: g.clone(),
                 active: booted.contains(&c.name),
@@ -399,7 +399,7 @@ pub fn resolve_mst_root(path: &str, roots: &[(u32, String)]) -> Option<String> {
 /// The connectors, from the DRM devices (cardN): the kernel's names, connection state, the chain a
 /// DisplayPort MST connector hangs off (its `PATH` property, `mst:<root id>-<port>`), and the
 /// monitor's EDID name.
-pub fn scan() -> Result<Vec<Connector>> {
+pub fn scan(probe_ddc: &[String]) -> Result<Vec<Connector>> {
     use drm::control::{connector, Device as ControlDevice};
     struct Card(std::fs::File);
     impl std::os::fd::AsFd for Card {
@@ -485,15 +485,49 @@ pub fn scan() -> Result<Vec<Connector>> {
             let mst_root = path_prop
                 .as_deref()
                 .and_then(|p| resolve_mst_root(p, &roots));
+            let ddc_monitor = if probe_ddc.contains(&name) {
+                let card_name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                ddc_edid(&card_name, &name).and_then(|e| edid_monitor_name(&e))
+            } else {
+                None
+            };
             out.push(Connector {
                 name,
                 connected,
                 mst_root,
                 monitor,
+                ddc_monitor,
             });
         }
     }
     Ok(out)
+}
+
+/// A sink's own EDID over the connector's DDC bus (`/sys/class/drm/<card>-<connector>/ddc`, read
+/// through `i2c-dev` at the EDID address 0x50), bypassing any EDID the kernel forces. None when no
+/// sink answers, the connector has no DDC bus, or `i2c-dev` is not loaded.
+pub fn ddc_edid(card: &str, connector: &str) -> Option<Vec<u8>> {
+    use std::io::{Read, Write};
+    use std::os::fd::AsRawFd;
+    const I2C_SLAVE: libc::c_ulong = 0x0703;
+    let bus = std::fs::read_link(format!("/sys/class/drm/{card}-{connector}/ddc")).ok()?;
+    let dev = Path::new("/dev").join(bus.file_name()?);
+    let mut f = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(dev)
+        .ok()?;
+    // SAFETY: I2C_SLAVE takes the 7-bit address by value; the descriptor is open.
+    if unsafe { libc::ioctl(f.as_raw_fd(), I2C_SLAVE as _, 0x50 as libc::c_ulong) } < 0 {
+        return None;
+    }
+    f.write_all(&[0]).ok()?;
+    let mut edid = vec![0u8; 128];
+    f.read_exact(&mut edid).ok()?;
+    (edid[0..8] == [0, 255, 255, 255, 255, 255, 255, 0]).then_some(edid)
 }
 
 /// What to call the monitor an EDID describes: its name descriptor (0xFC); else the last free-text
@@ -542,9 +576,11 @@ fn booted() -> Vec<String> {
 }
 
 pub fn list() -> Result<i32> {
-    let connectors = scan()?;
+    let ghosts = load_ghosts();
+    let probe: Vec<String> = ghosts.iter().map(|g| g.connector.clone()).collect();
+    let connectors = scan(&probe)?;
     println!("  {:<11}{:<13}{:<27}GHOST", "CONNECTOR", "STATE", "MONITOR");
-    for (name, state) in rows(&connectors, &load_ghosts(), &booted()) {
+    for (name, state) in rows(&connectors, &ghosts, &booted()) {
         let (st, monitor, ghost): (String, String, String) = match state {
             State::Connected(m) => ("connected".into(), format!("{m} (real)"), "—".to_string()),
             State::Chain(ms) => (
@@ -629,7 +665,7 @@ pub fn add_ghosts(
     if !system::ubuntu_with_apt() {
         bail!("ghost screens are set on the kernel command line with GRUB; this is not Ubuntu with apt, so nothing is changed (docs/26#ghost-screens)");
     }
-    let connectors = scan()?;
+    let connectors = scan(&[])?;
     let mut ghosts = load_ghosts();
     let mut added = Vec::new();
     for _ in 0..count {
@@ -664,7 +700,7 @@ pub fn add_ghost(state: &Path, connector: Option<&str>, mode: Option<&str>) -> R
 
 /// Monitors plugged in now (root connectors and chains): whether `setup desktop` offers ghosts.
 pub fn monitors_connected() -> usize {
-    scan()
+    scan(&[])
         .map(|cs| {
             cs.iter()
                 .filter(|c| c.connected && !c.name.starts_with("eDP"))
@@ -729,6 +765,7 @@ mod tests {
             connected,
             monitor: monitor.map(Into::into),
             mst_root: root.map(Into::into),
+            ddc_monitor: None,
         }
     }
 
@@ -880,11 +917,11 @@ mod tests {
                 ..
             }
         ));
-        let clash = rows(
-            &[conn("DP-2", true, Some("DELL U2422H"), None)],
-            &g,
-            &["DP-2".into()],
-        );
+        // The mini-PC, 2026-10-01: a DELL on the ghost's HDMI-A-1 reads as the ghost through the
+        // kernel and as itself over DDC.
+        let mut on_ghost = conn("DP-2", true, Some("Fjarr Ghost 1"), None);
+        on_ghost.ddc_monitor = Some("DELL U2422H".into());
+        let clash = rows(&[on_ghost], &g, &["DP-2".into()]);
         assert!(
             matches!(&clash[0].1, State::Ghost { real_monitor: Some(m), .. } if m == "DELL U2422H")
         );

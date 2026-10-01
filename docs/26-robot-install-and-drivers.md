@@ -517,9 +517,9 @@ members' `PATH` property (`mst:<root>-<port>`) even while it reads as
 disconnected. The EDID is generated as EDID 1.4 with the mode's CVT
 reduced-blanking timing, and `di-edid-decode` reports it conforming. The GRUB
 snippet's `# fjarr-ghosts:` line is the one record of which ghosts exist. Proving
-it on hardware (a reboot into the ghosts, a chain beside them) is 3.L's, as is
+it on hardware (a reboot into the ghosts, a chain beside them) is 3.L's, as was
 [open question #37](18-open-questions.md): telling that a real monitor is on a
-ghost connector. **On the mini-PC** (amdgpu, 2026-10-01) the ghost came up
+ghost connector (answered the same evening: over DDC, above). **On the mini-PC** (amdgpu, 2026-10-01) the ghost came up
 from the first reboot with the EDID only in `/usr/lib/firmware/edid`, because
 amdgpu is not in that machine's initramfs and loads after the root filesystem
 is mounted. A machine whose initramfs carries its GPU driver would need the
@@ -531,7 +531,10 @@ is left it says how many ghosts this machine can have instead of failing after
 a reboot. `--check` adds rows for each configured ghost: *active* when the
 running kernel booted with it, *reboot pending* when it did not, and a failure
 when a real monitor is plugged into a ghost connector. That monitor shows up as
-the ghost, because the kernel forces the ghost's EDID on that port.
+the ghost, because the kernel forces the ghost's EDID on that port, so both read
+the monitor's own EDID over the connector's DDC bus instead (`i2c-dev`, which
+`fjarr-desktop-wayland` loads at boot). A sink that answers there is a real
+monitor ([#37](18-open-questions.md), measured on the mini-PC).
 
 A **virtual monitor** (mutter's `RecordVirtual`) is the other kind: an extra
 screen for one session, created when the operator asks and gone when they

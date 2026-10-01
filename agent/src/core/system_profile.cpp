@@ -4,13 +4,17 @@
 
 #include <algorithm>
 #include <climits>
+#include <cstring>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 
+#include <fcntl.h>
 #include <grp.h>
+#include <linux/i2c-dev.h>
 #include <pwd.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -207,6 +211,14 @@ void check_desktop(const toml::table& d, const std::string& account, const std::
             if (eq == std::string::npos) continue;
             const std::string connector = item.substr(0, eq);
             const bool active = cmdline.find("video=" + connector + ":") != std::string::npos;
+            // A real monitor here shows up as the ghost (the kernel forces the ghost's EDID); its own
+            // EDID still answers over DDC (docs/18 #37).
+            const auto real = active && sys.ddc_monitor ? sys.ddc_monitor(connector) : std::nullopt;
+            if (real && real->rfind("Fjarr Ghost", 0) != 0) {
+                rows.push_back({"desktop", "ghost " + connector, false, *real + " is plugged in here and shows as the ghost",
+                                "unplug it, or: sudo fjarr-agent display remove-ghost " + connector});
+                continue;
+            }
             rows.push_back({"desktop", "ghost " + connector, true, active ? "active" : "reboot pending", ""});
         }
     }
@@ -294,6 +306,36 @@ System System::real() {
         std::stringstream t;
         t << in.rdbuf();
         return t.str();
+    };
+    s.ddc_monitor = [](const std::string& connector) -> std::optional<std::string> {
+        // /sys/class/drm/card*-<connector>/ddc → /dev/i2c-N, the EDID at 0x50 (i2c-dev).
+        std::error_code ec;
+        for (const auto& e : std::filesystem::directory_iterator("/sys/class/drm", ec)) {
+            const auto name = e.path().filename().string();
+            const auto dash = name.find('-');
+            if (name.rfind("card", 0) != 0 || dash == std::string::npos || name.substr(dash + 1) != connector) continue;
+            const auto bus = std::filesystem::read_symlink(e.path() / "ddc", ec);
+            if (ec) return std::nullopt;
+            const int fd = ::open(("/dev/" + bus.filename().string()).c_str(), O_RDWR | O_CLOEXEC);
+            if (fd < 0) return std::nullopt;
+            unsigned char edid[128] = {};
+            const unsigned char offset = 0;
+            const bool ok = ::ioctl(fd, I2C_SLAVE, 0x50) >= 0 && ::write(fd, &offset, 1) == 1 && ::read(fd, edid, sizeof edid) == sizeof edid;
+            ::close(fd);
+            static const unsigned char header[8] = {0, 255, 255, 255, 255, 255, 255, 0};
+            if (!ok || std::memcmp(edid, header, 8) != 0) return std::nullopt;
+            for (int i = 0; i < 4; i++) {
+                const unsigned char* d = edid + 54 + 18 * i;
+                if (d[0] == 0 && d[1] == 0 && d[3] == 0xFC) {
+                    std::string n(reinterpret_cast<const char*>(d + 5), 13);
+                    n = n.substr(0, n.find('\n'));
+                    while (!n.empty() && n.back() == ' ') n.pop_back();
+                    return n;
+                }
+            }
+            return std::string("a monitor");
+        }
+        return std::nullopt;
     };
     s.netdev = [](const std::string& name) -> std::optional<NetDev> {
         const std::filesystem::path base = std::filesystem::path("/sys/class/net") / name;
