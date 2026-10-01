@@ -1,6 +1,9 @@
 #include "producer.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
 
 #include <gst/video/video.h>
 
@@ -308,6 +311,44 @@ std::pair<int, int> Producer::band_kbps(const std::string& tier) const {
     return {std::max(config_.active_floor_kbps, config_.active_kbps / 2), config_.active_kbps};
 }
 
+namespace {
+// Unlink `src` from `sink` only while no buffer is in flight on `src` (an IDLE probe), and wait for
+// it. Unlinking mid-push let the branch be set to NULL under the streaming thread: the push came
+// back FLUSHING, the tee passed it upstream, and the source paused its task for good, with the
+// pipeline still PLAYING: every tier frozen (#38, the 2026-10-01 TSan run, 9 of 25 under load).
+void unlink_when_idle(GstPad* src, GstPad* sink) {
+    struct Unlink {
+        GstPad* sink;
+        std::mutex mu;
+        std::condition_variable cv;
+        bool done = false;
+    };
+    auto u = std::make_shared<Unlink>();
+    u->sink = sink;
+    // The probe holds its own reference, released by GStreamer when the probe goes: whichever of the
+    // two finishes last frees it.
+    const gulong id = gst_pad_add_probe(
+        src, GST_PAD_PROBE_TYPE_IDLE,
+        [](GstPad* pad, GstPadProbeInfo*, gpointer d) -> GstPadProbeReturn {
+            auto& un = *static_cast<std::shared_ptr<Unlink>*>(d);
+            gst_pad_unlink(pad, un->sink);
+            std::lock_guard<std::mutex> lk(un->mu);
+            un->done = true;
+            un->cv.notify_all();
+            return GST_PAD_PROBE_REMOVE;
+        },
+        new std::shared_ptr<Unlink>(u), [](gpointer d) { delete static_cast<std::shared_ptr<Unlink>*>(d); });
+    // Runs at once when the pad is idle, else when the push in flight returns. A push that never
+    // returns would hold the loop; the deadline turns that into a plain unlink.
+    std::unique_lock<std::mutex> lk(u->mu);
+    if (u->cv.wait_for(lk, std::chrono::seconds(2), [&] { return u->done; })) return;
+    lk.unlock();
+    log::warn("producer", "a tier's pad never went idle in 2 s; unlinking it anyway");
+    gst_pad_remove_probe(src, id);
+    gst_pad_unlink(src, sink);
+}
+} // namespace
+
 void Producer::stop_tier(const std::string& tier) {
     auto it = tiers_.find(tier);
     if (it == tiers_.end()) return;
@@ -318,7 +359,7 @@ void Producer::stop_tier(const std::string& tier) {
     // state change in flight, and its completion sets every child still in the bin back to
     // PLAYING — mid-teardown, which disposed elements un-NULLed and could hang the next stop.
     glib::GstPadPtr qsink = glib::adopt_pad(gst_element_get_static_pad(t->queue.get(), "sink"));
-    gst_pad_unlink(t->tee_pad.get(), qsink.get());
+    unlink_when_idle(t->tee_pad.get(), qsink.get());
     gst_element_set_locked_state(t->sink.get(), TRUE);
     gst_element_set_locked_state(t->encode.get(), TRUE);
     gst_element_set_locked_state(t->queue.get(), TRUE);

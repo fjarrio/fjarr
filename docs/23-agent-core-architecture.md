@@ -647,7 +647,10 @@ buffers leaked) and, within a few dozen start/stop cycles, a stop that never
 returned. So `stop_tier` calls `gst_element_set_locked_state(TRUE)` on the
 branch's elements first, which keeps the parent's hands off them — the rule for
 any branch removed from a running pipeline (found by the nightly memcheck,
-2026-09-29; `LoopMedia.aTierStoppedWhileItsStartIsStillSettlingIsTornDownCleanly`).
+2026-09-29; `LoopMedia.aTierStoppedWhileItsStartIsStillSettlingIsTornDownCleanly`). The branch is also **unlinked only from an IDLE probe** on the tee's pad: a
+branch set to NULL under a push in flight returns FLUSHING through the tee, and
+the source then pauses its task for good, freezing every tier while the pipeline
+still reads PLAYING (found under TSan with the CPU loaded, 2026-10-01, #38).
 The consumer's branches have a different hazard, a thread parked on an
 un-negotiated `webrtcbin` pad, and a different rule ([valves open only on
 answered m-sections](#offer-construction-and-renegotiation)).
