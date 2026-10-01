@@ -56,10 +56,10 @@ test("the Terminal panel gives a developer a working shell, and tells an operato
 test("the Desktop panel shows the desktop robot's screen: <DesktopView> on the primary monitor's track (M3 3.1)", async ({ dashboard, stack, page }) => {
   await stack.requireServer();
   test.skip(!(await stack.dashboardReachable()), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
-  // The headless-mutter robot (docs/12#services): up with `make desktop-see`, not with the demo profile.
+  // The headless-mutter robot (docs/12#services): up with `make desktop-e2e`, not with the demo profile.
   const desktopRobot = process.env.E2E_DESKTOP_ROBOT_HTTP ?? "http://desktop-robot:7381";
   const up = await fetch(desktopRobot, { signal: AbortSignal.timeout(2000) }).then(() => true, () => false);
-  test.skip(!up, `desktop-robot is not running at ${desktopRobot} — \`make desktop-see\``);
+  test.skip(!up, `desktop-robot is not running at ${desktopRobot} — \`make desktop-e2e\``);
 
   await dashboard.goto();
   await page.getByRole("button", { name: /Desktop Robot 01/ }).click();

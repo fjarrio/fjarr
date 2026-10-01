@@ -76,7 +76,7 @@ services:
       - desktop-socket:/run/fjarr
 
   # An agent attached to the fixture's desktop (M3 3.1): the reference daemon with backend module E
-  # from the build, reached by the fixture's session helper over the shared socket. make desktop-see.
+  # from the build, reached by the fixture's session helper over the shared socket. make desktop-e2e.
   desktop-robot:
     profiles: [desktop]
     image: fjarr-dev

@@ -82,7 +82,7 @@ const robots = [
   { id: "demo-robot-01", name: "Demo Robot 01", site: "Lab", capabilities: FLEET_ROBOT },
   { id: "demo-robot-02", name: "Demo Robot 02", site: "Warehouse", capabilities: FLEET_ROBOT },
   { id: "demo-robot-03", name: "Demo Robot 03", site: "Yard", capabilities: FLEET_ROBOT },
-  // A robot with a screen and no camera: the headless-mutter fixture (`make desktop-see`, docs/12#services).
+  // A robot with a screen and no camera: the headless-mutter fixture (`make desktop-e2e`, docs/12#services).
   { id: "desktop-robot-01", name: "Desktop Robot 01", site: "Lab", capabilities: ["fjarr.test", "fjarr.desktop", "fjarr.introspect"] },
 ];
 

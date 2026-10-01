@@ -68,6 +68,7 @@ add_library(fjarr STATIC
   src/capabilities/net_addressing.cpp
   src/capabilities/desktop_capability.cpp
   src/desktop/module_loader.cpp
+  src/desktop/keycodes.cpp
 )
 add_library(fjarr::fjarr ALIAS fjarr)
 target_include_directories(fjarr
@@ -93,9 +94,14 @@ target_link_libraries(fjarr-desktop-session PRIVATE PkgConfig::GIO nlohmann_json
 # Backend module E (ADR-0006, ADR-0021): mutter through the session helper, as its own shared object
 # in desktop-modules/ — where FJARR_DESKTOP_MODULE_DIR points in the lab, and what the
 # fjarr-desktop-wayland package installs to /usr/lib/fjarr/desktop (M3 3.3).
-add_library(fjarr-desktop-mutter MODULE modules/desktop-mutter/backend.cpp src/desktop/helper_protocol.cpp src/desktop/monitor_identity.cpp)
+# Input is libei on the EIS socket the helper hands over; text is typed through mutter's keymap with
+# xkbcommon (docs/23#desktop-helper-protocol). Both are the module's dependencies, not libfjarr's.
+pkg_check_modules(LIBEI REQUIRED IMPORTED_TARGET libei-1.0)
+pkg_check_modules(XKBCOMMON REQUIRED IMPORTED_TARGET xkbcommon)
+add_library(fjarr-desktop-mutter MODULE modules/desktop-mutter/backend.cpp modules/desktop-mutter/eis_input.cpp
+  src/desktop/helper_protocol.cpp src/desktop/monitor_identity.cpp src/desktop/keymap.cpp)
 target_include_directories(fjarr-desktop-mutter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(fjarr-desktop-mutter PRIVATE PkgConfig::GST PkgConfig::GIO nlohmann_json::nlohmann_json)
+target_link_libraries(fjarr-desktop-mutter PRIVATE PkgConfig::GST PkgConfig::GIO PkgConfig::LIBEI PkgConfig::XKBCOMMON nlohmann_json::nlohmann_json)
 set_target_properties(fjarr-desktop-mutter PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/desktop-modules" PREFIX "lib" CXX_VISIBILITY_PRESET hidden)
 

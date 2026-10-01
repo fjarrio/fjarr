@@ -41,7 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # --- X11 desktop backend (docs/07) ------------------------------------
     libx11-dev libxtst-dev libxfixes-dev libxrandr-dev libxi-dev x11-utils \
     # --- Wayland desktop backend (docs/07) --------------------------------
-    libpipewire-0.3-dev libei-dev libdbus-1-dev xdg-desktop-portal \
+    libpipewire-0.3-dev libei-dev libxkbcommon-dev libdbus-1-dev xdg-desktop-portal \
     # --- uinput input backend (docs/07, ADR-0009) -------------------------
     libevdev-dev libudev-dev \
     # --- agent misc (docs/09, docs/23: TOML config, sd_notify) -------------

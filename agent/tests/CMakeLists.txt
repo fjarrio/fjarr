@@ -9,7 +9,9 @@ add_executable(fjarr-tests
   test_desktop_modules.cpp
   test_helper_protocol.cpp
   test_monitor_identity.cpp
+  test_keymap.cpp
   ${CMAKE_SOURCE_DIR}/agent/src/desktop/monitor_identity.cpp
+  ${CMAKE_SOURCE_DIR}/agent/src/desktop/keymap.cpp
   ${CMAKE_SOURCE_DIR}/agent/src/desktop/helper_protocol.cpp
   test_frame_hub.cpp
   test_channels.cpp
@@ -34,7 +36,7 @@ add_executable(fjarr-tests
   test_camera.cpp
 )
 target_include_directories(fjarr-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
-target_link_libraries(fjarr-tests PRIVATE fjarr::fjarr GTest::gtest PkgConfig::GST PkgConfig::SOUP)
+target_link_libraries(fjarr-tests PRIVATE fjarr::fjarr GTest::gtest PkgConfig::GST PkgConfig::SOUP PkgConfig::XKBCOMMON)
 target_compile_definitions(fjarr-tests PRIVATE FJARR_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/protocol/fixtures")
 # The supervision probe spawns the real daemon under a fake systemd notify socket (docs/15).
 target_compile_definitions(fjarr-tests PRIVATE FJARR_AGENT_BINARY="$<TARGET_FILE:fjarr-agent>")

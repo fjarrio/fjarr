@@ -20,6 +20,7 @@ groups with comments.
 | libva + intel-media-driver (iHD; amd64 only — arm64 uses mesa's VA drivers) | 2.22 / 26.1 | VA-API H.264 encode | MIT | yes (driver from distro) |
 | libx11 / libxtst / libxfixes / libxrandr / libxi | 26.04 | X11 backend | MIT/X11 | yes — in `fjarr-desktop-x11` only ([ADR-0021](adr/0021-desktop-backends-as-runtime-modules.md)) |
 | libei | 1.5.0 | Wayland input injection | MIT | yes — in `fjarr-desktop-wayland` only |
+| libxkbcommon | 1.13.1 | keymap lookup for typing `text` through the robot's layout ([docs/23](23-agent-core-architecture.md#desktop-helper-protocol)) | MIT | yes — in `fjarr-desktop-wayland` only |
 | libpipewire (+ `gstreamer1.0-pipewire`) | 1.6.2 | portal capture | MIT | yes — in `fjarr-desktop-wayland` only |
 | libevdev | 1.13.6 | uinput helper | MIT-ish (X11) | yes (in `fjarr-inputd`) |
 | libdbus / sd-bus | 26.04 | portal negotiation | AFL-2.1/GPL dual → use LGPL path; verify at M2 | yes — in `fjarr-desktop-wayland` only |

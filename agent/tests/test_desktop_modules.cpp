@@ -110,6 +110,7 @@ TEST(DesktopModules, somethingThatIsNotOurModuleIsIgnoredWithAReasonRatherThanLo
 
 #include "core/loop.hpp"
 #include "media/sources.hpp"
+#include "recording_context.hpp"
 
 namespace {
 /// The capability ignores the source factory; one still has to exist to call configure().
@@ -151,4 +152,97 @@ TEST(DesktopCapability, disabledIsADeploymentChoiceAndSaysSo) {
     ASSERT_EQ(rows.size(), 1u);
     EXPECT_FALSE(rows[0].available);
     EXPECT_NE(rows[0].reason.find("disabled"), std::string::npos) << rows[0].reason;
+}
+
+// --- input (M3 3.2) ------------------------------------------------------------------------------
+// spec: docs/08-protocol.md#input-events-fjarrdesktop · docs/15-testing-strategy.md#safety-behaviors
+namespace {
+struct InputRig {
+    std::filesystem::path log = temp_dir("input") / "calls.txt";
+    Env record{"FJARR_STUB_RECORD", log.c_str()};
+    Sources sources;
+    fjarr::DesktopCapability cap;
+    fjarr::testing::RecordingContext a, b;
+    InputRig() {
+        cap.configure(nlohmann::json{{"module_dir", FJARR_STUB_MODULE_DIR}}, sources.reg);
+        a.sid = "session-a";
+        b.sid = "session-b";
+        cap.session_attached(a, nlohmann::json::object());
+        cap.session_attached(b, nlohmann::json::object());
+    }
+    void send(fjarr::testing::RecordingContext& ctx, const std::string& type, nlohmann::json payload, const std::string& kind = "event") {
+        cap.on_message(ctx, fjarr::Envelope{"fjarr.desktop", type, "e-" + type, kind, std::move(payload)});
+    }
+    std::vector<std::string> calls() const {
+        std::vector<std::string> out;
+        std::ifstream in(log);
+        for (std::string line; std::getline(in, line);) out.push_back(line);
+        return out;
+    }
+};
+} // namespace
+
+TEST(DesktopInput, eachMessageReachesTheBackendAsItsEvdevCall) {
+    InputRig r;
+    r.send(r.a, "pointer", {{"track_id", "desk-virtual-1"}, {"x", 0.5}, {"y", 0.25}, {"seq", 1}});
+    r.send(r.a, "button", {{"button", "right"}, {"down", true}});
+    r.send(r.a, "button", {{"button", "right"}, {"down", false}});
+    r.send(r.a, "wheel", {{"dx", 0}, {"dy", 48}});
+    r.send(r.a, "key", {{"code", "KeyA"}, {"down", true}});
+    r.send(r.a, "key", {{"code", "KeyA"}, {"down", false}});
+    r.send(r.a, "key-combo", {{"codes", {"ControlLeft", "AltLeft", "Delete"}}}, "request");
+    EXPECT_EQ(r.calls(), (std::vector<std::string>{"pointer 7 0.500000 0.250000", "button 2 down", "button 2 up", "wheel 0.000000 48.000000",
+                                                  "key 30 down", "key 30 up", "key 29 down", "key 56 down", "key 111 down", "key 111 up",
+                                                  "key 56 up", "key 29 up"}));
+    ASSERT_EQ(r.a.sent.size(), 1u);
+    EXPECT_TRUE(r.a.sent[0].payload["ok"].get<bool>()) << "key-combo is answered";
+}
+
+TEST(DesktopInput, staleOrOffScreenPointerMotionIsDropped) {
+    InputRig r;
+    r.send(r.a, "pointer", {{"track_id", "desk-virtual-1"}, {"x", 0.1}, {"y", 0.1}, {"seq", 5}});
+    r.send(r.a, "pointer", {{"track_id", "desk-virtual-1"}, {"x", 0.9}, {"y", 0.9}, {"seq", 4}}); // older: realtime is unordered
+    r.send(r.a, "pointer", {{"track_id", "desk-virtual-1"}, {"x", 1.5}, {"y", 0.1}, {"seq", 6}}); // outside the monitor
+    r.send(r.a, "pointer", {{"track_id", "desk-nope"}, {"x", 0.2}, {"y", 0.2}, {"seq", 7}});      // no such monitor
+    EXPECT_EQ(r.calls(), (std::vector<std::string>{"pointer 7 0.100000 0.100000"}));
+}
+
+TEST(DesktopInput, textIsTypedWholeOrRefusedNamingWhatTheLayoutLacks) {
+    InputRig r;
+    r.send(r.a, "text", {{"text", "hej"}}, "request");
+    r.send(r.a, "text", {{"text", "hå"}}, "request");
+    EXPECT_EQ(r.calls(), (std::vector<std::string>{"text hej"}));
+    ASSERT_EQ(r.a.sent.size(), 2u);
+    EXPECT_TRUE(r.a.sent[0].payload["ok"].get<bool>());
+    EXPECT_EQ(r.a.sent[1].payload["error"]["code"], "unavailable");
+    EXPECT_EQ(r.a.sent[1].payload["error"]["data"]["untypable"], nlohmann::json::array({"å"}));
+}
+
+TEST(DesktopInput, unknownKeysAndButtonsAreRefusedAndNeverInjected) {
+    InputRig r;
+    r.send(r.a, "key", {{"code", "NotAKey"}, {"down", true}}, "request");
+    r.send(r.a, "button", {{"button", "sideways"}, {"down", true}}, "request");
+    r.send(r.a, "key-combo", {{"codes", {"ControlLeft", "Nope"}}}, "request");
+    EXPECT_TRUE(r.calls().empty()) << "a combo with an unknown key presses nothing, not half of it";
+    ASSERT_EQ(r.a.sent.size(), 3u);
+    for (const auto& s : r.a.sent) EXPECT_EQ(s.payload["error"]["code"], "payload-invalid");
+}
+
+TEST(DesktopInput, safetyTheEndOfTheSessionWhoseInputIsOnTheDesktopReleasesItAndNoOtherDoes) {
+    // docs/15 safety: release_all_input on session end. But a viewer leaving (or its window losing
+    // focus, `release-all`) must not let go of keys the holder is pressing.
+    InputRig r;
+    r.send(r.a, "key", {{"code", "ShiftLeft"}, {"down", true}});
+    r.cap.release_all_input(r.b.sid);
+    r.send(r.b, "release-all", nlohmann::json::object());
+    EXPECT_EQ(r.calls(), (std::vector<std::string>{"key 42 down"}));
+    r.cap.release_all_input(r.a.sid); // the core, as session-a ends
+    EXPECT_EQ(r.calls().back(), "release-all");
+}
+
+TEST(DesktopInput, safetyWhenInputMovesToAnotherSessionThePreviousHoldersKeysGoUpFirst) {
+    InputRig r;
+    r.send(r.a, "key", {{"code", "ControlLeft"}, {"down", true}});
+    r.send(r.b, "key", {{"code", "KeyC"}, {"down", true}}); // b took control: a's Ctrl must not make this Ctrl+C
+    EXPECT_EQ(r.calls(), (std::vector<std::string>{"key 29 down", "release-all", "key 46 down"}));
 }

@@ -127,6 +127,11 @@ class DesktopBackend {
     virtual void pointer_wheel(double dx, double dy) = 0;
 
     virtual void key(LinuxKeycode code, bool down) = 0;
+    /// Types `utf8` through the robot's active keymap: each character as the key and modifiers that
+    /// produce it there (docs/08 `text`; no backend has a Unicode path). Returns the characters no
+    /// key produces, and then types nothing. Sets `error` when there is no input to type with.
+    /// spec: docs/23-agent-core-architecture.md#desktop-helper-protocol
+    virtual std::vector<std::string> type_text(const std::string& utf8, std::string& error) = 0;
 
     /// MUST be called on every session end — no stuck modifiers, ever.
     /// spec: docs/15-testing-strategy.md#safety-behaviors

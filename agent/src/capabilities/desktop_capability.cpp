@@ -3,11 +3,13 @@
 
 #include <map>
 #include <optional>
+#include <set>
 
 #include <fjarr/errors.hpp>
 #include <fjarr/session_context.hpp>
 
 #include "core/log.hpp"
+#include "desktop/keycodes.hpp"
 #include "desktop/module_loader.hpp"
 #include "media/sources.hpp"
 
@@ -31,6 +33,24 @@ struct DesktopCapability::Impl {
     // The primary monitor's track (M3 3.1; every monitor from 3.4).
     std::optional<Monitor> primary;
     std::shared_ptr<VideoSource> source;
+    // Input (M3 3.2). The core lets only the desktop domain's holder through (docs/10); this is
+    // the session whose input is on the desktop now, so only its end releases what it holds.
+    std::optional<SessionId> input_session;
+    std::map<SessionId, std::uint64_t> pointer_seq; // docs/08: receivers drop stale motion
+    std::set<std::string> unknown_codes;            // logged once each
+
+    /// The monitor a desktop track shows, by its wire id.
+    std::optional<Monitor> monitor_for(const std::string& track_id) const {
+        if (!driver || track_id.rfind("desk-", 0) != 0) return std::nullopt;
+        for (const auto& m : driver->monitors())
+            if (m.wire_id == track_id.substr(5)) return m;
+        return std::nullopt;
+    }
+    std::optional<LinuxKeycode> keycode(const std::string& code) {
+        if (auto k = desktop::evdev_for_code(code)) return *k;
+        if (unknown_codes.insert(code).second) log::warn("desktop", "unknown key code; dropped", {{"code", code}});
+        return std::nullopt;
+    }
 
     std::vector<TrackSpec> specs(bool available_only = false) const {
         if (!primary || !source || (available_only && !source->available())) return {};
@@ -173,21 +193,81 @@ void DesktopCapability::session_attached(SessionContext& ctx, const nlohmann::js
     for (auto& spec : impl_->specs()) ctx.add_track(std::move(spec)); // unavailable until the helper hands it over: held back by the core
 }
 
-void DesktopCapability::session_detached(const SessionId& id, DetachReason, std::string_view) { impl_->sessions.erase(id); }
+void DesktopCapability::session_detached(const SessionId& id, DetachReason, std::string_view) {
+    impl_->sessions.erase(id);
+    impl_->pointer_seq.erase(id);
+    if (impl_->input_session == id) impl_->input_session.reset();
+}
 
-void DesktopCapability::release_all_input(const SessionId&) {
-    if (impl_->driver) impl_->driver->release_all_input();
+void DesktopCapability::release_all_input(const SessionId& id) {
+    // spec: docs/15-testing-strategy.md#safety-behaviors — the core calls this on every session end
+    // and when control moves. Another session's held keys are not ours to release.
+    if (!impl_->driver || (impl_->input_session && *impl_->input_session != id)) return;
+    impl_->driver->release_all_input();
+    impl_->input_session.reset();
 }
 
 void DesktopCapability::on_message(SessionContext& ctx, const Envelope& msg) {
-    if (msg.kind != "request") return;
-    // M3 brings capture and input. Until then the honest answer to any request is the same one
-    // `/sources` gives, with the reason — never a silent no-op that looks like it worked.
-    if (!impl_->chosen.empty()) {
-        ctx.fail(msg, error_codes::unavailable, "desktop input arrives in M3 slice 3.2; the " + impl_->chosen + " backend streams the screen only");
+    // spec: docs/08-protocol.md#input-events-fjarrdesktop. The core has already dropped input from a
+    // session that does not hold the desktop domain, and from a view-only grant (docs/10).
+    const bool request = msg.kind == "request";
+    auto refuse = [&](std::string_view code, const std::string& why) {
+        if (request) ctx.fail(msg, code, why);
+    };
+    if (!impl_->driver) return refuse(error_codes::unavailable, impl_->unavailable.empty() ? "no desktop backend is running" : impl_->unavailable);
+    auto& d = *impl_->driver;
+    const auto& p = msg.payload;
+    if (msg.type == "release-all") {
+        // Never claims: only the session whose input is on the desktop can let go of it.
+        release_all_input(ctx.id());
+        if (request) ctx.result(msg, {{"ok", true}});
         return;
     }
-    ctx.fail(msg, error_codes::unavailable, impl_->unavailable);
+    if (impl_->input_session && *impl_->input_session != ctx.id()) d.release_all_input(); // control moved without an end
+    impl_->input_session = ctx.id();
+    if (msg.type == "pointer") {
+        const auto seq = p.value("seq", std::uint64_t{0});
+        auto& last = impl_->pointer_seq[ctx.id()];
+        if (seq != 0 && seq <= last) return; // stale: realtime is unordered
+        last = seq;
+        const double x = p.value("x", -1.0), y = p.value("y", -1.0);
+        const auto m = impl_->monitor_for(p.value("track_id", std::string{}));
+        if (!m || x < 0 || x > 1 || y < 0 || y > 1) return;
+        d.pointer_motion(m->id, x, y);
+    } else if (msg.type == "button") {
+        static const std::map<std::string, MouseButton> buttons{
+            {"left", MouseButton::Left}, {"middle", MouseButton::Middle}, {"right", MouseButton::Right}, {"back", MouseButton::Back}, {"forward", MouseButton::Forward}};
+        const auto it = buttons.find(p.value("button", std::string{}));
+        if (it == buttons.end()) return refuse(error_codes::payload_invalid, "button is left, middle, right, back or forward");
+        d.pointer_button(it->second, p.value("down", false));
+    } else if (msg.type == "wheel") {
+        d.pointer_wheel(p.value("dx", 0.0), p.value("dy", 0.0));
+    } else if (msg.type == "key") {
+        if (const auto k = impl_->keycode(p.value("code", std::string{}))) d.key(*k, p.value("down", false));
+        else return refuse(error_codes::payload_invalid, "unknown key code");
+    } else if (msg.type == "key-combo") {
+        std::vector<LinuxKeycode> keys;
+        for (const auto& c : p.value("codes", nlohmann::json::array())) {
+            const auto k = c.is_string() ? impl_->keycode(c.get<std::string>()) : std::nullopt;
+            if (!k) return refuse(error_codes::payload_invalid, "unknown key code in the combo");
+            keys.push_back(*k);
+        }
+        for (const auto k : keys) d.key(k, true);
+        for (auto it = keys.rbegin(); it != keys.rend(); ++it) d.key(*it, false);
+        if (request) ctx.result(msg, {{"ok", true}});
+    } else if (msg.type == "text") {
+        // Typed through the robot's keymap, whole or not at all (docs/08 `text`).
+        std::string error;
+        const auto untypable = d.type_text(p.value("text", std::string{}), error);
+        if (!error.empty()) return refuse(error_codes::unavailable, error);
+        if (!untypable.empty()) {
+            if (request) ctx.fail(msg, error_codes::unavailable, "the robot's keyboard layout cannot type these characters", {{"untypable", untypable}});
+            return;
+        }
+        if (request) ctx.result(msg, {{"ok", true}});
+    } else {
+        refuse(error_codes::payload_invalid, "fjarr.desktop has no message '" + msg.type + "'");
+    }
 }
 
 std::vector<Capability::ConfiguredSource> DesktopCapability::configured_sources() const {

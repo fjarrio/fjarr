@@ -211,6 +211,8 @@ public:
   virtual void pointer_button(MouseButton, bool down) = 0;
   virtual void pointer_wheel(double dx, double dy) = 0;
   virtual void key(LinuxKeycode, bool down) = 0;
+  // Text through the robot's keymap; returns the characters it cannot type, typing nothing then.
+  virtual std::vector<std::string> type_text(const std::string& utf8, std::string& error) = 0;
   virtual void release_all_input() = 0;   // MUST be called on session end
   virtual ClipboardHandle* clipboard() = 0;
 };

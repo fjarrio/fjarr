@@ -75,6 +75,7 @@ struct Options {
     std::string ice_policy = "all";
     std::string introspect; // http://127.0.0.1:7381
     std::string introspect_token; // --introspect-token, else $FJARR_INTROSPECT_TOKEN (the demo exposes the endpoint with one, docs/24)
+    std::string desktop_oracle;   // desktop-control: the fixture's test-window log, http://desktop-fixture:8090/testwin.log
     int timeout_s = 60;
     int cycles = 200; // soak: connect/stream/close cycles
     /// `smoke --hold N`: keep every track subscribed for N seconds before closing — a viewer that
@@ -96,7 +97,8 @@ void usage() {
                  "                   [--json out.json] [--timeout 60] [--ice-policy all|relay] [--cycles 200] [--hold 0]\n"
                  "                   [--introspect http://127.0.0.1:7381] [--introspect-token <t>] [--verbose]\n"
                  "                   [--exec '<command>'] (tunnel: run it with the link up, $FJARR_ADDR set)\n"
-                 "scenarios: smoke toggle hotplug rejected-track desktop-see silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer tunnel\n"
+                 "                   [--desktop-oracle <url of the fixture's test-window log>] (desktop-control)\n"
+                 "scenarios: smoke toggle hotplug rejected-track desktop-see desktop-control silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer tunnel\n"
                  "           soak (--cycles N, needs --introspect)\n"
                  "           netem-{lan,wifi-ok,4g,lossy,bad} (the profile is applied externally: docker/lab/netem.sh)\n"
                  "exit: 0 all assertions pass, 1 any fail, 2 usage, 3 timeout\n");
@@ -134,6 +136,8 @@ bool parse_args(int argc, char** argv, Options& o) {
             if (!need(o.introspect)) return false;
         } else if (a == "--introspect-token") {
             if (!need(o.introspect_token)) return false;
+        } else if (a == "--desktop-oracle") {
+            if (!need(o.desktop_oracle)) return false;
         } else if (a == "--timeout") {
             if (!need(v)) return false;
             o.timeout_s = std::atoi(v.c_str());
@@ -316,7 +320,22 @@ struct TrackRx {
     // Encoded access units reaching the parser (before the decoder): the transport-level "frames keep arriving".
     std::uint64_t encoded = 0;
     std::int64_t last_encoded_us = 0, max_encoded_gap_us = 0;
+    // The mean luma of the frame's centre (16×16): the input-to-photon harness watches it change.
+    int centre_luma = -1;
 };
+
+/// Mean 8-bit luma of the 16×16 block at the centre of a decoded frame; -1 when it has none.
+int centre_luma(const GstVideoFrame& f) {
+    if (GST_VIDEO_FRAME_COMP_DEPTH(&f, 0) != 8) return -1;
+    const int w = GST_VIDEO_FRAME_WIDTH(&f), h = GST_VIDEO_FRAME_HEIGHT(&f);
+    if (w < 16 || h < 16) return -1;
+    const auto* data = static_cast<const std::uint8_t*>(GST_VIDEO_FRAME_PLANE_DATA(&f, 0));
+    const int stride = GST_VIDEO_FRAME_PLANE_STRIDE(&f, 0), pstride = GST_VIDEO_FRAME_COMP_PSTRIDE(&f, 0), offset = GST_VIDEO_FRAME_COMP_OFFSET(&f, 0);
+    int sum = 0;
+    for (int y = h / 2 - 8; y < h / 2 + 8; y++)
+        for (int x = w / 2 - 8; x < w / 2 + 8; x++) sum += data[y * stride + offset + x * pstride];
+    return sum / 256;
+}
 
 struct Captured {
     double t;
@@ -939,14 +958,17 @@ class Peer {
         std::uint32_t counter = 0;
         std::uint64_t ts = 0;
         bool ok = false;
+        int luma = -1;
         GstVideoFrame frame;
         if (gst_video_frame_map(&frame, &vinfo, buf, GST_MAP_READ)) {
             ok = decode_stamp(frame, counter, ts);
+            luma = centre_luma(frame);
             gst_video_frame_unmap(&frame);
         }
         const std::int64_t now = g_get_monotonic_time();
         std::lock_guard<std::mutex> lk(self->sh_.mu);
         rx->frames++;
+        rx->centre_luma = luma;
         if (!rx->first_frame_us) rx->first_frame_us = now;
         if (rx->last_frame_us && now - rx->last_frame_us > rx->max_gap_us) rx->max_gap_us = now - rx->last_frame_us;
         rx->last_frame_us = now;
@@ -1546,6 +1568,24 @@ class Operator {
     double best_rtt() { return locked<double>([this] { return sh_.best_rtt_ms; }); }
     int pongs() { return locked<int>([this] { return sh_.pongs; }); }
     const std::string& introspect() const { return opts_.introspect; }
+    const std::string& desktop_oracle() const { return opts_.desktop_oracle; }
+    /// Send an event on a data channel (input is events: docs/08#input-events-fjarrdesktop).
+    bool event(const std::string& channel, const std::string& cap, const std::string& type, json payload) {
+        return send_envelope(channel, protocol::make_envelope(cap, type, "event", std::move(payload)));
+    }
+    /// Wait until a track's centre luma satisfies `pred` (evaluated under the shared lock wait_for holds).
+    bool wait_centre_luma(const std::string& track_id, std::function<bool(int)> pred, int timeout_ms) {
+        return wait_for([&] {
+            auto* t = sh_.track(track_id);
+            return t && t->centre_luma >= 0 && pred(t->centre_luma);
+        }, timeout_ms);
+    }
+    int centre_luma(const std::string& track_id) {
+        return locked<int>([&] {
+            auto* t = sh_.track(track_id);
+            return t ? t->centre_luma : -1;
+        });
+    }
     const std::string& scenario() const { return opts_.scenario; }
     const std::string& exec_cmd() const { return opts_.exec_cmd; }
     int hold_s() const { return opts_.hold_s; }
@@ -2212,6 +2252,133 @@ void scenario_desktop_see(Operator& op) {
     close_and_assert(op);
 }
 
+/// M3 3.2: the fixture's desktop driven through the agent — clicks, keys, text through the keymap,
+/// a combo, the untypable refused by name, input-to-photon, and no key left held when the session
+/// ends mid-keydown (docs/15 safety). The verdict is the test window's own log (--desktop-oracle).
+/// spec: docs/08-protocol.md#input-events-fjarrdesktop · docs/15-testing-strategy.md#the-desktop-test-lab
+void scenario_desktop_control(Operator& op) {
+    Report& r = op.report();
+    if (op.desktop_oracle().empty()) {
+        r.check("desktop-oracle", false, "--desktop-oracle not given: nothing can read the test window's log");
+        return;
+    }
+    connect_and_report(op);
+    std::string desk;
+    for (const auto& id : op.track_ids())
+        if (id.rfind("desk-", 0) == 0) desk = id;
+    r.check("desktop-track", !desk.empty(), desk.empty() ? "no desk-* track in the manifest (is the session helper connected?)" : "the manifest carries " + desk);
+    if (desk.empty()) return;
+    const std::uint64_t f0 = op.frames(desk);
+    if (!op.select(desk, true, "active", 5000, "fjarr.desktop") || !op.wait_frames(desk, f0, 5, 10000)) {
+        r.check("desktop-frames", false, "no frames from " + desk + why_no_frames(op));
+        return;
+    }
+    const auto snap = op.track_snapshot(desk);
+    const int width = snap ? GST_VIDEO_INFO_WIDTH(&snap->info) : 0, height = snap ? GST_VIDEO_INFO_HEIGHT(&snap->info) : 0;
+    auto oracle = [&] {
+        auto g = op.http_get_url(op.desktop_oracle());
+        return g.status == 200 ? g.body : std::string();
+    };
+    auto since = [&](std::size_t mark) {
+        const std::string all = oracle();
+        return all.size() > mark ? all.substr(mark) : std::string();
+    };
+    std::uint64_t seq = 0;
+    auto point = [&](double x, double y) { op.event("fjarr:realtime", "fjarr.desktop", "pointer", json{{"track_id", desk}, {"x", x}, {"y", y}, {"seq", ++seq}}); };
+    auto button = [&](bool down) { op.event("fjarr:control", "fjarr.desktop", "button", json{{"button", "left"}, {"down", down}}); };
+    auto click = [&](double x, double y) {
+        point(x, y);
+        op.sleep_ms(50);
+        button(true);
+        button(false);
+    };
+    auto key = [&](const char* code, bool down) { op.event("fjarr:control", "fjarr.desktop", "key", json{{"code", code}, {"down", down}}); };
+    auto tap = [&](const char* code) {
+        key(code, true);
+        key(code, false);
+    };
+
+    // 1. Focus, then a key. Input arrives once the agent's module holds the EIS socket, and nothing
+    //    has focus on a headless desktop until something clicks: retry until the window logs it.
+    std::size_t mark = oracle().size();
+    const std::int64_t t_focus = g_get_monotonic_time();
+    bool typed = false;
+    for (int i = 0; i < 20 && !typed; i++) {
+        click(0.5, 0.5);
+        op.sleep_ms(300);
+        tap("KeyF");
+        op.sleep_ms(300);
+        typed = since(mark).find("key f text='f'") != std::string::npos;
+    }
+    r.check("desktop-input", typed, typed ? "click to focus and KeyF reached the test window " + ms_str(g_get_monotonic_time() - t_focus) + " after the first try"
+                                          : "the test window logged no 'f' within 12 s: " + since(mark).substr(0, 300));
+    if (!typed) return;
+
+    // 2. Physical keys with a modifier, text through the keymap, a combo, a click at a known point.
+    mark = oracle().size();
+    key("ShiftLeft", true);
+    tap("KeyJ");
+    key("ShiftLeft", false);
+    auto text = op.request("fjarr.desktop", "text", json{{"text", "Hej @1"}});
+    auto refused = op.request("fjarr.desktop", "text", json{{"text", "på"}});
+    auto combo = op.request("fjarr.desktop", "key-combo", json{{"codes", json::array({"AltLeft", "Tab"})}});
+    if (width > 0) click(321.0 / width, 234.0 / height);
+    op.sleep_ms(800);
+    const std::string got = since(mark);
+    auto has = [&](const std::string& needle) { return got.find(needle) != std::string::npos; };
+    r.check("desktop-shift", has("key J text='J'") && has("release Shift_L"), "Shift+KeyJ typed 'J' and Shift went up");
+    const bool text_ok = text && text->payload.value("ok", false);
+    std::size_t at = 0;
+    bool in_order = true;
+    for (const char* k : {"key H text='H'", "key e text='e'", "key j text='j'", "key space text=' '", "key at text='@'", "key 1 text='1'"}) {
+        const auto p = got.find(k, at);
+        if (p == std::string::npos) in_order = false;
+        else at = p;
+    }
+    r.check("desktop-text", text_ok && in_order, text_ok ? (in_order ? "'Hej @1' typed through the keymap, in order" : "the result said ok but the window saw: " + got.substr(0, 400))
+                                                        : "text was not answered ok");
+    const auto untypable = refused ? refused->payload.value("error", json::object()).value("data", json::object()).value("untypable", json::array()) : json::array();
+    r.check("desktop-untypable", refused && untypable == json::array({"å"}) && !has("key p text='p'"),
+            refused ? "'på' refused before anything was typed: " + refused->payload.dump() : "no answer to the untypable text");
+    // Alt+Tab is the compositor's to take (a real robot's window switcher), so the window may or may
+    // not see Tab; what must hold is that the combo ran and left Alt up.
+    r.check("desktop-combo", combo && combo->payload.value("ok", false) && has("key Alt_L") && has("release Alt_L"),
+            std::string("Alt+Tab pressed and released") + (has("key Tab") ? "; Tab reached the window" : "; the compositor took Tab"));
+    r.check("desktop-click", width > 0 && has("click button=1 x=321 y=234"), "a click at 321,234 of " + std::to_string(width) + "x" + std::to_string(height) + " landed there");
+
+    // 3. Input-to-photon: F9 turns the window green while held; time key-down to the first decoded
+    //    frame whose centre changed. docs/16 budget; CI fails only above the 2x ceiling (docs/15).
+    std::vector<double> samples;
+    const int base = op.centre_luma(desk);
+    for (int i = 0; i < 10 && base >= 0; i++) {
+        const std::int64_t t0 = g_get_monotonic_time();
+        key("F9", true);
+        const bool lit = op.wait_centre_luma(desk, [&](int l) { return std::abs(l - base) > 20; }, 2000);
+        if (lit) samples.push_back((g_get_monotonic_time() - t0) / 1000.0);
+        key("F9", false);
+        op.wait_centre_luma(desk, [&](int l) { return std::abs(l - base) <= 8; }, 2000);
+        op.sleep_ms(150);
+    }
+    std::sort(samples.begin(), samples.end());
+    auto pct = [&](double q) { return samples.empty() ? 0.0 : samples[std::min(samples.size() - 1, static_cast<std::size_t>(q * samples.size()))]; };
+    const double p50 = pct(0.5), p95 = pct(0.95);
+    char detail[200];
+    std::snprintf(detail, sizeof detail, "%zu/10 samples, p50 %.0f ms, p95 %.0f ms (LAN budget 150/250; CI ceiling 500)", samples.size(), p50, p95);
+    r.check("input-to-photon", samples.size() == 10 && p95 <= 500, detail);
+
+    // 4. Safety (docs/15): the session ends while Shift is down; the agent releases it.
+    mark = oracle().size();
+    key("ShiftLeft", true);
+    op.sleep_ms(300);
+    close_and_assert(op);
+    bool released = false;
+    for (int i = 0; i < 20 && !released; i++) {
+        op.sleep_ms(100);
+        released = since(mark).find("release Shift_L") != std::string::npos;
+    }
+    r.check("desktop-release-on-close", released, released ? "Shift held at session-close was released by the agent" : "Shift was still held after the session closed: " + since(mark));
+}
+
 void scenario_silent_operator(Operator& op) {
     Report& r = op.report();
     connect_and_report(op);
@@ -2770,7 +2937,7 @@ const std::map<std::string, ScenarioFn> kScenarios = {
     {"smoke", scenario_smoke},       {"toggle", scenario_toggle},   {"hotplug", scenario_hotplug},     {"silent-operator", scenario_silent_operator},
     {"no-answer", scenario_no_answer}, {"socket-drop", scenario_socket_drop}, {"ice-restart", scenario_ice_restart}, {"deadman", scenario_deadman},
     {"congested-viewer", scenario_congested_viewer}, {"rejected-track", scenario_rejected_track},
-    {"desktop-see", scenario_desktop_see},
+    {"desktop-see", scenario_desktop_see}, {"desktop-control", scenario_desktop_control},
     {"relay-only", scenario_relay_only}, {"tunnel", scenario_tunnel}, {"soak", scenario_soak},
     // netem-<profile>: one function, the profile is read from the scenario name (unknown profile → usage, exit 2).
     {"netem-lan", scenario_netem},     {"netem-wifi-ok", scenario_netem}, {"netem-4g", scenario_netem},     {"netem-lossy", scenario_netem},
@@ -2797,7 +2964,7 @@ int main(int argc, char** argv) {
     // The tunnel is as consequential as a shell (docs/10#network-tunnel), so the grant claims it
     // only for the scenario that exercises it.
     if (opts.scenario == "tunnel") opts.capabilities.push_back("fjarr.net");
-    if (opts.scenario == "desktop-see") opts.capabilities.push_back("fjarr.desktop");
+    if (opts.scenario == "desktop-see" || opts.scenario == "desktop-control") opts.capabilities.push_back("fjarr.desktop");
     gst_init(&argc, &argv);
 
     Shared sh;

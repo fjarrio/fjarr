@@ -531,8 +531,23 @@ its name is bumped with the module seam's.
   narrowing it to the one node is 3.3's gating item** (above).
 - **Input.** `open-input {}` makes the helper call `ConnectToEIS` on the running
   session and reply `input-opened {}` with **one descriptor: the EIS socket**. The
-  module is its libei sender (keyboard, absolute pointer, buttons), mapping a
-  track-local point to the stream's `x, y` plus that point.
+  module is its libei sender (keyboard, absolute pointer, buttons, scroll),
+  mapping a track-local point to the stream's `x, y` plus that point. The module
+  asks for input once its first capture has started, because the EIS socket
+  belongs to the RemoteDesktop session a capture starts.
+- **Typing text.** Keys are evdev codes, and the agent maps a client's
+  `KeyboardEvent.code` to one. `text` ([docs/08](08-protocol.md#input-events-fjarrdesktop))
+  has no such path: mutter 50 and libei 1.5 have no Unicode input, and mutter's
+  own keysym call types only what the active keymap has (spike 2026-10-01: "a"
+  and "@" typed, "å" did not, on a US layout). So module E reads the keymap
+  mutter hands over with the EIS keyboard device and finds, with xkbcommon,
+  each character's keycode and the modifiers of its level. It types over the
+  same EIS socket as keys, so a key and the text after it arrive in order. A
+  character no key produces makes the whole `text` fail by name before anything
+  is typed. The layout is the robot's: on GNOME, gnome-shell applies the
+  configured input source. Headless mutter alone always uses US, which is why
+  the fixture's end-to-end test types Shift-level characters and refuses "å",
+  and a unit test types åäö against a Swedish keymap.
 - **Loss.** The helper sends `capture-lost {id, reason: "monitor-gone" |
   "stream-stopped"}` when mutter ends a stream. A closed socket is
   `SessionEnded` for every capture (`CaptureLost`, docs/09): the desktop session

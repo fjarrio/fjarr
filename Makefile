@@ -492,12 +492,15 @@ website-build: ## Production build of fjarr.io
 # --------------------------------------------------------------- packaging --
 # docs/26#releases, ADR-0031. Run on the HOST: they start their own throwaway containers.
 DEB_ARCH ?= $(shell dpkg --print-architecture 2>/dev/null || uname -m)
-.PHONY: desktop-see
-desktop-see: ## M3 3.1: the fixture's desktop as a track — helper → module E → agent → opsim decodes frames (host-run; make agent-build first)
+.PHONY: desktop-e2e
+desktop-e2e: ## M3: the fixture's desktop end to end — see it (frames, a still screen) and drive it (input, text, input-to-photon, release on close) through helper → module E → agent → opsim (host-run; make agent-build first)
 	docker compose --profile desktop --profile stack up -d --build --wait desktop-fixture fjarr-server
 	docker compose --profile desktop --profile stack up -d --no-deps --force-recreate desktop-robot
 	@for i in $$(seq 30); do docker compose --profile desktop logs --no-color desktop-robot 2>/dev/null | grep -q "capture of .* ready" && break; sleep 1; done
-	@$(MAKE) --no-print-directory opsim OPSIM_ROBOT=desktop-robot-01 OPSIM_SCENARIO=desktop-see OPSIM_INTROSPECT=http://desktop-robot:7381 OPSIM_EXTRA="--introspect-token $(INTROSPECT_TOKEN)"; rc=$$?; \
+	@rc=0; for s in desktop-see desktop-control; do \
+	  $(MAKE) --no-print-directory opsim OPSIM_ROBOT=desktop-robot-01 OPSIM_SCENARIO=$$s OPSIM_INTROSPECT=http://desktop-robot:7381 \
+	    OPSIM_EXTRA="--introspect-token $(INTROSPECT_TOKEN) --desktop-oracle http://desktop-fixture:8090/testwin.log" || rc=1; \
+	done; \
 	  [ $$rc -eq 0 ] || docker compose --profile desktop logs --no-color --tail 40 desktop-robot desktop-fixture; \
 	  docker compose --profile desktop stop desktop-robot desktop-fixture >/dev/null 2>&1; exit $$rc
 

@@ -12,6 +12,7 @@
 #include <string>
 
 #include <grp.h>
+#include <linux/input-event-codes.h>
 #include <pwd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -24,6 +25,7 @@
 #include "desktop/helper_protocol.hpp"
 #include "desktop/module.hpp"
 #include "desktop/monitor_identity.hpp"
+#include "eis_input.hpp"
 
 using namespace fjarr;
 using nlohmann::json;
@@ -97,7 +99,8 @@ class MutterBackend final : public DesktopBackend {
   public:
     explicit MutterBackend(const desktop::ModuleHost& host, const json& config)
         : ctx_(host.context), log_(host.log), socket_path_(config.value("socket", std::string{"/run/fjarr/desktop.sock"})),
-          keepalive_ms_(config.value("keepalive_ms", 100)) {
+          keepalive_ms_(config.value("keepalive_ms", 100)), input_(host.context, [this](int level, const std::string& msg) { say(level, msg); }) {
+        input_.on_disconnected([this] { input_requested_ = false; });
         if (config.contains("uid")) desktop_uid_ = config["uid"].get<int>();
         else if (config.contains("user")) {
             if (const passwd* pw = ::getpwnam(config["user"].get<std::string>().c_str())) desktop_uid_ = static_cast<int>(pw->pw_uid);
@@ -172,17 +175,30 @@ class MutterBackend final : public DesktopBackend {
     std::shared_ptr<VideoSource> start_audio_capture() override { return nullptr; }
     void stop_audio_capture() override {}
     void on_cursor_shape(std::function<void(const CursorShape&)>) override {}
-    // Input through EIS is slice 3.2 (docs/17#m3).
-    void pointer_motion(MonitorId, double, double) override {}
-    void pointer_button(MouseButton, bool) override {}
-    void pointer_wheel(double, double) override {}
-    void key(LinuxKeycode, bool) override {}
-    void release_all_input() override {}
+    // Input through the EIS socket the helper hands over (docs/23#desktop-helper-protocol).
+    void pointer_motion(MonitorId monitor, double nx, double ny) override {
+        // The pointer's region is the stream's logical rectangle: its position plus the point.
+        auto it = captures_.find(monitor);
+        const Monitor* m = find(monitor);
+        if (it != captures_.end() && it->second.width > 0)
+            input_.pointer_absolute(it->second.x + nx * it->second.width, it->second.y + ny * it->second.height);
+        else if (m)
+            input_.pointer_absolute(m->x + nx * m->width / m->scale, m->y + ny * m->height / m->scale);
+    }
+    void pointer_button(MouseButton button, bool down) override {
+        static constexpr std::uint32_t codes[] = {BTN_LEFT, BTN_MIDDLE, BTN_RIGHT, BTN_SIDE, BTN_EXTRA};
+        input_.button(codes[static_cast<int>(button)], down);
+    }
+    void pointer_wheel(double dx, double dy) override { input_.scroll(dx, dy); }
+    void key(LinuxKeycode code, bool down) override { input_.key(code, down); }
+    std::vector<std::string> type_text(const std::string& utf8, std::string& error) override { return input_.type_text(utf8, &error); }
+    void release_all_input() override { input_.release_all(); }
     ClipboardHandle* clipboard() override { return nullptr; }
 
   private:
     struct Capture {
         int id = 0;
+        int x = 0, y = 0, width = 0, height = 0; // the stream's logical rectangle, from capture-started
         std::string connector, cursor;
         std::shared_ptr<MonitorSource> source;
     };
@@ -262,10 +278,21 @@ class MutterBackend final : public DesktopBackend {
             const int id = m.body.value("id", 0);
             for (auto& [monitor, c] : captures_)
                 if (c.id == id && !m.fds.empty()) {
+                    c.x = m.body.value("x", 0);
+                    c.y = m.body.value("y", 0);
+                    c.width = m.body.value("width", 0);
+                    c.height = m.body.value("height", 0);
                     c.source->ready(m.fds[0].release(), m.body.value("node", 0u));
+                    request_input();
                     say(1, "capture of " + c.connector + " ready: node " + std::to_string(m.body.value("node", 0u)) + ", " +
                                std::to_string(m.body.value("width", 0)) + "x" + std::to_string(m.body.value("height", 0)));
                 }
+        } else if (type == "input-opened") {
+            input_requested_ = false;
+            if (!m.fds.empty()) input_.attach(m.fds[0].release());
+        } else if (type == "input-failed") {
+            input_requested_ = false;
+            say(2, "the helper could not open input: " + m.body.value("reason", std::string{"?"}));
         } else if (type == "capture-failed") {
             say(2, "the helper could not capture: " + m.body.value("reason", std::string{"?"}));
         } else if (type == "capture-lost") {
@@ -276,6 +303,13 @@ class MutterBackend final : public DesktopBackend {
                     if (lost_cb_) lost_cb_(monitor, m.body.value("reason", std::string{}) == "monitor-gone" ? CaptureLost::MonitorGone : CaptureLost::SourceStopped);
                 }
         }
+    }
+
+    /// Input belongs to the remote-desktop session a capture starts, so it is asked for once one has.
+    void request_input() {
+        if (input_.attached() || input_requested_) return;
+        input_requested_ = true;
+        send({{"type", "open-input"}});
     }
 
     void set_monitors(const json& list) {
@@ -318,6 +352,8 @@ class MutterBackend final : public DesktopBackend {
         ::close(conn_);
         conn_ = -1;
         welcomed_ = false;
+        input_.detach(); // mutter's session went with the helper; it released what was held
+        input_requested_ = false;
         say(1, why);
         for (auto& [monitor, c] : captures_) {
             c.source->lost("the desktop session ended");
@@ -345,6 +381,8 @@ class MutterBackend final : public DesktopBackend {
     int next_id_ = 1;
     std::function<void(std::vector<Monitor>)> monitors_cb_;
     std::function<void(MonitorId, CaptureLost)> lost_cb_;
+    desktop::mutter::EisInput input_;
+    bool input_requested_ = false;
 };
 
 const char* probe() { return nullptr; } // usable wherever it is installed: the helper says the rest
