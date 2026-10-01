@@ -472,13 +472,17 @@ What the module and the package take from it:
   has already taken the helper's credentials. The agent passes the descriptor
   to `pipewiresrc fd=` together with the stream's node id. As the spike did it,
   the connection carries **all** of the desktop user's PipeWire rights,
-  microphones included. The helper **must** narrow the connection to the
-  granted node before handing it over, as the portal's `OpenPipeWireRemote`
-  does. **That is not yet verified.** The portal narrows as a privileged
-  PipeWire client, and whether an ordinary session-user process can restrict its
-  own connection is untested. It is an M3 gate item, because it is the account
-  boundary for audio. If it cannot be done, the helper proxies the one stream
-  instead of handing over the connection. The
+  microphones included. So the helper **narrows** the connection before handing
+  it over, as the portal's `OpenPipeWireRemote` does. **Proven 2026-10-01**
+  ([spikes/pipewire-narrowing](../spikes/pipewire-narrowing/README.md); PipeWire
+  1.6.2, WirePlumber 0.5.13): an ordinary session-user process calls
+  `pw_client_update_permissions` on its own connection with the core `r-x`, the
+  stream's node `r-x`, the `client-node` factory `r-x` (a capture stream is a
+  client-node) and `PW_ID_ANY` `0`, then `pw_core_steal_fd`. Through that
+  descriptor the screen captures and a live microphone yields nothing, by serial,
+  name, id or as the default source. The receiver cannot widen it, because it
+  cannot see its own client object. This is the account boundary for audio, and
+  CI checks it on every push (`fixture-helper-check`). The
   stream is damage-driven, so a static screen yields almost no buffers, and the
   source must not treat silence as capture loss.
 - **EIS.** The helper calls `ConnectToEIS` after `Start()`. mutter then offers
@@ -527,8 +531,8 @@ its name is bumped with the module seam's.
   `pipewiresrc fd=… path=<node> keepalive-time=<ms>`: mutter's stream is
   damage-driven and silent on a static screen, and the keepalive re-sends the
   last frame so the encoder keeps producing. Silence is never capture loss.
-  **Until slice 3.3 the connection is handed over unnarrowed, as the spike did;
-  narrowing it to the one node is 3.3's gating item** (above).
+  The connection is narrowed to that node before it is handed over (above), so
+  one connection serves one capture.
 - **Input.** `open-input {}` makes the helper call `ConnectToEIS` on the running
   session and reply `input-opened {}` with **one descriptor: the EIS socket**. The
   module is its libei sender (keyboard, absolute pointer, buttons, scroll),

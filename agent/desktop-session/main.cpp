@@ -1,6 +1,7 @@
 // fjarr-desktop-session: the desktop user's side of the handover (ADR-0028). It runs in the user's
 // session, talks to mutter over the session bus, and hands the agent descriptors over
-// /run/fjarr/desktop.sock — a PipeWire connection per capture, and mutter's EIS socket for input —
+// /run/fjarr/desktop.sock — a PipeWire connection per capture, narrowed to that capture's node, and
+// mutter's EIS socket for input —
 // so frames and input events never pass through it. It connects out to the agent and reconnects.
 // spec: docs/23-agent-core-architecture.md#desktop-helper-protocol
 #include <algorithm>
@@ -22,6 +23,7 @@
 
 #include "desktop/helper_protocol.hpp"
 #include "mutter.hpp"
+#include "pipewire.hpp"
 
 using namespace fjarr::desktop;
 using nlohmann::json;
@@ -33,22 +35,6 @@ void say(const std::string& msg) { std::fprintf(stderr, "fjarr-desktop-session: 
 std::string env_or(const char* name, const std::string& fallback) {
     const char* v = std::getenv(name);
     return v && *v ? v : fallback;
-}
-
-/// A new connection to the user's PipeWire socket: the descriptor pipewiresrc reads from. Opened
-/// here, so PipeWire takes this user's credentials. Narrowed to the one node from slice 3.3.
-int open_pipewire(std::string* error) {
-    const std::string path = env_or("XDG_RUNTIME_DIR", "/run/user/" + std::to_string(::getuid())) + "/" + env_or("PIPEWIRE_REMOTE", "pipewire-0");
-    const int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    std::snprintf(addr.sun_path, sizeof addr.sun_path, "%s", path.c_str());
-    if (fd < 0 || ::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof addr) != 0) {
-        if (error) *error = "cannot connect to PipeWire at " + path + ": " + std::strerror(errno);
-        if (fd >= 0) ::close(fd);
-        return -1;
-    }
-    return fd;
 }
 
 class Helper {
@@ -177,7 +163,7 @@ class Helper {
                 return;
             }
             std::string err;
-            const int pw = open_pipewire(&err);
+            const int pw = helper::open_narrowed_pipewire(info.node, &err); // the screen and nothing else (docs/23)
             if (pw < 0) {
                 send({{"type", "capture-failed"}, {"id", id}, {"reason", err}});
                 return;

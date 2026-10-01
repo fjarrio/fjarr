@@ -357,7 +357,12 @@ focus, Esc, IME through `text`, pointer capture, the non-passive wheel and the
 control domain. The demo's Desktop panel has take-control, Ctrl+Alt+Del,
 Alt+Tab and fullscreen. In the lab browser real Chromium types into the
 fixture, and Shift held through an Esc is released on the robot
-(`dashboard.spec.ts`). Next: 3.L when the hardware is wanted, otherwise 3.3.
+(`dashboard.spec.ts`). **3.3 started; its gating item is proven:** the
+helper narrows each handed PipeWire connection to the core, the stream's node
+and the `client-node` factory
+([spikes/pipewire-narrowing](../spikes/pipewire-narrowing/README.md)).
+`fixture-helper-check` shows on every push that a live microphone, which an
+unnarrowed connection captures, yields nothing through the handed one.
 
 ## M3.5 — Hear the robot {#m35}
 

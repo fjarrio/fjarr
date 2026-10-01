@@ -7,13 +7,14 @@
 # push without building the whole agent (repo-root build context; .dockerignore keeps it to sources).
 FROM ubuntu:26.04 AS helper
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends g++ pkg-config libglib2.0-dev nlohmann-json3-dev \
+RUN apt-get update && apt-get install -y --no-install-recommends g++ pkg-config libglib2.0-dev nlohmann-json3-dev libpipewire-0.3-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY agent/desktop-session /src/agent/desktop-session
 COPY agent/src/desktop/helper_protocol.hpp agent/src/desktop/helper_protocol.cpp /src/agent/src/desktop/
 RUN g++ -std=c++20 -O2 -Wall -Wextra -Werror -I/src/agent/src \
-      /src/agent/desktop-session/main.cpp /src/agent/desktop-session/mutter.cpp /src/agent/src/desktop/helper_protocol.cpp \
-      $(pkg-config --cflags --libs gio-unix-2.0) -o /fjarr-desktop-session
+      /src/agent/desktop-session/main.cpp /src/agent/desktop-session/mutter.cpp /src/agent/desktop-session/pipewire.cpp \
+      /src/agent/src/desktop/helper_protocol.cpp \
+      $(pkg-config --cflags --libs gio-unix-2.0 libpipewire-0.3) -o /fjarr-desktop-session
 
 FROM ubuntu:26.04
 ENV DEBIAN_FRONTEND=noninteractive

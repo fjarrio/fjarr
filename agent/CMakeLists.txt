@@ -87,9 +87,11 @@ endif()
 # session bus, descriptors to the agent's module over /run/fjarr/desktop.sock. It links nothing of
 # libfjarr: it runs as another account and knows only the helper protocol.
 pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0 gio-unix-2.0)
-add_executable(fjarr-desktop-session desktop-session/main.cpp desktop-session/mutter.cpp src/desktop/helper_protocol.cpp)
+# libpipewire: the helper narrows each handed connection to its capture's node (docs/23).
+pkg_check_modules(LIBPIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
+add_executable(fjarr-desktop-session desktop-session/main.cpp desktop-session/mutter.cpp desktop-session/pipewire.cpp src/desktop/helper_protocol.cpp)
 target_include_directories(fjarr-desktop-session PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(fjarr-desktop-session PRIVATE PkgConfig::GIO nlohmann_json::nlohmann_json)
+target_link_libraries(fjarr-desktop-session PRIVATE PkgConfig::GIO PkgConfig::LIBPIPEWIRE nlohmann_json::nlohmann_json)
 
 # Backend module E (ADR-0006, ADR-0021): mutter through the session helper, as its own shared object
 # in desktop-modules/ — where FJARR_DESKTOP_MODULE_DIR points in the lab, and what the

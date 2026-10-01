@@ -41,6 +41,37 @@ def send(conn, body):
     conn.sendall(json.dumps(body).encode())
 
 
+# A microphone that really produces sound: a live Audio/Source node in the desktop user's PipeWire.
+MIC = ("import gi; gi.require_version('Gst','1.0'); from gi.repository import Gst, GLib; Gst.init(None);"
+       "p=Gst.parse_launch('audiotestsrc is-live=true ! audio/x-raw,rate=48000,channels=2 ! pipewiresink mode=provide "
+       "stream-properties=\"props,media.class=Audio/Source,node.name=fixture-mic\"'); p.set_state(Gst.State.PLAYING); GLib.MainLoop().run()")
+# Capture fixture-mic through the PipeWire connection on fd 3; exit 0 when audio arrives.
+GRAB_MIC = ("import gi,sys; gi.require_version('Gst','1.0'); from gi.repository import Gst; Gst.init(None);"
+            "p=Gst.parse_launch('pipewiresrc fd=3 target-object=fixture-mic ! audioconvert ! audio/x-raw ! appsink name=s max-buffers=1 drop=true sync=false');"
+            "p.set_state(Gst.State.PLAYING); s=p.get_by_name('s').emit('try-pull-sample', 4*Gst.SECOND); print('audio' if s else 'nothing', flush=True); os._exit(0 if s else 1)")
+
+
+def grab_mic(fd):
+    """True when audio came through `fd` (a PipeWire connection). A refused capture hangs rather than
+    erroring (spikes/pipewire-narrowing), so it runs in its own process with a deadline."""
+    if fd != 3:
+        os.dup2(fd, 3)
+    try:
+        r = subprocess.run(["python3", "-c", "import os;" + GRAB_MIC], pass_fds=(3,), capture_output=True, text=True, timeout=8)
+        return r.returncode == 0
+    except subprocess.TimeoutExpired:
+        return False
+    finally:
+        os.close(3)
+
+
+def raw_pipewire():
+    """A fresh, unnarrowed connection to this user's PipeWire: what the helper must never hand over."""
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/run/desktop"), "pipewire-0"))
+    return s.detach()
+
+
 def main():
     helper_bin = sys.argv[1]
     try:
@@ -73,6 +104,7 @@ def main():
         started, fds = recv(conn)
         ok = started.get("type") == "capture-started" and len(fds) == 1
         check("capture-started", ok, f"{json.dumps(started)} with {len(fds)} descriptor(s)")
+        mic_probe = os.dup(fds[0]) if ok else -1  # the same connection, for the narrowing check below
         if ok:
             Gst.init(None)
             pipe = Gst.parse_launch(
@@ -104,6 +136,19 @@ def main():
             check("capture through the handed PipeWire connection", good, detail)
             check("a still screen keeps producing (keepalive)", n >= 3, f"{n} frames in 2.5 s of an unchanging window")
             pipe.set_state(Gst.State.NULL)
+
+            # The account boundary for audio (docs/23#desktop-descriptor-handover): the handed
+            # connection reaches the screen and nothing else. The control proves the check can fail.
+            mic = subprocess.Popen(["python3", "-c", MIC])
+            try:
+                time.sleep(2)
+                control = grab_mic(raw_pipewire())
+                leaked = grab_mic(mic_probe)
+                check("the microphone, through an unnarrowed connection (the control)", control, "audio" if control else "no audio: the check below would prove nothing")
+                check("the microphone, through the handed connection", control and not leaked,
+                      "nothing: the connection is narrowed to the screen" if not leaked else "AUDIO: the handed connection reaches the desktop user's microphone")
+            finally:
+                mic.kill()
 
         send(conn, {"type": "open-input"})
         opened, eis_fds = recv(conn)
