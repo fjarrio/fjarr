@@ -320,7 +320,7 @@ Slices, in dependency order. Each ends in something demonstrable and tested:
 |---|---|---|
 | **3.0 Lab foundation** | A throwaway spike first: headless mutter in a container with no GPU gives RemoteDesktop, ScreenCast, a PipeWire frame and EIS input (ADR-0033's assumption; if not, its fallback). Then the fixture in CI ([docs/15](15-testing-strategy.md#the-desktop-test-lab)), and `fjarr-lab` written and tested without a real runner ([docs/12](12-development-environment.md#lab-machines-and-fjarr-lab)). Code only: no lab machine is needed | CI captures a frame from a mutter desktop and sees injected input in its test window, on every push; `fjarr-lab`'s window, reservation and grace logic pass their tests |
 | **3.1 See** | `fjarr-desktop-session` and backend module E for one monitor: the helper hands over the PipeWire descriptor, and the agent turns it into a video track that repeats its last frame on a static screen. `<DesktopView>` shows it | the fixture's desktop is live in the demo dashboard, and the fixture asserts frames from a static screen |
-| **3.2 Control** | `DesktopInput` and `<DesktopView>`'s input: pointer, wheel, keys by `code`, no auto-repeat, composition, reserved shortcuts and Keyboard Lock, `release-all`. libei injection in module E. The desktop control domain wired to it. An input-to-photon harness | keys, Shift-level text and Alt+Tab reach the fixture's test window, and a character its US keymap lacks is refused by name; åäö type against a Swedish keymap (unit test; real typing on the mini-PC in 3.L); disconnecting mid-keydown leaves no key held (docs/15 safety); the input-to-photon harness runs against the fixture |
+| **3.2 Control** | `DesktopInput` and `<DesktopView>`'s input: pointer, wheel, keys by `code`, no auto-repeat, composition, reserved shortcuts and Keyboard Lock, `release-all`. libei injection in module E. The desktop control domain wired to it. An input-to-photon harness | keys and Shift-level text reach the fixture's test window and Alt+Tab reaches its compositor, and a character its US keymap lacks is refused by name; åäö type against a Swedish keymap (unit test; real typing on the mini-PC in 3.L); disconnecting mid-keydown leaves no key held (docs/15 safety); the input-to-photon harness runs against the fixture |
 | **3.L Lab machines (with Erik)** | The manual steps, done when the slices need hardware and not before: ssh and sudo on the mini-PC for development, registering it as a runner (a one-time token from the repository's settings), installing `fjarr-lab` with its labels and CI window, and the first nightly on it. The GPU desktop joins the same way when it suits, as it is needed only for the nightly media jobs | the mini-PC runs a nightly job inside its window and `fjarr-lab reserve` holds it; 3.1 and 3.2 shown on real hardware: its screen in the dashboard, and input-to-photon within [docs/16](16-performance-budgets.md) |
 | **3.3 Appliance** | The helper as a systemd user unit, with `SO_PEERCRED` and **PipeWire narrowing (proven first; the gating item)**. `fjarr-desktop-wayland` and `setup desktop` / `--undo desktop`: auto-login account, GDM watchdog, helper, **ghost screens** and `fjarr-agent ghosts`. The unattended-access test | `apt install fjarr-desktop-wayland` plus `setup desktop` gives remote desktop after a reboot with nobody at the machine, nightly; `--undo` restores the machine; the agent cannot open the desktop user's microphone |
 | **3.4 Multi-monitor** | Monitor ids from EDIDs, one track per monitor, hot-plug by renegotiation, placeholders, mode changes, ghosts and real monitors together | the docs/06 hot-plug criteria on the mini-PC with a real monitor, the DisplayPort chain and two ghosts, each with its own stable id |
@@ -351,8 +351,13 @@ typed through the robot's keymap with xkbcommon. A spike showed no Unicode path
 on mutter 50 and libei 1.5, so docs/08 now says so. `make desktop-e2e` drives the
 fixture in CI. Clicks, keys, text, Alt+Tab and an untypable "å" all check against
 the window's log, and the Shift held at session end is released. Input-to-photon
-is p50 21 / p95 24 ms on the dev machine, within the container. Remaining in 3.2:
-the web side (`DesktopInput`, `<DesktopView>`'s input surface).
+is p50 21 / p95 24 ms on the dev machine, within the container. **3.2 done:**
+`DesktopInput` in `@fjarr/core` and `<DesktopView>`'s input surface, with
+focus, Esc, IME through `text`, pointer capture, the non-passive wheel and the
+control domain. The demo's Desktop panel has take-control, Ctrl+Alt+Del,
+Alt+Tab and fullscreen. In the lab browser real Chromium types into the
+fixture, and Shift held through an Esc is released on the robot
+(`dashboard.spec.ts`). Next: 3.L when the hardware is wanted, otherwise 3.3.
 
 ## M3.5 — Hear the robot {#m35}
 

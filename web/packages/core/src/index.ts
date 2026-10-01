@@ -77,6 +77,20 @@ export {
   type VideoTrackStats,
 } from "./stats.js";
 export { FocusRegistry, type FocusOptions, type FocusRegistration, type WindowLike } from "./focus.js";
+export {
+  contentBox,
+  DesktopInput,
+  normalizedPoint,
+  WHEEL_LINE_PX,
+  type ContentBox,
+  type DesktopButton,
+  type DesktopInputOptions,
+  type KeyLike,
+  type PointerLike,
+  type TextResult,
+  type VideoLike,
+  type WheelLike,
+} from "./desktop.js";
 export { createSession, type AudioUplink, type ControlState, type DomainControl, type Session, type SessionDeps, type SessionEvent, type SessionInfo, type SessionOptions, type SessionState, type TrackApi } from "./session.js";
 export { createFjarrClient, type FjarrClient, type FjarrClientConfig, type PersistenceAdapter, type SessionManager } from "./client.js";
 export type { WireEvent } from "./wire.js";

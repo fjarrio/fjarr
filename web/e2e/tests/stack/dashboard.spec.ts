@@ -77,3 +77,42 @@ test("the Desktop panel shows the desktop robot's screen: <DesktopView> on the p
   expect(await page.locator("[data-fjarr-grid] [data-fjarr-track^='desk-']").count()).toBe(0);
   await page.screenshot({ path: dashboard.out.path("desktop.png") });
 });
+
+test("the Desktop panel drives the robot's desktop from a real browser: click, type, and Esc releases what is held (M3 3.2)", async ({ dashboard, stack, page }) => {
+  await stack.requireServer();
+  test.skip(!(await stack.dashboardReachable()), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
+  const oracleUrl = process.env.E2E_DESKTOP_ORACLE ?? "http://desktop-fixture:8090/testwin.log";
+  const oracle = () => fetch(oracleUrl, { signal: AbortSignal.timeout(2000) }).then((r) => (r.ok ? r.text() : ""), () => "");
+  const start = (await oracle()).length;
+  test.skip(start === 0 && !(await oracle()), `the desktop fixture's log is not reachable at ${oracleUrl} — \`make desktop-e2e\` brings it up`);
+  const since = async () => (await oracle()).slice(start);
+
+  await dashboard.goto();
+  await page.getByRole("button", { name: /Desktop Robot 01/ }).click();
+  await dashboard.connect("desktop-robot-01");
+  await dashboard.waitForState("desktop-robot-01", "connected");
+  const view = page.locator("[data-fjarr-desktop]");
+  await expect(view.locator('[data-fjarr-track^="desk-"]')).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
+
+  // Click into the view (focus on the robot and in the page), then type: physical keys, as a person would.
+  await expect(async () => {
+    await view.click({ position: { x: 200, y: 150 } });
+    await page.keyboard.type("hej");
+    expect(await since()).toContain("key j text='j'");
+  }).toPass({ timeout: 15_000 });
+  await expect(view).toHaveAttribute("data-fjarr-input", "focused");
+  const typed = await since();
+  for (const k of ["key h text='h'", "key e text='e'", "key j text='j'"]) expect(typed).toContain(k);
+  expect(typed).toMatch(/click button=1/);
+  await expect(page.locator("[data-demo-desktop-control]")).toHaveAttribute("data-demo-desktop-control", "you");
+
+  // Safety (docs/22): Shift held, then Esc gives the keyboard back — the robot must not keep Shift.
+  const mark = (await oracle()).length;
+  await page.keyboard.down("Shift");
+  await expect.poll(async () => (await oracle()).slice(mark), { timeout: 5000 }).toContain("key Shift_L");
+  await page.keyboard.press("Escape");
+  await expect(view).toHaveAttribute("data-fjarr-input", "hover");
+  await expect.poll(async () => (await oracle()).slice(mark), { timeout: 5000 }).toContain("release Shift_L");
+  await page.keyboard.up("Shift");
+  await page.screenshot({ path: dashboard.out.path("desktop-input.png") });
+});

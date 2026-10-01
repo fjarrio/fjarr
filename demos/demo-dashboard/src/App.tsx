@@ -36,6 +36,7 @@ import {
   useStore,
   useTelemetry,
   useTimeSync,
+  type DesktopViewHandle,
   type Session,
 } from "@fjarr/react";
 import { RobotStatusProvider, useRobotStatus } from "./robot-status.tsx";
@@ -195,8 +196,8 @@ function RemoteView() {
         <code style={{ fontSize: 12 }}>{JSON.stringify(status)}</code>
       </Panel>
       {monitors.length > 0 && (
-        <Panel title="Desktop (fjarr.desktop — the robot's screen; input arrives in M3 slice 3.2)">
-          <DesktopView session={session} style={{ maxHeight: "70vh", borderRadius: 8, overflow: "hidden" }} />
+        <Panel title="Desktop (fjarr.desktop — click to type into the robot's screen, Esc to give the keyboard back; one operator at a time)">
+          <DesktopPanel session={session} />
         </Panel>
       )}
       <Panel title="Cameras (demand-driven: only visible tiles are streamed)">
@@ -213,6 +214,36 @@ function RemoteView() {
       <Panel title="Terminal (fjarr.terminal — developer role only; the robot names the account it runs the shell as)">
         <TerminalPanel session={session} />
       </Panel>
+    </div>
+  );
+}
+
+/**
+ * The robot's screen with the host's own toolbar (docs/22: the toolbar is a slot the host fills):
+ * who has the desktop, take control, the combos a browser cannot capture, and fullscreen with
+ * Keyboard Lock. Everything here is public @fjarr/react API.
+ */
+function DesktopPanel({ session }: { session: Session }) {
+  const view = useRef<DesktopViewHandle>(null);
+  const desktop = useControl(session, "desktop");
+  const [note, setNote] = useState<string | null>(null);
+  const run = (fn: () => Promise<unknown>) => {
+    setNote(null);
+    fn().catch((e: unknown) => setNote(e instanceof Error ? e.message : String(e)));
+  };
+  const who = !desktop.known ? "—" : desktop.you ? "You" : desktop.holder ? desktop.holder.label : "free (the next click or key takes it)";
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }} data-demo-desktop-control={desktop.you ? "you" : desktop.free ? "free" : "held"}>
+        <span>desktop: {who}</span>
+        {!desktop.viewOnly && desktop.known && !desktop.you && !desktop.free && <button onClick={() => run(desktop.takeControl)}>Take control</button>}
+        {desktop.you && <button onClick={() => run(desktop.releaseControl)}>Release</button>}
+        <button onClick={() => run(() => view.current!.keyCombo(["ControlLeft", "AltLeft", "Delete"]))}>Ctrl+Alt+Del</button>
+        <button onClick={() => run(() => view.current!.keyCombo(["AltLeft", "Tab"]))}>Alt+Tab</button>
+        <button onClick={() => run(() => view.current!.enterFullscreen())}>Fullscreen</button>
+        {note && <span style={{ color: "#f85149" }}>{note}</span>}
+      </div>
+      <DesktopView ref={view} session={session} viewOnly={desktop.viewOnly} style={{ maxHeight: "70vh", borderRadius: 8, overflow: "hidden" }} />
     </div>
   );
 }

@@ -413,7 +413,7 @@ overridable; the host's design system wins (docs/05).
 | `useSessionPeers` / `<SessionPeers>` | who else is on this robot and who owns input (docs/08 `session-peers`, M5) | — |
 | `useGamepadHaptics` | maps capability `haptic` events to the Gamepad vibration actuator | — |
 | `<ConnectionQuality>` | health level + reasons from the stats sampler | `StreamSelector` stats panel (generalized) |
-| `<DesktopView>` | the remote-desktop surface — design in [docs/22](22-remote-desktop-client.md), which also lists the core requirements slice 2 must satisfy for it | — |
+| `<DesktopView>` | the remote-desktop surface: one monitor's video and its input surface, on `DesktopInput` from `@fjarr/core`. Design in [docs/22](22-remote-desktop-client.md), which also lists the core requirements slice 2 must satisfy for it | M3 3.1 (video), 3.2 (input) |
 | `useTerminal(session)` / `<TerminalView>` | the robot's shell (M2, slice 2a): the hook carries no renderer, the component adds xterm behind **optional** peers on the `@fjarr/react/terminal` entry — the same shape `<PipelineGraph>` uses for d3, so a dashboard with no terminal pays nothing. "Not configured" and "not granted" are states to render, not errors to retry ([docs/06](06-capabilities.md), [docs/08](08-protocol.md#terminal)) | — |
 | `<PipelineGraph feed pipelineId>` / `usePipelines(feed)` / `usePipelineSnapshot(feed, id)` / `usePipelineFeed(session)` | live GStreamer pipeline graphs from `fjarr.introspect` ([docs/24](24-pipeline-introspection.md)) over a [pipeline feed](#pipeline-feeds); d3-graphviz rendering, history scrubbing (slice 5) | — |
 

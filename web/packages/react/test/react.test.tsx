@@ -3,7 +3,8 @@
  * chip, demand acquired/released by DOM presence, selector re-render
  * discipline, publisher release on unmount.
  */
-import { act, render, screen, cleanup } from "@testing-library/react";
+import { StrictMode } from "react";
+import { act, render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFjarrClient, type FjarrClient, type MonitorInfo } from "@fjarr/core";
 import { MockAgent } from "@fjarr/core/testing";
@@ -446,15 +447,22 @@ describe("<DesktopView> (M3 3.1: video only)", () => {
     const status = () => view.container.querySelector("[data-fjarr-status]")?.getAttribute("data-fjarr-status");
     expect(status()).toBe("requested");
 
+    // Demand is the track's: the view's input publisher stays held while it is mounted.
+    const demand = () => {
+      const last = agent.received.filter((e) => e.type === "select-tracks").at(-1)?.payload as { tracks: { track_id: string; enabled: boolean }[] } | undefined;
+      return last?.tracks.find((t) => t.track_id === `desk-${b.id}`)?.enabled;
+    };
+    expect(demand()).toBe(true);
+
     act(() => agent.sendMonitors([a]));
     await act(() => vi.advanceTimersByTimeAsync(50));
     expect(status()).toBe("monitor-disconnected");
-    expect(session.consumerCount).toBe(0);
+    expect(demand()).toBe(false);
 
     act(() => agent.sendMonitors([a, b]));
     await act(() => vi.advanceTimersByTimeAsync(50));
     expect(view.container.querySelector("[data-fjarr-track]")?.getAttribute("data-fjarr-track")).toBe(`desk-${b.id}`);
-    expect(session.consumerCount).toBe(1);
+    expect(demand()).toBe(true);
   });
 
   it("no monitors: \"no display connected\", and no demand", async () => {
@@ -469,5 +477,106 @@ describe("<DesktopView> (M3 3.1: video only)", () => {
     await act(() => vi.advanceTimersByTimeAsync(50));
     expect(view.container.textContent).toContain("no display connected");
     expect(agent.received.filter((e) => e.type === "select-tracks")).toEqual([]);
+  });
+});
+
+describe("<DesktopView> input (M3 3.2)", () => {
+  const mon: MonitorInfo = { id: "virtual-1", index: 0, primary: true, x: 0, y: 0, w: 1280, h: 720, scale: 1, connector: "Meta-0" };
+  const track = { track_id: "desk-virtual-1", cap: "fjarr.desktop", kind: "video" as const, label: "Meta-0", codec: "H264", pt: 96, mid: "0", monitor: mon };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("IntersectionObserver", undefined);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  async function mount(props: { viewOnly?: boolean } = {}) {
+    const { agent, client } = setup({ tracks: [track] });
+    const session = client.sessions.open("robot-1");
+    await tick();
+    const view = render(
+      <FjarrProvider client={client}>
+        <DesktopView session={session} {...props} />
+      </FjarrProvider>,
+    );
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    const surface = () => view.container.querySelector<HTMLElement>("[data-fjarr-desktop]")!;
+    const editor = () => view.container.querySelector<HTMLElement>("[contenteditable]");
+    const sent = () => agent.received.filter((e) => e.cap === "fjarr.desktop" && e.type !== "select-tracks").map((e) => [e.type, e.payload] as const);
+    return { agent, session, view, surface, editor, sent };
+  }
+
+  it("keys reach the robot only once the view is focused, by physical code, with the browser's default prevented", async () => {
+    const { surface, editor, sent } = await mount();
+    fireEvent.keyDown(editor()!, { code: "KeyA", key: "a" });
+    expect(sent()).toEqual([]); // not focused: typing elsewhere on the page never reaches a robot
+    fireEvent.pointerDown(surface(), { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(surface().getAttribute("data-fjarr-input")).toBe("focused");
+    const down = fireEvent.keyDown(editor()!, { code: "KeyA", key: "a" });
+    fireEvent.keyDown(editor()!, { code: "KeyA", key: "a", repeat: true });
+    fireEvent.keyUp(editor()!, { code: "KeyA", key: "a" });
+    expect(down).toBe(false); // fireEvent returns false when the default was prevented
+    expect(sent()).toEqual([
+      ["key", { code: "KeyA", down: true }],
+      ["key", { code: "KeyA", down: false }],
+    ]);
+  });
+
+  it("StrictMode's mount-unmount-mount leaves a working input, not a disposed one", async () => {
+    const { agent, client } = setup({ tracks: [track] });
+    const session = client.sessions.open("robot-1");
+    await tick();
+    const view = render(
+      <StrictMode>
+        <FjarrProvider client={client}>
+          <DesktopView session={session} />
+        </FjarrProvider>
+      </StrictMode>,
+    );
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    const surface = view.container.querySelector<HTMLElement>("[data-fjarr-desktop]")!;
+    fireEvent.pointerDown(surface, { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    fireEvent.keyDown(view.container.querySelector("[contenteditable]")!, { code: "KeyQ", key: "q" });
+    expect(agent.received.some((e) => e.type === "key" && (e.payload as { code: string }).code === "KeyQ")).toBe(true);
+  });
+
+  it("safety: Esc and blur give the keyboard back and release what the view held", async () => {
+    const { surface, editor, sent } = await mount();
+    fireEvent.pointerDown(surface(), { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    fireEvent.keyDown(editor()!, { code: "ShiftLeft", key: "Shift" });
+    fireEvent.keyDown(editor()!, { code: "Escape", key: "Escape" });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(surface().getAttribute("data-fjarr-input")).toBe("hover");
+    expect(sent().map(([t]) => t)).toEqual(["key", "release-all"]);
+    expect(sent().some(([t, p]) => t === "key" && (p as { code: string }).code === "Escape")).toBe(false);
+  });
+
+  it("a view-only view has no input surface at all", async () => {
+    const { surface, editor, sent } = await mount({ viewOnly: true });
+    expect(surface().getAttribute("data-fjarr-input")).toBe("view-only");
+    expect(editor()).toBeNull();
+    fireEvent.pointerDown(surface(), { button: 0, pointerId: 1 });
+    expect(sent()).toEqual([]);
+  });
+
+  it("while someone else holds the desktop, nothing is sent and the view says who", async () => {
+    const { agent, surface, editor, sent } = await mount();
+    act(() => agent.sendEvent("fjarr.core", "control-state", { domains: { desktop: { holder: { id: "anna@example.com", label: "Anna" }, since: 1, you: false } } }));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(surface().getAttribute("data-fjarr-input")).toBe("held-elsewhere");
+    expect(surface().textContent).toContain("Anna has control");
+    fireEvent.pointerDown(surface(), { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.keyDown(editor()!, { code: "KeyA", key: "a" });
+    expect(sent()).toEqual([]);
+    act(() => agent.sendEvent("fjarr.core", "control-state", { domains: { desktop: { holder: null, you: false } } }));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(surface().getAttribute("data-fjarr-input")).toBe("hover"); // free: the next input claims it
   });
 });

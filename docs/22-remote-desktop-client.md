@@ -221,7 +221,7 @@ All input goes through the docs/21 publish side; classes per docs/08:
 | Buttons | `pointerdown/up` with `setPointerCapture` so drags that leave the element still deliver the `up` | `button {button, down}` | control |
 | Wheel | `wheel` with `deltaMode` normalized to pixels (lines × 16, pages × viewport) and accumulated, sent at ≤ 60 Hz | `wheel {dx, dy}` | control |
 | Keys | `keydown/keyup` using `code` (physical key); **auto-repeat is not forwarded** (`repeat === true` dropped — the agent's held key auto-repeats natively) | `key {code, down}` | control |
-| Composed text / IME / paste-as-typing | `beforeinput` with `inputType: "insertText"`/`insertCompositionText` on a hidden `contenteditable` | `text {text}` | control |
+| Composed text / IME | `compositionend` on a hidden `contenteditable` that holds the keyboard focus; keys during composition (`isComposing`) are not sent as keys. Paste-as-typing is a host action through `typeText()` | `text {text}` (a request: the robot types it through its keymap or refuses naming what it cannot type, docs/08) | control |
 | Touch (tablets) | tap → click, long-press → right click, two-finger drag → wheel, pinch → local zoom (never sent) | as above | — |
 | Special combos | toolbar buttons | `key-combo {codes: ["ControlLeft","AltLeft","Delete"]}` | control |
 | Release everything | on `blur`, `visibilitychange: hidden`, focus loss, unmount | `release-all` | control |
@@ -233,6 +233,13 @@ backstop, not the mechanism. A stuck Shift after Alt+Tab is a bug in this
 table, not an edge case.
 
 ## Focus model
+
+**As built (M3 slice 3.2).** `<DesktopView>` takes `viewOnly` and `releaseKey`
+(default `"Escape"`, `null` for click-away only). Its `ref` is a
+`DesktopViewHandle` with `enterFullscreen()` (Keyboard Lock where the browser
+has it), `exitFullscreen()`, `keyCombo(codes)` and `typeText(text)`, which is
+what a host toolbar drives. `DesktopInput` and `contentBox()` are exported from
+`@fjarr/core` for hosts that are not on React.
 
 Exactly one input surface per page owns the keyboard: `useDesktopFocus`
 implements click-to-focus, a visible focus ring, `Esc` (configurable) to
