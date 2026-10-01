@@ -8,7 +8,7 @@ import { act, render, screen, cleanup, fireEvent } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFjarrClient, type FjarrClient, type MonitorInfo } from "@fjarr/core";
 import { MockAgent } from "@fjarr/core/testing";
-import { DesktopView, FjarrProvider, SessionScope, SessionStatus, VideoGrid, VideoTile, pickMonitor, usePublisher, useTelemetry } from "../src/index.js";
+import { DesktopLayout, DesktopView, FjarrProvider, SessionScope, SessionStatus, VideoGrid, VideoTile, pickMonitor, usePublisher, useTelemetry } from "../src/index.js";
 
 const tick = async (n = 6) => {
   for (let i = 0; i < n; i++) await act(() => vi.advanceTimersByTimeAsync(0));
@@ -578,5 +578,51 @@ describe("<DesktopView> input (M3 3.2)", () => {
     act(() => agent.sendEvent("fjarr.core", "control-state", { domains: { desktop: { holder: null, you: false } } }));
     await act(() => vi.advanceTimersByTimeAsync(0));
     expect(surface().getAttribute("data-fjarr-input")).toBe("hover"); // free: the next input claims it
+  });
+});
+
+describe("<DesktopLayout> (M3 3.4)", () => {
+  const mon = (id: string, index: number, x: number, w = 1280): MonitorInfo => ({ id, index, primary: index === 0, x, y: 0, w, h: 720, scale: 1, connector: `Meta-${index}` });
+  const track = (m: MonitorInfo, mid: string) => ({ track_id: `desk-${m.id}`, cap: "fjarr.desktop", kind: "video" as const, label: m.id, codec: "H264", pt: 96 + Number(mid), mid, monitor: m });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("IntersectionObserver", undefined);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("places every monitor by its geometry, reflows on hot-plug, and hides an exact mirror", async () => {
+    const a = mon("virtual-1", 0, 0);
+    const b = mon("virtual-2", 1, 1280);
+    const { agent, client } = setup({ tracks: [track(a, "0"), track(b, "1")] });
+    const session = client.sessions.open("robot-1");
+    await tick();
+    const view = render(
+      <FjarrProvider client={client}>
+        <DesktopLayout session={session} gap={0} />
+      </FjarrProvider>,
+    );
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    const placed = () =>
+      Array.from(view.container.querySelectorAll<HTMLElement>("[data-fjarr-layout-monitor]")).map((el) => [el.getAttribute("data-fjarr-layout-monitor"), el.style.left]);
+    expect(placed()).toEqual([
+      ["virtual-1", "calc(0% + 0px)"],
+      ["virtual-2", "calc(50% + 0px)"],
+    ]);
+    // Unplug: the layout reflows to one monitor.
+    act(() => agent.sendMonitors([a]));
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    expect(placed()).toEqual([["virtual-1", "calc(0% + 0px)"]]);
+    // A mirror (same rectangle as another) is hidden unless asked for.
+    act(() => agent.sendMonitors([a, { ...a, id: "mirror", index: 1 }]));
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    expect(placed().map(([id]) => id)).toEqual(["virtual-1"]);
+    act(() => agent.sendMonitors([]));
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    expect(view.container.textContent).toContain("no display connected");
   });
 });

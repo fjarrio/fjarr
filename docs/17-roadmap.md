@@ -402,8 +402,13 @@ itself, and makes a real monitor primary when mutter picks a ghost. The
 fixture plugs mutter virtual monitors, and `desktop-hotplug` passes 12/12. The
 new track was offered 101 ms after the plug. The first monitor's longest gap was
 117 ms, which is its keepalive, so nothing was dropped. The unplugged track left
-21 ms after the unplug, and came back as the same `track_id`. Remaining in 3.4:
-`<DesktopLayout>` and the demo's monitor picker, then the mini-PC run.
+21 ms after the unplug, and came back as the same `track_id`. The web side
+followed the same day: `<DesktopLayout>` arranges every monitor by its geometry,
+reflows on hot-plug, and hides exact mirrors. The demo's Desktop panel has a
+monitor picker (primary, all, or one by stable id). In the lab browser, a
+monitor plugged into the fixture appeared in the layout streaming, and left it
+again when unplugged. Remaining in 3.4: the mini-PC run, with a real monitor,
+the DisplayPort chain and two ghosts.
 
 ## M3.5 — Hear the robot {#m35}
 

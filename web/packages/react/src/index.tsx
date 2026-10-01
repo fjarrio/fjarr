@@ -31,7 +31,7 @@ export {
   type ControlBinding,
   type TelemetryReader,
 } from "./hooks.js";
-export { DesktopView, desktopTrackId, pickMonitor, type DesktopViewHandle, type DesktopViewProps, type MonitorPolicy } from "./desktop.js";
+export { DesktopLayout, DesktopView, desktopTrackId, pickMonitor, type DesktopLayoutProps, type DesktopViewHandle, type DesktopViewProps, type MonitorPolicy } from "./desktop.js";
 export { useFeedStatus, usePipelineBody, usePipelineFeed, usePipelines, usePipelineSnapshot, type PipelineBody } from "./pipelines.js";
 export { FjarrCliLogin, isValidCallbackPort, readCliLoginRequest, type CliLoginRequest, type CliLoginStrings, type FjarrCliLoginProps } from "./cli-login.js";
 export { useAudioTrack, usePushToTalk, useVideoTrack, type AudioSinkStatus, type AudioTrackBinding, type PushToTalkBinding, type PushToTalkOptions, type UseVideoTrackOptions, type VideoTrackBinding } from "./media.js";

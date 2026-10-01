@@ -19,6 +19,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ConnectButton,
   ConnectionQuality,
+  DesktopLayout,
   DesktopView,
   FjarrProvider,
   SessionScope,
@@ -226,6 +227,9 @@ function RemoteView() {
 function DesktopPanel({ session }: { session: Session }) {
   const view = useRef<DesktopViewHandle>(null);
   const desktop = useControl(session, "desktop");
+  const monitors = useMonitors(session);
+  // The picker stores the monitor's stable id, never its index or connector (docs/22#hot-plug).
+  const [shown, setShown] = useState<string>("primary");
   const [note, setNote] = useState<string | null>(null);
   const run = (fn: () => Promise<unknown>) => {
     setNote(null);
@@ -238,12 +242,38 @@ function DesktopPanel({ session }: { session: Session }) {
         <span>desktop: {who}</span>
         {!desktop.viewOnly && desktop.known && !desktop.you && !desktop.free && <button onClick={() => run(desktop.takeControl)}>Take control</button>}
         {desktop.you && <button onClick={() => run(desktop.releaseControl)}>Release</button>}
-        <button onClick={() => run(() => view.current!.keyCombo(["ControlLeft", "AltLeft", "Delete"]))}>Ctrl+Alt+Del</button>
-        <button onClick={() => run(() => view.current!.keyCombo(["AltLeft", "Tab"]))}>Alt+Tab</button>
-        <button onClick={() => run(() => view.current!.enterFullscreen())}>Fullscreen</button>
+        {monitors.length > 1 && (
+          <select value={shown} onChange={(e) => setShown(e.target.value)} data-demo-monitor-picker>
+            <option value="primary">Primary monitor</option>
+            <option value="all">All monitors ({monitors.length})</option>
+            {monitors.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name ?? m.id}
+                {m.connector ? ` · ${m.connector}` : ""}
+              </option>
+            ))}
+          </select>
+        )}
+        {shown !== "all" && (
+          <>
+            <button onClick={() => run(() => view.current!.keyCombo(["ControlLeft", "AltLeft", "Delete"]))}>Ctrl+Alt+Del</button>
+            <button onClick={() => run(() => view.current!.keyCombo(["AltLeft", "Tab"]))}>Alt+Tab</button>
+            <button onClick={() => run(() => view.current!.enterFullscreen())}>Fullscreen</button>
+          </>
+        )}
         {note && <span style={{ color: "#f85149" }}>{note}</span>}
       </div>
-      <DesktopView ref={view} session={session} viewOnly={desktop.viewOnly} style={{ maxHeight: "70vh", borderRadius: 8, overflow: "hidden" }} />
+      {shown === "all" && monitors.length > 1 ? (
+        <DesktopLayout session={session} viewOnly={desktop.viewOnly} style={{ maxHeight: "70vh" }} />
+      ) : (
+        <DesktopView
+          ref={view}
+          session={session}
+          monitorId={shown === "primary" || shown === "all" ? undefined : shown}
+          viewOnly={desktop.viewOnly}
+          style={{ maxHeight: "70vh", borderRadius: 8, overflow: "hidden" }}
+        />
+      )}
     </div>
   );
 }

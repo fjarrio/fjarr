@@ -226,3 +226,61 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
     </div>
   );
 }
+
+export interface DesktopLayoutProps {
+  session?: Session;
+  /** Show a monitor whose geometry exactly duplicates another's (a mirror). Default: hidden. */
+  showMirrors?: boolean;
+  /** Gap between monitors, in CSS px. */
+  gap?: number;
+  /** Viewers only: no input surface on any monitor. */
+  viewOnly?: boolean;
+  className?: string;
+  style?: CSSProperties;
+}
+
+/**
+ * Every current monitor arranged by its `x/y` geometry: the same picture as the robot's display
+ * settings, reflowing on every hot-plug. Each monitor is a `<DesktopView monitorId>`, so each keeps
+ * its own demand, input surface and placeholder (docs/22#hot-plug).
+ */
+export function DesktopLayout({ session, showMirrors = false, gap = 4, viewOnly, className, style }: DesktopLayoutProps) {
+  const s = useSession(session);
+  const all = useMonitors(s);
+  const monitors = showMirrors
+    ? all
+    : all.filter((m, i) => !all.some((o, j) => j < i && o.x === m.x && o.y === m.y && o.w === m.w && o.h === m.h));
+  if (monitors.length === 0) {
+    return (
+      <div data-fjarr-desktop-layout data-fjarr-status="no-display" className={className} style={{ position: "relative", aspectRatio: "16 / 9", background: "#000", ...style }}>
+        <div data-fjarr-placeholder style={placeholderStyle}>
+          no display connected
+        </div>
+      </div>
+    );
+  }
+  const left = Math.min(...monitors.map((m) => m.x));
+  const top = Math.min(...monitors.map((m) => m.y));
+  const width = Math.max(...monitors.map((m) => m.x + m.w)) - left;
+  const height = Math.max(...monitors.map((m) => m.y + m.h)) - top;
+  const pct = (v: number, of: number) => `${(v / of) * 100}%`;
+  return (
+    <div data-fjarr-desktop-layout className={className} style={{ position: "relative", aspectRatio: `${width} / ${height}`, ...style }}>
+      {monitors.map((m) => (
+        <div
+          key={m.id}
+          data-fjarr-layout-monitor={m.id}
+          style={{
+            position: "absolute",
+            left: `calc(${pct(m.x - left, width)} + ${gap / 2}px)`,
+            top: `calc(${pct(m.y - top, height)} + ${gap / 2}px)`,
+            width: `calc(${pct(m.w, width)} - ${gap}px)`,
+            height: `calc(${pct(m.h, height)} - ${gap}px)`,
+          }}
+        >
+          <DesktopView session={s} monitorId={m.id} viewOnly={viewOnly} style={{ width: "100%", height: "100%", aspectRatio: "auto" }} />
+        </div>
+      ))}
+    </div>
+  );
+}

@@ -116,3 +116,34 @@ test("the Desktop panel drives the robot's desktop from a real browser: click, t
   await page.keyboard.up("Shift");
   await page.screenshot({ path: dashboard.out.path("desktop-input.png") });
 });
+
+test("a monitor plugged into the robot appears in the Desktop panel's layout, and leaves it when unplugged (M3 3.4)", async ({ dashboard, stack, page }) => {
+  await stack.requireServer();
+  test.skip(!(await stack.dashboardReachable()), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
+  const plugd = process.env.E2E_DESKTOP_PLUG ?? "http://desktop-fixture:8091";
+  const call = (what: string) => fetch(`${plugd}/${what}`, { signal: AbortSignal.timeout(10_000) }).then((r) => r.text(), () => "");
+  test.skip(!(await fetch(`${plugd}/`, { signal: AbortSignal.timeout(2000) }).then(() => true, () => false)), `the fixture's monitor hot-plug is not reachable at ${plugd} — \`make desktop-e2e\` brings it up`);
+  while ((await call("unplug")).startsWith("Meta")); // start from the fixture's one monitor
+
+  await dashboard.goto();
+  await page.getByRole("button", { name: /Desktop Robot 01/ }).click();
+  await dashboard.connect("desktop-robot-01");
+  await dashboard.waitForState("desktop-robot-01", "connected");
+  await expect(page.locator("[data-fjarr-desktop] [data-fjarr-track^='desk-']")).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
+  await expect(page.locator("[data-demo-monitor-picker]")).toHaveCount(0); // one monitor: nothing to pick
+
+  expect(await call("plug")).toMatch(/^Meta-/);
+  const picker = page.locator("[data-demo-monitor-picker]");
+  await expect(picker).toBeVisible({ timeout: 5000 });
+  await picker.selectOption("all");
+  const layout = page.locator("[data-fjarr-desktop-layout] [data-fjarr-layout-monitor]");
+  await expect(layout).toHaveCount(2);
+  for (const m of await layout.all()) await expect(m.locator("[data-fjarr-track]")).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
+  await page.screenshot({ path: dashboard.out.path("desktop-layout.png") });
+
+  // Unplugged: one monitor again, so the panel goes back to a single view and the picker leaves.
+  await call("unplug");
+  await expect(picker).toHaveCount(0, { timeout: 5000 });
+  await expect(page.locator("[data-fjarr-desktop-layout]")).toHaveCount(0);
+  await expect(page.locator("[data-fjarr-desktop] [data-fjarr-track^='desk-']")).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
+});
