@@ -11,7 +11,7 @@
 namespace fjarr::profile {
 
 struct Row {
-    std::string feature; // "core", "net", or "profile" for the file itself
+    std::string feature; // "core", "net", "desktop", or "profile" for the file itself
     std::string item;    // what was checked: "account fjarr", "/var/lib/fjarr", "unit fjarr-agent.service"
     bool ok = false;
     std::string detail;  // what was found
@@ -39,6 +39,8 @@ struct System {
     /// by what does their job there (docs/26#the-system-profile).
     bool systemd = true;
     std::function<std::optional<NetDev>(const std::string& name)> netdev;
+    /// A small text file's contents (GDM's configuration, the ghost snippet, /proc/cmdline).
+    std::function<std::optional<std::string>(const std::string& path)> read_file;
 
     /// The running machine: getpwnam/getgrouplist, stat, systemd's .wants links, /sys/class/net.
     static System real();
@@ -47,6 +49,8 @@ struct System {
 /// Rows for the profile at `path`. `core` always; `net` when the tunnel is configured. A missing
 /// profile file is one informational row (a development build), not a failure.
 std::vector<Row> check(const std::string& path, bool net_wanted, const System& system);
+/// As above, and `desktop` when `setup desktop` configured a desktop account (`helper.user`).
+std::vector<Row> check(const std::string& path, bool net_wanted, const std::optional<std::string>& desktop_account, const System& system);
 
 /// True when no row failed.
 bool all_ok(const std::vector<Row>& rows);

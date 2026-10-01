@@ -362,7 +362,14 @@ helper narrows each handed PipeWire connection to the core, the stream's node
 and the `client-node` factory
 ([spikes/pipewire-narrowing](../spikes/pipewire-narrowing/README.md)).
 `fixture-helper-check` shows on every push that a live microphone, which an
-unnarrowed connection captures, yields nothing through the handed one.
+unnarrowed connection captures, yields nothing through the handed one. Then
+`fjarr-desktop-wayland` (the module, the helper and its user unit, the group,
+the watchdog), `setup desktop` / `--undo desktop` and `fjarr-agent display`
+with generated ghost EDIDs. All are tested in containers and the package
+install test, and `display list` was read on real hardware. What remains of 3.3
+needs the mini-PC (3.L): a reboot into the automatic login, ghosts on real
+connectors, the watchdog bringing a killed session back, and the nightly
+unattended test.
 
 ## M3.5 — Hear the robot {#m35}
 

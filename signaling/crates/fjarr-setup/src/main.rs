@@ -1,6 +1,7 @@
 //! fjarr-setup — `fjarr-agent`'s installer commands, handed over unchanged: `setup` (the first
 //! run), `net setup`, `net up` (run at boot by `fjarr-net.service`), `setup --undo [<feature>]`,
-//! `drivers list|detect|install`, and the place `setup desktop` goes in M3 (docs/26#the-setup-tool).
+//! `drivers list|detect|install`, `setup desktop` and the GDM watchdog it enables
+//! (docs/26#the-setup-tool).
 //!
 //! Rules every command keeps: every prompt has a flag, every change is recorded so `--undo` reverses
 //! exactly those, system changes are applied only on Ubuntu with apt, and each command ends with
@@ -16,7 +17,9 @@ mod addressing;
 mod catalog;
 mod changes;
 mod config;
+mod desktop;
 mod detect;
+mod display;
 mod drivers;
 mod net;
 mod setup;
@@ -67,6 +70,52 @@ pub enum Command {
         #[command(subcommand)]
         command: DriversCommand,
     },
+    /// The robot's connectors and monitors, and ghost screens for a headless robot (docs/26#ghost-screens).
+    Display {
+        #[command(subcommand)]
+        command: DisplayCommand,
+    },
+    /// The desktop's background jobs (`setup desktop` sets them up).
+    #[command(hide = true)]
+    Desktop {
+        #[command(subcommand)]
+        command: DesktopCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DisplayCommand {
+    /// Every connector: real monitors, DisplayPort chains, free connectors, ghosts.
+    List,
+    /// A ghost screen on a free root connector; takes effect after a reboot.
+    AddGhost {
+        /// The connector (default: the next free root connector).
+        #[arg(long, value_name = "CONNECTOR")]
+        connector: Option<String>,
+        /// WIDTHxHEIGHT[@HZ] (default 1920x1080@60).
+        #[arg(long, value_name = "MODE")]
+        mode: Option<String>,
+    },
+    /// Remove a ghost screen (`all` for every one); takes effect after a reboot.
+    RemoveGhost {
+        #[arg(value_name = "CONNECTOR|all")]
+        which: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DesktopCommand {
+    /// One check of the GDM watchdog; what `fjarr-desktop-watchdog.timer` runs every 30 s.
+    Watchdog,
+}
+
+/// `setup desktop`'s own flags, taken from `setup`'s.
+#[derive(Debug, Default)]
+pub struct DesktopArgs {
+    pub yes: bool,
+    pub account: Option<String>,
+    pub reboot: Option<YesNo>,
+    pub ghost_screens: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -90,7 +139,7 @@ impl Encoder {
 
 #[derive(Args, Debug, Default)]
 pub struct SetupArgs {
-    /// `desktop` (M3). Alone: the first run.
+    /// `desktop`: a desktop reachable with nobody at the machine. Alone: the first run.
     #[arg(value_name = "WHAT")]
     pub what: Option<String>,
     /// Reverse every recorded change: of one feature (`setup`, `net`), or, bare, of all of them.
@@ -136,6 +185,15 @@ pub struct SetupArgs {
     pub ros_units: Option<Vec<String>>,
     #[arg(long, value_enum)]
     pub dds: Option<Dds>,
+    /// For `setup desktop`: the account the desktop runs as (created when it does not exist).
+    #[arg(long, value_name = "NAME")]
+    pub account: Option<String>,
+    /// For `setup desktop`: how many ghost screens to add, on free connectors (docs/26#ghost-screens).
+    #[arg(long, value_name = "N")]
+    pub ghost_screens: Option<u32>,
+    /// For `setup desktop`: reboot at the end, so the account's group applies.
+    #[arg(long, value_enum)]
+    pub reboot: Option<YesNo>,
     /// How long to wait for the agent's STATUS=online, in seconds.
     #[arg(long, default_value_t = 30, value_name = "SECONDS")]
     pub timeout: u64,
@@ -235,6 +293,27 @@ async fn run(cli: Cli) -> Result<i32> {
             let feature = (!feature.is_empty()).then_some(feature);
             undo::undo(&cli.config, &cli.state, feature.as_deref()).await
         }
+        Command::Setup(args) if args.what.as_deref() == Some("desktop") => {
+            let d = DesktopArgs {
+                yes: args.yes,
+                account: args.account,
+                reboot: args.reboot,
+                ghost_screens: args.ghost_screens,
+            };
+            desktop::setup(&cli.config, &cli.state, d).await
+        }
+        Command::Desktop {
+            command: DesktopCommand::Watchdog,
+        } => desktop::watchdog(&cli.config).map(|_| 0),
+        Command::Display {
+            command: DisplayCommand::List,
+        } => display::list(),
+        Command::Display {
+            command: DisplayCommand::AddGhost { connector, mode },
+        } => display::add_ghost(&cli.state, connector.as_deref(), mode.as_deref()),
+        Command::Display {
+            command: DisplayCommand::RemoveGhost { which },
+        } => display::remove_ghost(&cli.state, &which),
         Command::Setup(args) => {
             setup::setup(&cli.config, &cli.state, &cli.profile, &cli.catalog, args).await
         }

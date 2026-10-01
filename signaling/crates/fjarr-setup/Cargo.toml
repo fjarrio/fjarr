@@ -23,6 +23,9 @@ tokio = { workspace = true }
 fjarr-netdev = { path = "../fjarr-netdev" }
 # The routing table, for the range check and the LAN interface Cyclone keeps (same crate as netdev).
 rtnetlink = "0.23.0"
+# The DRM connectors for `display` (docs/26#ghost-screens): names, state, and the PATH property that
+# says a connector hangs off a DisplayPort chain. MIT (docs/14).
+drm = "0.15"
 futures-util = { workspace = true }
 
 [dev-dependencies]

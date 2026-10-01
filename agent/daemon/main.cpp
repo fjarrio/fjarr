@@ -28,7 +28,7 @@ namespace {
 
 int usage() {
     std::printf("fjarr-agent [--config /etc/fjarr/fjarr.toml] [--check] [--probe-source '<description|type>'] [--diagnostics [out.tar.gz]]\n"
-                "fjarr-agent setup [--undo <feature>] | net setup | net up | drivers …   (fjarr-setup, docs/26#the-setup-tool)\n"
+                "fjarr-agent setup [desktop] [--undo <feature>] | net setup | net up | drivers … | display …   (fjarr-setup, docs/26#the-setup-tool)\n"
                 "  --check          the doctor: encoder, configured sources, endpoint (exit 0/1)\n"
                 "  --net-address    this robot's tunnel address, to create the interface with (docs/27)\n"
                 "  --probe-source   bring one source up standalone and report caps + fps\n"
@@ -50,7 +50,7 @@ int probe_source(const std::string& spec) {
     return r.ok ? 0 : 1;
 }
 
-// `setup`, `net` and `drivers` are fjarr-setup's, handed over unchanged so the commands keep their
+// `setup`, `net`, `drivers` and `display` are fjarr-setup's, handed over unchanged so the commands keep their
 // names; the daemon itself never grows installer UX (docs/26#the-setup-tool).
 int hand_to_setup(int argc, char** argv) {
     const char* env = std::getenv("FJARR_SETUP");
@@ -69,7 +69,7 @@ int hand_to_setup(int argc, char** argv) {
 int main(int argc, char** argv) {
     if (argc >= 2) {
         const std::string first = argv[1];
-        if (first == "setup" || first == "net" || first == "drivers") return hand_to_setup(argc, argv);
+        if (first == "setup" || first == "net" || first == "drivers" || first == "display") return hand_to_setup(argc, argv);
     }
     gst_init(&argc, &argv);
     std::setvbuf(stdout, nullptr, _IOLBF, 0);
@@ -157,7 +157,14 @@ int main(int argc, char** argv) {
             const std::string path = env && *env ? env : "/usr/share/fjarr/profile.toml";
             const auto net = config.capabilities.count("fjarr.net") ? config.capabilities["fjarr.net"] : nlohmann::json::object();
             const bool net_wanted = net.is_object() && net.value("enabled", false);
-            const auto rows = fjarr::profile::check(path, net_wanted, fjarr::profile::System::real());
+            // docs/26#fjarr-agent-setup-desktop: the desktop's rows once `setup desktop` named its account.
+            std::optional<std::string> desktop_account;
+            if (config.capabilities.count("fjarr.desktop")) {
+                const auto& d = config.capabilities["fjarr.desktop"];
+                if (d.is_object() && d.contains("helper") && d["helper"].is_object() && d["helper"].contains("user") && d["helper"]["user"].is_string())
+                    desktop_account = d["helper"]["user"].get<std::string>();
+            }
+            const auto rows = fjarr::profile::check(path, net_wanted, desktop_account, fjarr::profile::System::real());
             for (const auto& r : rows)
                 std::printf("profile %-7s %-28s %-8s %s%s\n", r.feature.c_str(), r.item.c_str(), r.ok ? "ok" : "MISSING", r.detail.c_str(),
                             r.fix.empty() ? "" : ("  → " + r.fix).c_str());

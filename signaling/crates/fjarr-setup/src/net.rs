@@ -171,6 +171,7 @@ pub async fn setup(
             FEATURE,
             Change::ConfigValue {
                 file: config_path.to_path_buf(),
+                table: config::NET_TABLE.into(),
                 key: "address".into(),
                 previous: prev,
             },
@@ -286,6 +287,7 @@ pub async fn setup(
         FEATURE,
         Change::ConfigValue {
             file: config_path.to_path_buf(),
+            table: config::NET_TABLE.into(),
             key: "enabled".into(),
             previous: prev,
         },

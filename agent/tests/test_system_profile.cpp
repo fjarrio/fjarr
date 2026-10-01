@@ -26,6 +26,13 @@ device = "fjarr0"
 owner  = "fjarr"
 mtu    = 1184
 units  = ["fjarr-net.service"]
+
+[desktop]
+module = "/usr/lib/fjarr/desktop/libfjarr-desktop-mutter.so"
+group  = "fjarr-desktop"
+gdm    = "/etc/gdm3/custom.conf"
+units  = ["fjarr-desktop-watchdog.timer"]
+ghosts = "/etc/default/grub.d/fjarr-ghosts.cfg"
 )";
 
 struct Fake {
@@ -36,6 +43,7 @@ struct Fake {
                                               {"/run/fjarr", {997, 0755, true}}};
     std::set<std::string> enabled{"fjarr-agent.service", "fjarr-net.service"};
     std::map<std::string, System::NetDev> devs{{"fjarr0", {true, 997u, 1184}}};
+    std::map<std::string, std::string> texts;
 
     System system() const {
         System s;
@@ -52,6 +60,10 @@ struct Fake {
             return it == files.end() ? std::nullopt : std::optional<System::Stat>(it->second);
         };
         s.unit_enabled = [this](const std::string& u) { return enabled.count(u) > 0; };
+        s.read_file = [this](const std::string& p) -> std::optional<std::string> {
+            auto it = texts.find(p);
+            return it == texts.end() ? std::nullopt : std::optional<std::string>(it->second);
+        };
         s.netdev = [this](const std::string& n) -> std::optional<System::NetDev> {
             auto it = devs.find(n);
             return it == devs.end() ? std::nullopt : std::optional<System::NetDev>(it->second);
@@ -186,4 +198,50 @@ TEST(SystemProfile, aMissingAccountStopsTheRowsThatNeedIt) {
     const auto rows = check(profile_file(), false, f.system());
     EXPECT_FALSE(find(rows, "account fjarr")->ok);
     EXPECT_EQ(find(rows, "fjarr in video"), nullptr) << "no group rows for a user that does not exist";
+}
+
+// docs/26#fjarr-agent-setup-desktop: `setup desktop`'s work, verified.
+namespace {
+Fake desktop_robot() {
+    Fake f;
+    f.users["desktop"] = 1001;
+    f.groups["desktop"] = {"desktop", "fjarr-desktop"};
+    f.groups["fjarr"].push_back("fjarr-desktop");
+    f.files["/usr/lib/fjarr/desktop/libfjarr-desktop-mutter.so"] = {0, 0644, false};
+    f.texts["/etc/gdm3/custom.conf"] = "# GDM\n[daemon]\n#  AutomaticLogin = user1\nAutomaticLoginEnable=true\nAutomaticLogin=desktop\n\n[security]\n";
+    f.enabled.insert("fjarr-desktop-watchdog.timer");
+    return f;
+}
+} // namespace
+
+TEST(SystemProfile, aSetUpDesktopPassesItsRowsAndTheyAreOnlyCheckedWhenConfigured) {
+    const auto rows = check(profile_file(), false, std::optional<std::string>("desktop"), desktop_robot().system());
+    EXPECT_TRUE(all_ok(rows));
+    for (const auto* item : {"module", "account desktop", "desktop in fjarr-desktop", "fjarr in fjarr-desktop", "automatic login", "unit fjarr-desktop-watchdog.timer"})
+        EXPECT_NE(find(rows, item), nullptr) << item;
+    EXPECT_EQ(find(check(profile_file(), false, std::nullopt, Fake{}.system()), "automatic login"), nullptr) << "no desktop account configured: no desktop rows";
+}
+
+TEST(SystemProfile, eachDesktopFailureNamesItsFix) {
+    Fake f = desktop_robot();
+    f.files.erase("/usr/lib/fjarr/desktop/libfjarr-desktop-mutter.so");
+    f.groups["fjarr"] = {"fjarr", "video", "render"}; // the agent left out of the helper's group
+    f.texts["/etc/gdm3/custom.conf"] = "[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin=someoneelse\n";
+    f.enabled.erase("fjarr-desktop-watchdog.timer");
+    const auto rows = check(profile_file(), false, std::optional<std::string>("desktop"), f.system());
+    EXPECT_FALSE(all_ok(rows));
+    EXPECT_EQ(find(rows, "module")->fix, "sudo apt install fjarr-desktop-wayland");
+    EXPECT_EQ(find(rows, "fjarr in fjarr-desktop")->fix, "sudo usermod -aG fjarr-desktop fjarr");
+    EXPECT_FALSE(find(rows, "automatic login")->ok) << "a login for another account is not ours";
+    EXPECT_EQ(find(rows, "unit fjarr-desktop-watchdog.timer")->fix, "sudo fjarr-agent setup desktop");
+}
+
+TEST(SystemProfile, aGhostIsActiveOnceBootedAndPendingIsNotAFailure) {
+    Fake f = desktop_robot();
+    f.texts["/etc/default/grub.d/fjarr-ghosts.cfg"] = "# fjarr-ghosts: DP-2=1:1920x1080@60 HDMI-A-2=2:1280x720@60\nGRUB_CMDLINE_LINUX_DEFAULT=...\n";
+    f.texts["/proc/cmdline"] = "BOOT_IMAGE=/vmlinuz quiet video=DP-2:1920x1080@60e drm.edid_firmware=DP-2:edid/fjarr-ghost-1.bin";
+    const auto rows = check(profile_file(), false, std::optional<std::string>("desktop"), f.system());
+    EXPECT_TRUE(all_ok(rows));
+    EXPECT_EQ(find(rows, "ghost DP-2")->detail, "active");
+    EXPECT_EQ(find(rows, "ghost HDMI-A-2")->detail, "reboot pending");
 }

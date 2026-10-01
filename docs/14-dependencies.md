@@ -53,6 +53,7 @@ The installer commands `fjarr-agent` hands over
 |---|---|---|---|---|
 | cliclack | 0.5 | the prompts (every one has a flag); the one prompt library once `fjarr-connect` moves off dialoguer | MIT | yes |
 | toml_edit | 0.22 | `/etc/fjarr/fjarr.toml` edited in place, comments and order kept — it is the customer's file | MIT/Apache-2.0 | yes |
+| drm | 0.15 | `fjarr-agent display`: the DRM connectors, their state, and the `PATH` property that says a connector hangs off a DisplayPort chain, so a chain's root, which reads as disconnected, is never taken for a free connector ([docs/26](26-robot-install-and-drivers.md#ghost-screens)) | MIT | yes |
 | clap, anyhow, libc, serde, serde_json, tokio | as the operator client | the CLI, errors, `getpwnam`/`getuid`/`isatty`, the change record, the netlink runtime | MIT/Apache-2.0 | yes |
 | `fjarr-netdev` (rtnetlink) | in-tree | the same device code `fjarr-connect` uses: the persistent tun, its address, the routing table for the range check | MIT (rtnetlink) | yes |
 

@@ -91,14 +91,9 @@ pub async fn setup(
     catalog_path: &Path,
     args: SetupArgs,
 ) -> Result<i32> {
-    if let Some(what) = args.what.as_deref() {
-        match what {
-            "desktop" => bail!(
-                "`fjarr-agent setup desktop` is not built in this version: it comes with the desktop packages in M3 \
-                 (docs/26#fjarr-agent-setup-desktop)"
-            ),
-            other => bail!("`fjarr-agent setup {other}`: unknown; `setup` alone is the first run, `setup desktop` is M3"),
-        }
+    if let Some(other) = args.what.as_deref() {
+        // `setup desktop` is routed to desktop::setup before this (main.rs).
+        bail!("`fjarr-agent setup {other}`: unknown; `setup` alone is the first run, `setup desktop` sets up the desktop");
     }
     crate::require_root("setup")?;
     cliclack::intro("fjarr setup")?;

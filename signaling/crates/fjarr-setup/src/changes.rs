@@ -23,13 +23,28 @@ pub enum Change {
     UnitStarted { unit: String },
     /// A tun device created.
     Device { name: String },
-    /// One key of `capabilities."fjarr.net"` in the configuration set; `previous` is its former
-    /// value as TOML text, none when the key did not exist.
+    /// One key of `capabilities."<table>"` in the configuration set (`key` may be dotted:
+    /// `helper.user`); `previous` is its former value as TOML text, none when it did not exist.
+    /// Records from before `table` existed were all `fjarr.net`'s.
     ConfigValue {
         file: PathBuf,
+        #[serde(default = "net_table")]
+        table: String,
         key: String,
         previous: Option<String>,
     },
+    /// An account `setup desktop` created: undone with `userdel --remove`, after its session ends.
+    AccountCreated { user: String },
+    /// An account added to a group (`usermod -aG`): undone with `gpasswd -d`.
+    GroupMember { user: String, group: String },
+    /// A symlink made (a user unit enabled for one account): undone by removing it.
+    Symlink { path: PathBuf, target: PathBuf },
+    /// `dconf update` must run again after its database files change; recorded so `--undo` does.
+    DconfUpdate,
+}
+
+fn net_table() -> String {
+    crate::config::NET_TABLE.to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,12 +87,18 @@ impl Record {
                     (Change::File { path: a, .. }, Change::File { path: b, .. }) => a == b,
                     (
                         Change::ConfigValue {
-                            file: fa, key: ka, ..
+                            file: fa,
+                            table: ta,
+                            key: ka,
+                            ..
                         },
                         Change::ConfigValue {
-                            file: fb, key: kb, ..
+                            file: fb,
+                            table: tb,
+                            key: kb,
+                            ..
                         },
-                    ) => fa == fb && ka == kb,
+                    ) => fa == fb && ta == tb && ka == kb,
                     (a, b) => a == b,
                 }
         });
@@ -185,6 +206,7 @@ mod tests {
         let mut r = Record::default();
         let first = Change::ConfigValue {
             file: "/etc/fjarr/fjarr.toml".into(),
+            table: "fjarr.net".into(),
             key: "enabled".into(),
             previous: None,
         };
@@ -193,6 +215,7 @@ mod tests {
             "net",
             Change::ConfigValue {
                 file: "/etc/fjarr/fjarr.toml".into(),
+                table: "fjarr.net".into(),
                 key: "enabled".into(),
                 previous: Some("true".into()),
             },

@@ -44,9 +44,10 @@ ok "fjarr-net.service installed, not enabled"
 # The setup tool, and the hand-off (docs/26#the-setup-tool): `fjarr-agent net …` is fjarr-setup's.
 [ -x /usr/lib/fjarr/fjarr-setup ] || fail "no /usr/lib/fjarr/fjarr-setup"
 fjarr-agent net --help 2>&1 | grep -q '^Usage: fjarr-setup net' || fail "fjarr-agent does not hand 'net' to fjarr-setup"
+fjarr-agent display --help 2>&1 | grep -q '^Usage: fjarr-setup display' || fail "fjarr-agent does not hand 'display' to fjarr-setup"
 # Root here, no config yet: the tool must refuse and name the fix, not "set up" a device that is not configured.
 fjarr-agent net setup --yes --ros no 2>&1 | grep -q 'does not exist.*fjarr-agent setup' || fail "net setup without a config did not name setup as the fix"
-ok "fjarr-agent hands setup/net/drivers to fjarr-setup"
+ok "fjarr-agent hands setup/net/drivers/display to fjarr-setup"
 [ ! -e /etc/fjarr/fjarr.toml ] || fail "the package shipped /etc/fjarr/fjarr.toml; setup writes it"; ok "no config shipped (setup writes it)"
 
 # fjarr-desktop-wayland (docs/26#packages): installs, switches nothing on. setup desktop does that.
@@ -118,6 +119,34 @@ if grep -q 'fjarr.toml .*MISSING' /tmp/check-user.log || ! grep -q 'permission d
     cat /tmp/check-user.log; fail "--check as an ordinary user called the config missing instead of saying it cannot see it"
 fi
 ok "--check without root says it cannot see the config, and to check as root"
+# setup desktop (docs/26#fjarr-agent-setup-desktop), as far as a container goes: no GDM or systemd
+# here, so the test gives it Ubuntu's own custom.conf and checks every file, account and key it
+# writes, then that --undo desktop puts each back.
+mkdir -p /etc/gdm3
+printf '# GDM configuration storage\n\n[daemon]\n#WaylandEnable=false\n#  AutomaticLoginEnable = true\n#  AutomaticLogin = user1\n\n[security]\n' >/etc/gdm3/custom.conf
+cp /etc/gdm3/custom.conf /tmp/custom.conf.orig
+fjarr-agent setup desktop --yes --account desktop --reboot no >/tmp/desktop.log 2>&1 || { cat /tmp/desktop.log; fail "setup desktop failed"; }
+getent passwd desktop >/dev/null || fail "setup desktop did not create the account"
+passwd -S desktop | awk '{print $2}' | grep -q '^L' || fail "the desktop account's password is not locked: $(passwd -S desktop)"
+id -nG desktop | tr ' ' '\n' | grep -qx fjarr-desktop || fail "desktop is not in fjarr-desktop"
+grep -q '^AutomaticLoginEnable=true$' /etc/gdm3/custom.conf && grep -q '^AutomaticLogin=desktop$' /etc/gdm3/custom.conf || { cat /etc/gdm3/custom.conf; fail "no automatic login for desktop in GDM"; }
+grep -q '^\[security\]' /etc/gdm3/custom.conf || fail "setup desktop dropped the rest of custom.conf"
+grep -q '^lock-enabled=false' /etc/dconf/db/local.d/00-fjarr-desktop || fail "no screen-lock setting"
+grep -q '^system-db:local' /etc/dconf/profile/user || fail "the dconf profile does not read the local database"
+link=/home/desktop/.config/systemd/user/graphical-session.target.wants/fjarr-desktop-session.service
+[ "$(readlink "$link")" = /usr/lib/systemd/user/fjarr-desktop-session.service ] || fail "the helper's user unit is not enabled for desktop: $(ls -la "$link" 2>&1)"
+[ "$(stat -c %U /home/desktop/.config/systemd)" = desktop ] || fail "setup made ~desktop/.config/systemd owned by $(stat -c %U /home/desktop/.config/systemd), not desktop"
+[ -z "$(find /etc/systemd/user -name 'fjarr-desktop-session.service' 2>/dev/null)" ] || fail "the helper got enabled for every account"
+grep -A3 '^\[capabilities."fjarr.desktop".helper\]' /etc/fjarr/fjarr.toml | grep -q '^user = "desktop"' || { cat /etc/fjarr/fjarr.toml; fail "the agent's config does not name the desktop account"; }
+grep -q '^check: OK' /tmp/desktop.log || { cat /tmp/desktop.log; fail "setup desktop did not end with a passing --check"; }
+ok "setup desktop: account (locked, in fjarr-desktop), GDM auto-login, no screen lock, helper for that account only, agent config; --check passed"
+fjarr-agent setup --undo desktop >/tmp/undo-desktop.log 2>&1 || { cat /tmp/undo-desktop.log; fail "setup --undo desktop failed"; }
+! getent passwd desktop >/dev/null || fail "--undo desktop left the account it created"
+cmp -s /etc/gdm3/custom.conf /tmp/custom.conf.orig || { diff /tmp/custom.conf.orig /etc/gdm3/custom.conf; fail "--undo desktop did not restore custom.conf"; }
+[ ! -e /etc/dconf/db/local.d/00-fjarr-desktop ] && [ ! -e /etc/dconf/profile/user ] || fail "--undo desktop left the dconf files"
+! grep -q 'fjarr.desktop' /etc/fjarr/fjarr.toml || { cat /etc/fjarr/fjarr.toml; fail "--undo desktop left the desktop keys in the config"; }
+grep -q '^robot_id = "test-device"' /etc/fjarr/fjarr.toml || fail "--undo desktop touched setup's own keys"
+ok "setup --undo desktop removed the account, restored custom.conf, removed the dconf files and the config keys, kept the rest"
 fjarr-agent setup --undo >/tmp/undo.log 2>&1 || { cat /tmp/undo.log; fail "setup --undo failed"; }
 [ ! -e /etc/fjarr/fjarr.toml ] || fail "--undo left the config in place"
 grep -q '"changes": \[\]' /var/lib/fjarr/setup-changes.json || fail "--undo left changes recorded: $(cat /var/lib/fjarr/setup-changes.json)"

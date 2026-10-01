@@ -231,7 +231,7 @@ Rules for every command:
 `setup` (the first run, [below](#fjarr-agent-setup)), `drivers list|detect|install`
 with the built-in catalog ([below](#fjarr-agent-drivers)) and the bare
 `setup --undo`, proven on the spike machine against the lab server and in the
-package install test. `setup desktop` says so and exits non-zero until M3.
+package install test. `setup desktop` and `display` followed in M3 slice 3.3 (2026-10-01, [below](#fjarr-agent-setup-desktop)).
 `fjarr-connect` still prompts with dialoguer; its move to cliclack is owed
 (docs/14).
 
@@ -452,6 +452,11 @@ What it writes, each change recorded for `setup --undo desktop` (specified
 | `fjarr-desktop-watchdog.timer` | enabled. Every 30 s it runs `fjarr-setup desktop watchdog`. When GDM is active and two checks in a row find no session of the account on `seat0`, the watchdog restarts GDM, which logs the account in again, and says so in the journal |
 | `/etc/fjarr/fjarr.toml` | `[capabilities."fjarr.desktop"]` `helper.user = "<account>"`, `helper.group = "fjarr-desktop"`; then the agent restarts |
 
+**Built 2026-10-01** (`fjarr-setup`'s `desktop.rs`): the package install test
+runs `setup desktop` and `--undo desktop` on a clean Ubuntu, and checks each file,
+the account and the keys. The automatic login, the watchdog and the reboot are
+proven on the mini-PC in 3.L.
+
 The group applies at the account's next login, so the command ends by offering
 a reboot. `--check` adds rows for the module, the account and its group, the
 auto-login, the watchdog and each ghost screen.
@@ -505,6 +510,16 @@ What a change writes, each recorded for `setup --undo desktop`:
 |---|---|
 | `/etc/default/grub.d/fjarr-ghosts.cfg` | `video=<connector>:<mode>e drm.edid_firmware=<connector>:edid/fjarr-ghost-N.bin` per ghost, then `update-grub` |
 | `/usr/lib/firmware/edid/fjarr-ghost-N.bin` | the generated EDID |
+
+**Built 2026-10-01** (M3 slice 3.3, `fjarr-setup`'s `display.rs`): connectors
+are read through DRM ioctls, so a DisplayPort chain's root is recognised by its
+members' `PATH` property (`mst:<root>-<port>`) even while it reads as
+disconnected. The EDID is generated as EDID 1.4 with the mode's CVT
+reduced-blanking timing, and `di-edid-decode` reports it conforming. The GRUB
+snippet's `# fjarr-ghosts:` line is the one record of which ghosts exist. Proving
+it on hardware (a reboot into the ghosts, a chain beside them) is 3.L's, as is
+[open question #37](18-open-questions.md): telling that a real monitor is on a
+ghost connector.
 
 `add-ghost` without `--connector` takes the next free root connector, and when none
 is left it says how many ghosts this machine can have instead of failing after

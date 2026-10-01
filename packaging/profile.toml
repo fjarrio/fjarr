@@ -1,7 +1,7 @@
 # The system profile (docs/26#the-system-profile): what each feature needs from the robot's OS.
 # Installed as /usr/share/fjarr/profile.toml. The packages and `setup` produce it; `fjarr-agent --check`
 # verifies it on every robot however it was installed; later channels (a NixOS module, a Yocto layer)
-# render the same data. Desktop and headless features join when `setup desktop` exists.
+# render the same data.
 
 [core]
 account = "fjarr"                                 # the agent's own unprivileged user (docs/10)
@@ -18,3 +18,10 @@ device = "fjarr0"                                 # persistent, created before t
 owner  = "fjarr"                                  # so the agent attaches without privilege
 mtu    = 1184                                     # one SCTP chunk (ADR-0027)
 units  = ["fjarr-net.service"]                    # enabled by `net setup`: recreates the device at every boot
+
+[desktop]                                         # when `setup desktop` configured it (docs/26#fjarr-agent-setup-desktop)
+module = "/usr/lib/fjarr/desktop/libfjarr-desktop-mutter.so"   # fjarr-desktop-wayland
+group  = "fjarr-desktop"                          # the helper's socket: the agent and the desktop account (ADR-0028)
+gdm    = "/etc/gdm3/custom.conf"                  # the automatic login
+units  = ["fjarr-desktop-watchdog.timer"]         # restores the automatic login if the session dies (ADR-0006)
+ghosts = "/etc/default/grub.d/fjarr-ghosts.cfg"   # ghost screens (docs/26#ghost-screens)

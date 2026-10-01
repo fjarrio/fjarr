@@ -195,22 +195,20 @@ pub fn net(doc: &DocumentMut) -> Result<NetConfig> {
 /// Set `capabilities."fjarr.net".<key>`, returning what was there (as TOML text) so the change can
 /// be recorded and reversed exactly.
 pub fn set_net_value(doc: &mut DocumentMut, key: &str, new: Value) -> Option<String> {
-    let caps = doc
-        .entry("capabilities")
-        .or_insert(Item::Table(Table::new()));
-    if let Some(t) = caps.as_table_mut() {
-        // A header-less parent: `[capabilities."fjarr.net"]` reads better than an empty `[capabilities]`.
-        if t.is_empty() {
-            t.set_implicit(true);
-        }
-    }
-    let net = caps
-        .as_table_mut()
-        .expect("capabilities is a table")
-        .entry(NET_TABLE)
-        .or_insert(Item::Table(Table::new()));
-    let previous = net.get(key).and_then(Item::as_value).map(bare);
-    replace_value(net, key, new);
+    set_cap_value(doc, NET_TABLE, key, new)
+}
+
+/// Set `capabilities."<cap>".<key>`, where `key` may be dotted (`helper.user` is the `user` key of
+/// `[capabilities."fjarr.desktop".helper]`), returning what was there as TOML text so the change
+/// can be recorded and reversed exactly.
+pub fn set_cap_value(doc: &mut DocumentMut, cap: &str, key: &str, new: Value) -> Option<String> {
+    let parts: Vec<&str> = key.split('.').collect();
+    let (last, parents) = parts.split_last().expect("a key");
+    let mut path = vec!["capabilities", cap];
+    path.extend(parents.iter().copied());
+    let table = table_at(doc, &path);
+    let previous = table.get(last).and_then(Item::as_value).map(bare);
+    replace_value(table, last, new);
     previous
 }
 
@@ -231,35 +229,69 @@ fn replace_value(table: &mut Item, key: &str, mut new: Value) {
 
 /// Put `capabilities."fjarr.net".<key>` back: to `previous`, or gone when it did not exist, pruning
 /// the tables `set_net_value` created when they are left empty.
+#[cfg(test)]
 pub fn restore_net_value(doc: &mut DocumentMut, key: &str, previous: Option<&str>) -> Result<()> {
-    let Some(net) = doc
-        .get_mut("capabilities")
-        .and_then(|c| c.get_mut(NET_TABLE))
-        .and_then(Item::as_table_mut)
-    else {
-        return Ok(());
-    };
-    match previous {
-        Some(text) => {
-            let v: Value = text
-                .parse()
-                .with_context(|| format!("recorded value {text:?} for {key}"))?;
-            let mut item = Item::Table(std::mem::take(net));
-            replace_value(&mut item, key, v);
-            *net = item.into_table().expect("still a table");
-        }
-        None => {
-            net.remove(key);
-        }
-    }
-    let net_empty = net.is_empty();
-    if net_empty {
-        if let Some(caps) = doc.get_mut("capabilities").and_then(Item::as_table_mut) {
-            caps.remove(NET_TABLE);
-            if caps.is_empty() {
-                doc.remove("capabilities");
+    restore_cap_value(doc, NET_TABLE, key, previous)
+}
+
+/// Put `capabilities."<cap>".<key>` (dotted, as in `set_cap_value`) back: to `previous`, or gone
+/// when it did not exist, pruning every table on the path that is left empty.
+pub fn restore_cap_value(
+    doc: &mut DocumentMut,
+    cap: &str,
+    key: &str,
+    previous: Option<&str>,
+) -> Result<()> {
+    let parts: Vec<&str> = key.split('.').collect();
+    let (last, parents) = parts.split_last().expect("a key");
+    let mut path = vec!["capabilities", cap];
+    path.extend(parents.iter().copied());
+    {
+        let mut item: &mut Item = doc.as_item_mut();
+        for k in &path {
+            match item.get_mut(k) {
+                Some(next) => item = next,
+                None => return Ok(()), // nothing left to restore
             }
         }
+        let Some(table) = item.as_table_mut() else {
+            return Ok(());
+        };
+        match previous {
+            Some(text) => {
+                let v: Value = text
+                    .parse()
+                    .with_context(|| format!("recorded value {text:?} for {key}"))?;
+                let mut it = Item::Table(std::mem::take(table));
+                replace_value(&mut it, last, v);
+                *table = it.into_table().expect("still a table");
+            }
+            None => {
+                table.remove(last);
+            }
+        }
+    }
+    // Prune the tables on the path that are left empty, deepest first.
+    for depth in (1..=path.len()).rev() {
+        let (parents, name) = (&path[..depth - 1], path[depth - 1]);
+        let mut parent: &mut Item = doc.as_item_mut();
+        for k in parents {
+            match parent.get_mut(k) {
+                Some(next) => parent = next,
+                None => return Ok(()),
+            }
+        }
+        let Some(pt) = parent.as_table_mut() else {
+            return Ok(());
+        };
+        if !pt
+            .get(name)
+            .and_then(Item::as_table)
+            .is_some_and(Table::is_empty)
+        {
+            break;
+        }
+        pt.remove(name);
     }
     Ok(())
 }

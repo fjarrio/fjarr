@@ -434,6 +434,48 @@ pub fn default_route_interface(routes: &[Route]) -> Option<String> {
         .and_then(|r| r.oif.clone())
 }
 
+/// Run a system command (useradd, gpasswd, loginctl, dconf …); its stdout, or an error carrying its
+/// stderr.
+pub fn run(program: &str, args: &[&str]) -> Result<String> {
+    let out = Command::new(program)
+        .args(args)
+        .output()
+        .with_context(|| format!("running {program}"))?;
+    if !out.status.success() {
+        bail!(
+            "{program} {} failed ({}): {}",
+            args.join(" "),
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// An account's home directory and ids, from the passwd database.
+pub fn passwd_entry(user: &str) -> Option<(PathBuf, libc::uid_t, libc::gid_t)> {
+    std::fs::read_to_string("/etc/passwd")
+        .ok()?
+        .lines()
+        .find_map(|l| {
+            let f: Vec<&str> = l.split(':').collect();
+            (f.first() == Some(&user) && f.len() >= 7).then(|| {
+                (
+                    PathBuf::from(f[5]),
+                    f[2].parse().unwrap_or(0),
+                    f[3].parse().unwrap_or(0),
+                )
+            })
+        })
+}
+
+/// Is `user` in `group` (the group database, not the running session's view)?
+pub fn in_group(user: &str, group: &str) -> bool {
+    run("id", &["-nG", user])
+        .map(|s| s.split_whitespace().any(|g| g == group))
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

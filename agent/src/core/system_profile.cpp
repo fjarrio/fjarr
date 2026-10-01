@@ -137,9 +137,86 @@ void check_net(const toml::table& net, const System& sys, std::vector<Row>& rows
     rows.push_back({"net", dev + " mtu", mtu_ok, std::to_string(nd->mtu), mtu_ok ? "" : "sudo ip link set " + dev + " mtu " + std::to_string(mtu)});
 }
 
+/// `key=value` lines of an ini file's `[section]`, comments skipped.
+std::string ini_value(const std::string& text, const std::string& section, const std::string& key) {
+    std::istringstream in(text);
+    std::string line, current;
+    while (std::getline(in, line)) {
+        const auto b = line.find_first_not_of(" \t");
+        if (b == std::string::npos || line[b] == '#' || line[b] == ';') continue;
+        line = line.substr(b);
+        if (line[0] == '[') {
+            current = line.substr(1, line.find(']') - 1);
+            continue;
+        }
+        const auto eq = line.find('=');
+        if (current != section || eq == std::string::npos) continue;
+        auto k = line.substr(0, eq), v = line.substr(eq + 1);
+        k.erase(k.find_last_not_of(" \t") + 1);
+        v.erase(0, v.find_first_not_of(" \t"));
+        v.erase(v.find_last_not_of(" \t\r") + 1);
+        if (k == key) return v;
+    }
+    return {};
+}
+
+void check_desktop(const toml::table& d, const std::string& account, const std::string& agent, const System& sys, std::vector<Row>& rows) {
+    // spec: docs/26#fjarr-agent-setup-desktop — what `setup desktop` writes, verified.
+    const std::string redo = "sudo fjarr-agent setup desktop";
+    if (auto module = d["module"].value<std::string>()) {
+        const bool there = sys.stat(*module).has_value();
+        rows.push_back({"desktop", "module", there, there ? *module : "not installed", there ? "" : "sudo apt install fjarr-desktop-wayland"});
+    }
+    const std::string group = d["group"].value_or(std::string("fjarr-desktop"));
+    const auto uid = sys.uid_of(account);
+    rows.push_back({"desktop", "account " + account, uid.has_value(), uid ? "uid " + std::to_string(*uid) : "no such user", uid ? "" : redo});
+    for (const auto& who : {account, agent}) {
+        if (!sys.uid_of(who)) continue;
+        const auto have = sys.groups_of(who);
+        const bool in = std::find(have.begin(), have.end(), group) != have.end();
+        rows.push_back({"desktop", who + " in " + group, in, in ? "member" : "not a member", in ? "" : "sudo usermod -aG " + group + " " + who});
+    }
+    if (auto gdm = d["gdm"].value<std::string>()) {
+        const auto text = sys.read_file(*gdm);
+        const bool on = text && ini_value(*text, "daemon", "AutomaticLoginEnable") == "true" && ini_value(*text, "daemon", "AutomaticLogin") == account;
+        rows.push_back({"desktop", "automatic login", on, on ? account + " in " + *gdm : (text ? "not for " + account : *gdm + " missing"), on ? "" : redo});
+    }
+    for (const auto& unit : strings(d["units"])) {
+        if (!sys.systemd) {
+            rows.push_back({"desktop", "unit " + unit, true, "no systemd (a container): the host keeps the desktop's session", ""});
+            continue;
+        }
+        const bool on = sys.unit_enabled(unit);
+        rows.push_back({"desktop", "unit " + unit, on, on ? "enabled" : "not enabled", on ? "" : redo});
+    }
+    // Ghost screens: active when this boot has them, otherwise waiting for a reboot (not a failure).
+    if (auto ghosts = d["ghosts"].value<std::string>()) {
+        const auto snippet = sys.read_file(*ghosts);
+        const auto cmdline = sys.read_file("/proc/cmdline").value_or("");
+        std::string listed;
+        if (snippet) {
+            std::istringstream in(*snippet);
+            std::string line;
+            while (std::getline(in, line))
+                if (line.rfind("# fjarr-ghosts:", 0) == 0) listed = line.substr(15);
+        }
+        std::istringstream items(listed);
+        std::string item;
+        while (items >> item) {
+            const auto eq = item.find('=');
+            if (eq == std::string::npos) continue;
+            const std::string connector = item.substr(0, eq);
+            const bool active = cmdline.find("video=" + connector + ":") != std::string::npos;
+            rows.push_back({"desktop", "ghost " + connector, true, active ? "active" : "reboot pending", ""});
+        }
+    }
+}
+
 } // namespace
 
-std::vector<Row> check(const std::string& path, bool net_wanted, const System& sys) {
+std::vector<Row> check(const std::string& path, bool net_wanted, const System& sys) { return check(path, net_wanted, std::nullopt, sys); }
+
+std::vector<Row> check(const std::string& path, bool net_wanted, const std::optional<std::string>& desktop_account, const System& sys) {
     std::vector<Row> rows;
     std::ifstream in(path);
     if (!in) {
@@ -158,6 +235,11 @@ std::vector<Row> check(const std::string& path, bool net_wanted, const System& s
     if (auto core = tbl["core"].as_table()) check_core(*core, sys, rows);
     if (net_wanted)
         if (auto net = tbl["net"].as_table()) check_net(*net, sys, rows);
+    if (desktop_account)
+        if (auto d = tbl["desktop"].as_table()) {
+            const std::string agent = tbl["core"]["account"].value_or(std::string("fjarr"));
+            check_desktop(*d, *desktop_account, agent, sys, rows);
+        }
     return rows;
 }
 
@@ -205,6 +287,13 @@ System System::real() {
             if (name.size() > 6 && name.ends_with(".wants") && std::filesystem::exists(e.path() / unit, ec)) return true;
         }
         return false;
+    };
+    s.read_file = [](const std::string& path) -> std::optional<std::string> {
+        std::ifstream in(path);
+        if (!in) return std::nullopt;
+        std::stringstream t;
+        t << in.rdbuf();
+        return t.str();
     };
     s.netdev = [](const std::string& name) -> std::optional<NetDev> {
         const std::filesystem::path base = std::filesystem::path("/sys/class/net") / name;
