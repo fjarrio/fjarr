@@ -383,6 +383,19 @@ pub fn pick_free(rows: &[(String, State)], wanted: Option<&str>) -> Result<Strin
     }
 }
 
+/// The root connector a DisplayPort MST connector's `PATH` (`mst:<base>-<port>[-<port>…]`) hangs off.
+/// Drivers fill `<base>` differently: Intel with the root connector's DRM object id, amdgpu with its
+/// own connector index, which is the root's position among the root connectors (measured on the
+/// mini-PC, 2026-10-01: `mst:1-8` for a chain on DP-1, after HDMI-A-1). `roots` is (object id, name)
+/// of every connector without a PATH, in the driver's order.
+pub fn resolve_mst_root(path: &str, roots: &[(u32, String)]) -> Option<String> {
+    let base: u32 = path.strip_prefix("mst:")?.split('-').next()?.parse().ok()?;
+    if let Some((_, name)) = roots.iter().find(|(id, _)| *id == base) {
+        return Some(name.clone());
+    }
+    roots.get(base as usize).map(|(_, name)| name.clone())
+}
+
 /// The connectors, from the DRM devices (cardN): the kernel's names, connection state, the chain a
 /// DisplayPort MST connector hangs off (its `PATH` property, `mst:<root id>-<port>`), and the
 /// monitor's EDID name.
@@ -420,14 +433,12 @@ pub fn scan() -> Result<Vec<Connector>> {
         let Ok(res) = card.resource_handles() else {
             continue;
         };
-        let mut by_id: BTreeMap<u32, String> = BTreeMap::new();
         let mut infos = Vec::new();
         for &h in res.connectors() {
             let Ok(info) = card.get_connector(h, false) else {
                 continue;
             };
             let name = format!("{}-{}", info.interface().as_str(), info.interface_id());
-            by_id.insert(u32::from(h), name.clone());
             let mut path_prop = None;
             let mut edid_name = None;
             if let Ok(props) = card.get_properties(h) {
@@ -457,18 +468,23 @@ pub fn scan() -> Result<Vec<Connector>> {
                 info.state() == connector::State::Connected,
                 path_prop,
                 edid_name,
+                u32::from(h),
             ));
         }
-        for (name, connected, path_prop, monitor) in infos {
+        // The root connectors (no PATH), in the order the driver lists them: amdgpu names a chain's
+        // root by this position, Intel by its object id (resolve_mst_root).
+        let roots: Vec<(u32, String)> = infos
+            .iter()
+            .filter(|(_, _, p, _, _)| p.is_none())
+            .map(|(n, _, _, _, id)| (*id, n.clone()))
+            .collect();
+        for (name, connected, path_prop, monitor, _) in infos {
             if name.starts_with("Writeback") || name.starts_with("Virtual") {
                 continue;
             }
             let mst_root = path_prop
                 .as_deref()
-                .and_then(|p| p.strip_prefix("mst:"))
-                .and_then(|p| p.split('-').next())
-                .and_then(|id| id.parse::<u32>().ok())
-                .and_then(|id| by_id.get(&id).cloned());
+                .and_then(|p| resolve_mst_root(p, &roots));
             out.push(Connector {
                 name,
                 connected,
@@ -686,6 +702,26 @@ pub fn remove_ghost(state: &Path, which: &str) -> Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_chains_root_is_found_by_object_id_or_by_amdgpus_connector_index() {
+        // The mini-PC's amdgpu, 2026-10-01: HDMI-A-1 (102), DP-1 (111) …; chained monitors say mst:1-….
+        let roots = vec![
+            (102, "HDMI-A-1".to_string()),
+            (111, "DP-1".to_string()),
+            (119, "DP-2".to_string()),
+            (125, "DP-3".to_string()),
+        ];
+        assert_eq!(resolve_mst_root("mst:1-8", &roots).as_deref(), Some("DP-1"));
+        assert_eq!(resolve_mst_root("mst:1-1", &roots).as_deref(), Some("DP-1"));
+        // Intel: the root's object id.
+        assert_eq!(
+            resolve_mst_root("mst:119-1", &roots).as_deref(),
+            Some("DP-2")
+        );
+        assert_eq!(resolve_mst_root("mst:99-1", &roots), None);
+        assert_eq!(resolve_mst_root("not-mst", &roots), None);
+    }
 
     fn conn(name: &str, connected: bool, monitor: Option<&str>, root: Option<&str>) -> Connector {
         Connector {

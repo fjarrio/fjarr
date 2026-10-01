@@ -129,31 +129,34 @@ pub fn helper_wants_link(home: &Path) -> PathBuf {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WatchdogAction {
-    /// The account has its session on seat0 (or there is nothing to watch).
+    /// A user session holds seat0 (or there is nothing to watch).
     Healthy,
-    /// No session this check: the count of consecutive misses so far.
+    /// No user session on seat0 this check: the count of consecutive misses so far.
     Missing(u32),
     /// Missed often enough: restart GDM so the automatic login runs again.
     RestartGdm,
 }
 
-/// One watchdog check (docs/26#fjarr-agent-setup-desktop): `sessions` is `loginctl list-sessions
-/// --json=short`. GDM down is systemd's to restart, not ours.
-pub fn watchdog_decide(
-    sessions: &str,
-    user: &str,
-    gdm_active: bool,
-    misses: u32,
-) -> WatchdogAction {
+/// One watchdog check (docs/26#fjarr-agent-setup-desktop, ADR-0006): `sessions` is `loginctl
+/// list-sessions --json=short`. It acts only when **no user session** holds seat0, whoever's: the
+/// robot's own desktop died, or nobody is logged in. A person at the machine holds the seat and is
+/// never logged out by it. GDM's greeter is not a user session. GDM down is systemd's to restart.
+pub fn watchdog_decide(sessions: &str, gdm_active: bool, misses: u32) -> WatchdogAction {
     if !gdm_active {
         return WatchdogAction::Healthy;
     }
     let list: Vec<serde_json::Value> = serde_json::from_str(sessions).unwrap_or_default();
-    let present = list.iter().any(|s| {
-        s.get("user").and_then(|u| u.as_str()) == Some(user)
-            && s.get("seat").and_then(|v| v.as_str()) == Some("seat0")
+    let held = list.iter().any(|s| {
+        let on_seat = s.get("seat").and_then(|v| v.as_str()) == Some("seat0");
+        let user = s.get("user").and_then(|v| v.as_str()).unwrap_or("");
+        // An older loginctl has no class field: then the greeter is known by its account.
+        let is_user = match s.get("class").and_then(|v| v.as_str()) {
+            Some(class) => class == "user",
+            None => !user.starts_with("gdm"),
+        };
+        on_seat && is_user
     });
-    if present {
+    if held {
         WatchdogAction::Healthy
     } else if misses + 1 >= WATCHDOG_MISSES {
         WatchdogAction::RestartGdm
@@ -190,17 +193,17 @@ pub fn watchdog(config_path: &Path) -> Result<()> {
         .ok()
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(0);
-    match watchdog_decide(&sessions, &user, gdm_active, misses) {
+    match watchdog_decide(&sessions, gdm_active, misses) {
         WatchdogAction::Healthy => {
             let _ = std::fs::remove_file(WATCHDOG_STATE);
         }
         WatchdogAction::Missing(n) => {
             let _ = std::fs::write(WATCHDOG_STATE, n.to_string());
-            println!("desktop watchdog: {user} has no session on seat0 ({n} of {WATCHDOG_MISSES})");
+            println!("desktop watchdog: no user session on seat0 ({n} of {WATCHDOG_MISSES})");
         }
         WatchdogAction::RestartGdm => {
             let _ = std::fs::remove_file(WATCHDOG_STATE);
-            println!("desktop watchdog: {user} has had no session on seat0 for {WATCHDOG_MISSES} checks; restarting GDM so it logs in again");
+            println!("desktop watchdog: no user session on seat0 for {WATCHDOG_MISSES} checks; restarting GDM so {user} logs in again");
             system::systemctl(&["restart", "gdm.service"])?;
         }
     }
@@ -405,18 +408,9 @@ pub async fn setup(config_path: &Path, state: &Path, args: DesktopArgs) -> Resul
             },
         );
     }
-    if system::systemd_running() {
-        system::systemctl(&["enable", "--now", WATCHDOG_TIMER])?;
-        record.add(
-            FEATURE,
-            Change::UnitEnabled {
-                unit: WATCHDOG_TIMER.into(),
-            },
-        );
-    }
     record.save(state)?;
     log::success(format!(
-        "Session helper enabled for {account} · group {GROUP} · GDM watchdog enabled"
+        "Session helper enabled for {account} · group {GROUP}"
     ))?;
 
     // 3b. Ghost screens (docs/26#ghost-screens): given, or offered when no monitor is plugged in.
@@ -456,7 +450,19 @@ pub async fn setup(config_path: &Path, state: &Path, args: DesktopArgs) -> Resul
     set_value(&mut record, &mut doc, config_path, "helper.group", GROUP);
     config::save(config_path, &doc)?;
     record.save(state)?;
+    // The watchdog last: its first check must already find the configured account.
     if system::systemd_running() {
+        system::systemctl(&["enable", "--now", WATCHDOG_TIMER])?;
+        record.add(
+            FEATURE,
+            Change::UnitEnabled {
+                unit: WATCHDOG_TIMER.into(),
+            },
+        );
+        record.save(state)?;
+        log::success(
+            "GDM watchdog enabled: brings the automatic login back when no one holds the seat",
+        )?;
         system::restart_agent_if_running()?;
     }
 
@@ -534,35 +540,41 @@ mod tests {
     }
 
     #[test]
-    fn the_watchdog_restarts_gdm_only_after_two_checks_without_the_session() {
-        let theirs =
+    fn the_watchdog_restarts_gdm_only_when_no_one_has_held_the_seat_for_two_checks() {
+        let greeter =
             r#"[{"session":"c1","uid":120,"user":"gdm","seat":"seat0","class":"greeter"}]"#;
-        let ours = r#"[{"session":"2","uid":1001,"user":"desktop","seat":"seat0","class":"user"},{"session":"5","uid":1000,"user":"erik","seat":null}]"#;
+        let robot = r#"[{"session":"2","uid":1001,"user":"desktop","seat":"seat0","class":"user"},{"session":"5","uid":1000,"user":"erik","seat":null}]"#;
+        assert_eq!(watchdog_decide(robot, true, 1), WatchdogAction::Healthy);
         assert_eq!(
-            watchdog_decide(ours, "desktop", true, 1),
-            WatchdogAction::Healthy
-        );
-        assert_eq!(
-            watchdog_decide(theirs, "desktop", true, 0),
+            watchdog_decide(greeter, true, 0),
             WatchdogAction::Missing(1)
         );
         assert_eq!(
-            watchdog_decide(theirs, "desktop", true, 1),
+            watchdog_decide(greeter, true, 1),
             WatchdogAction::RestartGdm
         );
         assert_eq!(
-            watchdog_decide(theirs, "desktop", false, 5),
+            watchdog_decide(greeter, false, 5),
             WatchdogAction::Healthy,
             "GDM down is systemd's to restart"
         );
-        // A session over ssh (no seat) is not the desktop.
-        let ssh = r#"[{"session":"9","uid":1001,"user":"desktop","seat":null}]"#;
+        // The mini-PC, 2026-10-01: a person logged in at the machine holds the seat; never log them out.
+        let person = r#"[{"session":"3","uid":1000,"user":"robot","seat":"seat0","class":"user","tty":"tty2"}]"#;
+        assert_eq!(watchdog_decide(person, true, 7), WatchdogAction::Healthy);
+        // A session over ssh (no seat) holds nothing.
+        let ssh = r#"[{"session":"9","uid":1001,"user":"desktop","seat":null,"class":"user"}]"#;
+        assert_eq!(watchdog_decide(ssh, true, 0), WatchdogAction::Missing(1));
+        // An older loginctl without a class: the greeter is known by its account.
         assert_eq!(
-            watchdog_decide(ssh, "desktop", true, 0),
+            watchdog_decide(r#"[{"user":"gdm-greeter","seat":"seat0"}]"#, true, 0),
             WatchdogAction::Missing(1)
         );
         assert_eq!(
-            watchdog_decide("not json", "desktop", true, 0),
+            watchdog_decide(r#"[{"user":"robot","seat":"seat0"}]"#, true, 0),
+            WatchdogAction::Healthy
+        );
+        assert_eq!(
+            watchdog_decide("not json", true, 0),
             WatchdogAction::Missing(1)
         );
     }
