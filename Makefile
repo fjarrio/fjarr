@@ -530,9 +530,13 @@ desktop-browser: ## M3: the demo dashboard's Desktop panel in the lab browser ag
 	docker compose --profile desktop --profile stack up -d --no-deps --force-recreate desktop-robot
 	@for i in $$(seq 30); do docker compose --profile desktop logs --no-color desktop-robot 2>/dev/null | grep -q "capture of .* ready" && break; sleep 1; done
 	@# From dev, where the fixture's and the robot's compose names resolve (the runner cannot reach them).
-	@mkdir -p build; rc=0; $(E2E_IN_DEV) tests/stack/dashboard.spec.ts --project stack -g "Desktop panel" > build/desktop-browser.log 2>&1 || rc=1; \
-	  cat build/desktop-browser.log; \
-	  if grep -qE "^ +[0-9]+ skipped" build/desktop-browser.log; then echo "desktop-browser: a test skipped — it must run here (reason above)"; rc=1; fi; \
+	@# The JSON report carries each skip's reason, which the list reporter does not print.
+	@mkdir -p build; rm -f build/desktop-browser.json; rc=0; \
+	  $(if $(IN_DEV),,docker compose exec -T dev )env PLAYWRIGHT_JSON_OUTPUT_NAME=/workspace/build/desktop-browser.json \
+	    pnpm --filter @fjarr/e2e exec playwright test tests/stack/dashboard.spec.ts --project stack -g "Desktop panel" --reporter=list,json || rc=1; \
+	  skips=$$(python3 -c 'import json,sys; r=[]; w=lambda o: [w(v) for v in (o.values() if isinstance(o,dict) else o if isinstance(o,list) else [])] + ([r.append(o.get("description",""))] if isinstance(o,dict) and o.get("type")=="skip" else []); w(json.load(open("build/desktop-browser.json"))); print("\n".join(sorted(set(r))))' 2>/dev/null); \
+	  if [ ! -f build/desktop-browser.json ]; then echo "desktop-browser: no report was written"; rc=1; \
+	  elif [ -n "$$skips" ]; then echo "desktop-browser: a test skipped — they must all run here:"; echo "$$skips" | sed 's/^/  /'; rc=1; fi; \
 	  [ $$rc -eq 0 ] || docker compose --profile desktop logs --no-color --tail 40 desktop-robot desktop-fixture; \
 	  docker compose --profile desktop stop desktop-robot desktop-fixture >/dev/null 2>&1; exit $$rc
 
