@@ -146,7 +146,9 @@ def compose_services(names):
     env = os.environ.get("GITHUB_ENV")
     if env:
         with open(env, "a") as f:
-            f.write(f"COMPOSE_FILE=docker-compose.yml:{os.path.relpath(OVERRIDE, ROOT)}\n")
+            # Absolute: the browser suites run `docker compose` from web/e2e, where relative paths in
+            # COMPOSE_FILE resolve to nothing (without it, compose searches the parent directories).
+            f.write(f"COMPOSE_FILE={os.path.join(ROOT, 'docker-compose.yml')}:{OVERRIDE}\n")
 
 
 def main(argv):
