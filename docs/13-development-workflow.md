@@ -81,7 +81,8 @@ thing happened — no `accepted=true` stubs (fleet-daemon anti-lesson).
 ## Docs hygiene
 
 - `make docs-lint` (markdownlint) and `make docs-links` (lychee) gate merges
-  (CI from M0.5).
+  (CI from M0.5). A docs-only push runs only these and the website build
+  ([docs/30](30-continuous-integration.md#which-changes-run-what)).
 - Each doc carries a status in the [index](README.md); promotions to
   `stable` happen by PR review.
 - The website renders `docs/` directly ([docs/19](19-website-and-publishing.md)) —

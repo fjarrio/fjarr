@@ -198,8 +198,10 @@ workflows**, because a job cannot outlive the reboot it causes, and a second job
 in the same run could be handed to the runner in the seconds before the machine
 goes down (decided 2026-10-01, on the mini-PC):
 
-- **`lab-desktop-prepare`, 00:15.** A hosted job builds the `.deb`s,
-  `fjarr-server` and `fjarr-opsim`. On the lab machine, `tools/fjarr-lab/unattended.sh prepare`
+- **`lab-desktop-prepare`, 00:15.** A hosted job takes the `.deb`s of
+  `main`'s newest green CI run — the files CI tested, not a rebuild
+  ([docs/30](30-continuous-integration.md#artifacts-built-once)) — and builds
+  `fjarr-server` and `fjarr-opsim` from the same commit. On the lab machine, `tools/fjarr-lab/unattended.sh prepare`
   undoes the previous `setup desktop`, installs the build, runs `setup desktop
   --ghost-screens 1`, and points the agent at a `fjarr-server` on the machine
   itself through a systemd drop-in. The person's own `/etc/fjarr/fjarr.toml` is
@@ -259,6 +261,10 @@ state after a run is documented, and a person's experiments before it do not
 decide its result.
 
 ## What CI runs
+
+How the workflows are laid out and kept fast — the job graph, which changes run
+what, CI images, caches — is [docs/30](30-continuous-integration.md); this
+section is what they test.
 
 Today (M0.5–slice 2): lint, Rust and web unit tests, builds, docs gates.
 From slice 3a/3b: lint (clang-tidy, clippy, eslint, markdownlint, lychee)

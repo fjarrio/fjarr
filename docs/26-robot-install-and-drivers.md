@@ -690,7 +690,9 @@ offline; its revocation certificate is kept offline with it.
   workspace and its lockfile; the npm packages; `debian/changelog`). That is
   committed, then tagged, and the release workflow refuses a tag that does
   not match every one of them.
-- **A release** is: tag → full CI → packages and images to `testing` → a
+- **A release** is: tag → the tagged commit's CI run, waited for and required
+  green → **its** packages (never rebuilt, [docs/30](30-continuous-integration.md#releases-reuse-cis-packages))
+  and images built from them to `testing` → a
   manual, protected promotion to `stable` that copies the same artifacts and
   never rebuilds them (`.github/workflows/release.yml`; environments
   `apt-testing` and `apt-stable`, the second requiring approval, both

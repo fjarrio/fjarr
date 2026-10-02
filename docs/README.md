@@ -43,6 +43,7 @@ with rationale).
 | 27 | [Network tunnel](27-network-tunnel.md) | `fjarr.net`: a session-scoped IP link to one robot — ssh, scp, UDP bridges and ROS 2 tooling; why it is a link and not a VPN | draft |
 | 28 | [What you can run over the tunnel](28-tunnel-ideas.md) | Ideas for `fjarr.net`: shells, desktops, files, debuggers, ROS, CAN, USB/IP, monitoring — what is verified, what fits, and the safety notes | review |
 | 29 | [How-tos over the tunnel](29-tunnel-howtos.md) | Step-by-step recipes for docs/28's ideas: a few commands each, robot side and your side, and the usual pitfall | review |
+| 30 | [Continuous integration](30-continuous-integration.md) | How CI is laid out and kept fast: the job graph, which changes run what, CI images by content hash, caches as a budget, build once and reuse; rules for adding to it | review |
 
 ## Architecture decision records
 
