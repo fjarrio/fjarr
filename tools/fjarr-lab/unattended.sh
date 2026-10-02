@@ -10,6 +10,11 @@
 #                                      then `fjarr-lab reboot`.
 #   sudo unattended.sh verify          after the reboot: each step in order, and a failure names the
 #                                      first one that broke; then the agent goes back to its own server.
+#                                      prepare installs fjarr-lab-unattended.service, which runs this
+#                                      once at the next boot and writes the verdict.
+#   sudo unattended.sh report          the verdict of the last verify, for the lab-desktop-verify
+#                                      workflow: exit 0 passed, 1 failed, 75 not yet (no reboot since
+#                                      prepare, or still verifying).
 #
 # Run by the lab-desktop-prepare and lab-desktop-verify workflows, and by hand on the machine.
 set -euo pipefail
@@ -22,9 +27,16 @@ PORT=18080
 SERVER_UNIT=/etc/systemd/system/fjarr-lab-server.service
 DROPIN=/etc/systemd/system/fjarr-agent.service.d/fjarr-lab.conf
 ORACLE=/tmp/fjarr-oracle
+VERIFY_UNIT=/etc/systemd/system/fjarr-lab-unattended.service
+VERDICT=""   # set while verifying at boot: where fail/pass leave the outcome
 
 say() { echo "unattended: $*"; }
-fail() { echo "FAIL $1: $2"; echo "SUMMARY unattended-access: failed at $1"; exit 1; }
+fail() {
+  echo "FAIL $1: $2"
+  echo "SUMMARY unattended-access: failed at $1"
+  if [ -n "$VERDICT" ]; then echo "failed: $1" > "$VERDICT"; fi
+  exit 1
+}
 pass() { echo "PASS $1: $2"; }
 [ "$(id -u)" -eq 0 ] || { echo "unattended.sh needs root (sudo)"; exit 2; }
 
@@ -42,6 +54,9 @@ prepare() {
   DEBIAN_FRONTEND=noninteractive apt-get install -y -q --reinstall --allow-downgrades "${debs[@]}" >"$STATE/apt.log" 2>&1 || { tail -20 "$STATE/apt.log"; fail install "apt could not install the build"; }
   install -m 0755 "$dir/fjarr-server" "$dir/fjarr-opsim" "$STATE/"
   install -m 0644 "$here/../../docker/desktop-fixture/testwin.py" "$STATE/testwin.py"
+  install -m 0755 "$0" "$STATE/unattended.sh" # the checkout is gone by the next boot
+  rm -f "$STATE/result" "$STATE/result.log"
+  echo "${GITHUB_RUN_ID:-by hand}" > "$STATE/prepare-run"
   pass install "$(dpkg-query -W -f '${Package} ${Version}  ' fjarr-agent fjarr-desktop-wayland)"
 
   # A server of its own, on this machine, with secrets of its own for this run.
@@ -78,6 +93,23 @@ EOF
   fjarr-agent setup desktop --yes --account "$ACCOUNT" --ghost-screens 1 --reboot no >"$STATE/setup-desktop.log" 2>&1 \
     || { sed 's/\x1b\[[0-9;]*m//g' "$STATE/setup-desktop.log" | tail -25; fail "setup desktop" "it failed or its --check did"; }
   pass "setup desktop" "$(grep -oE '[A-Z]+[A-Za-z0-9-]* → Fjarr Ghost [0-9]+' "$STATE/setup-desktop.log" | head -1) · --check passed"
+  # The machine verifies itself at the next boot, whenever GitHub gets round to asking (docs/15).
+  {
+    echo "# Written by tools/fjarr-lab/unattended.sh prepare: verify once at the next boot, then disable (docs/15)."
+    echo "[Unit]"
+    echo "Description=Fjarr unattended-access test: verify after the reboot"
+    echo "After=network-online.target fjarr-agent.service fjarr-lab-server.service gdm.service"
+    echo "Wants=network-online.target"
+    echo "[Service]"
+    echo "Type=oneshot"
+    echo "ExecStart=$STATE/unattended.sh verify --on-boot"
+    echo "TimeoutStartSec=15min"
+    echo "[Install]"
+    echo "WantedBy=multi-user.target"
+  } > "$VERIFY_UNIT"
+  systemctl daemon-reload
+  systemctl enable fjarr-lab-unattended.service >/dev/null 2>&1
+  pass "verify at boot" "fjarr-lab-unattended.service runs it once after the reboot"
   fjarr-lab reboot
   pass reboot "requested; fjarr-lab reboots once this job has ended"
 }
@@ -91,6 +123,11 @@ seat_session() { loginctl list-sessions --no-legend | awk -v u="$ACCOUNT" '$3 ==
 agent_says() { journalctl -b -u fjarr-agent --no-pager -o cat | grep -qE "$1"; }
 
 cleanup() {
+  if [ -n "$VERDICT" ]; then
+    [ -f "$VERDICT" ] && mv "$VERDICT" "$STATE/result"
+    systemctl disable fjarr-lab-unattended.service >/dev/null 2>&1 || true
+    rm -f "$VERIFY_UNIT"
+  fi
   pkill -f "$ORACLE/testwin.py" 2>/dev/null || true
   pkill -f "http.server 8090" 2>/dev/null || true
   rm -f "$DROPIN"
@@ -102,8 +139,13 @@ cleanup() {
 }
 
 verify() {
-  [ -f "$STATE/boot-id" ] || fail rebooted "no prepare ran here ($STATE/boot-id missing)"
+  if [ "${1:-}" = "--on-boot" ]; then
+    VERDICT="$STATE/result.tmp"
+    exec > >(tee "$STATE/result.log") 2>&1
+    echo "unattended: verifying at boot $(boot_id), for prepare run $(cat "$STATE/prepare-run" 2>/dev/null)"
+  fi
   trap cleanup EXIT
+  [ -f "$STATE/boot-id" ] || fail rebooted "no prepare ran here ($STATE/boot-id missing)"
   [ "$(boot_id)" != "$(cat "$STATE/boot-id")" ] || fail rebooted "this is still the boot prepare ran in"
   pass rebooted "up since $(uptime -s)"
   wait_for 180 seat_session || fail "GDM automatic login" "no session of $ACCOUNT on seat0 within 3 min of the check starting"
@@ -137,10 +179,33 @@ verify() {
   done
   [ $rc -eq 0 ] || fail stream "an opsim scenario failed (above; full logs in $STATE)"
   echo "SUMMARY unattended-access: passed"
+  if [ -n "$VERDICT" ]; then echo "passed" > "$VERDICT"; fi
+  return 0
+}
+
+# What lab-desktop-verify reports: the verdict the machine wrote at boot.
+report() {
+  if [ ! -f "$STATE/boot-id" ]; then echo "unattended: no prepare has run on this machine"; return 1; fi
+  if [ "$(boot_id)" = "$(cat "$STATE/boot-id")" ]; then
+    echo "unattended: not rebooted since prepare (run $(cat "$STATE/prepare-run" 2>/dev/null)) yet"
+    return 75
+  fi
+  if [ ! -f "$STATE/result" ]; then
+    if systemctl is-active --quiet fjarr-lab-unattended.service || systemctl is-enabled --quiet fjarr-lab-unattended.service 2>/dev/null; then
+      echo "unattended: rebooted; the machine is still verifying"
+      return 75
+    fi
+    echo "unattended: rebooted, but no verdict was written (journalctl -u fjarr-lab-unattended)"
+    return 1
+  fi
+  cat "$STATE/result.log" 2>/dev/null
+  echo "unattended: verdict for prepare run $(cat "$STATE/prepare-run" 2>/dev/null): $(cat "$STATE/result")"
+  [ "$(cat "$STATE/result")" = "passed" ]
 }
 
 case "${1:-}" in
   prepare) shift; prepare "$@" ;;
-  verify) verify ;;
-  *) echo "usage: unattended.sh prepare <dir> | verify"; exit 2 ;;
+  verify) shift; verify "$@" ;;
+  report) report ;;
+  *) echo "usage: unattended.sh prepare <dir> | verify [--on-boot] | report"; exit 2 ;;
 esac

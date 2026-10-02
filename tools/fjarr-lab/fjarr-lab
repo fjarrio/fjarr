@@ -160,17 +160,34 @@ cmd_window() {
 cmd_reboot() {
   need_service
   if [ -z "${FJARR_LAB_FOREGROUND:-}" ]; then
-    FJARR_LAB_FOREGROUND=1 setsid "$0" reboot </dev/null >>"$STATE/reboot.log" 2>&1 &
-    say "rebooting once the runner is idle (log: $STATE/reboot.log)"
+    # The job asking for the reboot: its Runner.Worker, an ancestor of this process. Waiting for that
+    # one process (not polling for "no job") takes the runner offline the moment the job ends,
+    # before GitHub can hand it the next queued job (the first night, 2026-10-02: verify was queued
+    # and taken before the reboot).
+    local pid=$$ worker=""
+    while [ "$pid" -gt 1 ]; do
+      if [ "$(cat "/proc/$pid/comm" 2>/dev/null)" = "Runner.Worker" ]; then worker=$pid; break; fi
+      pid=$(awk '{print $4}' "/proc/$pid/stat" 2>/dev/null || echo 1)
+    done
+    FJARR_LAB_FOREGROUND=1 FJARR_LAB_WAIT_PID="$worker" setsid "$0" reboot </dev/null >>"$STATE/reboot.log" 2>&1 &
+    say "rebooting once ${worker:+this job (Runner.Worker $worker) has ended}${worker:-the runner is idle} (log: $STATE/reboot.log)"
     return 0
   fi
   local waited=0 limit=$((GRACE_MIN * 60))
-  sleep "${FJARR_LAB_REBOOT_SETTLE:-3}"
-  while job_running && [ "$waited" -lt "$limit" ]; do
-    sleep "$POLL_S"; waited=$((waited + POLL_S))
-  done
-  say "$(date -Is) runner idle: offline, then reboot"
-  systemctl stop "$RUNNER_SERVICE"
+  if [ -n "${FJARR_LAB_WAIT_PID:-}" ]; then
+    while kill -0 "$FJARR_LAB_WAIT_PID" 2>/dev/null && [ "$waited" -lt $((limit * 5)) ]; do
+      sleep 0.2; waited=$((waited + 1))
+    done
+    systemctl stop "$RUNNER_SERVICE"
+    say "$(date -Is) the job has ended: runner offline at once, then reboot"
+  else
+    sleep "${FJARR_LAB_REBOOT_SETTLE:-3}"
+    while job_running && [ "$waited" -lt "$limit" ]; do
+      sleep "$POLL_S"; waited=$((waited + POLL_S))
+    done
+    systemctl stop "$RUNNER_SERVICE"
+    say "$(date -Is) runner idle: offline, then reboot"
+  fi
   systemctl reboot
 }
 

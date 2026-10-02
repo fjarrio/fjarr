@@ -222,6 +222,8 @@ goes down (decided 2026-10-01, on the mini-PC):
   verify ran before the reboot. So when verify finds the machine not yet
   rebooted, it dispatches itself again (at most 5 times) and ends as
   rescheduled, never as a failure or a pass.
+  Proven by hand on the mini-PC on 2026-10-02: prepare, a reboot, the machine
+  verifying itself at boot, and `report` giving the verdict "passed".
 
 `fjarr-opsim` runs on the lab machine itself and decodes with `openh264dec`, which
 the robot already has for its software encoder. libav (GPL) is never installed on

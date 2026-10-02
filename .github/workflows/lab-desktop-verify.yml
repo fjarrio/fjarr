@@ -1,24 +1,57 @@
-# The unattended-access test, second half (docs/15#unattended-access-test-the-industrial-gate): after
-# lab-desktop-prepare's reboot, with nobody at the machine — GDM's automatic login, the session helper,
-# the agent's capture, then video and input through fjarr-opsim. A failure names the first step that
-# broke. Lab machines serve only schedule and workflow_dispatch from main (ADR-0033, docs/12).
+# The unattended-access test, second half (docs/15#unattended-access-test-the-industrial-gate): the
+# machine verifies itself at the first boot after lab-desktop-prepare (fjarr-lab-unattended.service);
+# this reports its verdict. GitHub's schedule is not an order, so when the machine has not rebooted
+# yet (or is still verifying) this dispatches itself again and ends as rescheduled — at most 5 times.
+# Lab machines serve only schedule and workflow_dispatch from main (ADR-0033, docs/12).
 name: Lab desktop — verify
 
 on:
   schedule:
     - cron: "45 22 * * *"   # 00:45 in Sweden (CEST), 30 min after prepare
   workflow_dispatch:
+    inputs:
+      attempt:
+        description: which attempt this is (re-dispatches count up to 5)
+        default: "1"
 
 concurrency:
   group: lab-desktop
   cancel-in-progress: false
+
+permissions:
+  actions: write   # to dispatch itself again when the machine has not rebooted yet
+  contents: read
 
 jobs:
   verify:
     name: unattended access after the reboot (mini-PC)
     if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, fjarr-lab, desktop, gnome]
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - run: sudo -n tools/fjarr-lab/unattended.sh verify
+      - name: the machine's verdict
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATTEMPT: ${{ inputs.attempt || '1' }}
+          REPO: ${{ github.repository }}
+        run: |
+          rc=0
+          sudo -n tools/fjarr-lab/unattended.sh report || rc=$?
+          if [ "$rc" -ne 75 ]; then exit "$rc"; fi
+          if [ "$ATTEMPT" -ge 5 ]; then
+            echo "::error::the machine had still not rebooted and verified after $ATTEMPT attempts"
+            exit 1
+          fi
+          next=$((ATTEMPT + 1))
+          python3 - "$REPO" "$next" <<'PY'
+          import json, os, sys, urllib.request
+          repo, attempt = sys.argv[1], sys.argv[2]
+          req = urllib.request.Request(
+              f"https://api.github.com/repos/{repo}/actions/workflows/lab-desktop-verify.yml/dispatches",
+              data=json.dumps({"ref": "main", "inputs": {"attempt": attempt}}).encode(),
+              headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"], "Accept": "application/vnd.github+json"},
+              method="POST")
+          urllib.request.urlopen(req, timeout=20)
+          PY
+          echo "::notice::not verified yet (attempt $ATTEMPT): dispatched attempt $next, which runs once the machine has rebooted"

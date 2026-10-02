@@ -99,6 +99,15 @@ out=$(FJARR_LAB_FOREGROUND=1 FJARR_LAB_REBOOT_SETTLE=0 lab_at 00:20 reboot)
 contains "reboot waits for the running job, then reboots" "$out" "runner idle"
 expect "the runner goes offline before the reboot" "$(grep -E 'systemctl (stop|reboot)' "$T/log" | tr '\n' '|')" "systemctl stop actions.runner.test.service|systemctl reboot|"
 
+# reboot asked by a job: waits for that job's process, not for "no job", then offline at once.
+: > "$T/log"
+touch "$T/active"
+sleep 2 & job_pid=$!
+out=$(FJARR_LAB_FOREGROUND=1 FJARR_LAB_WAIT_PID=$job_pid lab_at 00:20 reboot)
+contains "reboot waits for the asking job's own process" "$out" "the job has ended"
+if kill -0 "$job_pid" 2>/dev/null; then bad "reboot went ahead while the job's process was alive"; else ok "the job's process had ended before the reboot"; fi
+expect "and the runner goes offline before the reboot" "$(grep -E 'systemctl (stop|reboot)' "$T/log" | tr '\n' '|')" "systemctl stop actions.runner.test.service|systemctl reboot|"
+
 rm -rf "$T"
 echo "lab-test: $([ $fails -eq 0 ] && echo 'all passed' || echo "$fails failed")"
 exit $((fails > 0))
