@@ -14,11 +14,19 @@ on:
         description: soak cycles
         default: "200"
 
+permissions:
+  contents: read
+
 jobs:
   nightly:
     name: Soak, memcheck, heaptrack, netem (${{ vars.FJARR_NIGHTLY_RUNNER || 'ubuntu-24.04' }})
     runs-on: ${{ vars.FJARR_NIGHTLY_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write # the CI images (docs/30#ci-images)
+    env:
+      FJARR_CI_PUSH: ${{ github.ref == 'refs/heads/main' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
       - name: environment (the runner's ids, GPU groups when present, TSan sysctl)
@@ -46,10 +54,21 @@ jobs:
             echo "::warning::vm.mmap_rnd_bits=$(cat /proc/sys/vm/mmap_rnd_bits) and no passwordless sudo — TSan will be skipped. Persist it on the runner: echo 'vm.mmap_rnd_bits=28' | sudo tee /etc/sysctl.d/60-tsan.conf && sudo sysctl --system"
           fi
           grep -E "^(USER_UID|USER_GID|DOCKER_GID|RENDER_GID)=" .env
-      - name: build the dev image
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: CI images by content hash (docs/30#ci-images)
         run: |
-          docker compose build dev
+          python3 tools/ci/image.py compose dev robot-sim fjarr-server robot-services robot-ros operator-ros
           docker compose up -d dev robot-sim
+      # ci.yml's cache of the same build, restored and never saved here (docs/30#caches).
+      - uses: actions/cache/restore@v4
+        with:
+          path: build/ccache-dev
+          key: ccache-dev-release-${{ github.run_id }}
+          restore-keys: ccache-dev-release-
       - name: choose the encoder by probing VA-API, not by the presence of a device
         # A render node is not an Intel one. An NVIDIA card presents /dev/dri/renderD128
         # and no VA-API H.264 encoder, while our hardware path IS VA-API (ADR-0022; NVENC
@@ -68,7 +87,7 @@ jobs:
       - name: doctor and the agent build
         run: |
           docker compose exec -T -e FJARR_MEDIA_ENCODER="$FJARR_MEDIA_ENCODER" dev make doctor
-          docker compose exec -T dev make agent-build
+          docker compose exec -T -e CCACHE_DIR=/workspace/build/ccache-dev -e CCACHE_MAXSIZE=500M dev make agent-build
       - name: valgrind memcheck on the loop tests (docs/15 nightly row)
         run: docker compose exec -T dev make agent-memcheck
       - name: heaptrack on the streaming loop test (docs/16 hot-path budget)

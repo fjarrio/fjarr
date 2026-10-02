@@ -1,4 +1,6 @@
-# Fjarr CI — the gates from docs/13-development-workflow.md.
+# Fjarr CI — the gates from docs/13-development-workflow.md, laid out per
+# docs/30-continuous-integration.md (the job graph, which changes run what, CI images, caches):
+# read it before adding a job, a cache or an image here.
 # Website deployment is handled by Cloudflare Pages' Git integration
 # (docs/19-website-and-publishing.md#deployment), not by CI.
 name: CI
@@ -8,7 +10,37 @@ on:
     branches: [main]
   pull_request:
 
+# Every commit on main keeps its own run (docs/30#principles: bisecting and tagging need each
+# verdict); a new push to a pull request cancels that PR's older run.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # CI images built here are pushed only from main (docs/30#ci-images); a pull request only pulls.
+  FJARR_CI_PUSH: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && '1' || '0' }}
+
 jobs:
+  changes:
+    # docs/30#which-changes-run-what: code=false only when every changed file is on the docs list.
+    name: What changed
+    runs-on: ubuntu-24.04
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: tools/ci's own tests (the classifier below, the CI images' hash)
+        run: make ci-test
+      - id: classify
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          bash tools/ci/changes.sh "$BASE" "$HEAD" | tee -a "$GITHUB_OUTPUT"
+
   docs:
     name: Docs gates + website build
     runs-on: ubuntu-24.04
@@ -41,6 +73,8 @@ jobs:
   web:
     name: Web packages + demos
     runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -58,6 +92,11 @@ jobs:
   e2e:
     name: Browser lab + real agent (Chromium over CDP, fjarr-server, demo robot, opsim)
     runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
+      packages: write # the CI images (docs/30#ci-images)
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -69,35 +108,37 @@ jobs:
       # The viewer's build output is what the demo robot serves from introspect.viewer_dir (docs/24).
       - run: pnpm -r --filter '@fjarr/introspect-viewer...' build
       - run: pnpm --filter '@fjarr/e2e' typecheck
+      - name: the runner's .env (uid, groups, the software encoder)
+        run: bash tools/ci/runner-env.sh
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: CI images by content hash (docs/30#ci-images)
+        run: python3 tools/ci/image.py compose dev robot-sim fjarr-server desktop-fixture robot-services
+      - uses: actions/cache/restore@v4
+        with:
+          path: build/ccache-dev
+          key: ccache-dev-release-${{ github.run_id }}
+          restore-keys: ccache-dev-release-
       - name: start the lab browser, fjarr-server and the demo stack (docs/25 topology; the real agent on the software encoder)
         run: |
-          cp .env.example .env
-          # The dev image's user must own the checkout (the runner user is not uid 1000) and
-          # share the docker socket's group, or nothing inside the container can build or exec.
-          sed -i "s/^USER_UID=.*/USER_UID=$(id -u)/; s/^USER_GID=.*/USER_GID=$(id -g)/; s#^DOCKER_GID=.*#DOCKER_GID=$(stat -c %g /var/run/docker.sock)#" .env
-          # The encoder belongs here, not on a `docker compose up` line, for the same reason TURN
-          # and the webhook URL do: any later `up` that recreates demo-robot re-resolves its
-          # environment, and a hosted runner has no VA-API, so `auto` refuses to start at all
-          # ("no silent fallback", docs/23). `make tun-up` recreates the robot, which is how this
-          # was found — the agent never came back and never registered.
-          echo "FJARR_MEDIA_ENCODER=software" >> .env
-          grep -E "^(USER_UID|USER_GID|DOCKER_GID|FJARR_MEDIA_ENCODER)=" .env
-          # dev and demo-robot map /dev/dri (VA-API); a hosted runner has none. An empty
-          # directory maps no device and the demo robot stays on the software encoder.
-          # `-n` never prompts: harmless here (hosted sudo is passwordless) and it stops
-          # this hanging forever if anyone ever points CI at a self-hosted machine.
-          sudo -n mkdir -p /dev/dri || mkdir -p /dev/dri || true
-          # TURN, the webhook URL and the encoder all come from .env (written above), never from
+          # TURN, the webhook URL and the encoder all come from .env (runner-env.sh), never from
           # a `docker compose up` line: a later `up` re-resolves a service's environment, so
           # anything passed inline is silently lost the next time that service is recreated.
           # That is how TURN and the webhook broke the first time, and how the encoder broke the
           # first time `make tun-up` recreated the robot.
           docker compose --profile lab --profile stack up -d --build --wait browser fjarr-server coturn
-          docker compose build dev
           docker compose up -d dev
-          docker compose exec -T dev make agent-build
+          docker compose exec -T -e CCACHE_DIR=/workspace/build/ccache-dev -e CCACHE_MAXSIZE=500M dev sh -c 'make agent-build && ccache -s'
           docker compose --profile demo --profile stack up -d demo-backend demo-robot demo-dashboard
           sleep 8 && docker compose logs --no-color demo-robot | tail -20
+      - uses: actions/cache/save@v4
+        if: ${{ !cancelled() && env.FJARR_CI_PUSH == '1' }}
+        with:
+          path: build/ccache-dev
+          key: ccache-dev-release-${{ github.run_id }}
       - name: run the e2e suites (loopback + stack)
         env:
           # The runner serves the lab page; the browser container reaches it via host-gateway.
@@ -113,11 +154,6 @@ jobs:
           CI: "true"
         # pnpm 10 forwards `--` literally: call playwright through `exec` to pass flags
         run: pnpm --filter '@fjarr/e2e' exec playwright test --project loopback --project stack
-      - name: unit + loop tests under ThreadSanitizer (a gate, docs/15; runner-level because of the sysctl)
-        run: |
-          # TSan's shadow layout vs 32-bit ASLR entropy (docs/12); `-n` never prompts.
-          [ "$(cat /proc/sys/vm/mmap_rnd_bits)" -le 28 ] || sudo -n sysctl -w vm.mmap_rnd_bits=28
-          docker compose exec -T dev make agent-test-tsan
       - name: fjarr-opsim scenarios against the demo robot (docs/23 gate 2)
         # From the runner: the target execs into the demo robot's container itself.
         run: make opsim-all
@@ -125,6 +161,11 @@ jobs:
         # The desktop fixture's GNOME session → fjarr-desktop-session → backend module E → the agent
         # → opsim decodes frames, including from a still screen (the keepalive).
         run: make desktop-e2e
+      - name: the Desktop panel in the lab browser, against the fixture's desktop (M3 3.1, 3.2, 3.4)
+        # From dev: the fixture and the desktop robot are compose names the runner cannot resolve, which
+        # is why these three tests had been skipping in every run until 2026-10-02 (docs/30). The target
+        # fails when any of them skips.
+        run: make desktop-browser
       - name: "20-cycle soak (docs/15: the census returns to baseline every commit; 200 nightly)"
         run: make opsim-soak OPSIM_CYCLES=20
       - name: "the robot logged no criticals (docs/15; the gate's selftest proves it can fire)"
@@ -172,37 +213,6 @@ jobs:
       - name: tunnel interfaces down
         if: always()
         run: make tun-down
-      - name: the fjarr-agent image (docs/12, slice 5b — built and smoke-tested every push, published in M2.5)
-        env:
-          E2E_BROWSER: http://localhost:9222
-          E2E_PAGE_ORIGIN: http://host.docker.internal:5174
-          E2E_SERVER_WS: ws://fjarr-server:8080/ws
-          E2E_SERVER_HTTP: http://localhost:8080
-          E2E_DASHBOARD_HTTP: http://localhost:5173
-          E2E_INTROSPECT_HTTP: http://localhost:7381
-          E2E_VIEWER_URL: http://demo-robot:7381/
-          CI: "true"
-        run: |
-          make deb   # the image is built FROM the .debs (docs/26#releases, ADR-0031)
-          docker build -f docker/agent/Dockerfile --target runtime -t fjarr-agent .
-          docker run --rm --entrypoint sh fjarr-agent -c '! gst-inspect-1.0 x264enc >/dev/null 2>&1 && (fjarr-agent --help 2>&1 | grep -q ^fjarr-agent) && ! ldd /usr/bin/fjarr-agent | grep -q "not found" && id -u | grep -qx 10001'
-          # The demo robot from the image (the embedder's topology): the same lab smoke as the dev-image robot.
-          docker compose -f docker-compose.yml -f docker-compose.image.yml --profile demo up -d --build demo-robot
-          sleep 8 && docker compose logs --no-color demo-robot | tail -20
-          pnpm --filter '@fjarr/e2e' exec playwright test tests/stack/viewer.spec.ts tests/stack/introspect.spec.ts tests/stack/dashboard.spec.ts
-      - name: the reference compose file (docs/26#containerized-robots, M2.5 gate)
-        # Exactly as shipped, host networking included: this runner is thrown away, so fjarr0 in its
-        # namespace harms nothing (a workstation runs the gate in a sandbox namespace instead).
-        # Setup in the image, a ROS container that waits for carrier, an agent with no privileges,
-        # a restart the device survives, and the tunnel scenario from an operator. Uses the .debs
-        # the image step built.
-        env:
-          FJARR_GATE_SANDBOX: "0"
-        # The lab robot publishes its introspection on the host's 7381, which is where a host-network
-        # agent listens too (and where the tunnel scenario looks). Nothing after this step needs it.
-        run: |
-          docker compose stop demo-robot
-          make compose-gate
       - name: lab artifacts (summaries, captures, traces)
         if: always()
         uses: actions/upload-artifact@v4
@@ -217,15 +227,154 @@ jobs:
         if: failure()
         run: docker compose --profile lab --profile stack --profile demo logs --no-color --tail 200 browser fjarr-server demo-robot demo-backend
 
+  agent-image:
+    # The runtime image from the .debs the packages job built (docs/30#artifacts-built-once), the demo
+    # robot from it with the lab browser's smoke suites, and the reference compose file.
+    name: fjarr-agent image from the packages + the reference compose file
+    runs-on: ubuntu-24.04
+    needs: [changes, packages]
+    if: needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
+      packages: write # the CI images (docs/30#ci-images)
+    env:
+      E2E_BROWSER: http://localhost:9222
+      E2E_PAGE_ORIGIN: http://host.docker.internal:5174
+      E2E_SERVER_WS: ws://fjarr-server:8080/ws
+      E2E_SERVER_HTTP: http://localhost:8080
+      E2E_DASHBOARD_HTTP: http://localhost:5173
+      E2E_BACKEND_HTTP: http://localhost:9090
+      E2E_INTROSPECT_HTTP: http://localhost:7381
+      E2E_VIEWER_URL: http://demo-robot:7381/
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r --filter '@fjarr/introspect-viewer...' build
+      - name: the runner's .env (uid, groups, the software encoder)
+        run: bash tools/ci/runner-env.sh
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: CI images by content hash (docs/30#ci-images)
+        run: python3 tools/ci/image.py compose dev robot-sim fjarr-server
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-amd64
+          path: dist/deb/amd64
+      - uses: actions/cache/restore@v4
+        with:
+          path: build/ccache-dev
+          key: ccache-dev-release-${{ github.run_id }}
+          restore-keys: ccache-dev-release-
+      - name: the lab stack, and fjarr-opsim for the compose file's tunnel scenario
+        run: |
+          docker compose --profile lab --profile stack up -d --wait browser fjarr-server coturn
+          docker compose up -d dev
+          docker compose exec -T -e CCACHE_DIR=/workspace/build/ccache-dev -e CCACHE_MAXSIZE=500M dev \
+            sh -c 'cmake --preset release >/dev/null && cmake --build --preset release --target fjarr-opsim'
+          docker compose --profile demo --profile stack up -d demo-backend demo-dashboard
+      - name: the fjarr-agent image (docs/12, slice 5b — built and smoke-tested every push, published in M2.5)
+        run: |
+          # Built FROM the packages job's .debs (docs/26#releases, ADR-0031), not a rebuild of them.
+          docker build -f docker/agent/Dockerfile --target runtime -t fjarr-agent .
+          docker run --rm --entrypoint sh fjarr-agent -c '! gst-inspect-1.0 x264enc >/dev/null 2>&1 && (fjarr-agent --help 2>&1 | grep -q ^fjarr-agent) && ! ldd /usr/bin/fjarr-agent | grep -q "not found" && id -u | grep -qx 10001'
+          # The demo robot from the image (the embedder's topology): the same lab smoke as the dev-image robot.
+          docker compose -f docker-compose.yml -f build/ci/compose.images.yml -f docker-compose.image.yml --profile demo up -d --build demo-robot
+          sleep 8 && docker compose logs --no-color demo-robot | tail -20
+          pnpm --filter '@fjarr/e2e' exec playwright test tests/stack/viewer.spec.ts tests/stack/introspect.spec.ts tests/stack/dashboard.spec.ts
+      - name: the reference compose file (docs/26#containerized-robots, M2.5 gate)
+        # Exactly as shipped, host networking included: this runner is thrown away, so fjarr0 in its
+        # namespace harms nothing (a workstation runs the gate in a sandbox namespace instead).
+        # Setup in the image, a ROS container that waits for carrier, an agent with no privileges,
+        # a restart the device survives, and the tunnel scenario from an operator. Uses the
+        # packages job's .debs, like the image step.
+        env:
+          FJARR_GATE_SANDBOX: "0"
+        # The lab robot publishes its introspection on the host's 7381, which is where a host-network
+        # agent listens too (and where the tunnel scenario looks). Nothing after this step needs it.
+        run: |
+          docker compose stop demo-robot
+          make compose-gate
+      - name: lab artifacts (summaries, captures, traces)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-lab-image
+          path: |
+            web/e2e/out/**/summary.*
+            web/e2e/out/**/*.jsonl
+            web/e2e/out/test-results/**
+          if-no-files-found: ignore
+      - name: stack logs on failure
+        if: failure()
+        run: docker compose --profile lab --profile stack --profile demo logs --no-color --tail 200 browser fjarr-server demo-robot demo-backend
+
+  tsan:
+    # Its own job since 2026-10-02 (docs/30): it needs the dev image and the sysctl, not the stack.
+    name: Agent under ThreadSanitizer (dev image)
+    runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
+      packages: write # the CI images (docs/30#ci-images)
+    steps:
+      - uses: actions/checkout@v4
+      - name: the runner's .env (uid, groups)
+        run: bash tools/ci/runner-env.sh
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: the dev image by content hash (docs/30#ci-images)
+        run: python3 tools/ci/image.py compose dev
+      - uses: actions/cache/restore@v4
+        with:
+          path: build/ccache-dev
+          key: ccache-dev-tsan-${{ github.run_id }}
+          restore-keys: ccache-dev-tsan-
+      - name: unit + loop tests under ThreadSanitizer (a gate, docs/15; runner-level because of the sysctl)
+        run: |
+          # TSan's shadow layout vs 32-bit ASLR entropy (docs/12); `-n` never prompts.
+          [ "$(cat /proc/sys/vm/mmap_rnd_bits)" -le 28 ] || sudo -n sysctl -w vm.mmap_rnd_bits=28
+          docker compose up -d dev
+          docker compose exec -T -e CCACHE_DIR=/workspace/build/ccache-dev -e CCACHE_MAXSIZE=500M dev sh -c 'ccache -z >/dev/null; make agent-test-tsan; rc=$?; ccache -s; exit $rc'
+      - uses: actions/cache/save@v4
+        if: ${{ !cancelled() && env.FJARR_CI_PUSH == '1' }}
+        with:
+          path: build/ccache-dev
+          key: ccache-dev-tsan-${{ github.run_id }}
+
   desktop-fixture:
     # Backend E's compositor half on every push (M3 slice 3.0, ADR-0033): GNOME's mutter headless in a
     # container, no GPU — capture from its PipeWire stream and input through EIS, checked by reading the
     # test window's pixels and its log (docs/15#the-desktop-test-lab).
     name: Desktop lab (headless mutter — capture + EIS input; fjarr-lab)
     runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
+      packages: write # the CI images (docs/30#ci-images)
     steps:
       - uses: actions/checkout@v4
       - run: cp .env.example .env
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: the fixture image by content hash (docs/30#ci-images)
+        run: python3 tools/ci/image.py compose desktop-fixture
       - run: make desktop-fixture-test
       # fjarr-lab, the lab machines' schedule (docs/12#lab-machines-and-fjarr-lab): its logic against
       # fake systemctl and pgrep, with shellcheck, here because it is the lab's other half.
@@ -237,6 +386,8 @@ jobs:
   rust:
     name: Signaling (test + clippy + fmt)
     runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     defaults:
       run:
         working-directory: signaling
@@ -260,6 +411,11 @@ jobs:
   cpp:
     name: Agent + demo-robot build (Ubuntu 26.04 / GStreamer 1.28)
     runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 600M
     # The baseline (ADR-0022) is newer than the hosted runner: build inside
     # the baseline image so the toolchain matches the dev container.
     container: ubuntu:26.04
@@ -274,9 +430,14 @@ jobs:
             libgstreamer-plugins-bad1.0-dev gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
             gstreamer1.0-nice nlohmann-json3-dev libtomlplusplus-dev \
             libsoup-3.0-dev libsystemd-dev libgtest-dev libnice-dev libei-dev libxkbcommon-dev libpipewire-0.3-dev
-      - uses: hendrikmuhs/ccache-action@v1
+      # One entry, saved from main and pruned after (docs/30#caches). hendrikmuhs/ccache-action saved a
+      # new 475 MB copy on every run and filled the repository's 10 GB with them.
+      - uses: actions/cache/restore@v4
         with:
-          key: cpp-${{ runner.os }}
+          path: .ccache
+          key: ccache-cpp-${{ github.run_id }}
+          restore-keys: ccache-cpp-
+      - run: ccache -z
       - run: cmake --preset release
       - run: cmake --build --preset release
       - run: ctest --preset release --output-on-failure
@@ -289,6 +450,13 @@ jobs:
           cmake --preset asan
           cmake --build --preset asan
           ctest --preset asan --output-on-failure
+      - run: ccache -s
+        if: ${{ !cancelled() }}
+      - uses: actions/cache/save@v4
+        if: ${{ !cancelled() && env.FJARR_CI_PUSH == '1' }}
+        with:
+          path: .ccache
+          key: ccache-cpp-${{ github.run_id }}
       # ADR-0011 license policy is enforced structurally too:
       - name: assert no GPL plugin package in the dependency docs
         run: "! grep -i 'plugins-ugly' CMakeLists.txt agent/CMakeLists.txt"
@@ -296,6 +464,8 @@ jobs:
   server-image:
     name: fjarr-server production image
     runs-on: ubuntu-24.04
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v4
       - name: every workspace member is in the Dockerfile's dependency layer
@@ -313,6 +483,13 @@ jobs:
     # docs/26#releases, ADR-0031: the .debs built natively per architecture — never emulated — and
     # installed on a clean Ubuntu 26.04 that checks what they promise (packaging/install-test.sh).
     name: packages (${{ matrix.arch }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
+      packages: write # the CI images (docs/30#ci-images)
+    env:
+      DEB_BUILDER: prebuilt # pulled by content hash below
     strategy:
       fail-fast: false
       matrix:
@@ -324,16 +501,41 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: the deb builder by content hash (docs/30#ci-images)
+        run: python3 tools/ci/image.py build fjarr-deb-builder docker/deb-builder
       - name: build the .debs
         run: make deb DEB_ARCH=${{ matrix.arch }}
       - name: install them on a clean Ubuntu 26.04
         run: make deb-install-test DEB_ARCH=${{ matrix.arch }}
       - name: embed libfjarr from the package (demo-robot out of tree)
         run: make deb-embed-test DEB_ARCH=${{ matrix.arch }}
+      # amd64's image is built and run by agent-image, from these same files.
       - name: the runtime image builds from them (what release.yml publishes)
+        if: matrix.arch == 'arm64'
         run: docker build -f docker/agent/Dockerfile --target runtime -t fjarr-agent:ci .
       - uses: actions/upload-artifact@v4
         with:
           name: debs-${{ matrix.arch }}
           path: dist/deb/${{ matrix.arch }}/*.deb
           retention-days: 14
+
+  cache-prune:
+    # One entry per cache (docs/30#caches): the saves above add one each on main; this deletes the
+    # older ones. After the saving jobs, whatever their result.
+    name: Keep one entry per cache
+    runs-on: ubuntu-24.04
+    needs: [changes, cpp, e2e, tsan]
+    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.code == 'true' }}
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/ci/cache-prune.sh ccache-cpp- ccache-dev-release- ccache-dev-tsan-

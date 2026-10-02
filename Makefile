@@ -492,6 +492,10 @@ website-build: ## Production build of fjarr.io
 # --------------------------------------------------------------- packaging --
 # docs/26#releases, ADR-0031. Run on the HOST: they start their own throwaway containers.
 DEB_ARCH ?= $(shell dpkg --print-architecture 2>/dev/null || uname -m)
+# `make deb` builds its builder image; CI pulls it by content hash first and sets DEB_BUILDER=prebuilt
+# (tools/ci/image.py, docs/30#ci-images).
+DEB_BUILDER ?= build
+DEB_BUILDER_IMAGE = $(if $(filter prebuilt,$(DEB_BUILDER)),docker image inspect fjarr-deb-builder >/dev/null 2>&1 || { echo "DEB_BUILDER=prebuilt, but there is no fjarr-deb-builder image (tools/ci/image.py build fjarr-deb-builder docker/deb-builder)"; exit 1; },docker build -q -t fjarr-deb-builder docker/deb-builder >/dev/null)
 .PHONY: desktop-e2e
 desktop-e2e: ## M3: the fixture's desktop end to end — see it (frames, a still screen), drive it (input, text, input-to-photon, release on close), hot-plug monitors through helper → module E → agent → opsim (host-run; make agent-build first)
 	docker compose --profile desktop --profile stack up -d --build --wait desktop-fixture fjarr-server
@@ -505,6 +509,9 @@ desktop-e2e: ## M3: the fixture's desktop end to end — see it (frames, a still
 	  docker compose --profile desktop stop desktop-robot desktop-fixture >/dev/null 2>&1; exit $$rc
 
 .PHONY: lab-test lab-runner-install
+ci-test: ## tools/ci's own tests: the change classifier and the CI images' content hash (docs/30)
+	@tools/ci/test.sh
+
 lab-test: ## fjarr-lab's tests: schedule, reservations, graceful stop, against fake systemctl (docs/12#lab-machines-and-fjarr-lab)
 	@tools/fjarr-lab/test.sh
 
@@ -518,6 +525,17 @@ lab-runner-install: ## ON A LAB MACHINE, as root: install fjarr-lab, its units a
 	@echo "lab-runner-install: set RUNNER_SERVICE in /etc/fjarr-lab.conf, then: sudo fjarr-lab window 00:00-06:00 && fjarr-lab status"
 
 .PHONY: desktop-fixture-test
+desktop-browser: ## M3: the demo dashboard's Desktop panel in the lab browser against the fixture's desktop — view, input, hot-plug; every test must run, none may skip (host-run; needs the demo stack, the lab browser and make agent-build)
+	docker compose --profile desktop --profile stack up -d --build --wait desktop-fixture fjarr-server
+	docker compose --profile desktop --profile stack up -d --no-deps --force-recreate desktop-robot
+	@for i in $$(seq 30); do docker compose --profile desktop logs --no-color desktop-robot 2>/dev/null | grep -q "capture of .* ready" && break; sleep 1; done
+	@# From dev, where the fixture's and the robot's compose names resolve (the runner cannot reach them).
+	@mkdir -p build; rc=0; $(E2E_IN_DEV) tests/stack/dashboard.spec.ts --project stack -g "Desktop panel" > build/desktop-browser.log 2>&1 || rc=1; \
+	  cat build/desktop-browser.log; \
+	  if grep -qE "^ +[0-9]+ skipped" build/desktop-browser.log; then echo "desktop-browser: a test skipped — it must run here (reason above)"; rc=1; fi; \
+	  [ $$rc -eq 0 ] || docker compose --profile desktop logs --no-color --tail 40 desktop-robot desktop-fixture; \
+	  docker compose --profile desktop stop desktop-robot desktop-fixture >/dev/null 2>&1; exit $$rc
+
 desktop-fixture-test: ## M3: headless mutter proves capture and EIS input, then the session helper's handover of both (docs/15#the-desktop-test-lab)
 	docker compose --profile desktop up -d --build --wait desktop-fixture
 	@docker compose --profile desktop exec -T desktop-fixture sh -c 'fixture-selftest && fixture-helper-check /usr/local/bin/fjarr-desktop-session'; rc=$$?; \
@@ -531,7 +549,7 @@ compose-gate: ## M2.5 gate: the reference compose file runs a robot, tunnel incl
 .PHONY: deb deb-install-test deb-embed-test install-script-test set-version
 deb: ## Build the .debs (fjarr-agent, fjarr-tools, fjarr-desktop-wayland, libfjarr-dev) for this host's architecture into dist/deb/<arch>/
 	@if [ -f /.dockerenv ]; then echo "make deb runs on the host (it starts its own builder container)"; exit 1; fi
-	docker build -q -t fjarr-deb-builder docker/deb-builder >/dev/null
+	@$(DEB_BUILDER_IMAGE)
 	mkdir -p dist/deb/$(DEB_ARCH)
 	@# Only this build's packages: the tests install dist/deb/<arch>/*.deb, and a stale version beside
 	@# a new one would be tested as a mix.
@@ -541,7 +559,7 @@ deb: ## Build the .debs (fjarr-agent, fjarr-tools, fjarr-desktop-wayland, libfja
 .PHONY: lab-artifacts
 lab-artifacts: ## fjarr-server and fjarr-opsim for a lab machine's nightly (Ubuntu 26.04, built in the deb builder) into dist/lab/ (docs/15#unattended-access-test-the-industrial-gate)
 	@if [ -f /.dockerenv ]; then echo "make lab-artifacts runs on the host (it starts the builder container)"; exit 1; fi
-	docker build -q -t fjarr-deb-builder docker/deb-builder >/dev/null
+	@$(DEB_BUILDER_IMAGE)
 	mkdir -p dist/lab && rm -f dist/lab/fjarr-server dist/lab/fjarr-opsim
 	docker run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp -v "$(CURDIR)":/src:ro -v "$(CURDIR)/dist/lab":/out --entrypoint sh fjarr-deb-builder -euc '\
 	  mkdir -p /tmp/w && tar -C /src --exclude=./node_modules --exclude="./**/node_modules" --exclude=./build --exclude=./signaling/target --exclude=./dist --exclude=./inspiration -cf - . | tar -C /tmp/w -xf - && \

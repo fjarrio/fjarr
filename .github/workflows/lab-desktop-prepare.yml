@@ -1,5 +1,6 @@
-# The unattended-access test, first half (docs/15#unattended-access-test-the-industrial-gate): build,
-# install on the desktop lab machine, `setup desktop`, reboot. lab-desktop-verify checks it at 00:45.
+# The unattended-access test, first half (docs/15#unattended-access-test-the-industrial-gate): install
+# the packages of main's newest green CI run on the desktop lab machine (docs/30#artifacts-built-once),
+# `setup desktop`, reboot. lab-desktop-verify checks it at 00:45.
 # Lab machines serve only schedule and workflow_dispatch from main (ADR-0033, docs/12): never push or
 # pull_request. A daytime dispatch waits in GitHub's queue until fjarr-lab opens the window (00:00).
 name: Lab desktop — prepare
@@ -13,14 +14,51 @@ concurrency:
   group: lab-desktop
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   build:
-    name: build (debs, fjarr-server, fjarr-opsim)
+    # The packages are CI's, not rebuilt: the lab installs what CI tested. Only the lab's own binaries
+    # (fjarr-server, fjarr-opsim) are built here, from the same commit.
+    name: CI's packages + build fjarr-server, fjarr-opsim
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read # the CI run's artifacts
+      packages: write # the deb builder by content hash (docs/30#ci-images)
+    outputs:
+      sha: ${{ steps.ci.outputs.sha }}
+    env:
+      DEB_BUILDER: prebuilt
+      FJARR_CI_PUSH: "1"
     steps:
       - uses: actions/checkout@v4
-      - run: make deb DEB_ARCH=amd64
+      - name: main's newest green CI run that built packages
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          found=$(bash tools/ci/ci-run.sh --latest-main)
+          read -r run sha <<<"$found"
+          echo "run=$run" >> "$GITHUB_OUTPUT"; echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "testing $sha, CI run https://github.com/$GITHUB_REPOSITORY/actions/runs/$run"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ci.outputs.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-amd64
+          path: dist/deb/amd64
+          run-id: ${{ steps.ci.outputs.run }}
+          github-token: ${{ github.token }}
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: python3 tools/ci/image.py build fjarr-deb-builder docker/deb-builder
       - run: make lab-artifacts
       - uses: actions/upload-artifact@v4
         with:
@@ -41,6 +79,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build.outputs.sha }} # the scripts of the commit under test
       - uses: actions/download-artifact@v4
         with:
           name: lab-desktop-build

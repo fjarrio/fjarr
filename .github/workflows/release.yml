@@ -1,6 +1,7 @@
-# Fjarr release — docs/26#releases, ADR-0031.
-# A tag vX.Y.Z builds and tests the packages natively on amd64 and arm64, publishes them and the
-# multi-arch image to `testing`, verifies the published repository from apt.fjarr.io, and — after a
+# Fjarr release — docs/26#releases, ADR-0031, docs/30#releases-reuse-cis-packages.
+# A tag vX.Y.Z publishes the packages CI built and tested for the tagged commit (natively on amd64
+# and arm64) — it waits for that run and refuses a red one — and the multi-arch image built from
+# them to `testing`, verifies the published repository from apt.fjarr.io, and — after a
 # person approves in the apt-stable environment — promotes the SAME files to `stable`: promotion only
 # re-indexes files already in the pool, so it cannot rebuild anything.
 name: Release
@@ -22,7 +23,61 @@ env:
 
 jobs:
   packages:
-    name: packages (${{ matrix.arch }})
+    # Not a rebuild: the tagged commit's ci.yml run, which built these files natively per architecture
+    # and installed, embedded and ran them. Waiting here also enforces "never tag on red".
+    name: the tagged commit's packages, from CI
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read # the CI run's artifacts
+    steps:
+      - uses: actions/checkout@v4
+      - name: the tag is the version every artifact declares
+        # One version for every artifact (docs/26#releases): set by `make set-version V=X.Y.Z` and
+        # committed before tagging. A tag that does not match is refused here, naming each place.
+        run: bash packaging/set-version.sh --check "${GITHUB_REF_NAME#v}"
+      - name: the tagged commit's CI run (green, with packages for both architectures)
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          found=$(bash tools/ci/ci-run.sh --sha "$GITHUB_SHA" --wait 60)
+          read -r run sha <<<"$found"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "CI run $run for $sha: https://github.com/$GITHUB_REPOSITORY/actions/runs/$run"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: debs-*
+          path: dist/deb
+          run-id: ${{ steps.ci.outputs.run }}
+          github-token: ${{ github.token }}
+      - name: every package is this version, both architectures
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          for arch in amd64 arm64; do
+            ls "dist/deb/debs-$arch"/*.deb >/dev/null || { echo "no $arch packages in the CI run"; exit 1; }
+            for d in "dist/deb/debs-$arch"/*.deb; do
+              [ "$(dpkg-deb -f "$d" Version)" = "$v" ] || { echo "$d is $(dpkg-deb -f "$d" Version), not $v"; exit 1; }
+              [ "$(dpkg-deb -f "$d" Architecture)" = "$arch" ] || [ "$(dpkg-deb -f "$d" Architecture)" = all ] || { echo "$d is not $arch"; exit 1; }
+            done
+          done
+          ls -l dist/deb/debs-*/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs-amd64
+          path: dist/deb/debs-amd64/*.deb
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs-arm64
+          path: dist/deb/debs-arm64/*.deb
+          retention-days: 30
+
+  install-script:
+    # install.sh is the one thing CI's packages job does not run (it needs the packages as a signed
+    # repository); natively per architecture, on the files about to be published.
+    name: install.sh (${{ matrix.arch }})
+    needs: packages
     strategy:
       fail-fast: true
       matrix:
@@ -32,23 +87,15 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
-      - name: the tag is the version every artifact declares
-        # One version for every artifact (docs/26#releases): set by `make set-version V=X.Y.Z` and
-        # committed before tagging. A tag that does not match is refused here, naming each place.
-        run: bash packaging/set-version.sh --check "${GITHUB_REF_NAME#v}"
-      - run: make deb DEB_ARCH=${{ matrix.arch }}
-      - run: make deb-install-test DEB_ARCH=${{ matrix.arch }}
-      - run: make deb-embed-test DEB_ARCH=${{ matrix.arch }}
-      - run: make install-script-test DEB_ARCH=${{ matrix.arch }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: debs-${{ matrix.arch }}
-          path: dist/deb/${{ matrix.arch }}/*.deb
-          retention-days: 30
+          path: dist/deb/${{ matrix.arch }}
+      - run: make install-script-test DEB_ARCH=${{ matrix.arch }}
 
   images:
     name: image (${{ matrix.arch }})
-    needs: packages
+    needs: [packages, install-script]
     strategy:
       matrix:
         include:
@@ -106,7 +153,7 @@ jobs:
 
   publish-testing:
     name: publish to testing
-    needs: packages
+    needs: [packages, install-script]
     runs-on: ubuntu-24.04
     environment: apt-testing
     steps:
