@@ -495,7 +495,7 @@ DEB_ARCH ?= $(shell dpkg --print-architecture 2>/dev/null || uname -m)
 # `make deb` builds its builder image; CI pulls it by content hash first and sets DEB_BUILDER=prebuilt
 # (tools/ci/image.py, docs/30#ci-images).
 DEB_BUILDER ?= build
-DEB_BUILDER_IMAGE = $(if $(filter prebuilt,$(DEB_BUILDER)),docker image inspect fjarr-deb-builder >/dev/null 2>&1 || { echo "DEB_BUILDER=prebuilt, but there is no fjarr-deb-builder image (tools/ci/image.py build fjarr-deb-builder docker/deb-builder)"; exit 1; },docker build -q -t fjarr-deb-builder docker/deb-builder >/dev/null)
+DEB_BUILDER_IMAGE = $(if $(filter prebuilt,$(DEB_BUILDER)),docker image inspect fjarr-deb-builder >/dev/null 2>&1 || { echo "DEB_BUILDER=prebuilt but there is no fjarr-deb-builder image (tools/ci/image.py build fjarr-deb-builder docker/deb-builder)"; exit 1; },docker build -q -t fjarr-deb-builder docker/deb-builder >/dev/null)
 .PHONY: desktop-e2e
 desktop-e2e: ## M3: the fixture's desktop end to end — see it (frames, a still screen), drive it (input, text, input-to-photon, release on close), hot-plug monitors through helper → module E → agent → opsim (host-run; make agent-build first)
 	docker compose --profile desktop --profile stack up -d --build --wait desktop-fixture fjarr-server
