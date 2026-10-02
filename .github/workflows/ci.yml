@@ -161,6 +161,14 @@ jobs:
           # Asserted since ADR-0027: at an MTU of one SCTP chunk the transfer went 20 of 20 where it
           # had been red in half of runs for three slices (open question #28, closed).
           make tunnel-scp
+      - name: the robot's side of a failed tunnel step (open question #39)
+        # The job's final log dump comes after later steps, which push these lines out of it. #39:
+        # the agent dropped off the server ~10 s after tun-up's restart, and opsim's hello landed in
+        # the gap; the supervisor's exit line says why the agent went.
+        if: failure()
+        run: |
+          docker compose logs --no-color --since 15m demo-robot | grep -E "agent exited|waiting for the tunnel|no tunnel interface|core started|hello-ack|signaling (error|closed|disconnected)|ERROR|fatal" || true
+          docker compose logs --no-color --since 15m fjarr-server | grep -E "demo-robot-01" || true
       - name: tunnel interfaces down
         if: always()
         run: make tun-down

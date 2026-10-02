@@ -205,13 +205,23 @@ goes down (decided 2026-10-01, on the mini-PC):
   itself through a systemd drop-in. The person's own `/etc/fjarr/fjarr.toml` is
   never touched. Then `fjarr-lab reboot` reboots the machine once the runner is
   idle, which is after the job has finished.
-- **`lab-desktop-verify`, 00:45.** `unattended.sh verify` checks that the machine
-  really rebooted, then each step in order, so a failure names the first one
-  that broke: GDM's automatic login (a session of the account on seat0), the
-  session helper (the agent says it connected), the agent's backend (a capture
-  ready), and the stream and input (`fjarr-opsim desktop-see` and
+- **The machine verifies itself after the reboot.** `prepare` also installs a
+  one-shot unit, `fjarr-lab-unattended.service`, which runs `unattended.sh
+  verify` once at the next boot and then disables itself. Verify checks that the
+  machine really rebooted, then each step in order, so a failure names the
+  first one that broke: GDM's automatic login (a session of the account on
+  seat0), the session helper (the agent says it connected), the agent's backend
+  (a capture ready), and the stream and input (`fjarr-opsim desktop-see` and
   `desktop-control` against the test window, run in the account's session). It
-  ends by removing the drop-in, so the agent returns to its own server.
+  writes its output and a verdict, tagged with the boot and the prepare run, to
+  `/var/lib/fjarr-lab/unattended/`. It ends by removing the drop-in, so the
+  agent returns to its own server.
+- **`lab-desktop-verify`, 00:45, only reports.** It prints the machine's result
+  and passes or fails on its verdict. GitHub's schedule is not an order. On the
+  first night both workflows started about 3½ hours late, back to back, and
+  verify ran before the reboot. So when verify finds the machine not yet
+  rebooted, it dispatches itself again (at most 5 times) and ends as
+  rescheduled, never as a failure or a pass.
 
 `fjarr-opsim` runs on the lab machine itself and decodes with `openh264dec`, which
 the robot already has for its software encoder. libav (GPL) is never installed on
