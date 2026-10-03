@@ -559,6 +559,27 @@ its name is bumped with the module seam's.
   configured input source. Headless mutter alone always uses US, which is why
   the fixture's end-to-end test types Shift-level characters and refuses "å",
   and a unit test types åäö against a Swedish keymap.
+- **Clipboard** (slice 3.5; spike 2026-10-03, `spikes/desktop-comfort`).
+  mutter's clipboard belongs to the RemoteDesktop session, and works on the
+  unlinked input session. The helper calls `EnableClipboard` when it opens
+  input. It sends `clipboard-changed {types}` when `SelectionOwnerChanged`
+  says the robot owns the clipboard (`session-is-owner: false`), with
+  mutter's mime types; an echo of our own selection is not sent. The module
+  maps them to Fjarr's (`text/plain` when any text type is there).
+  `clipboard-read {id, type}` makes the helper call `SelectionRead` and
+  reply `clipboard-data {id}` with **one descriptor**, the read end, or
+  `clipboard-failed {id, reason}`. The module reads at most 1 MiB from it.
+  `clipboard-set {types}` arrives with **one descriptor**, a sealed memfd
+  holding the bytes. The helper calls `SetSelection` with every name an
+  application may ask text for (`text/plain;charset=utf-8`, `text/plain`,
+  `UTF8_STRING`, `STRING`, `TEXT`) and answers **every**
+  `SelectionTransfer(mime, serial)` from the memfd (`SelectionWrite`, write,
+  close, `SelectionWriteDone`). It replies `clipboard-set-done {}` once the
+  selection is set. It keeps the memfd until the next set, or until the
+  robot copies something itself. mutter hands its descriptors over
+  non-blocking. A paste on the robot needs a keyboard on the seat; the EIS
+  keyboard device is that keyboard (the spike's wl-paste refused without
+  one).
 - **Loss.** The helper sends `capture-lost {id, reason: "monitor-gone" |
   "stream-stopped"}` when a capture ends without being asked. mutter does not
   say when a recorded monitor goes away: there is no `Stopped` on the stream and
@@ -570,8 +591,8 @@ its name is bumped with the module seam's.
   `SessionEnded` for every capture (`CaptureLost`, docs/09): the desktop session
   ended or the helper died, and the capability rebuilds its tracks when a helper
   connects again.
-- **Growth.** Later slices add message types (clipboard in 3.5, virtual
-  monitors, hot-plug details in 3.4) within `fjarr-desktop-1`. An end ignores a
+- **Growth.** Later slices add message types (the clipboard came in 3.5,
+  virtual monitors are next) within `fjarr-desktop-1`. An end ignores a
   type it does not know. Changing the meaning of an existing type bumps the name.
 
 ### The desktop's monitors (M3 slice 3.4) {#desktop-monitors}

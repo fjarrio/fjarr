@@ -300,16 +300,23 @@ show-pointer=false` captures without the cursor.
 
 Browser side of the docs/06 offer/request model:
 
-- **Robot → browser**: on `clipboard-offer` the client fetches the
-  preferred MIME (text first, `image/png` when offered) and writes it with
-  `navigator.clipboard.write()`; this requires a user gesture or granted
-  permission — `useClipboardSync` reports `"needs-gesture"` and the toolbar
-  offers a "copy from robot" button when auto-sync is blocked.
-- **Browser → robot**: `paste` events on the focused input surface deliver
-  `text/plain`/`image/png` without any permission prompt; the client sends
-  a `clipboard-offer` and serves the payload on the bulk channel per
-  docs/06. Optional polling of `navigator.clipboard.readText()` (permission
-  gated) for "auto-sync" mode.
+- **Robot → browser**: on `clipboard-offer` the client sends
+  `clipboard-read` for `text/plain` and writes the text with
+  `navigator.clipboard.writeText()`. The browser allows that only while the
+  page is focused and the operator recently pressed a key or clicked, which
+  is the case right after a copy on the robot (the operator's Ctrl+C was
+  that key). When the browser refuses, `DesktopClipboard` keeps the text and
+  reports `"needs-gesture"`, and the toolbar offers a "Copy from robot"
+  button that writes it on click.
+- **Browser → robot**: the operator's paste is caught on the focused input
+  surface. A Ctrl+V or Cmd+V keydown is **held back**, not forwarded. The
+  browser then fires `paste` on the surface with the clipboard's text,
+  without a permission prompt. The client sends `clipboard-write`, and once
+  it is answered it sends Ctrl+V to the robot (`key-combo`). So the robot
+  pastes what the operator pasted, never its previous clipboard. If no
+  `paste` event follows within 300 ms (an empty or non-text clipboard), the
+  held keys go to the robot as they were. Cmd+V on a Mac becomes Ctrl+V on
+  the robot.
 - Files on the clipboard route through `fjarr.files` (M4+); drag-and-drop
   onto the view uploads via the same capability.
 

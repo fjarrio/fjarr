@@ -79,6 +79,11 @@ thing take turns; everyone else works side by side.**
   input-bearing grant claims nothing.
 - **`view_only: true` in a grant** means that session can never claim or take
   control, whatever its client does.
+- **The clipboard.** Writing the robot's clipboard is input in the `desktop`
+  domain: it claims, and a non-holder is answered `control-held`. Reading it
+  claims nothing, but a `view_only` session gets no offers and its reads are
+  `capability-denied`. Clipboard text is often a password: a viewer is given
+  the screen, not what the robot copied.
 - A claim is keyed on the **operator identity in the grant**, not on the
   session: several sessions of the same operator (one per browser window in
   the desktop [presentation mode](22-remote-desktop-client.md#presentation-mode)

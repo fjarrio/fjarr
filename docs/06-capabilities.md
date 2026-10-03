@@ -118,7 +118,15 @@ detail is incorporated here).
   buttons/wheel reliable. Keyboard: physical `KeyboardEvent.code` →
   Linux keycodes, reliable channel; layout handling per backend
   ([docs/07](07-desktop-backends.md)).
-- Clipboard (text first; images/files later): offer/request MIME model.
+- Clipboard, both ways (text first; images and files later): the robot
+  *offers* what it copied and a client *reads* it on demand; a client
+  *writes* what the operator pastes, before the paste keystroke reaches the
+  robot ([docs/08](08-protocol.md#input-events-fjarrdesktop),
+  [docs/22](22-remote-desktop-client.md#clipboard)). Writing is input in the
+  `desktop` control domain; a `view_only` session sees no clipboard at all
+  ([docs/10](10-security.md#session-ownership)). Accepted when text copied on
+  the robot pastes in the browser and text pasted in the browser pastes on the
+  robot, non-ASCII included, in the CI fixture and on the mini-PC.
 - **Unattended access**: works after reboot with nobody logged in — the
   defining industrial requirement; backend chosen accordingly
   ([ADR-0006](adr/0006-desktop-backend-selection.md)).

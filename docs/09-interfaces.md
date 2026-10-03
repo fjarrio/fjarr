@@ -214,7 +214,24 @@ public:
   // Text through the robot's keymap; returns the characters it cannot type, typing nothing then.
   virtual std::vector<std::string> type_text(const std::string& utf8, std::string& error) = 0;
   virtual void release_all_input() = 0;   // MUST be called on session end
-  virtual ClipboardHandle* clipboard() = 0;
+  virtual ClipboardHandle* clipboard() = 0;  // null when features().clipboard is false
+};
+
+// The robot's clipboard (docs/08 clipboard-*, slice 3.5). Types are Fjarr's
+// ("text/plain" = UTF-8); the backend maps them to the compositor's names.
+// Every callback runs on the core loop.
+class ClipboardHandle {
+ public:
+  virtual ~ClipboardHandle() = default;
+  // The robot copied something (not what write() put there): what it can be
+  // read as. Empty = cleared.
+  virtual void on_changed(std::function<void(std::vector<std::string> types)>) = 0;
+  // The current content as `type`, at most max_bytes; nullopt and a reason otherwise.
+  virtual void read(const std::string& type, std::size_t max_bytes,
+                    std::function<void(std::optional<std::string> bytes, std::string error)>) = 0;
+  // The robot's clipboard holds `bytes` as `type` once done(true) runs.
+  virtual void write(const std::string& type, std::string bytes,
+                     std::function<void(bool ok, std::string error)>) = 0;
 };
 
 } // namespace fjarr
