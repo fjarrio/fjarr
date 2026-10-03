@@ -47,6 +47,8 @@ struct Monitor {
     int x = 0, y = 0;      // placement in the virtual screen
     int width = 0, height = 0;
     double scale = 1.0;
+    /// Its capture fell back to the cursor drawn into the video (docs/23, The stream reader).
+    bool cursor_in_video = false;
 };
 
 enum class MouseButton : std::uint8_t { Left, Middle, Right, Back, Forward };

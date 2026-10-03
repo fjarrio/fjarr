@@ -34,6 +34,8 @@ export interface MonitorInfo {
   name?: string;
   /** Current connector name ("HDMI-1", "DP-5"): informational, changes on replug. */
   connector?: string;
+  /** "embedded": the robot's cursor is drawn into this monitor's video, so a client draws none (docs/08#track-manifest, docs/23). */
+  cursor?: "embedded";
 }
 
 /** spec: docs/08-protocol.md#track-manifest */

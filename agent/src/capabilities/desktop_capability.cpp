@@ -229,6 +229,7 @@ struct DesktopCapability::Impl {
         mi.scale = m.scale;
         mi.name = m.label;
         mi.connector = m.connector;
+        if (m.cursor_in_video) mi.cursor = "embedded"; // docs/23: this capture fell back
         return mi;
     }
     std::vector<TrackSpec> specs(bool available_only = false) const {

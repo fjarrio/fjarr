@@ -28,12 +28,16 @@ struct StreamReader::Impl {
     pw_stream* stream = nullptr;
     spa_hook stream_listener{};
     spa_source* keepalive = nullptr;
+    spa_source* first_frame_watch = nullptr; // re-links when a stream stays without a frame (below)
+    std::uint32_t node = 0;
+    int relinks = 0;
     int keepalive_ms = 100;
     GMainContext* ctx = nullptr;
     std::shared_ptr<bool> alive = std::make_shared<bool>(true); // posts that outlive the reader are dropped
     Shape shape;
     Position position;
     Log log;
+    std::function<void()> stalled;
 
     // Frames: guarded by `mu` (the PipeWire thread pushes, create_bin runs on the core loop).
     std::mutex mu;
@@ -47,6 +51,43 @@ struct StreamReader::Impl {
     spa_video_format format = SPA_VIDEO_FORMAT_UNKNOWN;
     std::string last_shape;
     int last_x = -1, last_y = -1;
+    bool first_frame = true;
+    unsigned buffers = 0, empty = 0;
+    std::string last_empty; // what the last buffer without pixels looked like, for the log
+    static constexpr int MAX_RELINKS = 3;
+    static constexpr long FIRST_FRAME_MS = 500;
+
+    /// Link to the node, asking for any raw format the producer offers.
+    bool connect() {
+        std::uint8_t buf[512];
+        spa_pod_builder b = SPA_POD_BUILDER_INIT(buf, sizeof(buf));
+        const spa_pod* params[1];
+        params[0] = static_cast<const spa_pod*>(spa_pod_builder_add_object(
+            &b, SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat, SPA_FORMAT_mediaType, SPA_POD_Id(SPA_MEDIA_TYPE_video), SPA_FORMAT_mediaSubtype,
+            SPA_POD_Id(SPA_MEDIA_SUBTYPE_raw), SPA_FORMAT_VIDEO_format,
+            SPA_POD_CHOICE_ENUM_Id(5, SPA_VIDEO_FORMAT_BGRx, SPA_VIDEO_FORMAT_BGRx, SPA_VIDEO_FORMAT_BGRA, SPA_VIDEO_FORMAT_RGBx, SPA_VIDEO_FORMAT_RGBA)));
+        return pw_stream_connect(stream, PW_DIRECTION_INPUT, node, static_cast<pw_stream_flags>(PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS), params, 1) >=
+               0;
+    }
+
+    /// A stream that streams without ever giving a frame: mutter sometimes does not send a freshly
+    /// plugged monitor's first frame to a consumer that links the moment its node appears, and on a
+    /// still screen no other comes (seen in 3 of 6 hot-plugs, 2026-10-03). A consumer that links later
+    /// is sent one, so the reader links again — at most three times.
+    void on_state(pw_stream_state state) {
+        if (state != PW_STREAM_STATE_STREAMING || !first_frame) return;
+        timespec value{0, FIRST_FRAME_MS * 1'000'000L}, none{0, 0};
+        pw_loop_update_timer(pw_thread_loop_get_loop(thread), first_frame_watch, &value, &none, false);
+    }
+    void on_first_frame_watch() {
+        if (!first_frame) return;
+        const std::string note = "no frame " + std::to_string(FIRST_FRAME_MS) + " ms into streaming (" + std::to_string(buffers) + " buffer(s), " +
+                                 std::to_string(empty) + " without pixels, the last " + last_empty + ")";
+        post([this, note] {
+            log(2, note);
+            if (stalled) stalled();
+        });
+    }
 
     ~Impl() {
         *alive = false;
@@ -56,7 +97,7 @@ struct StreamReader::Impl {
         if (context) pw_context_destroy(context);
         if (thread) pw_thread_loop_destroy(thread);
         std::lock_guard<std::mutex> lk(mu);
-        if (appsrc) gst_app_src_end_of_stream(GST_APP_SRC(appsrc)), gst_object_unref(appsrc);
+        if (appsrc) gst_object_unref(appsrc); // the source's, not ours: no end-of-stream, a new reader may follow
         if (last) gst_buffer_unref(last);
         if (caps) gst_caps_unref(caps);
     }
@@ -114,6 +155,7 @@ struct StreamReader::Impl {
         pw_buffer* b = pw_stream_dequeue_buffer(stream);
         if (!b) return;
         spa_buffer* sb = b->buffer;
+        buffers++;
         // The frame: a chunk with pixels (a cursor-only buffer has none, or is flagged corrupted).
         if (sb->n_datas > 0 && sb->datas[0].data && sb->datas[0].chunk && sb->datas[0].chunk->size > 0 &&
             !(sb->datas[0].chunk->flags & SPA_CHUNK_FLAG_CORRUPTED) && width > 0 && height > 0) {
@@ -130,8 +172,24 @@ struct StreamReader::Impl {
                 if (last) gst_buffer_unref(last);
                 last = frame;
                 push_locked(last);
+                if (first_frame) {
+                    first_frame = false;
+                    const std::string note = "first frame " + std::to_string(width) + "x" + std::to_string(height) + " after " + std::to_string(buffers) +
+                                             " buffer(s), " + std::to_string(empty) + " without pixels";
+                    post([this, note] { log(1, note); });
+                }
             } else {
                 gst_buffer_unref(frame);
+            }
+        } else {
+            empty++;
+            if (sb->n_datas > 0) {
+                const spa_data& d = sb->datas[0];
+                last_empty = "type " + std::to_string(d.type) + ", data " + (d.data ? "mapped" : "null") + ", chunk " +
+                             (d.chunk ? std::to_string(d.chunk->size) + " bytes flags " + std::to_string(d.chunk->flags) : std::string("none")) +
+                             ", size " + std::to_string(width) + "x" + std::to_string(height) + ", format " + std::to_string(format);
+            } else {
+                last_empty = "no datas";
             }
         }
         auto* mc = static_cast<spa_meta_cursor*>(spa_buffer_find_meta_data(sb, SPA_META_Cursor, sizeof(spa_meta_cursor)));
@@ -190,6 +248,7 @@ const pw_stream_events EVENTS = [] {
     pw_stream_events e{};
     e.version = PW_VERSION_STREAM_EVENTS;
     e.param_changed = [](void* d, std::uint32_t id, const spa_pod* param) { static_cast<StreamReader::Impl*>(d)->on_param_changed(id, param); };
+    e.state_changed = [](void* d, pw_stream_state, pw_stream_state state, const char*) { static_cast<StreamReader::Impl*>(d)->on_state(state); };
     e.process = [](void* d) { static_cast<StreamReader::Impl*>(d)->on_process(); };
     return e;
 }();
@@ -203,6 +262,7 @@ std::unique_ptr<StreamReader> StreamReader::start(GMainContext* ctx, int fd, std
     (void)initialized;
     auto impl = std::make_unique<Impl>();
     impl->ctx = ctx;
+    impl->node = node;
     impl->keepalive_ms = keepalive_ms > 0 ? keepalive_ms : 100;
     impl->shape = std::move(shape);
     impl->position = std::move(position);
@@ -221,15 +281,9 @@ std::unique_ptr<StreamReader> StreamReader::start(GMainContext* ctx, int fd, std
         impl->stream = pw_stream_new(impl->core, "fjarr-capture",
                                      pw_properties_new(PW_KEY_MEDIA_TYPE, "Video", PW_KEY_MEDIA_CATEGORY, "Capture", PW_KEY_MEDIA_ROLE, "Screen", nullptr));
         pw_stream_add_listener(impl->stream, &impl->stream_listener, &EVENTS, impl.get());
-        std::uint8_t buf[512];
-        spa_pod_builder b = SPA_POD_BUILDER_INIT(buf, sizeof(buf));
-        const spa_pod* params[1];
-        params[0] = static_cast<const spa_pod*>(spa_pod_builder_add_object(
-            &b, SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat, SPA_FORMAT_mediaType, SPA_POD_Id(SPA_MEDIA_TYPE_video), SPA_FORMAT_mediaSubtype,
-            SPA_POD_Id(SPA_MEDIA_SUBTYPE_raw), SPA_FORMAT_VIDEO_format,
-            SPA_POD_CHOICE_ENUM_Id(5, SPA_VIDEO_FORMAT_BGRx, SPA_VIDEO_FORMAT_BGRx, SPA_VIDEO_FORMAT_BGRA, SPA_VIDEO_FORMAT_RGBx, SPA_VIDEO_FORMAT_RGBA)));
-        ok = pw_stream_connect(impl->stream, PW_DIRECTION_INPUT, node, static_cast<pw_stream_flags>(PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS),
-                               params, 1) >= 0;
+        impl->first_frame_watch = pw_loop_add_timer(pw_thread_loop_get_loop(impl->thread),
+                                                    [](void* d, std::uint64_t) { static_cast<Impl*>(d)->on_first_frame_watch(); }, impl.get());
+        ok = impl->connect();
         if (ok) {
             // The keepalive: mutter is silent on a still screen, and the encoder must keep producing.
             impl->keepalive = pw_loop_add_timer(pw_thread_loop_get_loop(impl->thread), [](void* d, std::uint64_t) { static_cast<Impl*>(d)->on_keepalive(); },
@@ -246,22 +300,17 @@ std::unique_ptr<StreamReader> StreamReader::start(GMainContext* ctx, int fd, std
     return std::unique_ptr<StreamReader>(new StreamReader(std::move(impl)));
 }
 
-GstBin* StreamReader::create_bin() {
-    GstElement* src = gst_element_factory_make("appsrc", nullptr);
-    if (!src) return nullptr;
-    g_object_set(src, "is-live", TRUE, "format", GST_FORMAT_TIME, "do-timestamp", TRUE, "max-buffers", static_cast<guint64>(4), "leaky-type", 2 /* downstream: drop old */, nullptr);
-    GstElement* bin = gst_bin_new(nullptr);
-    gst_bin_add(GST_BIN(bin), src);
-    GstPad* pad = gst_element_get_static_pad(src, "src");
-    gst_element_add_pad(bin, gst_ghost_pad_new("src", pad));
-    gst_object_unref(pad);
+void StreamReader::attach(GstElement* appsrc) {
     std::lock_guard<std::mutex> lk(impl_->mu);
-    if (impl_->caps) gst_app_src_set_caps(GST_APP_SRC(src), impl_->caps);
+    if (impl_->appsrc == appsrc) return;
     if (impl_->appsrc) gst_object_unref(impl_->appsrc);
-    impl_->appsrc = GST_ELEMENT(gst_object_ref(src));
+    impl_->appsrc = appsrc ? GST_ELEMENT(gst_object_ref(appsrc)) : nullptr;
+    if (!impl_->appsrc) return;
+    if (impl_->caps) gst_app_src_set_caps(GST_APP_SRC(impl_->appsrc), impl_->caps);
     if (impl_->last) impl_->push_locked(impl_->last); // a new viewer's first frame now, not at the next damage
-    return GST_BIN(bin);
 }
+
+void StreamReader::on_stalled(std::function<void()> cb) { impl_->stalled = std::move(cb); }
 
 StreamReader::StreamReader(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 StreamReader::~StreamReader() = default;

@@ -173,6 +173,7 @@ extern "C" void fjarr_stub_plug(const char* spec) {
         m.width = std::stoi(next());
         m.height = 720;
         m.primary = next() == "1";
+        m.cursor_in_video = next() == "e"; // an optional sixth field: this capture fell back to embedded
         m.connector = "Meta-" + std::to_string(m.id);
         g_monitors.push_back(m);
     }

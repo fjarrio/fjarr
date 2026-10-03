@@ -30,9 +30,15 @@ class StreamReader {
     StreamReader(const StreamReader&) = delete;
     StreamReader& operator=(const StreamReader&) = delete;
 
-    /// The track's source for a newly built pipeline: `appsrc` fed by this reader, starting with the
-    /// last frame. A later call replaces the earlier appsrc (the producer rebuilt its pipeline).
-    GstBin* create_bin();
+    /// Feed `appsrc` (a ref is taken), starting with the last frame and replacing any earlier one. The
+    /// appsrc belongs to the track's source, so a capture that is restarted with a new reader goes on
+    /// feeding the pipeline already built (docs/23, The stream reader).
+    void attach(GstElement* appsrc);
+
+    /// Called on the core loop when the stream has streamed for a while without a single frame
+    /// (docs/23, The stream reader: mutter in metadata mode sometimes records none for a freshly
+    /// plugged monitor). The capture is restarted then.
+    void on_stalled(std::function<void()> cb);
 
     struct Impl;
 

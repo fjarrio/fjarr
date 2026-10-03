@@ -232,7 +232,9 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
   // The robot's cursor (docs/22#cursor-strategy). Under the operator's own pointer, while they may send
   // input, it is the surface's CSS cursor: the browser draws it, with no lag. Otherwise it is drawn
   // at the robot's position, scaled with the video (percentages of the monitor's width).
-  const shape = cursor.shape;
+  // A monitor whose capture fell back has the cursor in its video already: nothing drawn here (docs/22).
+  const embedded = monitor.cursor === "embedded";
+  const shape = embedded ? null : cursor.shape;
   const image = shape && !shape.hidden ? shape.image : undefined;
   const cssCursor = !shape ? "default" : shape.hidden ? "none" : image ? `url(${cursorDataUrl(shape.id, image)}) ${shape.hotspot.x} ${shape.hotspot.y}, default` : "default";
   const local = inputOn && mayInput && hovered;

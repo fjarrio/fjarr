@@ -26,6 +26,7 @@ struct MonitorInfo {
     double scale = 1.0;
     std::string name;
     std::string connector; // informational only: changes on replug (docs/08#track-manifest)
+    std::string cursor;    // "embedded": the cursor is in this monitor's video (docs/08#track-manifest); empty otherwise
 };
 
 struct OperatorInfo {

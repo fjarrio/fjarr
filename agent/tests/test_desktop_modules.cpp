@@ -485,3 +485,21 @@ TEST(DesktopClipboard, afterAPasteALaterSessionIsNotOfferedWhatTheRobotNoLongerH
     r.cap.session_attached(late, nlohmann::json::object());
     EXPECT_EQ(last(late, "clipboard-offer"), nullptr);
 }
+
+TEST(DesktopCursor, aMonitorWhoseCaptureFellBackSaysTheCursorIsInItsVideo) {
+    // docs/23, The stream reader: a metadata capture with no frame is restarted embedded, and the
+    // monitor's info tells clients (docs/08#track-manifest), who then draw no cursor of their own there.
+    InputRig r;
+    void* so = ::dlopen((std::string(FJARR_STUB_MODULE_DIR) + "/libfjarr-desktop-stub.so").c_str(), RTLD_NOW | RTLD_NOLOAD);
+    auto plug = reinterpret_cast<void (*)(const char*)>(::dlsym(so, "fjarr_stub_plug"));
+    ASSERT_NE(plug, nullptr);
+    plug("virtual-1:7:0:1280:1;virtual-2:8:1280:1280:0:e");
+    const fjarr::testing::RecordingContext::Sent* ev = nullptr;
+    for (auto it = r.a.sent.rbegin(); it != r.a.sent.rend() && !ev; ++it)
+        if (it->type == "monitors") ev = &*it;
+    ASSERT_NE(ev, nullptr);
+    const auto& list = ev->payload["monitors"];
+    ASSERT_EQ(list.size(), 2u);
+    EXPECT_FALSE(list[0].contains("cursor")) << "metadata: the cursor arrives beside the video";
+    EXPECT_EQ(list[1].value("cursor", ""), "embedded");
+}

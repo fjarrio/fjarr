@@ -745,6 +745,15 @@ describe("<DesktopView> cursor (M3 3.5)", () => {
     expect(overlay()).not.toBeNull();
   });
 
+  it("a monitor with the cursor in its video gets no cursor of ours: the browser's default, no overlay", async () => {
+    const { agent, surface, overlay } = await mount();
+    act(() => agent.sendEvent("fjarr.desktop", "monitors", { monitors: [{ ...mon, cursor: "embedded" }], reason: "mode-change" }));
+    act(() => agent.sendEvent("fjarr.desktop", "cursor-position", { track_id: "desk-virtual-1", x: 0.25, y: 0.5 }));
+    await tick();
+    expect(surface().style.cursor).toBe("default");
+    expect(overlay()).toBeNull();
+  });
+
   it("a viewer sees the robot's cursor where the robot's pointer is", async () => {
     const { agent, overlay } = await mount(true);
     act(() => agent.sendEvent("fjarr.desktop", "cursor-position", { track_id: "desk-virtual-1", x: 0.75, y: 0.1 }));

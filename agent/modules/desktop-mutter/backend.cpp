@@ -8,6 +8,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <map>
+#include <set>
 #include <memory>
 #include <string>
 
@@ -38,25 +39,48 @@ namespace {
 constexpr const char* COMPONENT = "desktop";
 
 /// The track's source for one monitor: unavailable until the helper hands the stream over. Its frames
-/// come from the capture's stream reader (docs/23#desktop-helper-protocol), through an appsrc.
+/// come from the capture's stream reader through an appsrc the source owns, so a restarted capture's
+/// new reader feeds the pipeline already built (docs/23#desktop-helper-protocol).
 class MonitorSource final : public VideoSource {
   public:
     explicit MonitorSource(std::string identity) : identity_(std::move(identity)) {}
+    ~MonitorSource() override {
+        if (appsrc_) gst_object_unref(appsrc_);
+    }
 
     SourceInfo describe() const override { return {identity_, {{"src", TrackKind::Video, "video/x-raw"}}}; }
 
-    /// The reader's appsrc, starting with the last frame; the producer may build the bin more than once.
-    GstBin* create_bin() override { return reader_ ? reader_->create_bin() : nullptr; }
+    /// An appsrc fed by the reader, starting with the last frame; the producer may build the bin
+    /// more than once, and the newest appsrc is the one fed.
+    GstBin* create_bin() override {
+        if (!reader_) return nullptr;
+        GstElement* src = gst_element_factory_make("appsrc", nullptr);
+        if (!src) return nullptr;
+        g_object_set(src, "is-live", TRUE, "format", GST_FORMAT_TIME, "do-timestamp", TRUE, "max-buffers", static_cast<guint64>(4), "leaky-type",
+                     2 /* downstream: drop the oldest */, nullptr);
+        GstElement* bin = gst_bin_new(nullptr);
+        gst_bin_add(GST_BIN(bin), src);
+        GstPad* pad = gst_element_get_static_pad(src, "src");
+        gst_element_add_pad(bin, gst_ghost_pad_new("src", pad));
+        gst_object_unref(pad);
+        if (appsrc_) gst_object_unref(appsrc_);
+        appsrc_ = GST_ELEMENT(gst_object_ref(src));
+        reader_->attach(appsrc_);
+        return GST_BIN(bin);
+    }
 
     bool available() const override { return reader_ != nullptr; }
     void on_availability_changed(std::function<void(bool)> cb) override { availability_ = std::move(cb); }
     std::string unavailable_reason() const override { return reader_ ? "" : reason_; }
 
-    /// The helper handed the stream over and the reader is linked.
+    /// The helper handed the stream over and the reader is linked. A restarted capture's reader takes
+    /// over the appsrc a pipeline already has.
     void ready(std::unique_ptr<desktop::mutter::StreamReader> reader) {
+        const bool was = reader_ != nullptr;
         reader_ = std::move(reader);
         reason_.clear();
-        if (availability_) availability_(reader_ != nullptr);
+        if (reader_ && appsrc_) reader_->attach(appsrc_);
+        if (availability_ && was != (reader_ != nullptr)) availability_(reader_ != nullptr);
     }
     /// The stream ended (monitor gone, stream stopped, helper gone).
     void lost(const std::string& why) {
@@ -69,6 +93,7 @@ class MonitorSource final : public VideoSource {
   private:
     std::string identity_;
     std::unique_ptr<desktop::mutter::StreamReader> reader_;
+    GstElement* appsrc_ = nullptr; // the newest pipeline's source, which every reader of this capture feeds
     std::string reason_ = "waiting for the desktop session to hand the stream over";
     std::function<void(bool)> availability_;
 };
@@ -140,7 +165,8 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         if (!c.source) c.source = std::make_shared<MonitorSource>("desktop:" + m->wire_id);
         c.id = next_id_++;
         c.connector = m->connector;
-        c.cursor = options.cursor_in_video ? "embedded" : "metadata";
+        // A monitor whose metadata capture gave no frame stays embedded (docs/23, The stream reader).
+        c.cursor = options.cursor_in_video || embedded_.count(monitor) ? "embedded" : "metadata";
         send_start(monitor, c);
         return c.source;
     }
@@ -151,6 +177,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         if (conn_ >= 0) send({{"type", "stop-capture"}, {"id", it->second.id}});
         it->second.source->lost("capture stopped");
         captures_.erase(it);
+        embedded_.erase(monitor); // a new capture of it tries metadata again
     }
 
     MonitorId create_virtual_monitor(int, int) override { return INVALID_MONITOR; }
@@ -237,6 +264,34 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
     }
 
   private:
+    /// A capture that streamed without a frame: a new ScreenCast session for the same monitor, whose
+    /// start asks mutter for a frame again (docs/23, The stream reader). At most three times.
+    void restart_capture(MonitorId monitor) {
+        auto it = captures_.find(monitor);
+        if (it == captures_.end()) return;
+        Capture& c = it->second;
+        if (c.restarts >= 3) {
+            say(3, "capture of " + c.connector + " has no frame after " + std::to_string(c.restarts) + " restarts; leaving it");
+            return;
+        }
+        c.restarts++;
+        // Embedded from now on: mutter renders that frame itself, where metadata mode copies a painted
+        // image the monitor may not have yet (docs/23, The stream reader). Clients are told.
+        const bool fell_back = c.cursor != "embedded";
+        c.cursor = "embedded";
+        embedded_.insert(monitor);
+        say(2, "capture of " + c.connector + " restarted (" + std::to_string(c.restarts) + "): it streamed without a frame" +
+                   (fell_back ? "; the cursor is drawn into its video from now on" : ""));
+        if (conn_ >= 0) send({{"type", "stop-capture"}, {"id", c.id}});
+        c.id = next_id_++;
+        send_start(monitor, c);
+        if (fell_back) {
+            for (auto& m : monitors_)
+                if (m.id == monitor) m.cursor_in_video = true;
+            if (monitors_cb_) monitors_cb_(monitors_);
+        }
+    }
+
     std::unique_ptr<desktop::mutter::StreamReader> start_reader(MonitorId monitor, int fd, std::uint32_t node) {
         return desktop::mutter::StreamReader::start(
             ctx_, fd, node, keepalive_ms_,
@@ -316,6 +371,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         int x = 0, y = 0, width = 0, height = 0; // the stream's logical rectangle, from capture-started
         std::string connector, cursor;
         std::shared_ptr<MonitorSource> source;
+        int restarts = 0; // after a capture that never gave a frame
     };
 
     void say(int level, const std::string& msg) {
@@ -399,7 +455,9 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
                     c.height = m.body.value("height", 0);
                     // The node's only consumer, linked now: mutter sends the cursor's shape, and on a
                     // still screen the only frame, to whoever is linked when it is produced (spikes).
-                    c.source->ready(start_reader(monitor, m.fds[0].release(), m.body.value("node", 0u)));
+                    auto reader = start_reader(monitor, m.fds[0].release(), m.body.value("node", 0u));
+                    if (reader) reader->on_stalled([this, monitor] { restart_capture(monitor); });
+                    c.source->ready(std::move(reader));
                     request_input();
                     say(1, "capture of " + c.connector + " ready: node " + std::to_string(m.body.value("node", 0u)) + ", " +
                                std::to_string(m.body.value("width", 0)) + "x" + std::to_string(m.body.value("height", 0)));
@@ -476,6 +534,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
             m.width = j.value("width", 0);
             m.height = j.value("height", 0);
             m.scale = j.value("scale", 1.0);
+            m.cursor_in_video = embedded_.count(m.id) > 0;
             next.push_back(m);
         }
         monitors_ = std::move(next);
@@ -529,6 +588,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
     std::function<void(MonitorId, CaptureLost)> lost_cb_;
     desktop::mutter::EisInput input_;
     bool input_requested_ = false;
+    std::set<MonitorId> embedded_; // monitors whose capture fell back to the cursor in the video
     std::function<void(const CursorShape&)> cursor_shape_cb_;
     std::function<void(MonitorId, double, double)> cursor_position_cb_;
     CursorShape shape_; // the latest, for a capability that subscribes later

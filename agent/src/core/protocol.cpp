@@ -214,6 +214,7 @@ nlohmann::json monitor_to_json(const MonitorInfo& m) {
                      {"w", m.w},   {"h", m.h},         {"scale", m.scale}};
     if (!m.name.empty()) j["name"] = m.name;
     if (!m.connector.empty()) j["connector"] = m.connector;
+    if (!m.cursor.empty()) j["cursor"] = m.cursor;
     return j;
 }
 
