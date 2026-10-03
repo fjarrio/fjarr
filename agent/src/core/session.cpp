@@ -885,6 +885,9 @@ void Session::apply_demand(const std::string& track_id, bool enabled, const std:
     }
     if (sub != subscribed_tier_.end() && sub->second != tier) {
         deps_.plane->hub().unsubscribe(media::HubKey{track_id, sub->second}, sink);
+        // Its share in the tier it left goes now: left to age out, a demoted viewer's low share held
+        // the shared encoder at band_low for 3 s more (docs/23, #40). The next tick reports the new tier.
+        deps_.plane->forget_allotment(sink.get());
         subscribed_tier_.erase(sub);
         sub = subscribed_tier_.end();
     }
@@ -941,7 +944,9 @@ void Session::rate_tick() {
     // arrived, so a source that compresses well (a static scene, the test pattern) pins it low
     // while the link is perfect. Demoting on that is demoting on nothing — the peer has to be
     // pushing against the estimate for it to mean anything (docs/23#rate-control-and-tier-switching).
-    const bool estimate_tested = twcc.packets > 0 && twcc.bitrate_sent >= media::TierPolicy::TESTED_RATIO * estimator_->estimate_bps();
+    const auto evidence = twcc.packets == 0                                                                 ? media::TierPolicy::Evidence::none
+                          : twcc.bitrate_sent >= media::TierPolicy::TESTED_RATIO * estimator_->estimate_bps() ? media::TierPolicy::Evidence::tested
+                                                                                                             : media::TierPolicy::Evidence::untested;
     if (enabled.empty() || sum_targets <= 0) return;
     // Share the peer's estimate across its tracks in proportion to their tier targets; report
     // each share to the plane (the encoder follows the minimum over its viewers) and tick the
@@ -956,7 +961,7 @@ void Session::rate_tick() {
         // the active tier would need instead.
         const double judged = ct->tier == "active" ? ct->allotment_bps : estimator_->estimate_bps() * (deps_.plane->band_kbps(ct->track_id, "active").second * 1000.0) / (sum_targets - target + deps_.plane->band_kbps(ct->track_id, "active").second * 1000.0);
         auto& policy = tier_policy_[ct->track_id];
-        if (auto changed = policy.update(judged, active_low, deps_.plane->tier_possible(ct->track_id, "thumbnail"), estimate_tested, now)) {
+        if (auto changed = policy.update(judged, active_low, deps_.plane->tier_possible(ct->track_id, "thumbnail"), evidence, now)) {
             log::info("session", policy.demoted() ? "tier reduced for this viewer" : "tier restored for this viewer",
                       {{"session", sid8_}, {"track", ct->track_id}, {"tier", *changed}, {"estimate_bps", std::to_string(static_cast<long long>(estimator_->estimate_bps()))}});
             apply_demand(ct->track_id, true, ct->demanded_tier); // resolves to the new effective tier

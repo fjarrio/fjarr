@@ -15,36 +15,36 @@ TierPolicy::clock::time_point at(double s) { return TierPolicy::clock::time_poin
 TEST(TierPolicy, demotesAfterTwoSecondsBelowTheBandAndPromotesAfterTenAbove) {
     TierPolicy p;
     const double low = 2'000'000; // the active band's floor
-    EXPECT_FALSE(p.update(1'000'000, low, true, /*estimate_tested=*/true, at(0)).has_value());
-    EXPECT_FALSE(p.update(1'000'000, low, true, /*estimate_tested=*/true, at(1.5)).has_value()); // not yet
-    EXPECT_EQ(p.update(1'000'000, low, true, /*estimate_tested=*/true, at(2.1)), "thumbnail");
+    EXPECT_FALSE(p.update(1'000'000, low, true, TierPolicy::Evidence::tested, at(0)).has_value());
+    EXPECT_FALSE(p.update(1'000'000, low, true, TierPolicy::Evidence::tested, at(1.5)).has_value()); // not yet
+    EXPECT_EQ(p.update(1'000'000, low, true, TierPolicy::Evidence::tested, at(2.1)), "thumbnail");
     EXPECT_TRUE(p.demoted());
     EXPECT_EQ(p.demanded(), "active");
-    EXPECT_FALSE(p.update(2'100'000, low, true, /*estimate_tested=*/true, at(3)).has_value()); // above the floor but under the margin: stays
-    EXPECT_FALSE(p.update(2'500'000, low, true, /*estimate_tested=*/true, at(4)).has_value());
-    EXPECT_FALSE(p.update(2'500'000, low, true, /*estimate_tested=*/true, at(8)).has_value()); // 4 s above: not yet
-    EXPECT_EQ(p.update(2'500'000, low, true, /*estimate_tested=*/true, at(9.1)), "active");
+    EXPECT_FALSE(p.update(2'100'000, low, true, TierPolicy::Evidence::tested, at(3)).has_value()); // above the floor but under the margin: stays
+    EXPECT_FALSE(p.update(2'500'000, low, true, TierPolicy::Evidence::tested, at(4)).has_value());
+    EXPECT_FALSE(p.update(2'500'000, low, true, TierPolicy::Evidence::tested, at(8)).has_value()); // 4 s above: not yet
+    EXPECT_EQ(p.update(2'500'000, low, true, TierPolicy::Evidence::tested, at(9.1)), "active");
     EXPECT_FALSE(p.demoted());
 }
 
 TEST(TierPolicy, aDipThatEndsResetsTheClockAndADemandForThumbnailIsNeverOverridden) {
     TierPolicy p;
     const double low = 2'000'000;
-    p.update(1'000'000, low, true, /*estimate_tested=*/true, at(0));
-    p.update(3'000'000, low, true, /*estimate_tested=*/true, at(1)); // recovered before 2 s
-    EXPECT_FALSE(p.update(1'000'000, low, true, /*estimate_tested=*/true, at(2.5)).has_value()); // a new dip starts its own 2 s
-    EXPECT_EQ(p.update(1'000'000, low, true, /*estimate_tested=*/true, at(4.6)), "thumbnail");
+    p.update(1'000'000, low, true, TierPolicy::Evidence::tested, at(0));
+    p.update(3'000'000, low, true, TierPolicy::Evidence::tested, at(1)); // recovered before 2 s
+    EXPECT_FALSE(p.update(1'000'000, low, true, TierPolicy::Evidence::tested, at(2.5)).has_value()); // a new dip starts its own 2 s
+    EXPECT_EQ(p.update(1'000'000, low, true, TierPolicy::Evidence::tested, at(4.6)), "thumbnail");
     p.set_demanded("thumbnail"); // the client itself wants the low tier now
     EXPECT_EQ(p.effective(), "thumbnail");
     EXPECT_FALSE(p.demoted());
-    EXPECT_FALSE(p.update(9'000'000, low, true, /*estimate_tested=*/true, at(30)).has_value()); // nothing to promote
+    EXPECT_FALSE(p.update(9'000'000, low, true, TierPolicy::Evidence::tested, at(30)).has_value()); // nothing to promote
     p.set_demanded("active");
     EXPECT_EQ(p.effective(), "active"); // the override was cleared with the thumbnail demand
 }
 
 TEST(TierPolicy, neverDemotesWhereNoLowerTierExists) {
     TierPolicy p;
-    for (double t = 0; t < 10; t += 0.2) EXPECT_FALSE(p.update(100'000, 2'000'000, false, /*estimate_tested=*/true, at(t)).has_value());
+    for (double t = 0; t < 10; t += 0.2) EXPECT_FALSE(p.update(100'000, 2'000'000, false, TierPolicy::Evidence::tested, at(t)).has_value());
     EXPECT_EQ(p.effective(), "active");
 }
 
@@ -58,7 +58,7 @@ TEST(TierPolicy, neverDemotesOnAnEstimateTheSenderNeverPushedAgainst) {
     TierPolicy p;
     const double low = 2'000'000;
     for (double t = 0; t <= 30; t += 0.5) {
-        ASSERT_FALSE(p.update(1'500'000, low, true, /*estimate_tested=*/false, at(t)).has_value())
+        ASSERT_FALSE(p.update(1'500'000, low, true, TierPolicy::Evidence::untested, at(t)).has_value())
             << "demoted at t=" << t << " s on an estimate nothing was pushing against";
     }
     EXPECT_FALSE(p.demoted());
@@ -66,9 +66,9 @@ TEST(TierPolicy, neverDemotesOnAnEstimateTheSenderNeverPushedAgainst) {
 
     // And the moment the peer does push against it — the link really is the limit — the ordinary
     // rule applies again, from a clock that starts now rather than one that has been running.
-    EXPECT_FALSE(p.update(1'500'000, low, true, /*estimate_tested=*/true, at(30.5)).has_value());
-    EXPECT_FALSE(p.update(1'500'000, low, true, /*estimate_tested=*/true, at(32.0)).has_value());
-    EXPECT_EQ(p.update(1'500'000, low, true, /*estimate_tested=*/true, at(32.6)), "thumbnail");
+    EXPECT_FALSE(p.update(1'500'000, low, true, TierPolicy::Evidence::tested, at(30.5)).has_value());
+    EXPECT_FALSE(p.update(1'500'000, low, true, TierPolicy::Evidence::tested, at(32.0)).has_value());
+    EXPECT_EQ(p.update(1'500'000, low, true, TierPolicy::Evidence::tested, at(32.6)), "thumbnail");
 }
 
 TEST(TierPolicy, anUntestedEstimateStillPromotesADemotedViewer) {
@@ -77,10 +77,37 @@ TEST(TierPolicy, anUntestedEstimateStillPromotesADemotedViewer) {
     // bitrate by definition, so it never would). Refusing to promote on it would strand viewers.
     TierPolicy p;
     const double low = 2'000'000;
-    EXPECT_FALSE(p.update(1'000'000, low, true, /*estimate_tested=*/true, at(0)).has_value());
-    EXPECT_EQ(p.update(1'000'000, low, true, /*estimate_tested=*/true, at(2.1)), "thumbnail");
+    EXPECT_FALSE(p.update(1'000'000, low, true, TierPolicy::Evidence::tested, at(0)).has_value());
+    EXPECT_EQ(p.update(1'000'000, low, true, TierPolicy::Evidence::tested, at(2.1)), "thumbnail");
     ASSERT_TRUE(p.demoted());
-    EXPECT_FALSE(p.update(2'500'000, low, true, /*estimate_tested=*/false, at(3)).has_value());
-    EXPECT_EQ(p.update(2'500'000, low, true, /*estimate_tested=*/false, at(13.1)), "active");
+    EXPECT_FALSE(p.update(2'500'000, low, true, TierPolicy::Evidence::untested, at(3)).has_value());
+    EXPECT_EQ(p.update(2'500'000, low, true, TierPolicy::Evidence::untested, at(13.1)), "active");
     EXPECT_FALSE(p.demoted());
+}
+
+TEST(TierPolicy, aTickWithoutNewFeedbackHoldsTheClocksInsteadOfResettingThem) {
+    // docs/18 #40: the estimate is ticked every 200 ms, TWCC feedback arrives about once a second.
+    // The ticks in between carry no evidence; counting them as "untested" reset the demotion timer
+    // four ticks in five, and a viewer behind a bad link took twice the 2 s to leave the shared
+    // encoder it was dragging down.
+    TierPolicy p;
+    const double low = 2'000'000;
+    for (double t = 0; t < 2.0; t += 0.2) {
+        const auto ev = static_cast<int>(t * 5 + 0.5) % 5 == 0 ? TierPolicy::Evidence::tested : TierPolicy::Evidence::none;
+        ASSERT_FALSE(p.update(1'000'000, low, true, ev, at(t)).has_value()) << "demoted early at t=" << t;
+    }
+    EXPECT_EQ(p.update(1'000'000, low, true, TierPolicy::Evidence::tested, at(2.0)), "thumbnail") << "the 2 s ran across the gaps";
+
+    // Promotion likewise: gaps between feedback do not restart its clock either.
+    for (double t = 2.2; t < 7.0; t += 0.2) {
+        const auto ev = static_cast<int>(t * 5 + 0.5) % 5 == 0 ? TierPolicy::Evidence::untested : TierPolicy::Evidence::none;
+        ASSERT_FALSE(p.update(2'500'000, low, true, ev, at(t)).has_value()) << "promoted early at t=" << t;
+    }
+    EXPECT_EQ(p.update(2'500'000, low, true, TierPolicy::Evidence::untested, at(8.0)), "active");
+
+    // An untested tick, unlike an empty one, still says the estimate is not a limit: it resets.
+    TierPolicy q;
+    q.update(1'000'000, low, true, TierPolicy::Evidence::tested, at(0));
+    q.update(1'000'000, low, true, TierPolicy::Evidence::untested, at(1));
+    EXPECT_FALSE(q.update(1'000'000, low, true, TierPolicy::Evidence::tested, at(2.5)).has_value());
 }

@@ -13,8 +13,13 @@ void TierPolicy::set_demanded(const std::string& tier) {
     effective_ = overridden_ ? "thumbnail" : tier;
 }
 
-std::optional<std::string> TierPolicy::update(double allotment_bps, double active_low_bps, bool lower_possible, bool estimate_tested, clock::time_point now) {
+std::optional<std::string> TierPolicy::update(double allotment_bps, double active_low_bps, bool lower_possible, Evidence evidence, clock::time_point now) {
     if (demanded_ != "active") return std::nullopt;
+    // A tick between feedback windows says nothing about the link: hold both clocks. Treating it as
+    // "untested" reset the demotion timer four ticks in five (feedback ~1/s, ticks every 200 ms), and
+    // a viewer behind a bad link dragged its shared encoder down for twice as long (docs/18 #40).
+    if (evidence == Evidence::none) return std::nullopt;
+    const bool estimate_tested = evidence == Evidence::tested;
     if (!demoted()) {
         // An estimate the sender never pushed against is untested, not low: a scene that compresses
         // well emits far below its target, the estimator will not credit more than 1.5x what

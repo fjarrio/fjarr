@@ -168,8 +168,7 @@ test.describe("rate control (slice 6a)", () => {
     wire.stop();
   });
 
-  // fixme, not skip: the clean viewers fall short of the active target, open question #40 (docs/18).
-  test.fixme("three viewers, one behind a bad link: it is demoted alone, the others keep their quality, and it is promoted back", async ({ loopback, context, out, stack }) => {
+  test("three viewers, one behind a bad link: it is demoted alone, the others keep their quality, and it is promoted back", async ({ loopback, context, out, stack }) => {
     test.setTimeout(180_000);
     // The demo robot's configured active-tier target (docs/16 budgets; AgentConfig.media.active_kbps).
     // The clean viewers are judged against this, not against their own opening seconds.

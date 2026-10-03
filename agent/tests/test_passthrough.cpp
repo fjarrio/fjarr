@@ -3,6 +3,9 @@
 // tier and cannot adapt to a viewer's link (docs/23#rate-control-and-tier-switching).
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <thread>
+
 #include <fjarr/errors.hpp>
 
 #include "core/loop.hpp"
@@ -81,5 +84,69 @@ TEST(Passthrough, aTrackWithoutASubstreamHasOneTierAndSaysItCannotAdapt) {
         EXPECT_TRUE(plane->adaptive("nosuchtrack")); // unknown: nothing to report
     });
     loop.call_sync([&] { plane.reset(); });
+    loop.stop();
+}
+
+TEST(MediaPlaneTargets, aViewerThatChangedTierStopsSteeringTheEncoderItLeft) {
+    // docs/18 #40: a demoted viewer's last share in the active tier stayed until it aged out (3 s),
+    // and the encoder it had left stayed at band_low for every other viewer meanwhile. Its report
+    // for the new tier withdraws it from the old one at once.
+    CoreLoop loop;
+    loop.start();
+    AgentConfig::MediaSection cfg; // active 4000 kbps, band_low 2000
+    SourceRegistry reg(loop.context());
+    std::unique_ptr<MediaPlane> plane;
+    loop.call_sync([&] {
+        plane = std::make_unique<MediaPlane>(loop, cfg, EncoderChoice{EncoderKind::Software, "software"}, reg);
+        TrackSpec spec;
+        spec.track_id = "t";
+        spec.label = "t";
+        spec.source = SourceRef{std::shared_ptr<VideoSource>(reg.create(nlohmann::json{{"type", "test"}})), "src"};
+        plane->register_track(TrackRegistration{spec, "fjarr.test", false});
+    });
+    struct Sink : FrameSink {
+        bool push(glib::GstBufferPtr, GstCaps*) override { return true; }
+    };
+    auto slow = std::make_shared<Sink>();
+    auto fast = std::make_shared<Sink>();
+    loop.call_sync([&] {
+        plane->hub().subscribe(HubKey{"t", "active"}, slow);
+        plane->hub().subscribe(HubKey{"t", "active"}, fast);
+    });
+    auto active_kbps = [&] {
+        int k = -1;
+        loop.call_sync([&] {
+            auto* p = plane->producer("t");
+            k = p && p->has_tier("active") ? p->current_kbps("active") : -1;
+        });
+        return k;
+    };
+    for (int i = 0; i < 300 && active_kbps() < 0; i++) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    ASSERT_GT(active_kbps(), 0) << "the active tier never started";
+
+    // The slow viewer pulls the shared encoder down to the band's floor (docs/23: as designed).
+    loop.call_sync([&] {
+        plane->report_allotment("t", "active", slow.get(), 1'000'000);
+        plane->report_allotment("t", "active", fast.get(), 4'500'000);
+    });
+    for (int i = 0; i < 150 && active_kbps() != 2000; i++) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    ASSERT_EQ(active_kbps(), 2000);
+
+    // It is demoted: it now reports for the thumbnail tier. The encoder it left recovers on the next
+    // target pass (500 ms), not when its old share ages out (3 s).
+    const auto moved = std::chrono::steady_clock::now();
+    loop.call_sync([&] {
+        plane->report_allotment("t", "thumbnail", slow.get(), 300'000);
+        plane->report_allotment("t", "active", fast.get(), 4'500'000);
+    });
+    while (active_kbps() != 4000 && std::chrono::steady_clock::now() - moved < std::chrono::seconds(4)) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    EXPECT_EQ(active_kbps(), 4000);
+    EXPECT_LT(std::chrono::steady_clock::now() - moved, std::chrono::milliseconds(1500)) << "the old share steered the encoder until it aged out";
+
+    loop.call_sync([&] {
+        plane->hub().unsubscribe(HubKey{"t", "active"}, slow);
+        plane->hub().unsubscribe(HubKey{"t", "active"}, fast);
+        plane.reset();
+    });
     loop.stop();
 }

@@ -26,12 +26,16 @@ class TierPolicy {
     /// The sender must be pushing at least this share of the estimate for it to count as tested.
     static constexpr double TESTED_RATIO = 0.9;
 
+    /// What this tick's estimate rests on (docs/23). `none`: no new feedback since the last tick —
+    /// no evidence either way, so the clocks hold. `untested`: feedback, but the peer is sending
+    /// below its estimate, so a low estimate is a guess. `tested`: the peer is pushing at or above
+    /// it, so a low estimate is a limit.
+    enum class Evidence { none, untested, tested };
+
     /// One tick with this viewer's allotment for the track; `active_low_bps` is the active band's
     /// floor (the demotion line and, ×1.2, the promotion line); `lower_possible` = the track can
-    /// serve a thumbnail tier; `estimate_tested` = the peer is actually sending at or above its
-    /// estimate, so a low estimate means a limit rather than an untested guess (docs/23). Returns
-    /// the new effective tier when it changed.
-    std::optional<std::string> update(double allotment_bps, double active_low_bps, bool lower_possible, bool estimate_tested, clock::time_point now);
+    /// serve a thumbnail tier. Returns the new effective tier when it changed.
+    std::optional<std::string> update(double allotment_bps, double active_low_bps, bool lower_possible, Evidence evidence, clock::time_point now);
 
   private:
     std::string demanded_ = "active";

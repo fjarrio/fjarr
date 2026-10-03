@@ -118,6 +118,12 @@ void MediaPlane::on_demand(const HubKey& key, int subscribers) {
 
 void MediaPlane::report_allotment(const std::string& track_id, const std::string& tier, const void* subscriber, double bps) {
     loop_.assert_owner("MediaPlane::report_allotment");
+    // A subscriber is in one tier of a track at a time (docs/23): a report for this tier withdraws
+    // its share from the track's others, so a viewer that changed tier stops steering the encoder it left.
+    for (auto it = allotments_.begin(); it != allotments_.end();) {
+        if (it->first.first == track_id && it->first.second != tier) it->second.erase(subscriber);
+        it = it->second.empty() ? allotments_.erase(it) : std::next(it);
+    }
     allotments_[{track_id, tier}][subscriber] = Allotment{bps, std::chrono::steady_clock::now()};
     if (!rate_timer_.active()) {
         rate_timer_ = loop_.add_timeout(std::chrono::milliseconds(500), [this] {
