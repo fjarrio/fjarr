@@ -26,6 +26,27 @@ ceiling, because a shared runner cannot hold a p95 honestly and a flaky
 gate teaches people to re-run it
 ([docs/15](15-testing-strategy.md#latency-harness)).
 
+## Measured results {#measured}
+
+What the budgets above have actually measured, on named hardware, with the
+roadmap entry that recorded each number. This table is what the
+[landing page](19-website-and-publishing.md#landing-page-content-model) quotes;
+a number not here is not on the page. Add a row when a gate measures something
+new, and replace a row (never average it) when a later run supersedes it.
+
+| What | Measured | Budget | Where, when |
+|---|---|---|---|
+| Camera glass-to-glass, clean LAN | p50 56 / p95 79 ms | 120 / 200 | nightly runner, 46–52 decoded fps, M1 gate 2026-09-25 ([docs/17](17-roadmap.md)) |
+| Camera glass-to-glass, lossy link | 82 / 100 ms | 200 / 350 | same run |
+| Camera glass-to-glass, through a TURN relay | 69 / 102 ms | 250 / 450 | same run |
+| Terminal interactive round trip | 11 ms | < 150 ms | M2, 2026-09-27 |
+| Desktop input-to-photon, LAN | p50 52 / p95 59 ms | 150 / 250 | mini-PC (Ryzen 7 5700U, GNOME 50), M3 3.L 2026-10-01 |
+| Desktop: monitor plugged in → new track offered | 101 ms, no frames dropped on the others | — | M3 3.4, 2026-10-01 |
+| Desktop: killed session → back, unattended | 51 s | — | M3 3.L, 2026-10-01 |
+| Tunnel: `ssh` to a shell | ~130 ms | — | M4.5 slice 4.5c, 2026-09-26 |
+| Tunnel: hash-verified 1 GiB `scp` via `fjarr-connect` | 246–253 Mbps | — | M4.5 gate 2026-09-27 ([docs/27](27-network-tunnel.md)) |
+| Camera beside a saturating tunnel transfer | 31–33 fps, no lost frames | [bulk vs interactive](#bulk-vs-interactive-isolation) | M4.5 slice 4.5c, 2026-09-26 |
+
 ## Bitrate tiers (per video track)
 
 | Tier | Resolution/fps | Target bitrate |

@@ -4,11 +4,13 @@ description: Why Fjarr exists, who it serves, and what it deliberately is not.
 ---
 
 **Fjarr** (from Swedish *fjärr*, "remote" — as in *fjärrkontroll*, remote
-control) is a generic framework for **peer-to-peer connectivity to robots and
-IoT devices**: live camera video, remote desktop, sensor streaming, file
-transfer, a remote terminal, and a direct network link to one robot,
-delivered over WebRTC, and extensible with capabilities we haven't thought
-of yet.
+control) is a generic framework for **peer-to-peer connectivity to the
+machines a company ships into the field** — robots first, and anything of the
+same shape: autonomous vehicles, farm machinery, IoT gateways
+([who it's for](03-product-strategy.md#who-its-for)). Live camera video,
+remote desktop, sensor streaming, file transfer, a remote terminal, and a
+direct network link to one machine, delivered over WebRTC, and extensible
+with capabilities we haven't thought of yet.
 
 ## The problem
 

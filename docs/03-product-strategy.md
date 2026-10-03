@@ -9,10 +9,30 @@ description: The living SaaS business plan — open-core split, pricing meters, 
 
 ## One-line pitch
 
-*Fjarr gives robot companies the remote connectivity stack they keep
-rebuilding — embeddable camera streaming, remote desktop, file transfer,
-direct developer access and fleet tooling — as open-source libraries plus a
-managed cloud.*
+*Fjarr gives companies that ship machines into the field the remote
+connectivity stack they would otherwise build or patch together — embeddable
+camera streaming, remote desktop, file transfer, direct developer access and
+fleet tooling — as open-source libraries plus a managed cloud.*
+
+## Who it's for {#who-its-for}
+
+Fjarr is for a team whose product is a **machine they can't walk up to**: it
+runs Linux, it has cameras or a screen, it sits behind someone else's network
+(a customer's firewall, a carrier's NAT), and the people who need to see it,
+drive it and fix it are somewhere else. Robots are where we start and the
+example we use; autonomous vehicles, farm machinery and field IoT gateways
+have the same shape and need the same things. A visitor should be able to
+check those traits against their own product in one read — the
+[landing page](19-website-and-publishing.md#landing-page-content-model)
+leads with them rather than with a list of industries.
+
+What that team has today is rarely nothing. It is usually a patchwork that
+kind of works — a VPN or jump host, a commercial remote-desktop tool the
+end customer installs, a hand-rolled video stream, `scp` for logs — or a
+"proper remote access" project that has sat on the backlog for a year.
+That is the situation the marketing speaks to; our own history of building
+this stack ([prior art](11-prior-art.md)) is a credibility footnote, not the
+pitch.
 
 ## Market hypothesis
 
