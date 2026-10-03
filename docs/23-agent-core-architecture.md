@@ -527,7 +527,9 @@ its name is bumped with the module seam's.
   **ScreenCast session of its own**, not linked to the input session (below),
   starts it, and replies `capture-started {id, node, x, y, width, height}`
   with **one descriptor: a PipeWire connection**, or `capture-failed {id,
-  reason}`. `stop-capture {id}` ends it. The module reads the stream with
+  reason}`. With `cursor: "metadata"` it hands **a second descriptor**, a
+  second connection narrowed to the same node, for the cursor reader
+  (below). `stop-capture {id}` ends it. The module reads the stream with
   `pipewiresrc fd=… path=<node> keepalive-time=<ms>`: mutter's stream is
   damage-driven and silent on a static screen, and the keepalive re-sends the
   last frame so the encoder keeps producing. Silence is never capture loss.
@@ -537,6 +539,19 @@ its name is bumped with the module seam's.
   no new linked ScreenCast session, and a `RecordMonitor` on its started
   ScreenCast session is accepted but never produces a stream. A capture of its
   own starts and stops without touching any other.
+- **The cursor** (slice 3.5; spike 2026-10-03, `spikes/desktop-comfort`).
+  mutter puts the cursor on the stream as `SPA_META_Cursor`: the position
+  on every pointer move, the shape once per change, an empty shape when there
+  is no cursor. `pipewiresrc` drops it, so module E has a **cursor reader** of
+  its own: a `pw_stream` on the second connection that asks only for that
+  meta and hands every buffer straight back. It is linked **as soon as the
+  capture starts**, before a viewer makes the media plane build the
+  `pipewiresrc` pipeline, because the shape goes only to whoever is linked
+  when it is sent (a reader that joined later never got one). Both are served
+  from one node. The reader runs on the core loop (PipeWire's loop polled
+  from GLib), names each shape by a hash of its pixels and hotspot (mutter's
+  own id does not change with the shape), and reports positions normalized
+  to the capture's rectangle.
 - **Input.** `open-input {}` makes the helper start its one RemoteDesktop
   session, if it has not, call `ConnectToEIS` on it, and reply `input-opened {}`
   with **one descriptor: the EIS socket**. The module is its libei sender

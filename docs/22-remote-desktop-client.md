@@ -263,14 +263,24 @@ combos via `key-combo`. macOS Cmd is mapped to Super by default
 
 ## Cursor strategy
 
-Two modes, chosen per session by the operator (default: local):
+Two modes (docs/08 `cursor`, `cursor-position`):
 
 | Mode | How | Trade-off |
 |---|---|---|
-| **Local cursor** | agent captures without the cursor drawn in the video and sends `cursor {shape_id, hotspot, png?}` events when the shape changes (docs/08); the client draws the shape at the *local* pointer position | cursor feels instant (no round trip); needs cursor-shape access per backend: XFixes cursor image on X11, PipeWire cursor metadata on Wayland (below) |
+| **Local cursor** | agent captures without the cursor drawn in the video and sends `cursor {shape_id, hotspot, image?}` when the shape changes and `cursor-position` as the robot's pointer moves; the client draws the shape **at the local pointer** while its operator is moving it, and **at the robot's position** otherwise | the operator's cursor feels instant (no round trip); everyone else still sees where the pointer is; needs cursor-shape access per backend: XFixes cursor image on X11, PipeWire cursor metadata on Wayland (below) |
 | **Embedded cursor** | cursor rendered into the video by the agent; client sets `cursor: none` over the surface | works everywhere; cursor lags by the full glass-to-glass latency |
 
-Local mode is why remote desktops *feel* fast; embedded is the fallback.
+Local mode is why remote desktops *feel* fast; embedded is the fallback for a
+backend with no cursor metadata. The mode is the backend's, not each
+session's: one capture serves every session watching a monitor, so they all
+get the same video.
+
+`<DesktopView>` draws the local cursor in two ways. Under the operator's own
+pointer, while the view may send input, it sets the surface's CSS `cursor` to
+the shape (`url(<image as PNG>) hotspot, default`): the browser draws it, with
+no lag at all. Otherwise, a viewer or an operator whose pointer is elsewhere, an
+overlay draws the shape at the last `cursor-position`, offset by its hotspot.
+A `hidden` shape hides both.
 
 **On Wayland, the cursor comes from Fjarr's own PipeWire reader.** Mutter and
 the portal deliver the cursor as metadata on the PipeWire stream (cursor mode

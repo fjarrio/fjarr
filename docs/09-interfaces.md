@@ -201,9 +201,11 @@ public:
   // monitor). Returns an invalid source when unsupported.
   virtual std::shared_ptr<VideoSource> start_audio_capture() = 0;
   virtual void stop_audio_capture() = 0;
-  // Local-cursor mode (docs/22#cursor-strategy): the shape, on every change,
-  // for captures started without the cursor in the video.
+  // Local-cursor mode (docs/22#cursor-strategy): the shape, on every change, and
+  // where the pointer is, normalized within one monitor, for captures started
+  // without the cursor in the video. CursorShape {shape_id, visible, w, h, hot_x, hot_y, rgba}.
   virtual void on_cursor_shape(std::function<void(const CursorShape&)>) = 0;
+  virtual void on_cursor_position(std::function<void(MonitorId, double nx, double ny)>) = 0;
   // Input: absolute normalized coordinates within one monitor's region —
   // the Wayland mapping_id model; X11 implements INTO this shape. Measured
   // correct on a non-primary monitor and at 200% scale (ADR-0006).
