@@ -325,8 +325,12 @@ dashboard's choice, so it is a prop:
 Both are available to a `view_only` view: resuming restores the screen and
 moves nothing (docs/10). Headless, `useDesktopSharing(session)` gives
 `{state: "on" | "stopped", resume()}` from `DesktopSharing` in
-`@fjarr/core`, one per session like `DesktopClipboard`. The demo's Desktop
-panel has a "Resume when the robot stops sharing" checkbox.
+`@fjarr/core`, one per session like `DesktopClipboard`. While stopped the
+robot offers no monitors, so a dashboard that shows its desktop only while
+`useMonitors` lists some must also show it while `useDesktopSharing` says
+`stopped`, or the message and the resume go with it (the demo did,
+2026-10-03). The demo's Desktop panel has a "Resume when the robot stops
+sharing" checkbox.
 
 ## Latency knobs (desktop-specific)
 

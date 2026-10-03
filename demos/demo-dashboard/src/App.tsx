@@ -32,6 +32,7 @@ import {
   removeDesktopMonitor,
   useControl,
   useDesktopClipboard,
+  useDesktopSharing,
   useFjarrClient,
   useMonitors,
   usePublisher,
@@ -188,6 +189,7 @@ function RemoteView() {
   // deadman heartbeat stops and cannot re-claim the domain the moment the new driver releases it.
   const motion = useControl(session, "motion");
   const monitors = useMonitors(session);
+  const sharing = useDesktopSharing(session);
   const [driveEpoch, setDriveEpoch] = useState(0);
   const wasDriving = useRef(false);
   useEffect(() => {
@@ -199,7 +201,8 @@ function RemoteView() {
       <Panel title="Robot status (host-owned, built on useTelemetry)">
         <code style={{ fontSize: 12 }}>{JSON.stringify(status)}</code>
       </Panel>
-      {monitors.length > 0 && (
+      {/* Stopped on the robot, it has no monitors to offer: the panel stays, to say so and resume (docs/22). */}
+      {(monitors.length > 0 || sharing.state === "stopped") && (
         <Panel title="Desktop (fjarr.desktop — click to type into the robot's screen, Esc to give the keyboard back; one operator at a time)">
           <DesktopPanel session={session} />
         </Panel>
