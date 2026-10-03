@@ -793,7 +793,7 @@ serves every viewer of a tier. The two meet like this (ADR-0007; planned
   the next lower tier *by the agent*:
   its hub subscription moves, a keyframe is requested, `bandwidth-stats`
   reports `effective_tier` below `tier`. It is promoted back when its
-  estimate stays above 1.2 × the higher tier's `band_low` for 10 s. The
+  estimate stays above 1.2 × the higher tier's `band_low` for 5 s. The
   client's demanded tier is remembered and never overwritten; the agent's
   override sits beside it. **Only new feedback moves the clocks**: the
   estimate is ticked every 200 ms but TWCC feedback arrives about once a

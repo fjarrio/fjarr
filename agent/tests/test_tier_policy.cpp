@@ -1,5 +1,5 @@
 // The per-viewer tier override (docs/23#rate-control-and-tier-switching): demote after 2 s below
-// the band, promote after 10 s above 1.2× its floor, never override a thumbnail demand, never
+// the band, promote after 5 s above 1.2× its floor, never override a thumbnail demand, never
 // demote where no lower tier exists, and never demote on an estimate the sender never tested.
 #include <gtest/gtest.h>
 
@@ -12,7 +12,7 @@ namespace {
 TierPolicy::clock::time_point at(double s) { return TierPolicy::clock::time_point{} + duration_cast<TierPolicy::clock::duration>(duration<double>(s)); }
 } // namespace
 
-TEST(TierPolicy, demotesAfterTwoSecondsBelowTheBandAndPromotesAfterTenAbove) {
+TEST(TierPolicy, demotesAfterTwoSecondsBelowTheBandAndPromotesAfterFiveAbove) {
     TierPolicy p;
     const double low = 2'000'000; // the active band's floor
     EXPECT_FALSE(p.update(1'000'000, low, true, TierPolicy::Evidence::tested, at(0)).has_value());
