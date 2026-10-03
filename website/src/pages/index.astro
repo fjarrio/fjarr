@@ -1,128 +1,428 @@
 ---
 // fjarr.io landing page — sells the idea, links to the docs.
-// Content model + feature-status honesty rule: docs/19-website-and-publishing.md
+// spec: docs/19-website-and-publishing.md#landing-page-content-model — section order, owners,
+// badge states (#badge-states) and claim rules (#claims). Every number here is a row of
+// docs/16-performance-budgets.md#measured; every badge is docs/17's state.
+
+// The latest published release (apt.fjarr.io stable). Moves with each release, not with main.
+const release = "0.1.2";
+
 const capabilities = [
-  { icon: "📷", name: "Camera video", desc: "Multi-camera live streams, one encode fanned out to every viewer, adaptive bitrate.", status: "in development" },
-  { icon: "🖥️", name: "Remote desktop", desc: "The robot's Ubuntu desktop in your dashboard — unattended access after reboot included.", status: "planned" },
-  { icon: "📈", name: "Sensor streaming", desc: "Typed telemetry with change-triggered updates and offline store-and-forward.", status: "planned" },
-  { icon: "📦", name: "File transfer", desc: "Resumable, backpressured transfers — a 4 GB log dump over LTE that survives reconnects.", status: "planned" },
-  { icon: "⌨️", name: "Remote terminal", desc: "An audited PTY in the browser, over the same session.", status: "planned" },
-  { icon: "🔌", name: "Network tunnel", desc: "ssh, scp, a CAN-over-UDP bridge and ros2 topic list straight to one robot behind carrier NAT — the tools you already use.", status: "planned" },
-  { icon: "🩺", name: "Fleet observability", desc: "Versions, host metrics, error rates across the fleet.", status: "planned" },
-  { icon: "🔄", name: "Atomic OTA", desc: "SWUpdate-based A/B updates with rollback and streamed binary diffs.", status: "planned" },
+  { icon: "📷", name: "Camera video", desc: "Many cameras, one encode fanned out to every viewer, adaptive bitrate. Cameras that already speak H.264 cost no encoder at all.", status: "available" },
+  { icon: "⌨️", name: "Remote terminal", desc: "A shell in the browser, over the same session. Off until configured, audited when opened.", status: "available" },
+  { icon: "🔌", name: "Network link", desc: "A routable address for one machine: ssh, scp, ROS 2, your debugger, your vendor tools.", status: "available" },
+  { icon: "🔬", name: "Pipeline introspection", desc: "The live media pipeline as a graph, on the machine and in your dashboard.", status: "available" },
+  { icon: "🖥️", name: "Remote desktop", desc: "The machine's own desktop in your dashboard, unattended after a reboot, every monitor.", status: "in development" },
+  { icon: "🎙️", name: "Audio", desc: "Hear the machine's microphones, talk through its speaker, push-to-talk.", status: "planned" },
+  { icon: "📦", name: "Files", desc: "The machine's files as a drive, and resumable transfers that survive a flaky LTE link.", status: "planned" },
+  { icon: "📈", name: "Telemetry & logs", desc: "Typed sensor streams with change-triggered updates, and logs that store and forward when offline.", status: "planned" },
+  { icon: "🩺", name: "Fleet observability", desc: "Versions, host metrics and error rates across the fleet.", status: "planned" },
+  { icon: "🔄", name: "Atomic OTA", desc: "A/B updates with rollback and streamed binary diffs.", status: "planned" },
 ];
+const badgeClass = (s: string) => (s === "available" ? "avail" : s === "in development" ? "dev" : "");
+
+// docs/16#measured — copy, never round into something the table doesn't say.
+const numbers = [
+  { value: "56 ms", label: "camera glass-to-glass on a LAN", detail: "p50; p95 79 ms" },
+  { value: "102 ms", label: "the same, p95, through a relay", detail: "p50 69 ms" },
+  { value: "52 ms", label: "desktop input-to-photon", detail: "p50; p95 59 ms, real hardware" },
+  { value: "11 ms", label: "terminal round trip", detail: "budget 150 ms" },
+  { value: "~250 Mbps", label: "1 GiB scp over the network link", detail: "246–253 Mbps, hash-verified" },
+  { value: "31–33 fps", label: "camera beside a saturating transfer", detail: "no lost frames" },
+];
+
+const tunnelUses = [
+  {
+    title: "The machine's CAN bus on your laptop",
+    desc: "Bridge its bus to a virtual interface; SavvyCAN or the vendor's tool sees it live.",
+    code: "cannelloni -I vcan0 -R <machine> -r 20000 -l 20000\ncandump vcan0",
+    href: "/29-tunnel-howtos/#can-the-robots-bus-on-your-laptop-cannelloni",
+  },
+  {
+    title: "Your debugger, on its process",
+    desc: "VS Code Remote-SSH for the editor, gdbserver for a process that's already running.",
+    code: "(gdb) target remote <machine>:2345",
+    href: "/29-tunnel-howtos/#gdbserver-debug-a-process-on-the-robot",
+  },
+  {
+    title: "ROS 2 from your desk",
+    desc: "DDS discovery crosses the link, so the CLI and rviz2 just see the robot's graph.",
+    code: "ros2 topic list\nrviz2",
+    href: "/29-tunnel-howtos/#ros-2-over-the-link",
+  },
+  {
+    title: "Its containers, from your CLI",
+    desc: "Your docker client, the machine's engine — logs, exec, restarts.",
+    code: "DOCKER_HOST=ssh://user@<machine> \\\n  docker logs -f my-node",
+    href: "/29-tunnel-howtos/#docker-on-the-robot-from-your-cli",
+  },
+];
+
+const trust = [
+  { icon: "🔐", title: "Encrypted end to end", desc: "Media and data are encrypted between the machine and the viewer. When a relay is needed, it only ever forwards ciphertext." },
+  { icon: "🎫", title: "Your backend decides", desc: "Access is a short-lived grant your backend signs, scoped per capability. The machine re-checks it against its own config, so a grant can't switch on what you didn't." },
+  { icon: "⏳", title: "No static secrets", desc: "Relay credentials are minted per session and expire with the grant. Nothing long-lived is compiled into a frontend." },
+  { icon: "🧱", title: "Nothing to open", desc: "The machine dials out. It never asks the customer's router to open a port, and their IT department has no inbound rule to approve." },
+  { icon: "🪪", title: "Least privilege on the machine", desc: "The agent runs as its own unprivileged user. Desktop access is narrowed to the screen — not the microphone." },
+  { icon: "✍️", title: "Signed from repo to robot", desc: "A signed apt repository, and container images signed with an SBOM." },
+];
+const efficiency = [
+  { icon: "🎞️", title: "One encode, any number of viewers", desc: "A second viewer costs fan-out, not another encoder." },
+  { icon: "🧮", title: "The integrated GPU first", desc: "Video encodes on the iGPU, so the discrete GPU stays with perception — the job the machine exists to do." },
+  { icon: "🚦", title: "Bulk never starves video", desc: "A transfer saturating the link leaves the camera beside it at full frame rate." },
+];
+// Section 3's snippets: real exported names only (docs/19), claims as docs/09#a-session-grants.
+const backendSnippet = `// any JWT library, any language
+const grant = jwt.sign({
+  aud: "fjarr",
+  tenant: "acme",
+  robot_id: "robot-024",
+  operator: { id: user.email, label: user.name },
+  capabilities: [
+    { name: "fjarr.camera" },
+    { name: "fjarr.desktop" },
+  ],
+}, GRANT_KEY, { algorithm: "HS256", expiresIn: "5m" });`;
+const dashboardSnippet = `import {
+  createFjarrClient, FjarrProvider, DesktopView,
+} from "@fjarr/react";
+
+const client = createFjarrClient({
+  serverUrl: "wss://fjarr.acme.example",
+  grant: (id) => myApi.fjarrGrant(id), // your grant endpoint
+});
+
+<FjarrProvider client={client}>
+  <DesktopView
+    session={client.sessions.open("robot-024")} />
+</FjarrProvider>`;
 ---
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Fjarr — remote connectivity for robot fleets</title>
-    <meta name="description" content="Embeddable peer-to-peer connectivity for robots: camera video, remote desktop, files, terminal, a direct network link for ssh and ROS 2, and fleet tooling over WebRTC. Open core, your stack." />
+    <title>Fjarr — remote access for the machines you ship</title>
+    <meta name="description" content="Live video, remote desktop, a terminal and a direct network link to machines in the field — peer-to-peer, end-to-end encrypted, through firewalls and carrier NAT. Open-core libraries for your machine, your backend and your dashboard." />
     <style>
-      :root { color-scheme: dark; }
+      :root { color-scheme: dark; --bg: #0d1117; --panel: #161b22; --line: #30363d; --line-soft: #21262d; --text: #e6edf3; --muted: #9da7b3; --faint: #7d8590; --accent: #58a6ff; --accent-strong: #2f81f7; --ok: #3fb950; }
       * { box-sizing: border-box; }
-      body { margin: 0; font-family: system-ui, sans-serif; background: #0d1117; color: #e6edf3; line-height: 1.6; }
-      .wrap { max-width: 1000px; margin: 0 auto; padding: 0 24px; }
-      header.hero { padding: 96px 0 64px; text-align: center; }
-      .hero h1 { font-size: clamp(2.2rem, 6vw, 3.6rem); margin: 0 0 8px; }
-      .hero .fjarr { color: #58a6ff; }
-      .hero p.tag { font-size: 1.25rem; color: #9da7b3; max-width: 46rem; margin: 12px auto 8px; }
-      .hero p.sub { color: #7d8590; max-width: 44rem; margin: 0 auto 32px; }
-      .cta { display: inline-block; padding: 12px 28px; border-radius: 8px; font-weight: 600; text-decoration: none; margin: 0 8px 8px 0; }
-      .cta.primary { background: #2f81f7; color: #fff; }
-      .cta.ghost { border: 1px solid #30363d; color: #e6edf3; }
-      .banner { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 14px 20px; color: #9da7b3; text-align: center; }
-      section { padding: 48px 0; }
-      h2 { font-size: 1.7rem; margin: 0 0 16px; }
-      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
-      .card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 18px; }
+      html, body { overflow-x: hidden; }
+      body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+      .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+      header.hero { padding-top: 96px; padding-bottom: 56px; text-align: center; }
+      .hero h1 { font-size: clamp(2.1rem, 6vw, 3.5rem); line-height: 1.15; margin: 0 0 20px; }
+      .hero .fjarr { color: var(--accent); }
+      .hero p.fit { font-size: 1.3rem; color: var(--text); max-width: 42rem; margin: 0 auto 16px; }
+      .hero p.tag { font-size: 1.1rem; color: var(--muted); max-width: 44rem; margin: 0 auto 8px; }
+      .hero p.sub { color: var(--faint); max-width: 44rem; margin: 0 auto 32px; }
+      .cta { display: inline-block; padding: 12px 28px; border-radius: 8px; font-weight: 600; text-decoration: none; margin: 0 6px 8px; }
+      .cta.primary { background: var(--accent-strong); color: #fff; }
+      .cta.ghost { border: 1px solid var(--line); color: var(--text); }
+      .release { margin: 40px auto 0; max-width: 40rem; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; text-align: left; }
+      .release .meta { color: var(--muted); font-size: 0.95rem; margin: 0 0 8px; }
+      .release .meta b { color: var(--ok); }
+      section.wrap { padding-top: 48px; padding-bottom: 48px; }
+      h2 { font-size: 1.7rem; line-height: 1.25; margin: 0 0 12px; }
+      h2 small { font-weight: 400; color: var(--faint); }
+      .lede { color: var(--muted); max-width: 50rem; margin: 0 0 24px; }
+      .note { color: var(--faint); margin: 20px 0 0; }
+      .grid.two { grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px; }
+      .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; min-width: 0; }
       .card h3 { margin: 0 0 6px; font-size: 1.05rem; }
-      .badge { float: right; font-size: 0.7rem; padding: 2px 8px; border-radius: 999px; border: 1px solid #30363d; color: #9da7b3; white-space: nowrap; }
-      .badge.dev { border-color: #2f81f7; color: #58a6ff; }
-      .tiers td { padding: 10px 14px; border-bottom: 1px solid #21262d; }
-      table.tiers { width: 100%; border-collapse: collapse; background: #161b22; border: 1px solid #30363d; border-radius: 10px; overflow: hidden; }
-      code { background: #21262d; padding: 1px 6px; border-radius: 4px; font-size: 0.9em; }
-      footer { padding: 40px 0 64px; color: #7d8590; text-align: center; }
-      a { color: #58a6ff; }
+      .card p { margin: 0; color: var(--muted); }
+      .badge { float: right; margin-left: 8px; font-size: 0.7rem; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+      .badge.avail { border-color: var(--ok); color: var(--ok); }
+      .badge.dev { border-color: var(--accent-strong); color: var(--accent); }
+      code { background: var(--line-soft); padding: 1px 6px; border-radius: 4px; font-size: 0.9em; overflow-wrap: anywhere; }
+      pre { background: #010409; border: 1px solid var(--line-soft); border-radius: 8px; padding: 12px 14px; margin: 12px 0 0; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; }
+      pre code { background: none; padding: 0; overflow-wrap: normal; }
+      pre .c { color: var(--faint); }
+      a { color: var(--accent); }
+
+      /* The problem */
+      ul.patchwork { list-style: none; padding: 0; margin: 0 0 20px; display: grid; gap: 10px; }
+      ul.patchwork li { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid #d29922; border-radius: 8px; padding: 12px 16px; color: var(--muted); }
+      ul.patchwork li b { color: var(--text); }
+
+      /* Tier diagram: backend on top, machine ⇄ dashboard below with the direct path between them */
+      .tiers-diagram { display: grid; grid-template-columns: 1fr minmax(120px, 0.8fr) 1fr; grid-template-rows: auto auto; gap: 0 12px; align-items: center; margin: 8px 0 24px; }
+      .tiers-diagram .node { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+      .tiers-diagram .node h3 { margin: 0 0 4px; font-size: 1.05rem; }
+      .tiers-diagram .node p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+      .tiers-diagram .backend { grid-column: 1 / 4; justify-self: center; max-width: 30rem; text-align: center; }
+      .tiers-diagram .control { grid-column: 1 / 4; display: flex; justify-content: space-between; padding: 0 16%; color: var(--faint); font-size: 0.8rem; }
+      .tiers-diagram .control span { border-left: 2px dashed var(--line); padding: 10px 0 10px 8px; }
+      .tiers-diagram .machine { grid-column: 1; grid-row: 3; }
+      .tiers-diagram .dashboard { grid-column: 3; grid-row: 3; }
+      .tiers-diagram .p2p { grid-column: 2; grid-row: 3; text-align: center; color: var(--ok); font-size: 0.85rem; line-height: 1.35; }
+      .tiers-diagram .p2p .arrow { display: block; height: 3px; background: var(--ok); border-radius: 2px; margin: 6px 0; position: relative; }
+      .tiers-diagram .p2p .arrow::before, .tiers-diagram .p2p .arrow::after { content: ""; position: absolute; top: -5px; border: 6.5px solid transparent; }
+      .tiers-diagram .p2p .arrow::before { left: -6px; border-right-color: var(--ok); border-left: 0; }
+      .tiers-diagram .p2p .arrow::after { right: -6px; border-left-color: var(--ok); border-right: 0; }
+      .snippets { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 16px; }
+      .snippets .card h3 { font-size: 0.95rem; color: var(--muted); font-weight: 600; }
+
+      /* Measured numbers */
+      .numbers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 12px; }
+      .numbers a { display: block; text-decoration: none; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; color: inherit; }
+      .numbers a:hover { border-color: var(--accent-strong); }
+      .numbers .v { display: block; font-size: 1.9rem; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.2; }
+      .numbers .l { display: block; color: var(--muted); font-size: 0.95rem; }
+      .numbers .d { display: block; color: var(--faint); font-size: 0.8rem; margin-top: 4px; }
+
+      ul.features { columns: 2 16rem; padding-left: 1.2rem; color: var(--muted); margin: 0 0 28px; }
+      ul.features li { break-inside: avoid; margin-bottom: 6px; }
+      h3.sub { font-size: 1.15rem; margin: 8px 0 12px; }
+
+      table.tiers { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+      table.tiers td { padding: 12px 14px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+      table.tiers tr:last-child td { border-bottom: 0; }
+      table.tiers td:first-child { white-space: nowrap; }
+
+      .closing { text-align: center; padding: 56px 0 24px; }
+      footer { padding: 24px 0 64px; color: var(--faint); text-align: center; }
+
+      @media (max-width: 720px) {
+        .wrap { padding: 0 16px; }
+        header.hero { padding-top: 64px; padding-bottom: 40px; }
+        .tiers-diagram { grid-template-columns: 1fr; }
+        .tiers-diagram .backend, .tiers-diagram .control, .tiers-diagram .machine, .tiers-diagram .dashboard, .tiers-diagram .p2p { grid-column: 1; grid-row: auto; }
+        .tiers-diagram .control { padding: 0 24px; }
+        .tiers-diagram .p2p { padding: 10px 0; }
+        .tiers-diagram .p2p .arrow { width: 3px; height: 28px; margin: 6px auto; }
+        .tiers-diagram .p2p .arrow::before { left: -5px; top: -6px; border: 6.5px solid transparent; border-bottom-color: var(--ok); border-top: 0; }
+        .tiers-diagram .p2p .arrow::after { left: -5px; right: auto; top: auto; bottom: -6px; border: 6.5px solid transparent; border-top-color: var(--ok); border-bottom: 0; }
+        table.tiers td { display: block; border-bottom: 0; }
+        table.tiers tr { display: block; border-bottom: 1px solid var(--line-soft); }
+        table.tiers td:first-child { padding-bottom: 0; }
+      }
     </style>
   </head>
   <body>
+    <!-- 1. Hero — who it's for, by traits (docs/03#who-its-for) -->
     <header class="hero wrap">
-      <h1>Stop rebuilding robot connectivity.<br /><span class="fjarr">Fjarr</span> is the stack you keep writing.</h1>
-      <p class="tag">
-        Live camera video, remote desktop, file transfer, telemetry, a remote
-        terminal, and an <code>ssh</code>-able link to every robot in your fleet
-        — over WebRTC, embedded in <em>your</em> robot, <em>your</em> backend,
-        and <em>your</em> dashboard.
+      <h1>Remote access for<br />the machines you ship.</h1>
+      <p class="fit">
+        Linux on board. Cameras or a screen. Behind someone else's network, far
+        from the people who need to see it, drive it and fix it. If that's your
+        product, <span class="fjarr">Fjarr</span> is how you reach it.
       </p>
-      <p class="sub">Open-core (AGPL-3.0) libraries you self-host, plus a managed cloud when you'd rather not. <i>Fjärr</i> is Swedish for "remote".</p>
+      <p class="tag">
+        Live video, the desktop, a terminal and a direct network link —
+        peer-to-peer, encrypted end to end, through firewalls and carrier NAT
+        with no ports to open. Built into <em>your</em> machine, <em>your</em> backend and <em>your</em> dashboard.
+      </p>
+      <p class="sub">
+        Robots are where we started; vehicles, farm machinery and field gateways
+        have the same shape. Open-core (AGPL-3.0) libraries you self-host, plus a
+        managed cloud when you'd rather not. <i>Fjärr</i> is Swedish for "remote".
+      </p>
       <a class="cta primary" href="/readme/">Read the docs</a>
-      <a class="cta ghost" href="/00-vision/">Why Fjarr exists</a>
-      <p style="margin-top: 40px;"></p>
-      <div class="banner">
-        🚧 Fjarr is being built <b>documentation-first</b> and in the open. The specs
-        below are real and current; the code is following them milestone by
-        milestone — see the <a href="/17-roadmap/">roadmap</a>.
+      <a class="cta ghost" href="https://github.com/fjarrio/fjarr">GitHub</a>
+      <div class="release">
+        <p class="meta"><b>v{release} released</b> · Ubuntu 26.04 · amd64 and arm64 · apt or Docker</p>
+        <pre><code>wget -qO- https://get.fjarr.io | sudo sh</code></pre>
+        <p class="meta" style="margin:8px 0 0;font-size:0.85rem;">
+          Then <code>sudo fjarr-agent --check</code>. <a href="/26-robot-install-and-drivers/">Install guide</a>
+        </p>
       </div>
     </header>
 
+    <!-- 2. The problem — the visitor's situation (docs/00#the-problem, docs/03#who-its-for) -->
     <section class="wrap">
-      <h2>Three libraries, your stack</h2>
-      <div class="grid">
-        <div class="card"><h3>🤖 On the robot</h3><p>Embed <code>libfjarr</code> (C++/GStreamer) into your robot software — or run the <code>fjarr-agent</code> daemon beside it. Hardware H.264 encode, one encoder for any number of viewers.</p></div>
-        <div class="card"><h3>🗄️ Next to your backend</h3><p>Deploy the <code>fjarr-server</code> sidecar (78 MB container) next to your existing stack — any language. Your backend mints session grants and receives webhooks. It never touches the media path.</p></div>
-        <div class="card"><h3>📊 In your dashboard</h3><p><code>@fjarr/core</code> + <code>@fjarr/react</code> drop robot sessions into the React dashboard you already have. Headless-first components, your design system wins.</p></div>
-      </div>
+      <h2>What you probably have today</h2>
+      <p class="lede">Rarely nothing. Usually a patchwork that kind of works:</p>
+      <ul class="patchwork">
+        <li><b>A VPN or a jump host</b> every engineer has to be set up on — and a second identity system nobody wants to explain to a customer's IT department.</li>
+        <li><b>A remote-desktop tool</b> the end customer has to install and approve, that knows nothing about your machine.</li>
+        <li><b>A camera stream</b> someone wired to the dashboard one sprint, that falls over on LTE.</li>
+        <li><b><code>scp</code> through two hops</b> to get one log out.</li>
+        <li>Or <b>"proper remote access"</b>, on the backlog for a year.</li>
+      </ul>
+      <p class="lede" style="margin:0;">
+        Each piece works on a good day. Together they're slow to support, hard to
+        secure, and a different login every time. Fjarr replaces the patchwork with
+        one connection per machine that carries all of it.
+      </p>
+      <p class="note">We've built this stack three times before, inside robot companies — <a href="/11-prior-art/">what we kept and what we didn't</a>.</p>
     </section>
 
+    <!-- 3. Three tiers (docs/02, docs/09) -->
     <section class="wrap">
-      <h2>Capabilities <small style="font-weight:400;color:#7d8590;">— everything is a plugin, including yours</small></h2>
+      <h2>Three pieces, your stack</h2>
+      <p class="lede">Fjarr embeds into what you already run. Your backend stays in charge of who may reach what; video and data go straight between the machine and the person looking at it.</p>
+      <div class="tiers-diagram" role="img" aria-label="Your backend, with the fjarr-server sidecar, issues grants and handles signaling for the machine and the dashboard. Media and data flow directly between the machine and the dashboard, peer-to-peer.">
+        <div class="node backend">
+          <h3>🗄️ Next to your backend</h3>
+          <p>The <code>fjarr-server</code> sidecar, beside a backend in any language. Your backend signs grants and receives webhooks. It never touches the media.</p>
+        </div>
+        <div class="control"><span>signaling</span><span>grants · signaling</span></div>
+        <div class="node machine">
+          <h3>🤖 On the machine</h3>
+          <p>Embed <code>libfjarr</code> (C++/GStreamer) in your software, or run the <code>fjarr-agent</code> daemon beside it. Hardware encode.</p>
+        </div>
+        <div class="p2p">
+          peer-to-peer
+          <span class="arrow"></span>
+          encrypted · relay only<br />when nothing else works
+        </div>
+        <div class="node dashboard">
+          <h3>📊 In your dashboard</h3>
+          <p><code>@fjarr/core</code> + <code>@fjarr/react</code> in the dashboard you already have — standard WebRTC, any modern browser. Headless-first: your design system wins.</p>
+        </div>
+      </div>
+      <div class="snippets">
+        <div class="card">
+          <h3>Your backend: decide who may open what</h3>
+          <pre><code>{backendSnippet}</code></pre>
+        </div>
+        <div class="card">
+          <h3>Your dashboard: mount it</h3>
+          <pre><code>{dashboardSnippet}</code></pre>
+        </div>
+      </div>
+      <p class="note">The contract between the pieces: <a href="/09-interfaces/">interfaces</a> · <a href="/02-architecture/">architecture</a></p>
+    </section>
+
+    <!-- 4. Capabilities (docs/06 + docs/17; badges per docs/19#badge-states) -->
+    <section class="wrap">
+      <h2>Capabilities <small>— everything is a plugin, including yours</small></h2>
       <div class="grid">
         {capabilities.map((c) => (
           <div class="card">
-            <span class={`badge ${c.status === "in development" ? "dev" : ""}`}>{c.status}</span>
+            <span class={`badge ${badgeClass(c.status)}`}>{c.status}</span>
             <h3>{c.icon} {c.name}</h3>
-            <p style="margin:0;color:#9da7b3;">{c.desc}</p>
+            <p>{c.desc}</p>
           </div>
         ))}
       </div>
-      <p style="color:#7d8590;">Statuses track the public <a href="/17-roadmap/">roadmap</a> — we don't market what doesn't run.</p>
+      <p class="note"><b>available</b>: in a release · <b>in development</b>: running on main · <b>planned</b>: on the <a href="/17-roadmap/">roadmap</a>. We don't market what doesn't run.</p>
     </section>
 
+    <!-- 5. Measured, not promised (docs/16#measured) -->
     <section class="wrap">
-      <h2>A link to one robot <small style="font-weight:400;color:#7d8590;">— not a VPN</small></h2>
-      <p style="color:#9da7b3;max-width:52rem;">
-        Every robot company keeps a list of things they occasionally need to do to
-        a robot that nobody will ever write a protocol for. The network tunnel is
-        the escape hatch that stops that list becoming a roadmap: an authorized
-        operator gets a routable address for <b>one</b> robot, inside the session
-        that already carries its video. <code>ssh</code> in. <code>scp</code> the
-        log out. Point a UDP bridge at the CAN bus. Run
-        <code>ros2 topic list</code> and see the robot's graph from your laptop.
-      </p>
-      <div class="grid">
-        <div class="card"><h3>🔒 Isolation you can't misconfigure</h3><p style="margin:0;color:#9da7b3;">Connect to two robots at once and they still can't see each other. Every link ends at you and nothing is forwarded between them — there's no path to leave open by mistake.</p></div>
-        <div class="card"><h3>🎫 One set of permissions</h3><p style="margin:0;color:#9da7b3;">You already decide who may reach robot 42. The tunnel is that same decision, in the same token, in the same audit log. No second identity system to run alongside the one you have.</p></div>
-        <div class="card"><h3>⏱️ Access that expires</h3><p style="margin:0;color:#9da7b3;">The link exists while a session does, then it's gone. Nothing becomes permanently reachable, and there's no extra daemon on the robot to install, update or license.</p></div>
+      <h2>Measured, not promised</h2>
+      <p class="lede">Every number below was measured on named hardware at a milestone gate, against a written budget. Click one for where and when.</p>
+      <div class="numbers">
+        {numbers.map((n) => (
+          <a href="/16-performance-budgets/#measured-results-measured">
+            <span class="v">{n.value}</span>
+            <span class="l">{n.label}</span>
+            <span class="d">{n.detail}</span>
+          </a>
+        ))}
       </div>
-      <p style="color:#7d8590;">
-        It deliberately isn't a mesh: no shared network, no robot-to-robot routing, no
-        always-on reachability. It's developer and support access — read
-        <a href="/27-network-tunnel/">the design</a> for exactly where that line sits.
+    </section>
+
+    <!-- 6. The desktop, and control that's safe for a moving machine (docs/22, docs/10, docs/15) -->
+    <section class="wrap">
+      <h2>The machine's desktop <small>— and control that's safe for one that moves</small></h2>
+      <p class="lede">
+        The desktop your machine already has, in your dashboard — no tool for the
+        end customer to install. <span class="badge dev" style="float:none;">in development</span>
+      </p>
+      <ul class="features">
+        <li>Unattended: back after a reboot with nobody at the machine</li>
+        <li>Every monitor, plugged in or out while you watch</li>
+        <li>Virtual screens for machines with no monitor attached</li>
+        <li>The clipboard both ways</li>
+        <li>Typing through the machine's own keyboard layout</li>
+        <li>Its own cursor, drawn where it really is</li>
+      </ul>
+      <h3 class="sub">Who's in control is explicit</h3>
+      <div class="grid two">
+        <div class="card"><h3>🛑 Taking control stops the robot first</h3><p>Driving is one operator at a time, and never handed over on idle. Taking it over releases every input before anyone new can move it.</p></div>
+        <div class="card"><h3>🖱️ One pointer, handed over cleanly</h3><p>Desktop control frees five seconds after the holder's last input, or anyone can take it at once — and the holder is told.</p></div>
+        <div class="card"><h3>💓 Gone means released</h3><p>If an operator's connection dies, their held keys and buttons are released and their control lapses. A machine is never left stuck.</p></div>
+        <div class="card"><h3>👁️ Watch without touching</h3><p>A view-only grant can never take control or read the clipboard — for the customer, the auditor, the second pair of eyes.</p></div>
+      </div>
+      <p class="note">Each of these ships with a regression test (<a href="/15-testing-strategy/#safety-behaviors-safety-behaviors">safety behaviors</a>). How control works: <a href="/10-security/">security</a> · <a href="/22-remote-desktop-client/">remote desktop</a>.</p>
+    </section>
+
+    <!-- 7. A link, not a VPN (docs/03#tunnel-positioning, docs/27, docs/29) -->
+    <section class="wrap">
+      <h2>A link to one machine <small>— not a VPN</small></h2>
+      <p class="lede">
+        Every team keeps a list of things it occasionally needs to do on a machine
+        that nobody will ever write a protocol for. The network link is the escape
+        hatch: an authorized operator gets a routable address for <b>one</b> machine, inside the session that already carries its video — and the tools
+        they already use just work.
+      </p>
+      <pre><code>$ fjarr-connect login                 <span class="c"># your company's sign-in, in the browser</span>
+$ fjarr-connect robot-024
+robot-024  100.70.118.224  mtu 1184  up in 0.8 s</code></pre>
+      <div class="grid two" style="margin-top:16px;">
+        {tunnelUses.map((u) => (
+          <div class="card">
+            <h3>{u.title}</h3>
+            <p>{u.desc}</p>
+            <pre><code>{u.code}</code></pre>
+            <p style="margin-top:8px;font-size:0.85rem;"><a href={u.href}>How-to →</a></p>
+          </div>
+        ))}
+      </div>
+      <p class="note">And ssh, scp, RDP, your file manager, Wireshark, a serial port, Modbus — <a href="/28-tunnel-ideas/">more ideas</a>.</p>
+      <div class="grid" style="margin-top:24px;">
+        <div class="card"><h3>🔒 Isolation you can't misconfigure</h3><p>Connect to two machines at once and they still can't see each other. Every link ends at you and nothing is forwarded between them — there's no path to leave open by mistake.</p></div>
+        <div class="card"><h3>🎫 One set of permissions</h3><p>You already decide who may reach machine 42. The link is that same decision, in the same grant, in the same audit log. No second identity system to run beside yours.</p></div>
+        <div class="card"><h3>⏱️ Access that expires</h3><p>The link exists while a session does, then it's gone. Nothing becomes permanently reachable, and there's no extra daemon on the machine to install, update or license.</p></div>
+      </div>
+      <p class="note">
+        It deliberately isn't a mesh: no shared network, no machine-to-machine
+        routing, no always-on reachability. It's developer and support access — <a href="/27-network-tunnel/">the design</a> says exactly where that line sits.
       </p>
     </section>
 
+    <!-- 8. Trust and efficiency (docs/10, docs/23, docs/26, ADR-0025) -->
+    <section class="wrap">
+      <h2>Safe to put on a customer's network</h2>
+      <div class="grid">
+        {trust.map((t) => (
+          <div class="card"><h3>{t.icon} {t.title}</h3><p>{t.desc}</p></div>
+        ))}
+      </div>
+      <h3 class="sub" style="margin-top:32px;">Light on the machine</h3>
+      <div class="grid">
+        {efficiency.map((t) => (
+          <div class="card"><h3>{t.icon} {t.title}</h3><p>{t.desc}</p></div>
+        ))}
+      </div>
+      <p class="note">The whole threat model is public: <a href="/10-security/">security</a>. Encoders and hardware: <a href="/04-supported-platforms/">supported platforms</a>.</p>
+    </section>
+
+    <!-- 9. Built for the people who debug machines (docs/24, docs/26) -->
+    <section class="wrap">
+      <h2>Built for the people who debug machines</h2>
+      <div class="grid">
+        <div class="card"><h3>🔬 See the media plane</h3><p>The live pipeline graph, with rates and drops, on the machine and in your dashboard — readable by a support engineer or an AI coding agent. <a href="/24-pipeline-introspection/">Introspection</a></p></div>
+        <div class="card"><h3>✅ One command says if it's healthy</h3><p><code>sudo fjarr-agent --check</code> lists every configured source and backend, and gives the one-line fix for anything missing. <a href="/26-robot-install-and-drivers/">Install &amp; drivers</a></p></div>
+        <div class="card"><h3>🧩 Only the drivers it needs</h3><p><code>fjarr-agent drivers detect</code> matches the hardware actually attached against a catalog and names the package each needs. Install those, and nothing else lands on the machine.</p></div>
+      </div>
+    </section>
+
+    <!-- 10. Open core, honest split (docs/03, ADR-0011) -->
     <section class="wrap">
       <h2>Open core, honest split</h2>
       <table class="tiers">
-        <tr><td><b>Free &amp; open (AGPL-3.0)</b></td><td>All three libraries, the signaling sidecar, the protocol, the docs, the demos. Genuinely usable alone, self-hosted forever.</td></tr>
-        <tr><td><b>Fjarr Cloud</b></td><td>Managed signaling + TURN, fleet observability, staged OTA campaigns, SSO — metered by robots, session-minutes, and relay bandwidth. Same contract as self-hosting: switch either way, no rework.</td></tr>
+        <tr><td><b>Free &amp; open</b></td><td>All three libraries, the signaling sidecar, the network link and its client, the protocol, the docs, the demos. Genuinely usable alone, self-hosted forever.</td></tr>
+        <tr><td><b>Fjarr Cloud</b></td><td>Managed signaling and relays, fleet observability, staged OTA campaigns, SSO — metered by machines, session-minutes and relay bandwidth. Same contract as self-hosting: switch either way, no rework.</td></tr>
+        <tr><td><b>Licence</b></td><td>AGPL-3.0, or a commercial licence when AGPL doesn't fit your product. Nothing we ship depends on GPL code, and the build environment refuses it.</td></tr>
       </table>
-      <p style="color:#7d8590;">The whole business plan is a public document: <a href="/03-product-strategy/">product strategy</a>.</p>
+      <p class="note">The whole business plan is a public document: <a href="/03-product-strategy/">product strategy</a>.</p>
+    </section>
+
+    <!-- 11. Docs CTA -->
+    <section class="wrap closing">
+      <h2>See if it fits</h2>
+      <p class="lede" style="margin:0 auto 24px;">The specs are the product's source of truth, and they're all public.</p>
+      <a class="cta primary" href="/readme/">Read the docs</a>
+      <a class="cta ghost" href="https://github.com/fjarrio/fjarr">GitHub</a>
+      <a class="cta ghost" href="/17-roadmap/">Roadmap</a>
     </section>
 
     <footer class="wrap">
-      Fjarr · <a href="/readme/">documentation</a> · built documentation-first in Sweden 🇸🇪
+      Fjarr · <a href="/readme/">documentation</a> · <a href="https://github.com/fjarrio/fjarr">GitHub</a> · built documentation-first in Sweden 🇸🇪
     </footer>
   </body>
 </html>

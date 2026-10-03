@@ -16,10 +16,8 @@ export default defineConfig({
     starlight({
       title: "Fjarr",
       description:
-        "Generic peer-to-peer connectivity for robot fleets — camera video, remote desktop, files, terminal, and fleet tooling over WebRTC.",
-      social: [
-        // populated at M0.5 when the repo has a public remote
-      ],
+        "Peer-to-peer remote access for the machines you ship — camera video, remote desktop, terminal, a direct network link, and fleet tooling.",
+      social: [{ icon: "github", label: "GitHub", href: "https://github.com/fjarrio/fjarr" }],
       sidebar: [
         { label: "Start here", slug: "readme" },
         {
