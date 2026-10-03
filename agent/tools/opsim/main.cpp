@@ -413,7 +413,16 @@ class Signaling {
   public:
     Signaling(fjarr::CoreLoop& loop, Shared& sh, std::function<void(const json&)> on_message)
         : loop_(loop), sh_(sh), on_message_(std::move(on_message)) {}
-    ~Signaling() { close(false); }
+    ~Signaling() {
+        close(false);
+        // libsoup's sources for this connection live on the loop: release it there, never from the
+        // thread that destroys us while one of them may be dispatching (CI, 2026-10-03).
+        loop_.call_sync([this] {
+            signals_.clear();
+            conn_.reset();
+            session_.reset();
+        });
+    }
 
     void connect(const std::string& url) {
         loop_.call_sync([this, url] {
@@ -1537,11 +1546,21 @@ class Operator {
     }
 
     void teardown() {
-        ping_timer_.cancel();
-        drive_timer_.cancel();
-        if (peer_) peer_->stop();
-        peer_.reset();
-        if (signaling_) signaling_->close(true);
+        // On the loop, as everything else is (docs/23 threading model): from this thread, the peer was
+        // destroyed while the loop could be inside its bus callback, and GLib aborted after a passing
+        // desktop-clipboard (CI, 2026-10-03: g_main_dispatch "source->context == context").
+        loop_.call_sync([this] {
+            ping_timer_.cancel();
+            drive_timer_.cancel();
+            if (peer_) peer_->stop();
+            peer_.reset();
+        });
+        if (signaling_) {
+            signaling_->close(true); // its own call_sync
+            // Let the close handshake finish (bounded) before the connection goes.
+            std::unique_lock<std::mutex> lk(sh_.mu);
+            sh_.cv.wait_for(lk, std::chrono::seconds(1), [this] { return sh_.ws_closed; });
+        }
         signaling_.reset();
     }
     void drop_socket() { signaling_->close(false); }
