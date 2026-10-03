@@ -94,7 +94,7 @@ function Viewer({ feed, onToken, hasToken }: { feed: PipelineFeed; onToken: (t: 
             ))}
           </span>
         </header>
-        {current && tab === "graph" && <PipelineGraph feed={feed} pipelineId={current} seq={scrub} style={{ background: "#fff", borderRadius: 6, minHeight: 0, overflow: "hidden" }} />}
+        {current && tab === "graph" && <PipelineGraph feed={feed} pipelineId={current} seq={scrub} style={{ background: "#fff", borderRadius: 6, height: "auto", minHeight: 0 }} />}
         {current && tab !== "graph" && <Body feed={feed} pipelineId={current} form={tab} seq={scrub} />}
       </main>
     </div>

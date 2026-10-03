@@ -33,14 +33,24 @@ export function graphvizRenderer(transitionMs = 400): DotRenderer {
   return async (container, dot, previous) => {
     graphvizModule ??= import("d3-graphviz");
     const { graphviz } = await graphvizModule;
-    const g = graphviz(container as HTMLDivElement, { useWorker: false, fit: true, zoom: true });
+    // The graph fits its box and zooms and pans inside it: drawn at its natural size, a long pipeline
+    // was thousands of pixels wide or tall and the page scrolled instead (docs/24).
+    const box = container as HTMLDivElement;
+    const g = graphviz(box, { useWorker: false, fit: true, zoom: true, width: box.clientWidth || 640, height: box.clientHeight || 360 });
     if (previous && transitionMs > 0) {
       const { transition } = await import("d3-transition");
       g.transition(() => transition("fjarr-pipeline").duration(transitionMs) as never);
     }
     await new Promise<void>((resolve, reject) => {
       try {
-        g.onerror((e) => reject(new Error(String(e)))).renderDot(dot, () => resolve());
+        g.onerror((e) => reject(new Error(String(e)))).renderDot(dot, () => {
+          // Then it follows the box as it resizes (the viewBox keeps the drawing's proportions).
+          const svg = box.querySelector("svg");
+          svg?.setAttribute("width", "100%");
+          svg?.setAttribute("height", "100%");
+          svg?.style.setProperty("display", "block"); // inline, it sat on a text baseline and overflowed by a few px
+          resolve();
+        });
       } catch (e) {
         reject(e as Error);
       }
@@ -85,7 +95,7 @@ export function PipelineGraph({ feed, pipelineId, seq, renderDot, transitionMs =
     <div
       ref={ref}
       className={className}
-      style={{ minHeight: 120, ...style }}
+      style={{ height: 360, minHeight: 120, overflow: "hidden", ...style }}
       data-fjarr-pipeline-graph={pipelineId}
       data-fjarr-pipeline-seq={bodySeq ?? ""}
       data-fjarr-pipeline-state={meta?.state ?? ""}

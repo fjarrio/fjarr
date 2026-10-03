@@ -30,13 +30,13 @@ export function Diagnostics({ session }: { session: Session }) {
           </li>
         ))}
       </ul>
-      {/* A wide graph scrolls in its own box, never the page. */}
-      <div style={{ minWidth: 0, overflowX: "auto" }}>
+      {/* The graph fits its box; zoom and pan inside it. */}
+      <div style={{ minWidth: 0 }}>
         <label style={{ fontSize: 12 }}>
           history <input type="range" min={1} max={latest?.seq ?? 1} value={scrub ?? latest?.seq ?? 1} onChange={(e) => setScrub(Number(e.target.value))} />{" "}
           #{scrub ?? latest?.seq ?? "-"} {scrub !== undefined && <button onClick={() => setScrub(undefined)}>live</button>}
         </label>
-        <PipelineGraph feed={feed} pipelineId={current} seq={scrub} style={{ border: "1px solid #d0d7de", borderRadius: 6, minHeight: 320 }} />
+        <PipelineGraph feed={feed} pipelineId={current} seq={scrub} style={{ border: "1px solid #d0d7de", borderRadius: 6, height: 420 }} />
       </div>
     </div>
   );

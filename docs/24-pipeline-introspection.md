@@ -206,7 +206,10 @@ The demo backend models this as a role picked on the dashboard
 id)` (docs/21 selector mode, newest-wins per pipeline), `<PipelineGraph
 feed pipelineId>` and `usePipelineFeed(session)` — the same viewer as a
 component over a [pipeline feed](21-web-client-architecture.md#pipeline-feeds),
-headless-first, so the demo dashboard's *Diagnostics* tab is ~20 lines. Fjarr Cloud later
+headless-first, so the demo dashboard's *Diagnostics* tab is ~20 lines. The
+graph fits its box (360 px tall unless the host sizes it) and is zoomed and
+panned inside it, never scrolled: drawn at its natural size, a session
+pipeline was 9120×1868 px and pushed the page wide (2026-10-03). Fjarr Cloud later
 shows the same view fleet-wide (M7), which is where the retention and
 cross-robot search live — the hosted-value line of docs/03.
 
