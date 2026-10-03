@@ -134,10 +134,9 @@ to three minutes each to build on a fresh runner and change rarely.
    image it pulled instead of rebuilding it.
 
 A registry rather than the Actions cache, because the images total several
-gigabytes and the cache's 10 GB is [already spoken for](#caches). Make the
-`fjarr-ci` package public once, in its settings on GitHub, like the
-repository: until then a fork's pull request cannot pull it and builds the
-images itself, which is slower but still correct.
+gigabytes and the cache's 10 GB is [already spoken for](#caches). The
+`fjarr-ci` package is public, like the repository, so a fork's pull request
+pulls the images too (anyone can list its tags without signing in).
 
 **Adding an image:** give it to `image.sh` in the jobs that use it. Inputs come
 from the Dockerfile, so nothing is listed twice; the one rule is that **an
