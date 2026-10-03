@@ -446,8 +446,23 @@ and it goes with `remove-monitor` or the session
 ([docs/22](22-remote-desktop-client.md#virtual-monitors-slice-35)). In CI,
 opsim's `desktop-virtual` adds a 1024×768 screen (answered in 19 ms),
 receives its frames, and removes it, 6/6. In the lab browser, the demo's
-"Add a screen" shows the new screen streaming and removes it. Remaining in
-3.5: the clipboard and cursor on the mini-PC.
+"Add a screen" shows the new screen streaming and removes it.
+**On the mini-PC (2026-10-03).** The cursor, `sharpness` and virtual
+monitors worked on the real desktop. Copying from the robot did not: module
+E asked mutter for the clipboard under the message's own name, which the
+fixture's `wl-copy` answers anyway and a GNOME app does not, and an empty
+blob was never sent; both fixed, and the helper now refuses a type the
+robot does not offer, so CI catches that class. GNOME's screen-sharing stop
+left the desktop gone until the agent restarted: the agent now reports
+`sharing: stopped` (keyed on the input session closing, since an unplug
+also ends a capture), and any session may `resume-sharing`; the dashboard
+chooses to ask or resume at once (`onRobotStop`). Resuming found one more:
+a track returning to a live session reused its SSRC under a payloader
+that restarted its sequence numbers, and SRTP refused them as replays,
+which also hit a re-plugged monitor about half the time. Stop, resume and
+auto-resume verified on the mini-PC. Remaining in 3.5: real monitors (the
+mini-PC ran on its ghost connector) and whether they hit the embedded
+fallback.
 
 ## M3.5 — Hear the robot {#m35}
 
