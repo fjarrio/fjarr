@@ -81,6 +81,37 @@ struct DesktopCapability::Impl {
     };
     std::map<std::string, Incoming> incoming; // by blob id
 
+    // Virtual monitors a session added (docs/08 add-monitor), and the adds still waiting for the
+    // monitor to appear in the layout.
+    std::map<SessionId, std::set<MonitorId>> virtuals;
+    struct PendingAdd {
+        SessionId session;
+        Envelope request;
+        std::unique_ptr<Timer> timeout;
+    };
+    std::map<MonitorId, PendingAdd> pending_adds;
+    static constexpr std::size_t MAX_VIRTUAL_PER_SESSION = 2;
+
+    /// An add whose monitor is in the layout now: answered with its id.
+    void answer_adds(const std::vector<Monitor>& monitors) {
+        for (const auto& m : monitors) {
+            auto p = pending_adds.find(m.id);
+            if (p == pending_adds.end()) continue;
+            auto s = sessions.find(p->second.session);
+            if (s != sessions.end()) s->second->result(p->second.request, {{"ok", true}, {"monitor", m.wire_id}});
+            pending_adds.erase(p);
+        }
+    }
+    void remove_virtuals(const SessionId& id) {
+        auto v = virtuals.find(id);
+        if (v == virtuals.end()) return;
+        for (const MonitorId m : v->second) {
+            pending_adds.erase(m);
+            if (driver) driver->destroy_virtual_monitor(m);
+        }
+        virtuals.erase(v);
+    }
+
     // The cursor (docs/08 `cursor`, `cursor-position`; docs/22#cursor-strategy).
     std::optional<CursorShape> cursor_shape;
     struct CursorSession {
@@ -298,6 +329,7 @@ struct DesktopCapability::Impl {
         announce(!had_monitors ? "initial" : set_changed ? "hotplug" : "mode-change");
         had_monitors = had_monitors || !monitors.empty();
         reoffer();
+        answer_adds(monitors); // after the monitors event: the client hears of the monitor first
     }
 };
 
@@ -328,7 +360,7 @@ CapabilityManifest DesktopCapability::manifest() const {
     // docs/08#input-events-fjarrdesktop. Not `release-all`: a viewer's window losing focus sends
     // it, and that must never claim a free desktop.
     // clipboard-write is input too (docs/10): a paste lands where the holder is typing. clipboard-read is not.
-    m.control_inputs = {"pointer", "button", "wheel", "key", "key-combo", "text", "clipboard-write"};
+    m.control_inputs = {"pointer", "button", "wheel", "key", "key-combo", "text", "clipboard-write", "add-monitor", "remove-monitor"};
     m.config_schema = nlohmann::json{
         {"type", "object"},
         {"additionalProperties", false},
@@ -403,6 +435,7 @@ void DesktopCapability::session_detached(const SessionId& id, DetachReason, std:
     impl_->sessions.erase(id);
     impl_->pointer_seq.erase(id);
     impl_->cursors.erase(id); // its timer goes with it
+    impl_->remove_virtuals(id); // docs/08 add-monitor: a session's virtual monitors go with it
     for (auto it = impl_->incoming.begin(); it != impl_->incoming.end();) it = it->second.session == id ? impl_->incoming.erase(it) : std::next(it);
     if (impl_->input_session == id) impl_->input_session.reset();
 }
@@ -505,6 +538,47 @@ void DesktopCapability::on_message(SessionContext& ctx, const Envelope& msg) {
         in.len = ref->len;
         if (ref->len == 0) in.complete = true; // an empty clipboard: no frames will come
         impl_->try_write(ref->id);
+    } else if (msg.type == "add-monitor") {
+        // docs/08 add-monitor: input in the desktop domain (control_inputs), so only the holder is here.
+        const int w = p.value("width", 0), h = p.value("height", 0);
+        if (w < 320 || w > 3840 || h < 240 || h > 2160) return refuse(error_codes::payload_invalid, "a virtual monitor is 320-3840 wide and 240-2160 high");
+        if (!d.features().virtual_monitors) return refuse(error_codes::unavailable, "this robot's desktop cannot add a monitor");
+        auto& mine = impl_->virtuals[ctx.id()];
+        if (mine.size() >= Impl::MAX_VIRTUAL_PER_SESSION) return refuse(error_codes::unavailable, "a session may add at most 2 monitors");
+        const MonitorId id = d.create_virtual_monitor(w, h);
+        if (id == INVALID_MONITOR) return refuse(error_codes::unavailable, "the robot's desktop would not add a monitor now");
+        mine.insert(id);
+        const SessionId sid = ctx.id();
+        auto& pending = impl_->pending_adds[id];
+        pending.session = sid;
+        pending.request = msg;
+        // The monitor joins the layout once its stream has a consumer; answered then (Impl::answer_adds).
+        pending.timeout = ctx.every(std::chrono::seconds(5), [this, id, sid] {
+            auto pa = impl_->pending_adds.find(id);
+            if (pa == impl_->pending_adds.end()) return false;
+            auto s = impl_->sessions.find(sid);
+            if (s != impl_->sessions.end()) s->second->fail(pa->second.request, error_codes::unavailable, "the monitor did not appear within 5 s");
+            impl_->virtuals[sid].erase(id);
+            if (impl_->driver) impl_->driver->destroy_virtual_monitor(id);
+            impl_->pending_adds.erase(pa);
+            return false;
+        });
+        impl_->answer_adds(d.monitors()); // a backend that adds it at once has already reported it
+        return;
+    } else if (msg.type == "remove-monitor") {
+        const std::string wire = p.value("id", std::string{});
+        auto& mine = impl_->virtuals[ctx.id()];
+        for (const MonitorId m : mine) {
+            const auto mon = impl_->monitor_for("desk-" + wire);
+            if (mon && mon->id == m) {
+                mine.erase(m);
+                impl_->pending_adds.erase(m);
+                d.destroy_virtual_monitor(m);
+                if (request) ctx.result(msg, {{"ok", true}});
+                return;
+            }
+        }
+        return refuse(error_codes::payload_invalid, "no virtual monitor '" + wire + "' was added by this session");
     } else if (msg.type == "text") {
         // Typed through the robot's keymap, whole or not at all (docs/08 `text`).
         std::string error;

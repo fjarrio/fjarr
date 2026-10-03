@@ -25,9 +25,11 @@ import {
   SessionScope,
   SessionStatus,
   VideoGrid,
+  addDesktopMonitor,
   createFjarrClient,
   heldBy,
   isFjarrError,
+  removeDesktopMonitor,
   useControl,
   useDesktopClipboard,
   useFjarrClient,
@@ -232,6 +234,10 @@ function DesktopPanel({ session }: { session: Session }) {
   // The robot's clipboard (docs/22#clipboard): a copy on the robot lands on this browser's clipboard by
   // itself, or, when the browser wants a click first, through "Copy from robot".
   const clipboard = useDesktopClipboard(session);
+  // A screen of our own on the robot (docs/22#virtual-monitors-slice-35), sized to this window; it goes
+  // when the session ends.
+  const [myScreen, setMyScreen] = useState<string | null>(null);
+  const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(v / 8) * 8));
   // The picker stores the monitor's stable id, never its index or connector (docs/22#hot-plug).
   const [shown, setShown] = useState<string>("primary");
   const [note, setNote] = useState<string | null>(null);
@@ -264,6 +270,34 @@ function DesktopPanel({ session }: { session: Session }) {
             <button onClick={() => run(() => view.current!.keyCombo(["AltLeft", "Tab"]))}>Alt+Tab</button>
             <button onClick={() => run(() => view.current!.enterFullscreen())}>Fullscreen</button>
           </>
+        )}
+        {!desktop.viewOnly && !myScreen && (
+          <button
+            data-demo-add-screen
+            onClick={() =>
+              run(async () => {
+                const id = await addDesktopMonitor(session, { width: clamp(window.innerWidth, 320, 3840), height: clamp(window.innerHeight, 240, 2160) });
+                setMyScreen(id);
+                setShown(id);
+              })
+            }
+          >
+            Add a screen
+          </button>
+        )}
+        {myScreen && (
+          <button
+            data-demo-remove-screen
+            onClick={() =>
+              run(async () => {
+                await removeDesktopMonitor(session, myScreen);
+                setMyScreen(null);
+                setShown("primary");
+              })
+            }
+          >
+            Remove my screen
+          </button>
         )}
         {clipboard.state.sync === "needs-gesture" && <button onClick={() => run(clipboard.copyFromRobot)}>Copy from robot</button>}
         <span data-demo-clipboard={clipboard.state.sync} style={{ color: "#8b93a1" }}>

@@ -80,6 +80,8 @@ export { FocusRegistry, type FocusOptions, type FocusRegistration, type WindowLi
 export {
   acquireDesktopClipboard,
   acquireDesktopCursor,
+  addDesktopMonitor,
+  removeDesktopMonitor,
   contentBox,
   cursorDataUrl,
   DesktopClipboard,

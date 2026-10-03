@@ -101,7 +101,7 @@ void usage() {
                  "                   [--exec '<command>'] (tunnel: run it with the link up, $FJARR_ADDR set)\n"
                  "                   [--desktop-oracle <url of the fixture's test-window log>] (desktop-control)\n"
                  "                   [--desktop-plug <url of the fixture's monitor hot-plug>] (desktop-hotplug, desktop-clipboard)\n"
-                 "scenarios: smoke toggle hotplug rejected-track desktop-see desktop-control desktop-hotplug desktop-clipboard desktop-cursor silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer tunnel\n"
+                 "scenarios: smoke toggle hotplug rejected-track desktop-see desktop-control desktop-hotplug desktop-clipboard desktop-cursor desktop-virtual silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer tunnel\n"
                  "           soak (--cycles N, needs --introspect)\n"
                  "           netem-{lan,wifi-ok,4g,lossy,bad} (the profile is applied externally: docker/lab/netem.sh)\n"
                  "exit: 0 all assertions pass, 1 any fail, 2 usage, 3 timeout\n");
@@ -2608,6 +2608,72 @@ void scenario_desktop_cursor(Operator& op) {
             pos ? "at " + pos->payload.dump() : "no cursor-position near (0.60, 0.40) on " + desk);
 }
 
+/// Per-session virtual monitors (M3 3.5; docs/08 add-monitor, remove-monitor): an extra screen of the
+/// asked size joins the layout as a hot-plug would, streams, and leaves on remove-monitor.
+void scenario_desktop_virtual(Operator& op) {
+    Report& r = op.report();
+    connect_and_report(op);
+    auto desks_in = [](const json& tracks) {
+        std::vector<std::string> out;
+        for (const auto& t : tracks)
+            if (t.value("track_id", std::string()).rfind("desk-", 0) == 0) out.push_back(t.value("track_id", std::string()));
+        return out;
+    };
+    std::vector<std::string> before;
+    for (const auto& id : op.manifest_tracks())
+        if (id.rfind("desk-", 0) == 0) before.push_back(id);
+    auto reoffer = [&](std::size_t sig_mark, std::size_t n) -> std::optional<std::vector<std::string>> {
+        std::size_t from = sig_mark;
+        for (int i = 0; i < 3; i++) {
+            auto offer = op.wait_signal(from, "offer", 5000);
+            if (!offer) return std::nullopt;
+            op.answer_offer(*offer);
+            from = op.sig_mark();
+            auto desks = desks_in(offer->value("tracks", json::array()));
+            if (desks.size() == n) return desks;
+        }
+        return std::nullopt;
+    };
+
+    // 1. Add: answered with its id, announced with its size, offered as a track that streams.
+    std::size_t mark = op.inbox_mark(), smark = op.sig_mark();
+    const std::int64_t t0 = g_get_monotonic_time();
+    auto added = op.request("fjarr.desktop", "add-monitor", json{{"width", 1024}, {"height", 768}}, 8000);
+    const std::string id = added && added->payload.value("ok", false) ? added->payload.value("monitor", std::string()) : "";
+    r.check("virtual-add", !id.empty(), added ? added->payload.dump() + " in " + ms_str(g_get_monotonic_time() - t0) : "no answer to add-monitor");
+    if (id.empty()) return;
+    auto ev = op.wait_envelope(mark, "fjarr.desktop", "monitors", "event", 5000, [&](const Envelope& e) {
+        for (const auto& m : e.payload.value("monitors", json::array()))
+            if (m.value("id", std::string()) == id) return true;
+        return false;
+    });
+    json mon;
+    if (ev)
+        for (const auto& m : ev->payload["monitors"])
+            if (m.value("id", std::string()) == id) mon = m;
+    r.check("virtual-size", mon.value("w", 0) == 1024 && mon.value("h", 0) == 768, ev ? "the layout has " + mon.dump() : "no monitors event naming " + id);
+    auto two = reoffer(smark, before.size() + 1);
+    const std::string track = "desk-" + id;
+    const bool offered = two && std::find(two->begin(), two->end(), track) != two->end();
+    r.check("virtual-track", offered, offered ? track + " offered" : "no re-offer with " + track);
+    if (!offered) return;
+    const std::uint64_t f0 = op.frames(track);
+    const bool flowing = op.select(track, true, "active", 5000, "fjarr.desktop") && op.wait_frames(track, f0, 5, 10000);
+    r.check("virtual-frames", flowing, flowing ? std::to_string(op.frames(track) - f0) + " frames from the virtual monitor" : "no frames from " + track + why_no_frames(op));
+
+    // 2. Remove: out of the layout and out of the offer.
+    mark = op.inbox_mark();
+    smark = op.sig_mark();
+    auto removed = op.request("fjarr.desktop", "remove-monitor", json{{"id", id}});
+    auto gone = op.wait_envelope(mark, "fjarr.desktop", "monitors", "event", 5000, [&](const Envelope& e) {
+        for (const auto& m : e.payload.value("monitors", json::array()))
+            if (m.value("id", std::string()) == id) return false;
+        return true;
+    });
+    auto one = reoffer(smark, before.size());
+    r.check("virtual-remove", removed && removed->payload.value("ok", false) && gone && one, removed ? removed->payload.dump() + (gone ? ", left the layout" : ", still in the layout") + (one ? ", left the offer" : ", still offered") : "no answer to remove-monitor");
+}
+
 void scenario_desktop_hotplug(Operator& op) {
     Report& r = op.report();
     if (op.desktop_plug().empty()) {
@@ -3261,7 +3327,7 @@ const std::map<std::string, ScenarioFn> kScenarios = {
     {"smoke", scenario_smoke},       {"toggle", scenario_toggle},   {"hotplug", scenario_hotplug},     {"silent-operator", scenario_silent_operator},
     {"no-answer", scenario_no_answer}, {"socket-drop", scenario_socket_drop}, {"ice-restart", scenario_ice_restart}, {"deadman", scenario_deadman},
     {"congested-viewer", scenario_congested_viewer}, {"rejected-track", scenario_rejected_track},
-    {"desktop-see", scenario_desktop_see}, {"desktop-control", scenario_desktop_control}, {"desktop-hotplug", scenario_desktop_hotplug}, {"desktop-clipboard", scenario_desktop_clipboard}, {"desktop-cursor", scenario_desktop_cursor},
+    {"desktop-see", scenario_desktop_see}, {"desktop-control", scenario_desktop_control}, {"desktop-hotplug", scenario_desktop_hotplug}, {"desktop-clipboard", scenario_desktop_clipboard}, {"desktop-cursor", scenario_desktop_cursor}, {"desktop-virtual", scenario_desktop_virtual},
     {"relay-only", scenario_relay_only}, {"tunnel", scenario_tunnel}, {"soak", scenario_soak},
     // netem-<profile>: one function, the profile is read from the scenario name (unknown profile → usage, exit 2).
     {"netem-lan", scenario_netem},     {"netem-wifi-ok", scenario_netem}, {"netem-4g", scenario_netem},     {"netem-lossy", scenario_netem},

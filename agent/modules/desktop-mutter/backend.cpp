@@ -151,7 +151,8 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
     Features features() override {
         Features f;
         f.clipboard = true;    // through the helper's input session (docs/23#desktop-helper-protocol)
-        f.local_cursor = true; // mutter's cursor metadata, through module E's cursor reader
+        f.local_cursor = true; // mutter's cursor metadata, through module E's stream reader
+        f.virtual_monitors = true; // RecordVirtual, through the helper (docs/23, Virtual monitors)
         return f;
     }
     std::vector<Monitor> monitors() override { return monitors_; }
@@ -159,6 +160,8 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
     void on_capture_lost(std::function<void(MonitorId, CaptureLost)> cb) override { lost_cb_ = std::move(cb); }
 
     std::shared_ptr<VideoSource> start_capture(MonitorId monitor, CaptureOptions options) override {
+        // A virtual monitor we made is captured by the stream that made it (docs/23, Virtual monitors).
+        if (auto v = captures_.find(monitor); v != captures_.end() && v->second.is_virtual) return v->second.source;
         const Monitor* m = find(monitor);
         if (!m) return nullptr;
         auto& c = captures_[monitor];
@@ -174,14 +177,35 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
     void stop_capture(MonitorId monitor) override {
         auto it = captures_.find(monitor);
         if (it == captures_.end()) return;
+        if (it->second.is_virtual) return; // its own stream; it goes with destroy_virtual_monitor
         if (conn_ >= 0) send({{"type", "stop-capture"}, {"id", it->second.id}});
         it->second.source->lost("capture stopped");
         captures_.erase(it);
         embedded_.erase(monitor); // a new capture of it tries metadata again
     }
 
-    MonitorId create_virtual_monitor(int, int) override { return INVALID_MONITOR; }
-    void destroy_virtual_monitor(MonitorId) override {}
+    MonitorId create_virtual_monitor(int width, int height) override {
+        if (conn_ < 0 || !welcomed_ || width <= 0 || height <= 0) return INVALID_MONITOR;
+        const MonitorId id = next_monitor_++;
+        auto& c = captures_[id];
+        c.source = std::make_shared<MonitorSource>("desktop:virtual");
+        c.id = next_id_++;
+        c.cursor = "metadata";
+        c.is_virtual = true;
+        c.want_width = width;
+        c.want_height = height;
+        send({{"type", "add-virtual"}, {"id", c.id}, {"width", width}, {"height", height}, {"cursor", c.cursor}});
+        say(1, "virtual monitor asked for: " + std::to_string(width) + "x" + std::to_string(height));
+        return id;
+    }
+    void destroy_virtual_monitor(MonitorId monitor) override {
+        auto it = captures_.find(monitor);
+        if (it == captures_.end() || !it->second.is_virtual) return;
+        if (conn_ >= 0) send({{"type", "stop-capture"}, {"id", it->second.id}}); // the session ends, and the monitor with it
+        it->second.source->lost("the virtual monitor was removed");
+        if (!it->second.connector.empty()) virtual_by_connector_.erase(it->second.connector);
+        captures_.erase(it);
+    }
     std::shared_ptr<VideoSource> start_audio_capture() override { return nullptr; }
     void stop_audio_capture() override {}
     void on_cursor_shape(std::function<void(const CursorShape&)> cb) override {
@@ -270,6 +294,11 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         auto it = captures_.find(monitor);
         if (it == captures_.end()) return;
         Capture& c = it->second;
+        if (c.is_virtual) {
+            // Restarting would make another monitor; a virtual one draws what its stream asks for.
+            say(2, "virtual monitor " + c.connector + " streamed without a frame");
+            return;
+        }
         if (c.restarts >= 3) {
             say(3, "capture of " + c.connector + " has no frame after " + std::to_string(c.restarts) + " restarts; leaving it");
             return;
@@ -292,7 +321,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         }
     }
 
-    std::unique_ptr<desktop::mutter::StreamReader> start_reader(MonitorId monitor, int fd, std::uint32_t node) {
+    std::unique_ptr<desktop::mutter::StreamReader> start_reader(MonitorId monitor, int fd, std::uint32_t node, int width = 0, int height = 0) {
         return desktop::mutter::StreamReader::start(
             ctx_, fd, node, keepalive_ms_,
             [this](const desktop::mutter::CursorImage& img) {
@@ -310,7 +339,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
             [this, monitor](double nx, double ny) {
                 if (cursor_position_cb_) cursor_position_cb_(monitor, nx, ny);
             },
-            [this](int level, const std::string& msg) { say(level, msg); });
+            [this](int level, const std::string& msg) { say(level, msg); }, width, height);
     }
 
     /// One read of the robot's clipboard: the descriptor mutter handed over, drained as it fills.
@@ -372,6 +401,8 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         std::string connector, cursor;
         std::shared_ptr<MonitorSource> source;
         int restarts = 0; // after a capture that never gave a frame
+        bool is_virtual = false;            // made by RecordVirtual for a session (docs/23, Virtual monitors)
+        int want_width = 0, want_height = 0; // its size, asked for in the reader's format
     };
 
     void say(int level, const std::string& msg) {
@@ -455,7 +486,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
                     c.height = m.body.value("height", 0);
                     // The node's only consumer, linked now: mutter sends the cursor's shape, and on a
                     // still screen the only frame, to whoever is linked when it is produced (spikes).
-                    auto reader = start_reader(monitor, m.fds[0].release(), m.body.value("node", 0u));
+                    auto reader = start_reader(monitor, m.fds[0].release(), m.body.value("node", 0u), c.want_width, c.want_height);
                     if (reader) reader->on_stalled([this, monitor] { restart_capture(monitor); });
                     c.source->ready(std::move(reader));
                     request_input();
@@ -492,6 +523,15 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
             cb(type == "clipboard-set-done", m.body.value("reason", std::string{}));
         } else if (type == "clipboard-failed") {
             finish_read(m.body.value("id", 0), std::nullopt, m.body.value("reason", std::string{"the helper could not read the clipboard"}));
+        } else if (type == "virtual-connector") {
+            // The connector a virtual monitor got: it keeps the MonitorId it was asked for under.
+            const int id = m.body.value("id", 0);
+            for (auto& [monitor, c] : captures_)
+                if (c.id == id && c.is_virtual) {
+                    c.connector = m.body.value("connector", std::string{});
+                    virtual_by_connector_[c.connector] = monitor;
+                    say(1, "virtual monitor is " + c.connector);
+                }
         } else if (type == "capture-failed") {
             say(2, "the helper could not capture: " + m.body.value("reason", std::string{"?"}));
         } else if (type == "capture-lost") {
@@ -523,7 +563,10 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
             Monitor m;
             m.wire_id = ids[i];
             auto known = ids_by_wire_.find(m.wire_id);
-            m.id = known != ids_by_wire_.end() ? known->second : (ids_by_wire_[m.wire_id] = next_monitor_++);
+            if (auto v = virtual_by_connector_.find(keys[i].connector); keys[i].is_virtual && v != virtual_by_connector_.end())
+                m.id = ids_by_wire_[m.wire_id] = v->second; // one of ours: the id it was asked for under
+            else
+                m.id = known != ids_by_wire_.end() ? known->second : (ids_by_wire_[m.wire_id] = next_monitor_++);
             m.identity = {keys[i].vendor, keys[i].model, keys[i].serial};
             m.kind = keys[i].is_virtual ? MonitorKind::Virtual : MonitorKind::Physical;
             m.connector = keys[i].connector;
@@ -564,6 +607,9 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
             c.source->lost("the desktop session ended");
             if (lost_cb_) lost_cb_(monitor, CaptureLost::SessionEnded);
         }
+        // Virtual monitors die with the helper's ScreenCast sessions: nothing to record again later.
+        for (auto it = captures_.begin(); it != captures_.end();) it = it->second.is_virtual ? captures_.erase(it) : std::next(it);
+        virtual_by_connector_.clear();
         monitors_.clear();
         if (monitors_cb_) monitors_cb_(monitors_);
     }
@@ -589,6 +635,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
     desktop::mutter::EisInput input_;
     bool input_requested_ = false;
     std::set<MonitorId> embedded_; // monitors whose capture fell back to the cursor in the video
+    std::map<std::string, MonitorId> virtual_by_connector_; // virtual monitors we made, by the connector they got
     std::function<void(const CursorShape&)> cursor_shape_cb_;
     std::function<void(MonitorId, double, double)> cursor_position_cb_;
     CursorShape shape_; // the latest, for a capability that subscribes later

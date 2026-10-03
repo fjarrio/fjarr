@@ -209,3 +209,28 @@ test("the Desktop panel shows the robot's own cursor: under the operator's point
   expect(left).toBeLessThan(45);
   await page.screenshot({ path: dashboard.out.path("desktop-cursor.png") });
 });
+
+test("the Desktop panel's \"Add a screen\" gives the operator a monitor of their own, which the robot streams and removes (M3 3.5)", async ({ dashboard, stack, page }) => {
+  await stack.requireServer();
+  needs(await stack.dashboardReachable(), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
+  const desktopRobot = process.env.E2E_DESKTOP_ROBOT_HTTP ?? "http://desktop-robot:7381";
+  needs(await fetch(desktopRobot, { signal: AbortSignal.timeout(2000) }).then(() => true, () => false), `desktop-robot is not running at ${desktopRobot} — \`make desktop-e2e\``);
+
+  await dashboard.goto();
+  await page.getByRole("button", { name: /Desktop Robot 01/ }).click();
+  await dashboard.connect("desktop-robot-01");
+  await dashboard.waitForState("desktop-robot-01", "connected");
+  await expect(page.locator("[data-fjarr-desktop] [data-fjarr-track^='desk-']")).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
+
+  await page.locator("[data-demo-add-screen]").click();
+  const picker = page.locator("[data-demo-monitor-picker]");
+  await expect(picker).toBeVisible({ timeout: 10_000 });
+  await expect(picker.locator("option")).toHaveCount(4); // primary, all, the fixture's monitor, and ours
+  await expect(picker).not.toHaveValue(/^(primary|all)$/); // the panel shows the new screen
+  await expect(page.locator("[data-fjarr-desktop] [data-fjarr-track^='desk-']")).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
+  await page.screenshot({ path: dashboard.out.path("desktop-virtual.png") });
+
+  await page.locator("[data-demo-remove-screen]").click();
+  await expect(picker).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.locator("[data-demo-add-screen]")).toBeVisible();
+});

@@ -45,18 +45,22 @@ class StubBackend final : public DesktopBackend, public ClipboardHandle {
     Features features() override {
         Features f;
         f.clipboard = std::getenv("FJARR_STUB_RECORD") != nullptr;
+        f.virtual_monitors = f.clipboard;
         return f;
     }
-    std::vector<Monitor> monitors() override {
-        if (!std::getenv("FJARR_STUB_RECORD")) return {};
-        if (!g_monitors.empty()) return g_monitors;
+    static Monitor default_monitor() {
         Monitor m;
         m.id = 7;
         m.wire_id = "virtual-1";
         m.width = 1280;
         m.height = 720;
         m.primary = true;
-        return {m};
+        return m;
+    }
+    std::vector<Monitor> monitors() override {
+        if (!std::getenv("FJARR_STUB_RECORD")) return {};
+        if (!g_monitors.empty()) return g_monitors;
+        return {default_monitor()};
     }
     void on_monitors_changed(std::function<void(std::vector<Monitor>)> cb) override { g_monitors_cb = std::move(cb); }
     void on_capture_lost(std::function<void(MonitorId, CaptureLost)>) override {}
@@ -66,8 +70,28 @@ class StubBackend final : public DesktopBackend, public ClipboardHandle {
         return std::make_shared<StubSource>();
     }
     void stop_capture(MonitorId m) override { record("stop " + std::to_string(m)); }
-    MonitorId create_virtual_monitor(int, int) override { return INVALID_MONITOR; }
-    void destroy_virtual_monitor(MonitorId) override {}
+    /// A virtual monitor joins the layout at once, as mutter's does once its stream has a consumer.
+    MonitorId create_virtual_monitor(int width, int height) override {
+        if (!std::getenv("FJARR_STUB_RECORD")) return INVALID_MONITOR;
+        record("virtual " + std::to_string(width) + "x" + std::to_string(height));
+        if (g_monitors.empty()) g_monitors.push_back(default_monitor());
+        Monitor m;
+        m.id = next_virtual_++;
+        m.wire_id = "virtual-" + std::to_string(m.id);
+        m.kind = MonitorKind::Virtual;
+        m.x = 1280;
+        m.width = width;
+        m.height = height;
+        g_monitors.push_back(m);
+        if (g_monitors_cb) g_monitors_cb(g_monitors);
+        return m.id;
+    }
+    void destroy_virtual_monitor(MonitorId id) override {
+        record("destroy " + std::to_string(id));
+        std::erase_if(g_monitors, [id](const Monitor& m) { return m.id == id; });
+        if (g_monitors_cb) g_monitors_cb(g_monitors);
+    }
+    MonitorId next_virtual_ = 100;
     std::shared_ptr<VideoSource> start_audio_capture() override { return nullptr; }
     void stop_audio_capture() override {}
     void on_cursor_shape(std::function<void(const CursorShape&)> cb) override { g_shape_cb = std::move(cb); }

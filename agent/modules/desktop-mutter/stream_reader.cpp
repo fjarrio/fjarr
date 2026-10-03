@@ -30,6 +30,7 @@ struct StreamReader::Impl {
     spa_source* keepalive = nullptr;
     spa_source* first_frame_watch = nullptr; // re-links when a stream stays without a frame (below)
     std::uint32_t node = 0;
+    int want_width = 0, want_height = 0; // a virtual monitor's size, asked for in the format
     int relinks = 0;
     int keepalive_ms = 100;
     GMainContext* ctx = nullptr;
@@ -62,10 +63,16 @@ struct StreamReader::Impl {
         std::uint8_t buf[512];
         spa_pod_builder b = SPA_POD_BUILDER_INIT(buf, sizeof(buf));
         const spa_pod* params[1];
-        params[0] = static_cast<const spa_pod*>(spa_pod_builder_add_object(
-            &b, SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat, SPA_FORMAT_mediaType, SPA_POD_Id(SPA_MEDIA_TYPE_video), SPA_FORMAT_mediaSubtype,
-            SPA_POD_Id(SPA_MEDIA_SUBTYPE_raw), SPA_FORMAT_VIDEO_format,
-            SPA_POD_CHOICE_ENUM_Id(5, SPA_VIDEO_FORMAT_BGRx, SPA_VIDEO_FORMAT_BGRx, SPA_VIDEO_FORMAT_BGRA, SPA_VIDEO_FORMAT_RGBx, SPA_VIDEO_FORMAT_RGBA)));
+        spa_pod_frame f;
+        spa_pod_builder_push_object(&b, &f, SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat);
+        spa_pod_builder_add(&b, SPA_FORMAT_mediaType, SPA_POD_Id(SPA_MEDIA_TYPE_video), SPA_FORMAT_mediaSubtype, SPA_POD_Id(SPA_MEDIA_SUBTYPE_raw),
+                            SPA_FORMAT_VIDEO_format,
+                            SPA_POD_CHOICE_ENUM_Id(5, SPA_VIDEO_FORMAT_BGRx, SPA_VIDEO_FORMAT_BGRx, SPA_VIDEO_FORMAT_BGRA, SPA_VIDEO_FORMAT_RGBx, SPA_VIDEO_FORMAT_RGBA), 0);
+        if (want_width > 0 && want_height > 0) {
+            const spa_rectangle size{static_cast<std::uint32_t>(want_width), static_cast<std::uint32_t>(want_height)};
+            spa_pod_builder_add(&b, SPA_FORMAT_VIDEO_size, SPA_POD_Rectangle(&size), 0);
+        }
+        params[0] = static_cast<const spa_pod*>(spa_pod_builder_pop(&b, &f));
         return pw_stream_connect(stream, PW_DIRECTION_INPUT, node, static_cast<pw_stream_flags>(PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS), params, 1) >=
                0;
     }
@@ -254,7 +261,8 @@ const pw_stream_events EVENTS = [] {
 }();
 } // namespace
 
-std::unique_ptr<StreamReader> StreamReader::start(GMainContext* ctx, int fd, std::uint32_t node, int keepalive_ms, Shape shape, Position position, Log log) {
+std::unique_ptr<StreamReader> StreamReader::start(GMainContext* ctx, int fd, std::uint32_t node, int keepalive_ms, Shape shape, Position position, Log log,
+                                                   int width, int height) {
     static const bool initialized = [] {
         pw_init(nullptr, nullptr);
         return true;
@@ -263,6 +271,8 @@ std::unique_ptr<StreamReader> StreamReader::start(GMainContext* ctx, int fd, std
     auto impl = std::make_unique<Impl>();
     impl->ctx = ctx;
     impl->node = node;
+    impl->want_width = width;
+    impl->want_height = height;
     impl->keepalive_ms = keepalive_ms > 0 ? keepalive_ms : 100;
     impl->shape = std::move(shape);
     impl->position = std::move(position);

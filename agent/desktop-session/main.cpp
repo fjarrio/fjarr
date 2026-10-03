@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <set>
 #include <memory>
 #include <string>
 
@@ -124,6 +125,8 @@ class Helper {
             say("ignored '" + type + "' before welcome");
         } else if (type == "start-capture") {
             start_capture(m.body);
+        } else if (type == "add-virtual") {
+            start_capture(m.body, /*virtual_monitor=*/true);
         } else if (type == "stop-capture") {
             captures_.erase(m.body.value("id", 0)); // its ScreenCast session stops; no other is touched
         } else if (type == "open-input") {
@@ -141,10 +144,24 @@ class Helper {
         // docs/26#ghost-screens: a ghost is never primary while a real monitor is connected. The
         // change raises MonitorsChanged, and the corrected layout is what gets sent then.
         if (enforce_primary(monitors)) return;
+        // A virtual monitor's connector, once the layout shows it (docs/23, Virtual monitors): the
+        // monitor appears when the stream's consumer has negotiated its size, after capture-started.
+        for (auto& [id, rec] : captures_) {
+            if (!rec.is_virtual || !rec.connector.empty()) continue;
+            for (const auto& m : monitors) {
+                if (!m.is_virtual || rec.before.count(m.connector)) continue;
+                const bool claimed = std::any_of(captures_.begin(), captures_.end(), [&](const auto& o) { return o.second.connector == m.connector; });
+                if (claimed) continue;
+                rec.connector = m.connector;
+                send({{"type", "virtual-connector"}, {"id", id}, {"connector", m.connector}});
+                say("virtual monitor " + std::to_string(id) + " is " + m.connector + ", " + std::to_string(m.width) + "x" + std::to_string(m.height));
+                break;
+            }
+        }
         // docs/23#desktop-helper-protocol: mutter says nothing when a recorded monitor goes away.
         for (auto it = captures_.begin(); it != captures_.end();) {
             const bool there = std::any_of(monitors.begin(), monitors.end(), [&](const helper::MonitorInfo& m) { return m.connector == it->second.connector; });
-            if (there || it->second.connector.empty()) {
+            if (there || it->second.connector.empty() || it->second.is_virtual) { // a virtual capture is the monitor
                 ++it;
                 continue;
             }
@@ -181,10 +198,16 @@ class Helper {
         return true;
     }
 
-    void start_capture(const json& req) {
+    void start_capture(const json& req, bool virtual_monitor = false) {
         const int id = req.value("id", 0);
-        const std::string connector = req.value("connector", std::string{});
-        auto cap = helper::Capture::start(bus_, connector, req.value("cursor", std::string{"embedded"}), [this, id, connector](bool ok, helper::StreamInfo info, std::string error) {
+        const std::string connector = virtual_monitor ? "" : req.value("connector", std::string{});
+        std::set<std::string> before; // the virtual connectors there were, so the new one can be told apart
+        if (virtual_monitor) {
+            std::string e;
+            for (const auto& m : helper::current_monitors(bus_, &e))
+                if (m.is_virtual) before.insert(m.connector);
+        }
+        auto recorded = [this, id, connector](bool ok, helper::StreamInfo info, std::string error) {
             if (!ok) {
                 send({{"type", "capture-failed"}, {"id", id}, {"reason", error}});
                 say("capture " + std::to_string(id) + " of '" + connector + "' failed: " + error);
@@ -204,7 +227,9 @@ class Helper {
             ::close(pw); // the agent holds its own copy now
             say("capture " + std::to_string(id) + " of '" + connector + "' started: node " + std::to_string(info.node) + ", " +
                 std::to_string(info.width) + "x" + std::to_string(info.height));
-        });
+        };
+        auto cursor = req.value("cursor", std::string{"embedded"});
+        auto cap = virtual_monitor ? helper::Capture::start_virtual(bus_, cursor, recorded) : helper::Capture::start(bus_, connector, cursor, recorded);
         if (!cap) return; // failed, and said so
         cap->on_closed([this, id] {
             // Deferred: this runs inside the capture's own signal handler.
@@ -219,7 +244,7 @@ class Helper {
                 return G_SOURCE_REMOVE;
             }, new std::pair<Helper*, int>(this, id));
         });
-        captures_[id] = Recording{connector, std::move(cap)};
+        captures_[id] = Recording{connector, std::move(cap), virtual_monitor, std::move(before)};
     }
 
     helper::InputSession& input() {
@@ -372,8 +397,10 @@ class Helper {
     bool welcomed_ = false;
     bool waiting_logged_ = false;
     struct Recording {
-        std::string connector;
+        std::string connector; // a virtual monitor's: empty until the layout shows it
         std::unique_ptr<helper::Capture> capture;
+        bool is_virtual = false;
+        std::set<std::string> before; // virtual: the virtual connectors there were when it was asked for
     };
     std::unique_ptr<helper::InputSession> input_;
     std::map<int, Recording> captures_; // by the agent's capture id

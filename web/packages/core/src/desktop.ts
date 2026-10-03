@@ -586,3 +586,22 @@ function base64(bytes: Uint8Array): string {
   for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]!);
   return btoa(s);
 }
+
+// --- virtual monitors (docs/08 add-monitor, remove-monitor; docs/22#virtual-monitors-slice-35) -------
+
+/**
+ * Ask the robot for an extra screen of this size for this session — one sized to the operator's
+ * window, say. Resolves with its monitor id once it is in the layout; it then arrives like any
+ * hot-plugged monitor (`useMonitors`, `<DesktopLayout>`, `<DesktopView monitorId>`), and goes when the
+ * session ends. It is input: it takes the desktop's control (docs/10). Rejects with the agent's error
+ * (`unavailable` past two per session or where the robot has none).
+ */
+export async function addDesktopMonitor(session: Session, size: { width: number; height: number }): Promise<string> {
+  const res = await session.request<ResultPayload & { monitor: string }>(CAP, "add-monitor", { width: Math.round(size.width), height: Math.round(size.height) });
+  return res.monitor;
+}
+
+/** Take away a screen this session added with `addDesktopMonitor`. */
+export async function removeDesktopMonitor(session: Session, id: string): Promise<void> {
+  await session.request(CAP, "remove-monitor", { id });
+}

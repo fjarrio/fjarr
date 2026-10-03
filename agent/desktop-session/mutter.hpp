@@ -91,6 +91,9 @@ class Capture {
     /// runs once, from the main loop, when its PipeWire node is known, or at once on failure (and
     /// then null is returned).
     static std::unique_ptr<Capture> start(GDBusConnection* bus, const std::string& connector, const std::string& cursor, Recorded done);
+    /// A virtual monitor (RecordVirtual): the stream makes the monitor, which exists while it has a
+    /// consumer and takes its size from the consumer's format (docs/23#desktop-helper-protocol).
+    static std::unique_ptr<Capture> start_virtual(GDBusConnection* bus, const std::string& cursor, Recorded done);
     ~Capture();
     Capture(const Capture&) = delete;
     Capture& operator=(const Capture&) = delete;
@@ -99,6 +102,7 @@ class Capture {
 
   private:
     explicit Capture(GDBusConnection* bus);
+    static std::unique_ptr<Capture> start_any(GDBusConnection* bus, const std::string* connector, const std::string& cursor, Recorded done);
     GDBusConnection* bus_;
     std::string path_, stream_;
     Recorded done_;

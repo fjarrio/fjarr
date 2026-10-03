@@ -25,7 +25,10 @@ class StreamReader {
 
     /// Takes `fd`, a PipeWire connection narrowed to `node`. Callbacks run on `ctx`. Nullptr (logged)
     /// when PipeWire refuses.
-    static std::unique_ptr<StreamReader> start(GMainContext* ctx, int fd, std::uint32_t node, int keepalive_ms, Shape shape, Position position, Log log);
+    /// `width`×`height` > 0: ask for exactly that size — a virtual monitor takes its size from its
+    /// consumer's format (docs/23, Virtual monitors).
+    static std::unique_ptr<StreamReader> start(GMainContext* ctx, int fd, std::uint32_t node, int keepalive_ms, Shape shape, Position position, Log log,
+                                               int width = 0, int height = 0);
     ~StreamReader();
     StreamReader(const StreamReader&) = delete;
     StreamReader& operator=(const StreamReader&) = delete;

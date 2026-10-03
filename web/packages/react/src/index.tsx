@@ -56,7 +56,7 @@ export {
 } from "./components.js";
 
 // Core surface hosts need without a second import.
-export { createFjarrClient, FjarrError, NotImplementedError, heldBy, isFjarrError } from "@fjarr/core";
+export { addDesktopMonitor, createFjarrClient, FjarrError, NotImplementedError, heldBy, isFjarrError, removeDesktopMonitor } from "@fjarr/core";
 export type {
   AcquireOptions,
   ControlDomain,

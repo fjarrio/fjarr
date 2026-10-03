@@ -4,7 +4,7 @@
  * spec: docs/22-remote-desktop-client.md#input-pipeline · #testing-docs15 · docs/08#input-events-fjarrdesktop
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { acquireDesktopClipboard, acquireDesktopCursor, contentBox, createFjarrClient, cursorDataUrl, DesktopInput, encodePng, FjarrError, isPasteChord, normalizedPoint, type Session } from "../src/index.js";
+import { acquireDesktopClipboard, acquireDesktopCursor, addDesktopMonitor, contentBox, createFjarrClient, cursorDataUrl, DesktopInput, encodePng, FjarrError, isPasteChord, normalizedPoint, removeDesktopMonitor, type Session } from "../src/index.js";
 import { encodeBlobChunk } from "../src/blob.js";
 import { fakeMediaStreamFactory, MockAgent, type MockAgentOptions } from "../src/testing/index.js";
 
@@ -308,5 +308,24 @@ describe("DesktopCursor", () => {
     const raw = inflateSync(png.subarray(41, 41 + idatLen));
     expect(Array.from(raw)).toEqual([0, ...Array.from(rgba.subarray(0, 12)), 0, ...Array.from(rgba.subarray(12, 24))]);
     expect(cursorDataUrl("t", { w: 3, h: 2, rgba })).toMatch(/^data:image\/png;base64,iVBORw0KGgo/);
+  });
+});
+
+describe("virtual monitors (docs/08 add-monitor)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("add-monitor asks for the size and resolves with the new monitor's id; remove-monitor names it", async () => {
+    const { agent, session } = await rig((env) =>
+      env.type === "add-monitor" ? { ok: true, monitor: "virtual-2" } : env.type === "remove-monitor" ? { ok: true } : undefined,
+    );
+    const added = addDesktopMonitor(session, { width: 1023.6, height: 768 });
+    await tick();
+    await expect(added).resolves.toBe("virtual-2");
+    expect(agent.received.find((e) => e.type === "add-monitor")?.payload).toEqual({ width: 1024, height: 768 });
+    const removed = removeDesktopMonitor(session, "virtual-2");
+    await tick();
+    await removed;
+    expect(agent.received.find((e) => e.type === "remove-monitor")?.payload).toEqual({ id: "virtual-2" });
   });
 });

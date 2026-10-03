@@ -435,9 +435,19 @@ position everywhere else. In CI, opsim's `desktop-cursor` receives mutter's
 lab browser, the demo's Desktop panel shows the same arrow both ways.
 Found on the way: control envelopes sent before the control channel opened
 were dropped, which lost the cursor's shape and the clipboard offer for every
-session but the first; they are now held until it opens. Remaining in 3.5:
-`sharpness`, per-session virtual monitors, and the clipboard and cursor on
-the mini-PC.
+session but the first; they are now held until it opens.
+**`sharpness` and per-session virtual monitors (2026-10-03).** A producer
+that any viewer asks to keep sharp lowers its frame rate as the bitrate
+falls, instead of each frame's quality
+([docs/16](16-performance-budgets.md)). `add-monitor` gives the operator a
+screen of their own on the robot, sized to their window: the helper's
+`RecordVirtual` stream is that monitor's capture, it streams like any other,
+and it goes with `remove-monitor` or the session
+([docs/22](22-remote-desktop-client.md#virtual-monitors-slice-35)). In CI,
+opsim's `desktop-virtual` adds a 1024×768 screen (answered in 19 ms),
+receives its frames, and removes it, 6/6. In the lab browser, the demo's
+"Add a screen" shows the new screen streaming and removes it. Remaining in
+3.5: the clipboard and cursor on the mini-PC.
 
 ## M3.5 — Hear the robot {#m35}
 

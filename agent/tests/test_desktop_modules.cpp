@@ -503,3 +503,56 @@ TEST(DesktopCursor, aMonitorWhoseCaptureFellBackSaysTheCursorIsInItsVideo) {
     EXPECT_FALSE(list[0].contains("cursor")) << "metadata: the cursor arrives beside the video";
     EXPECT_EQ(list[1].value("cursor", ""), "embedded");
 }
+
+// --- virtual monitors (M3 3.5) --------------------------------------------------------------------------
+// spec: docs/08 add-monitor, remove-monitor · docs/10#session-ownership
+
+TEST(DesktopVirtual, anAddedMonitorJoinsTheLayoutAndTheAddIsAnsweredWithItsId) {
+    InputRig r;
+    r.send(r.a, "add-monitor", {{"width", 1024}, {"height", 768}}, "request");
+    const auto* res = last(r.a, "add-monitor");
+    ASSERT_NE(res, nullptr);
+    EXPECT_TRUE(res->payload.value("ok", false)) << res->payload.dump();
+    const std::string id = res->payload.value("monitor", "");
+    EXPECT_EQ(id.rfind("virtual-", 0), 0u) << id;
+    // Every session hears of it, as of any hot-plug, before the answer.
+    const auto* ev = last(r.b, "monitors");
+    ASSERT_NE(ev, nullptr);
+    bool seen = false;
+    for (const auto& m : ev->payload["monitors"]) seen = seen || (m.value("id", "") == id && m.value("w", 0) == 1024 && m.value("h", 0) == 768);
+    EXPECT_TRUE(seen) << ev->payload.dump();
+    EXPECT_NE(std::find(r.calls().begin(), r.calls().end(), "virtual 1024x768"), r.calls().end());
+}
+
+TEST(DesktopVirtual, sizesOutsideTheBoundsAndAThirdMonitorAreRefused) {
+    InputRig r;
+    r.send(r.a, "add-monitor", {{"width", 100}, {"height", 768}}, "request");
+    EXPECT_EQ(r.a.sent.back().payload["error"]["code"], "payload-invalid");
+    r.send(r.a, "add-monitor", {{"width", 800}, {"height", 600}}, "request");
+    r.send(r.a, "add-monitor", {{"width", 800}, {"height", 600}}, "request");
+    r.send(r.a, "add-monitor", {{"width", 800}, {"height", 600}}, "request");
+    EXPECT_EQ(r.a.sent.back().payload["error"]["code"], "unavailable") << "two per session";
+}
+
+TEST(DesktopVirtual, onlyItsOwnSessionRemovesItAndAllGoWhenTheSessionEnds) {
+    InputRig r;
+    r.send(r.a, "add-monitor", {{"width", 800}, {"height", 600}}, "request");
+    const std::string id = last(r.a, "add-monitor")->payload.value("monitor", "");
+    r.send(r.b, "remove-monitor", {{"id", id}}, "request");
+    EXPECT_EQ(r.b.sent.back().payload["error"]["code"], "payload-invalid") << "another session's";
+    r.send(r.a, "remove-monitor", {{"id", id}}, "request");
+    EXPECT_TRUE(r.a.sent.back().payload.value("ok", false));
+    // One more, and the session ends: it goes with it.
+    r.send(r.a, "add-monitor", {{"width", 640}, {"height", 480}}, "request");
+    r.cap.session_detached(r.a.sid, fjarr::DetachReason::PeerGone, "peer-gone");
+    std::size_t destroys = 0;
+    for (const auto& c : r.calls()) destroys += c.rfind("destroy ", 0) == 0;
+    EXPECT_EQ(destroys, 2u);
+}
+
+TEST(DesktopVirtual, addingAndRemovingAMonitorIsDesktopInput) {
+    fjarr::DesktopCapability cap;
+    const auto inputs = cap.manifest().control_inputs;
+    EXPECT_NE(std::find(inputs.begin(), inputs.end(), "add-monitor"), inputs.end());
+    EXPECT_NE(std::find(inputs.begin(), inputs.end(), "remove-monitor"), inputs.end());
+}

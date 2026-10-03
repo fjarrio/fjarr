@@ -369,6 +369,15 @@ Capture::~Capture() {
 }
 
 std::unique_ptr<Capture> Capture::start(GDBusConnection* bus, const std::string& connector, const std::string& cursor, Recorded done) {
+    return start_any(bus, &connector, cursor, std::move(done));
+}
+
+std::unique_ptr<Capture> Capture::start_virtual(GDBusConnection* bus, const std::string& cursor, Recorded done) {
+    return start_any(bus, nullptr, cursor, std::move(done));
+}
+
+/// RecordMonitor of `connector`, or RecordVirtual when it is null.
+std::unique_ptr<Capture> Capture::start_any(GDBusConnection* bus, const std::string* connector, const std::string& cursor, Recorded done) {
     std::unique_ptr<Capture> c(new Capture(bus));
     std::string error;
     GVariantBuilder none;
@@ -386,7 +395,8 @@ std::unique_ptr<Capture> Capture::start(GDBusConnection* bus, const std::string&
     GVariantBuilder props;
     g_variant_builder_init(&props, G_VARIANT_TYPE("a{sv}"));
     g_variant_builder_add(&props, "{sv}", "cursor-mode", g_variant_new_uint32(cursor_mode(cursor)));
-    r = call(bus, SC, c->path_, "org.gnome.Mutter.ScreenCast.Session", "RecordMonitor", g_variant_new("(sa{sv})", connector.c_str(), &props), "(o)", &error);
+    r = connector ? call(bus, SC, c->path_, "org.gnome.Mutter.ScreenCast.Session", "RecordMonitor", g_variant_new("(sa{sv})", connector->c_str(), &props), "(o)", &error)
+                  : call(bus, SC, c->path_, "org.gnome.Mutter.ScreenCast.Session", "RecordVirtual", g_variant_new("(a{sv})", &props), "(o)", &error);
     if (!r) {
         done(false, {}, error);
         return nullptr;
