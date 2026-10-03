@@ -59,6 +59,11 @@ class Producer {
     /// Rate control (docs/23#rate-control-and-tier-switching): the tier encoder's target, changed
     /// while playing. Returns true when the encoder's property changed.
     bool set_bitrate(const std::string& tier, int kbps);
+    /// Preference sharpness (docs/23 rate control), for every tier, now and as each starts: the frame
+    /// rate falls with the bitrate instead of each frame's quality. False: motion, the rate held.
+    void set_sharpness(bool sharp);
+    /// The frame rate videorate lets through now (the tier's own, or lower under sharpness).
+    int current_max_fps(const std::string& tier) const;
     /// The tier's current target (its profile's until rate control moved it); 0 for a tier not running.
     int current_kbps(const std::string& tier) const;
     /// The band rate control may move a tier within: [low, target] (docs/23).
@@ -81,8 +86,13 @@ class Producer {
         glib::GstPadPtr tee_pad;
         HubKey key;
         FrameHub* hub = nullptr;
-        int kbps = 0; // current encoder target
+        int kbps = 0;       // current encoder target
+        int fps = 30;       // the tier's rate (TierProfile)
+        bool sharp = false; // preference sharpness: the frame rate follows the bitrate (docs/23)
+        int max_fps = 30;   // what videorate lets through now
     };
+    void apply_rate(const std::string& tier, Tier& t);
+    bool sharp_ = false;
     TierProfile profile_for(const std::string& tier) const;
     static GstFlowReturn on_new_sample(GstAppSink* sink, gpointer user);
     static gboolean on_bus(GstBus* bus, GstMessage* msg, gpointer user);

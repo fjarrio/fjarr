@@ -150,3 +150,70 @@ TEST(MediaPlaneTargets, aViewerThatChangedTierStopsSteeringTheEncoderItLeft) {
     });
     loop.stop();
 }
+
+TEST(MediaPlaneTargets, sharpnessLowersTheFrameRateWithTheBitrateAndMotionHoldsIt) {
+    // docs/23 rate control, motion or sharpness: under sharpness each frame keeps its bits — the rate
+    // follows the target down from the band's top (never below 5); a viewer's preference goes with it.
+    CoreLoop loop;
+    loop.start();
+    AgentConfig::MediaSection cfg; // active 4000 kbps at 30 fps, band_low 2000
+    SourceRegistry reg(loop.context());
+    std::unique_ptr<MediaPlane> plane;
+    loop.call_sync([&] {
+        plane = std::make_unique<MediaPlane>(loop, cfg, EncoderChoice{EncoderKind::Software, "software"}, reg);
+        TrackSpec spec;
+        spec.track_id = "t";
+        spec.label = "t";
+        spec.source = SourceRef{std::shared_ptr<VideoSource>(reg.create(nlohmann::json{{"type", "test"}})), "src"};
+        plane->register_track(TrackRegistration{spec, "fjarr.test", false});
+    });
+    struct Sink : FrameSink {
+        bool push(glib::GstBufferPtr, GstCaps*) override { return true; }
+    };
+    auto a = std::make_shared<Sink>();
+    auto b = std::make_shared<Sink>();
+    loop.call_sync([&] {
+        plane->hub().subscribe(HubKey{"t", "active"}, a);
+        plane->hub().subscribe(HubKey{"t", "active"}, b);
+    });
+    auto fps = [&] {
+        int f = -1;
+        loop.call_sync([&] {
+            auto* p = plane->producer("t");
+            f = p && p->has_tier("active") ? p->current_max_fps("active") : -1;
+        });
+        return f;
+    };
+    auto settle = [&](int want) {
+        for (int i = 0; i < 150 && fps() != want; i++) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        return fps();
+    };
+    for (int i = 0; i < 300 && fps() < 0; i++) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    ASSERT_EQ(fps(), 30);
+
+    // Motion, the default: half the bitrate, the same frame rate.
+    loop.call_sync([&] {
+        plane->report_allotment("t", "active", a.get(), 2'000'000);
+        plane->report_allotment("t", "active", b.get(), 4'500'000);
+    });
+    EXPECT_EQ(settle(30), 30);
+    // One viewer asks for sharpness: half the target, half the frames.
+    loop.call_sync([&] { plane->report_preference("t", a.get(), true); });
+    EXPECT_EQ(settle(15), 15);
+    // The floor: a lone viewer far below the band still gets 5 frames a second.
+    loop.call_sync([&] {
+        plane->forget_allotment(b.get());
+        plane->report_allotment("t", "active", a.get(), 300'000);
+    });
+    EXPECT_EQ(settle(5), 5);
+    // The viewer goes, and its preference with it: back to motion.
+    loop.call_sync([&] { plane->forget_allotment(a.get()); });
+    EXPECT_EQ(settle(30), 30);
+
+    loop.call_sync([&] {
+        plane->hub().unsubscribe(HubKey{"t", "active"}, a);
+        plane->hub().unsubscribe(HubKey{"t", "active"}, b);
+        plane.reset();
+    });
+    loop.stop();
+}

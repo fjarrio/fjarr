@@ -83,6 +83,7 @@ bool MediaPlane::ensure_producer(Registered& r) {
         return false;
     }
     r.producer = std::move(p);
+    if (auto sh = sharp_.find(id); sh != sharp_.end() && !sh->second.empty()) r.producer->set_sharpness(true); // a rebuilt producer keeps it
     return true;
 }
 
@@ -139,6 +140,21 @@ void MediaPlane::forget_allotment(const void* subscriber) {
         it->second.erase(subscriber);
         it = it->second.empty() ? allotments_.erase(it) : std::next(it);
     }
+    for (auto& [track, viewers] : sharp_)
+        if (viewers.erase(subscriber)) apply_sharpness(track); // a viewer's preference goes with the viewer
+}
+
+void MediaPlane::report_preference(const std::string& track_id, const void* subscriber, bool sharpness) {
+    loop_.assert_owner("MediaPlane::report_preference");
+    auto& viewers = sharp_[track_id];
+    const bool changed = sharpness ? viewers.insert(subscriber).second : viewers.erase(subscriber) > 0;
+    if (changed) apply_sharpness(track_id);
+}
+
+void MediaPlane::apply_sharpness(const std::string& track_id) {
+    auto t = tracks_.find(track_id);
+    if (t == tracks_.end() || !t->second.producer) return;
+    t->second.producer->set_sharpness(sharp_.count(track_id) && !sharp_[track_id].empty());
 }
 
 namespace {

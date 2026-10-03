@@ -265,6 +265,9 @@ bool Producer::start_tier(const std::string& tier) {
         }
     }
     t->kbps = passthrough_ ? 0 : profile.kbps; // passthrough: the camera sets the rate, not us
+    t->fps = profile.fps;
+    t->max_fps = profile.fps;
+    t->sharp = sharp_;
     tiers_[tier] = std::move(t);
     if (!playing_) {
         if (gst_element_set_state(pipeline_.get(), GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
@@ -298,7 +301,39 @@ bool Producer::set_bitrate(const std::string& tier, int kbps) {
     else g_object_set(enc.get(), "bitrate", static_cast<guint>(kbps) * 1000u, nullptr);
     log::debug("producer", "bitrate", {{"producer", name()}, {"tier", tier}, {"kbps", std::to_string(kbps)}, {"was", std::to_string(t.kbps)}});
     t.kbps = kbps;
+    apply_rate(tier, t);
     return true;
+}
+
+void Producer::set_sharpness(bool sharp) {
+    sharp_ = sharp;
+    for (auto& [tier, t] : tiers_) {
+        if (t->sharp == sharp) continue;
+        t->sharp = sharp;
+        apply_rate(tier, *t);
+    }
+}
+
+int Producer::current_max_fps(const std::string& tier) const {
+    auto it = tiers_.find(tier);
+    return it == tiers_.end() ? 0 : it->second->max_fps;
+}
+
+// spec: docs/23-agent-core-architecture.md#rate-control-and-tier-switching (motion or sharpness)
+void Producer::apply_rate(const std::string& tier, Tier& t) {
+    if (passthrough_ || !t.encode) return;
+    int fps = t.fps;
+    if (t.sharp && t.kbps > 0) {
+        // Each frame keeps its bits: the rate follows the target down from the band's top, never below 5.
+        const int top = band_kbps(tier).second;
+        fps = std::clamp(static_cast<int>((static_cast<long long>(t.fps) * t.kbps + top / 2) / top), std::min(5, t.fps), t.fps);
+    }
+    if (fps == t.max_fps) return;
+    glib::GstElementPtr rate = glib::adopt_element(gst_bin_get_by_name(GST_BIN(t.encode.get()), (name() + ":" + tier + "/rate").c_str()));
+    if (!rate) return;
+    g_object_set(rate.get(), "max-rate", fps, nullptr);
+    log::debug("producer", "frame rate", {{"producer", name()}, {"tier", tier}, {"fps", std::to_string(fps)}, {"sharp", t.sharp ? "yes" : "no"}});
+    t.max_fps = fps;
 }
 
 int Producer::current_kbps(const std::string& tier) const {

@@ -6,6 +6,7 @@
 #include <chrono>
 #include <functional>
 #include <map>
+#include <set>
 #include <memory>
 #include <string>
 #include <vector>
@@ -65,6 +66,9 @@ class MediaPlane {
     // subscriber is identified by an opaque pointer (its hub sink) and forgotten on unsubscribe.
     void report_allotment(const std::string& track_id, const std::string& tier, const void* subscriber, double bps);
     void forget_allotment(const void* subscriber);
+    /// A viewer's preference for a track (docs/08 select-tracks): the track's producer serves
+    /// sharpness while any viewer asks for it (docs/23). Forgotten with the viewer's allotment.
+    void report_preference(const std::string& track_id, const void* subscriber, bool sharpness);
     /// Can this track serve `tier` for a demoted viewer? (a lower tier exists; passthrough without a substream says no)
     bool tier_possible(const std::string& track_id, const std::string& tier) const;
     /// False when nothing about this track can follow a viewer's link: a passthrough stream the
@@ -112,6 +116,8 @@ class MediaPlane {
         std::chrono::steady_clock::time_point at{};
     };
     std::map<std::pair<std::string, std::string>, std::map<const void*, Allotment>> allotments_; // (track, tier) → subscriber → share
+    std::map<std::string, std::set<const void*>> sharp_; // track → the viewers asking for sharpness
+    void apply_sharpness(const std::string& track_id);
     glib::SourceGuard rate_timer_;
 };
 

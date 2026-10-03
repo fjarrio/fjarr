@@ -863,7 +863,13 @@ void Session::handle_select_tracks(const Envelope& env, const AttachedCapability
             return;
         }
     }
-    for (const auto& t : tracks) apply_demand(t.value("track_id", ""), t["enabled"].get<bool>(), t.value("tier", "active"));
+    for (const auto& t : tracks) {
+        const std::string id = t.value("track_id", "");
+        apply_demand(id, t["enabled"].get<bool>(), t.value("tier", "active"));
+        // docs/08 `preference`: sharpness keeps each frame's quality and lowers the rate (docs/23).
+        if (t.contains("preference") && consumer_)
+            if (auto sink = consumer_->sink_for(id)) deps_.plane->report_preference(id, sink.get(), t.value("preference", std::string{"motion"}) == "sharpness");
+    }
     reply(env, nlohmann::json{{"ok", true}});
     if (deps_.snapshot && consumer_ && consumer_->pipeline()) deps_.snapshot(GST_BIN(consumer_->pipeline()), "select-tracks");
 }
