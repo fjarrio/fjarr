@@ -795,7 +795,16 @@ serves every viewer of a tier. The two meet like this (ADR-0007; planned
   reports `effective_tier` below `tier`. It is promoted back when its
   estimate stays above 1.2 × the higher tier's `band_low` for 10 s. The
   client's demanded tier is remembered and never overwritten; the agent's
-  override sits beside it. A peer that has no lower tier to go to (the
+  override sits beside it. **Only new feedback moves the clocks**: the
+  estimate is ticked every 200 ms but TWCC feedback arrives about once a
+  second, and a tick with none is no evidence either way, so it neither
+  starts, advances nor resets the demotion and promotion timers. (Counting
+  it as "untested" reset the timer four ticks in five, and a viewer on a bad
+  link took twice the 2 s to leave — open question #40.) **A viewer belongs
+  to one tier of a track at a time**: when it reports a share for a tier,
+  its share in the track's other tiers is withdrawn at once, and a tier
+  change withdraws it before the next report. A share left behind held the
+  shared encoder at `band_low` until it aged out after 3 s (#40). A peer that has no lower tier to go to (the
   thumbnail producer refused for the encoder budget, or a passthrough
   track without a lower stream) keeps its tier with the per-consumer leaky
   queue as its only protection, and the track reports `adaptive: false`.
