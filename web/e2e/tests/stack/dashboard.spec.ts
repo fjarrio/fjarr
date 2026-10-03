@@ -3,12 +3,12 @@
  * Streams appear with slice 3b; until then this smoke only proves the page
  * loads and exposes its client, and skips without the demo profile.
  */
-import { expect, test } from "../../src/fixtures.ts";
+import { expect, test, needs } from "../../src/fixtures.ts";
 import { env } from "../../src/env.ts";
 
 test("the demo dashboard connects to demo-robot through the demo backend's grant and shows the test pattern (slice-3b gate)", async ({ dashboard, stack, page }) => {
   await stack.requireServer();
-  test.skip(!(await stack.dashboardReachable()), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
+  needs(await stack.dashboardReachable(), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
   await dashboard.goto();
   await expect(page.getByText("Acme Fleet")).toBeVisible();
   const t0 = Date.now();
@@ -31,7 +31,7 @@ test("the demo dashboard connects to demo-robot through the demo backend's grant
 test("the Terminal panel gives a developer a working shell, and tells an operator why it has none", async ({ dashboard, stack, page }) => {
   test.slow();
   await stack.requireServer();
-  test.skip(!(await stack.dashboardReachable()), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
+  needs(await stack.dashboardReachable(), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
 
   // The developer role's grant carries fjarr.terminal (docs/10: a shell is a different risk class
   // from a camera, so the demo's role picker stands in for "their auth decides").
@@ -55,11 +55,11 @@ test("the Terminal panel gives a developer a working shell, and tells an operato
 
 test("the Desktop panel shows the desktop robot's screen: <DesktopView> on the primary monitor's track (M3 3.1)", async ({ dashboard, stack, page }) => {
   await stack.requireServer();
-  test.skip(!(await stack.dashboardReachable()), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
+  needs(await stack.dashboardReachable(), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
   // The headless-mutter robot (docs/12#services): up with `make desktop-e2e`, not with the demo profile.
   const desktopRobot = process.env.E2E_DESKTOP_ROBOT_HTTP ?? "http://desktop-robot:7381";
   const up = await fetch(desktopRobot, { signal: AbortSignal.timeout(2000) }).then(() => true, () => false);
-  test.skip(!up, `desktop-robot is not running at ${desktopRobot} — \`make desktop-e2e\``);
+  needs(up, `desktop-robot is not running at ${desktopRobot} — \`make desktop-e2e\``);
 
   await dashboard.goto();
   await page.getByRole("button", { name: /Desktop Robot 01/ }).click();
@@ -80,11 +80,11 @@ test("the Desktop panel shows the desktop robot's screen: <DesktopView> on the p
 
 test("the Desktop panel drives the robot's desktop from a real browser: click, type, and Esc releases what is held (M3 3.2)", async ({ dashboard, stack, page }) => {
   await stack.requireServer();
-  test.skip(!(await stack.dashboardReachable()), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
+  needs(await stack.dashboardReachable(), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
   const oracleUrl = process.env.E2E_DESKTOP_ORACLE ?? "http://desktop-fixture:8090/testwin.log";
   const oracle = () => fetch(oracleUrl, { signal: AbortSignal.timeout(2000) }).then((r) => (r.ok ? r.text() : ""), () => "");
   const start = (await oracle()).length;
-  test.skip(start === 0 && !(await oracle()), `the desktop fixture's log is not reachable at ${oracleUrl} — \`make desktop-e2e\` brings it up`);
+  needs(start > 0 || Boolean(await oracle()), `the desktop fixture's log is not reachable at ${oracleUrl} — \`make desktop-e2e\` brings it up`);
   const since = async () => (await oracle()).slice(start);
 
   await dashboard.goto();
@@ -119,10 +119,10 @@ test("the Desktop panel drives the robot's desktop from a real browser: click, t
 
 test("a monitor plugged into the robot appears in the Desktop panel's layout, and leaves it when unplugged (M3 3.4)", async ({ dashboard, stack, page }) => {
   await stack.requireServer();
-  test.skip(!(await stack.dashboardReachable()), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
+  needs(await stack.dashboardReachable(), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
   const plugd = process.env.E2E_DESKTOP_PLUG ?? "http://desktop-fixture:8091";
   const call = (what: string) => fetch(`${plugd}/${what}`, { signal: AbortSignal.timeout(10_000) }).then((r) => r.text(), () => "");
-  test.skip(!(await fetch(`${plugd}/`, { signal: AbortSignal.timeout(2000) }).then(() => true, () => false)), `the fixture's monitor hot-plug is not reachable at ${plugd} — \`make desktop-e2e\` brings it up`);
+  needs(await fetch(`${plugd}/`, { signal: AbortSignal.timeout(2000) }).then(() => true, () => false), `the fixture's monitor hot-plug is not reachable at ${plugd} — \`make desktop-e2e\` brings it up`);
   while ((await call("unplug")).startsWith("Meta")); // start from the fixture's one monitor
 
   await dashboard.goto();

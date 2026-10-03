@@ -5,7 +5,7 @@
  * tracks at once, and a toggle that takes effect without renegotiation.
  */
 import { env } from "../../src/env.ts";
-import { expect, Loopback, test } from "../../src/fixtures.ts";
+import { expect, Loopback, test, needs } from "../../src/fixtures.ts";
 import { mintGrant } from "../../src/grant.ts";
 
 type SourcesBody = { sources: Array<{ track_id: string; cap: string; status: string; reason: string; identity: string }> };
@@ -29,7 +29,7 @@ test.describe("fjarr.camera on the real agent (slice 4)", () => {
     const ids = (await loopback.tracks()).map((t) => t.track_id).sort();
     expect(ids).toEqual(["pattern", "rtsp"]); // `webcam` (v4l2, no device in the container) is held back by the core
     const sources = (await stack.introspect("/sources")) as SourcesBody | null;
-    test.skip(!sources, "no introspection endpoint reachable");
+    needs(sources, "no introspection endpoint reachable");
     const webcam = sources!.sources.find((s) => s.track_id === "webcam");
     expect(webcam, JSON.stringify(sources!.sources)).toMatchObject({ cap: "fjarr.camera", status: "missing" });
     expect(webcam!.reason).toContain("no such device");

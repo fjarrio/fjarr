@@ -280,8 +280,7 @@ export class Stack {
   /** Skip the test unless fjarr-server answers — in CI that is a failure, never a silent skip. */
   async requireServer(): Promise<void> {
     const ok = await this.serverHealthy();
-    if (!ok && process.env.CI) throw new Error(`fjarr-server not reachable at ${env.serverHttp} in CI`);
-    base.skip(!ok, `fjarr-server not reachable at ${env.serverHttp} — \`make lab-up\``);
+    needs(ok, `fjarr-server not reachable at ${env.serverHttp} — \`make lab-up\``);
   }
 
   async dashboardReachable(): Promise<boolean> {
@@ -339,9 +338,18 @@ export class Stack {
   /** Skip unless the demo robot container runs (a failure in CI). */
   async requireRobot(): Promise<void> {
     const up = await this.robot.isUp();
-    if (!up && process.env.CI) throw new Error(`${env.robotService} is not running in CI`);
-    base.skip(!up, `${env.robotService} is not running — \`make demo-up\``);
+    needs(up, `${env.robotService} is not running — \`make demo-up\``);
   }
+}
+
+/**
+ * A precondition a test cannot run without. Locally a missing piece skips, saying how to bring it up;
+ * in CI it fails, because a skip there reads as a pass — five dashboard tests skipped in every run for
+ * weeks before anyone noticed (docs/30#principles).
+ */
+export function needs(ok: unknown, reason: string): void {
+  if (!ok && process.env.CI) throw new Error(`a precondition is missing in CI: ${reason}`);
+  base.skip(!ok, reason);
 }
 
 // -------------------------------------------------------------- dashboard

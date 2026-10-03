@@ -7,7 +7,7 @@
  * nothing pointed one at the other, so "the demo backend receives webhooks" was a
  * claim rather than a fact. Found by the M1 gate review.
  */
-import { expect, test } from "../../src/fixtures.ts";
+import { expect, test, needs } from "../../src/fixtures.ts";
 import { env } from "../../src/env.ts";
 
 const backend = env.backendHttp; // the harness's view, not the browser's (they differ in CI)
@@ -33,7 +33,7 @@ test.describe("ADR-0015 contract through the demo backend", () => {
       await webhooks();
     } catch (e) {
       if (process.env.CI) throw new Error(`demo-backend not reachable at ${backend} in CI: ${String(e)}`);
-      test.skip(true, `demo-backend not reachable at ${backend} — \`make demo-up\``);
+      needs(false, `demo-backend not reachable at ${backend} — \`make demo-up\``);
     }
   });
 

@@ -153,8 +153,11 @@ jobs:
           E2E_VIEWER_URL: http://demo-robot:7381/
           CI: "true"
         # pnpm 10 forwards `--` literally: call playwright through `exec` to pass flags.
-        # The 4.5f login gate needs fjarr-connect and the tunnel: `make tunnel-login` runs it below.
-        run: pnpm --filter '@fjarr/e2e' exec playwright test --project loopback --project stack --grep-invert "4\\.5f gate"
+        # A missing precondition fails in CI rather than skipping (needs(), docs/30#principles), so the
+        # tests that need what only a later step brings up are left to that step: the 4.5f login gate
+        # (fjarr-connect and the tunnel, `make tunnel-login`) and the Desktop panel (the fixture,
+        # `make desktop-browser`).
+        run: pnpm --filter '@fjarr/e2e' exec playwright test --project loopback --project stack --grep-invert "4\\.5f gate|Desktop panel"
       - name: fjarr-opsim scenarios against the demo robot (docs/23 gate 2)
         # From the runner: the target execs into the demo robot's container itself.
         run: make opsim-all
@@ -291,7 +294,8 @@ jobs:
           # The demo robot from the image (the embedder's topology): the same lab smoke as the dev-image robot.
           docker compose -f docker-compose.yml -f build/ci/compose.images.yml -f docker-compose.image.yml --profile demo up -d --build demo-robot
           sleep 8 && docker compose logs --no-color demo-robot | tail -20
-          pnpm --filter '@fjarr/e2e' exec playwright test tests/stack/viewer.spec.ts tests/stack/introspect.spec.ts tests/stack/dashboard.spec.ts
+          # The Desktop panel needs the desktop fixture, which this job does not run (e2e's desktop-browser does).
+          pnpm --filter '@fjarr/e2e' exec playwright test tests/stack/viewer.spec.ts tests/stack/introspect.spec.ts tests/stack/dashboard.spec.ts --grep-invert "Desktop panel"
       - name: the reference compose file (docs/26#containerized-robots, M2.5 gate)
         # Exactly as shipped, host networking included: this runner is thrown away, so fjarr0 in its
         # namespace harms nothing (a workstation runs the gate in a sandbox namespace instead).

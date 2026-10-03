@@ -4,7 +4,7 @@
  * camera's low-resolution mount is the track's thumbnail tier; a joining viewer starts from the
  * retained keyframe without any request reaching the camera.
  */
-import { expect, test } from "../../src/fixtures.ts";
+import { expect, test, needs } from "../../src/fixtures.ts";
 import { mintGrant } from "../../src/grant.ts";
 import { env } from "../../src/env.ts";
 
@@ -32,7 +32,7 @@ test.describe("passthrough (slice 6b)", () => {
     // The producer's pipeline: depayload and parse, nothing else. An encoder anywhere in it would
     // mean the robot is transcoding a stream it was handed ready-made.
     const snap = (await stack.introspect("/pipelines/producer:rtsp.json")) as { elements: Element[] } | null;
-    test.skip(!snap, "no introspection endpoint reachable");
+    needs(snap, "no introspection endpoint reachable");
     const factories = walk(snap!.elements).map((e) => e.factory ?? "").filter(Boolean);
     loopback.out.note("factories", factories.join(" "));
     expect(factories).toContain("rtph264depay");

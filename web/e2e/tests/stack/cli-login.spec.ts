@@ -14,7 +14,7 @@
  * @fjarr/react — and docs/15 says so.
  */
 import { spawn } from "node:child_process";
-import { expect, test } from "../../src/fixtures.ts";
+import { expect, test, needs } from "../../src/fixtures.ts";
 import { env } from "../../src/env.ts";
 
 const CLI = "./signaling/target/release/fjarr-connect";
@@ -62,7 +62,7 @@ async function inDev(args: string[]): Promise<string> {
 test("fjarr-connect login through the demo dashboard, then list, pick and connect with nobody typing a robot id (4.5f gate)", async ({ stack, page }, testInfo) => {
   test.setTimeout(240_000);
   await stack.requireServer();
-  test.skip(!(await stack.dashboardReachable()), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
+  needs(await stack.dashboardReachable(), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
   const configDir = `/tmp/fjarr-cli-e2e-${Date.now()}`;
   const t0 = Date.now();
 

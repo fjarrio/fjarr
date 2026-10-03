@@ -5,7 +5,7 @@
  * the demo dashboard's Diagnostics tab renders the graph for the developer role only.
  */
 import { env } from "../../src/env.ts";
-import { expect, test } from "../../src/fixtures.ts";
+import { expect, test, needs } from "../../src/fixtures.ts";
 import { mintGrant } from "../../src/grant.ts";
 
 const grantFor = (caps: string[]) => mintGrant({ robotId: env.robotId, secret: env.grantSecret, capabilities: caps.map((name) => ({ name })) });
@@ -91,7 +91,7 @@ test.describe("fjarr.introspect (slice 5a)", () => {
   });
 
   test("the demo dashboard's Diagnostics tab renders the session graph for the developer role and is denied for the operator", async ({ dashboard, stack }) => {
-    test.skip(!(await stack.dashboardReachable()), "demo-dashboard is not up");
+    needs(await stack.dashboardReachable(), "demo-dashboard is not up");
     await dashboard.goto({ role: "developer" });
     await dashboard.connect(env.robotId);
     await dashboard.waitForState(env.robotId, "connected");

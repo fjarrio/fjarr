@@ -9,7 +9,7 @@
 import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import Ajv2020 from "ajv/dist/2020.js";
-import { expect, test, type Loopback } from "../../src/fixtures.ts";
+import { expect, test, type Loopback, needs } from "../../src/fixtures.ts";
 import { env } from "../../src/env.ts";
 
 const introspectSchema = JSON.parse(readFileSync(new URL("../../../../protocol/schemas/introspect.schema.json", import.meta.url), "utf8")) as object;
@@ -186,7 +186,7 @@ test.describe("real agent through fjarr-server", () => {
     await loopback.mount("tile", { trackId: "test-pattern" });
     await loopback.waitForStreaming("test-pattern", 15_000);
     const list = (await stack.introspect("/pipelines")) as { pipelines: Array<{ id: string; kind: string; state: string; session_id: string }> } | null;
-    test.skip(!list, "no introspection endpoint reachable (set E2E_INTROSPECT_HTTP or run the demo profile)");
+    needs(list, "no introspection endpoint reachable (set E2E_INTROSPECT_HTTP or run the demo profile)");
     const sid = (await loopback.info()).sessionId!;
     const session = list!.pipelines.find((p) => p.id === "session:" + sid);
     expect(session, "the session pipeline is listed").toBeTruthy();
@@ -241,7 +241,7 @@ type MemoryDiff = { since: string; diff: { sessions_alive: number; census: Recor
 test.describe("introspection routes of the real agent (docs/24 slice 3c)", () => {
   test.beforeEach(async ({ stack }) => {
     await stack.requireServer();
-    test.skip(!(await stack.introspect("/stats")), "no introspection endpoint reachable (set E2E_INTROSPECT_HTTP or run the demo profile)");
+    needs(await stack.introspect("/stats"), "no introspection endpoint reachable (set E2E_INTROSPECT_HTTP or run the demo profile)");
   });
 
   /** A client-mode session streaming the test pattern; returns its id. */
