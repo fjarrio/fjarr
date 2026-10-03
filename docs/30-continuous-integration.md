@@ -17,8 +17,8 @@ and CI runs 10–20 times a day. The budget is wall-clock time to a verdict:
 
 | Push | Budget | Measured (2026-10-02) |
 |---|---|---|
-| Code (anything outside the docs) | **≤ 20 min** to the last job | 38 min before this design; see [the job graph](#the-job-graph) |
-| Docs only | **≤ 3 min** | 38 min before this design |
+| Code (anything outside the docs) | **≤ 20 min** to the last job | 38 min before this design; **14.9 min** after (ac7667b, 2026-10-03), the browser-lab job the longest at 12.5 |
+| Docs only | **≤ 3 min** | 38 min before this design; **0.6 min** after (2d4e810) |
 
 Job-minutes matter only where they buy wall-clock time back: a job that runs in
 parallel and finishes before the longest one is free.
@@ -51,6 +51,18 @@ parallel and finishes before the longest one is free.
 7. **Measure before and after.** Every change to the layout states the times
    it was made for, from [`tools/ci/timings.sh`](#measuring), in its commit
    message and in the table above.
+8. **A skip in CI is a failure.** A browser test whose precondition is
+   missing — the dashboard down, an endpoint unreachable, a binary not
+   built — skips locally, saying how to bring it up, and **fails in CI**
+   (`needs()` in `web/e2e/src/fixtures.ts`). A skip reads as a pass: until
+   2026-10-03 the demo dashboard never started in CI and every dashboard
+   test, the slice-3b gate among them, skipped in every run; so did the 4.5f
+   login gate, the Desktop panel tests and the three-viewer rate-control
+   test. A test that only a later step can run is left out of the earlier
+   one by name (`--grep-invert`), and a target that runs a set of tests
+   fails when any of them skips (`make desktop-browser`). A test that is
+   known to fail is marked `fixme` with an open question in
+   [docs/18](18-open-questions.md), never skipped.
 
 ## The job graph {#the-job-graph}
 
