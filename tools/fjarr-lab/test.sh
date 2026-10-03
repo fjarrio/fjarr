@@ -108,6 +108,24 @@ contains "reboot waits for the asking job's own process" "$out" "the job has end
 if kill -0 "$job_pid" 2>/dev/null; then bad "reboot went ahead while the job's process was alive"; else ok "the job's process had ended before the reboot"; fi
 expect "and the runner goes offline before the reboot" "$(grep -E 'systemctl (stop|reboot)' "$T/log" | tr '\n' '|')" "systemctl stop actions.runner.test.service|systemctl reboot|"
 
+# unattended.sh report: the verdict counts only for the prepare run the workflow asks about. When a
+# night's prepare failed before reaching the machine, the state was an older night's, and its
+# "passed" was once reported as that night's (2026-10-03).
+U="$T/unattended"; mkdir -p "$U/unattended"
+echo "not-this-boot" > "$U/unattended/boot-id" # a reboot since prepare
+echo 1111 > "$U/unattended/prepare-run"
+echo passed > "$U/unattended/result"
+rep() { FJARR_LAB_STATE="$U" PATH="$T/bin:$PATH" bash "$(dirname "$0")/unattended.sh" report "$@" 2>&1; echo "rc=$?"; }
+out=$(rep --prepare-run 1111)
+contains "report passes on the verdict of the prepare it was asked about" "$out" "rc=0"
+out=$(rep --prepare-run 2222)
+contains "report refuses an older night's verdict" "$out" "rc=1"
+contains "and says that prepare never reached the machine" "$out" "last prepared by run 1111, not run 2222"
+echo failed > "$U/unattended/result"
+contains "report fails on a failed verdict" "$(rep --prepare-run 1111)" "rc=1"
+cat /proc/sys/kernel/random/boot_id > "$U/unattended/boot-id"
+contains "report says 'not yet' before the reboot" "$(rep --prepare-run 1111)" "rc=75"
+
 rm -rf "$T"
 echo "lab-test: $([ $fails -eq 0 ] && echo 'all passed' || echo "$fails failed")"
 exit $((fails > 0))

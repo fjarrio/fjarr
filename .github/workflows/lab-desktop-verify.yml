@@ -36,8 +36,29 @@ jobs:
           ATTEMPT: ${{ inputs.attempt || '1' }}
           REPO: ${{ github.repository }}
         run: |
+          # Tonight's prepare first: the verdict on the machine counts only if it is for that run. When
+          # a prepare failed before reaching the machine, its state is an older night's (2026-10-03).
+          read -r prep status conclusion < <(python3 - "$REPO" <<'PY'
+          import json, os, sys, urllib.request, datetime
+          req = urllib.request.Request(
+              f"https://api.github.com/repos/{sys.argv[1]}/actions/workflows/lab-desktop-prepare.yml/runs?branch=main&per_page=1",
+              headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"], "Accept": "application/vnd.github+json"})
+          runs = json.load(urllib.request.urlopen(req, timeout=20))["workflow_runs"]
+          if not runs:
+              print("none none none"); sys.exit()
+          r = runs[0]
+          age = datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(r["created_at"].replace("Z", "+00:00"))
+          print(r["id"], r["status"], (r["conclusion"] or "none") if age < datetime.timedelta(hours=12) else "stale")
+          PY
+          )
+          echo "tonight's prepare: run $prep, $status, $conclusion"
+          if [ -z "$prep" ]; then echo "::error::could not ask GitHub for tonight's prepare run"; exit 1; fi
+          if [ "$conclusion" = stale ] || [ "$prep" = none ]; then echo "::error::no lab-desktop-prepare run in the last 12 hours"; exit 1; fi
+          if [ "$status" = completed ] && [ "$conclusion" != success ]; then
+            echo "::error::tonight's prepare (run $prep) ended $conclusion: https://github.com/$REPO/actions/runs/$prep"; exit 1
+          fi
           rc=0
-          sudo -n tools/fjarr-lab/unattended.sh report || rc=$?
+          if [ "$status" != completed ]; then rc=75; else sudo -n tools/fjarr-lab/unattended.sh report --prepare-run "$prep" || rc=$?; fi
           if [ "$rc" -ne 75 ]; then exit "$rc"; fi
           if [ "$ATTEMPT" -ge 5 ]; then
             echo "::error::the machine had still not rebooted and verified after $ATTEMPT attempts"

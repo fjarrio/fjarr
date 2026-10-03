@@ -31,7 +31,6 @@ jobs:
     outputs:
       sha: ${{ steps.ci.outputs.sha }}
     env:
-      DEB_BUILDER: prebuilt
       FJARR_CI_PUSH: "1"
     steps:
       - uses: actions/checkout@v4
@@ -44,13 +43,17 @@ jobs:
           read -r run sha <<<"$found"
           echo "run=$run" >> "$GITHUB_OUTPUT"; echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "testing $sha, CI run https://github.com/$GITHUB_REPOSITORY/actions/runs/$run"
+      # The commit under test beside this workflow's own: the lookup above is this commit's tooling,
+      # the build below is the tested commit's. When they were one checkout, a tested commit older
+      # than tools/ci had no image.py and the night failed (2026-10-03).
       - uses: actions/checkout@v4
         with:
           ref: ${{ steps.ci.outputs.sha }}
+          path: under-test
       - uses: actions/download-artifact@v4
         with:
           name: debs-amd64
-          path: dist/deb/amd64
+          path: under-test/dist/deb/amd64
           run-id: ${{ steps.ci.outputs.run }}
           github-token: ${{ github.token }}
       - uses: docker/login-action@v3
@@ -58,17 +61,24 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - run: python3 tools/ci/image.py build fjarr-deb-builder docker/deb-builder
+      - name: the deb builder by content hash, when the commit under test has the tool (docs/30#ci-images)
+        working-directory: under-test
+        run: |
+          if [ -f tools/ci/image.py ]; then
+            python3 tools/ci/image.py build fjarr-deb-builder docker/deb-builder
+            echo "DEB_BUILDER=prebuilt" >> "$GITHUB_ENV"
+          fi
       - run: make lab-artifacts
+        working-directory: under-test
       - uses: actions/upload-artifact@v4
         with:
           name: lab-desktop-build
           path: |
-            dist/deb/amd64/fjarr-agent_*.deb
-            dist/deb/amd64/fjarr-tools_*.deb
-            dist/deb/amd64/fjarr-desktop-wayland_*.deb
-            dist/lab/fjarr-server
-            dist/lab/fjarr-opsim
+            under-test/dist/deb/amd64/fjarr-agent_*.deb
+            under-test/dist/deb/amd64/fjarr-tools_*.deb
+            under-test/dist/deb/amd64/fjarr-desktop-wayland_*.deb
+            under-test/dist/lab/fjarr-server
+            under-test/dist/lab/fjarr-opsim
           retention-days: 3
 
   prepare:

@@ -38,11 +38,13 @@ fail() {
   exit 1
 }
 pass() { echo "PASS $1: $2"; }
-[ "$(id -u)" -eq 0 ] || { echo "unattended.sh needs root (sudo)"; exit 2; }
+# prepare and verify change the machine; report only reads its state.
+need_root() { [ "$(id -u)" -eq 0 ] || { echo "unattended.sh $1 needs root (sudo)"; exit 2; }; }
 
 boot_id() { cat /proc/sys/kernel/random/boot_id; }
 
 prepare() {
+  need_root prepare
   local dir=${1:?usage: unattended.sh prepare <dir with the .debs, fjarr-server and fjarr-opsim>}
   mkdir -p "$STATE"
   boot_id > "$STATE/boot-id"
@@ -139,6 +141,7 @@ cleanup() {
 }
 
 verify() {
+  need_root verify
   if [ "${1:-}" = "--on-boot" ]; then
     VERDICT="$STATE/result.tmp"
     exec > >(tee "$STATE/result.log") 2>&1
@@ -186,6 +189,17 @@ verify() {
 # What lab-desktop-verify reports: the verdict the machine wrote at boot.
 report() {
   if [ ! -f "$STATE/boot-id" ]; then echo "unattended: no prepare has run on this machine"; return 1; fi
+  # The verdict must be for the prepare the workflow asks about: when tonight's prepare never reached
+  # the machine, the state here is an older night's, and its "passed" was reported as tonight's once
+  # (2026-10-03).
+  if [ "${1:-}" = "--prepare-run" ]; then
+    local want=${2:?--prepare-run needs a run id} have
+    have=$(cat "$STATE/prepare-run" 2>/dev/null)
+    if [ "$have" != "$want" ]; then
+      echo "unattended: the machine was last prepared by run ${have:-unknown}, not run $want: that prepare never reached it"
+      return 1
+    fi
+  fi
   if [ "$(boot_id)" = "$(cat "$STATE/boot-id")" ]; then
     echo "unattended: not rebooted since prepare (run $(cat "$STATE/prepare-run" 2>/dev/null)) yet"
     return 75
@@ -198,7 +212,7 @@ report() {
     echo "unattended: rebooted, but no verdict was written (journalctl -u fjarr-lab-unattended)"
     return 1
   fi
-  cat "$STATE/result.log" 2>/dev/null
+  cat "$STATE/result.log" 2>/dev/null || true # a missing log must not swallow the verdict (set -e)
   echo "unattended: verdict for prepare run $(cat "$STATE/prepare-run" 2>/dev/null): $(cat "$STATE/result")"
   [ "$(cat "$STATE/result")" = "passed" ]
 }
@@ -206,6 +220,6 @@ report() {
 case "${1:-}" in
   prepare) shift; prepare "$@" ;;
   verify) shift; verify "$@" ;;
-  report) report ;;
-  *) echo "usage: unattended.sh prepare <dir> | verify [--on-boot] | report"; exit 2 ;;
+  report) shift; report "$@" ;;
+  *) echo "usage: unattended.sh prepare <dir> | verify [--on-boot] | report [--prepare-run <id>]"; exit 2 ;;
 esac
