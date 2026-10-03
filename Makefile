@@ -537,7 +537,7 @@ desktop-browser: ## M3: the demo dashboard's Desktop panel in the lab browser ag
 	  skips=$$(python3 -c 'import json,sys; r=[]; w=lambda o: [w(v) for v in (o.values() if isinstance(o,dict) else o if isinstance(o,list) else [])] + ([r.append(o.get("description",""))] if isinstance(o,dict) and o.get("type")=="skip" else []); w(json.load(open("build/desktop-browser.json"))); print("\n".join(sorted(set(r))))' 2>/dev/null); \
 	  if [ ! -f build/desktop-browser.json ]; then echo "desktop-browser: no report was written"; rc=1; \
 	  elif [ -n "$$skips" ]; then echo "desktop-browser: a test skipped — they must all run here:"; echo "$$skips" | sed 's/^/  /'; rc=1; fi; \
-	  [ $$rc -eq 0 ] || docker compose --profile desktop --profile demo logs --no-color --tail 40 desktop-robot desktop-fixture demo-dashboard; \
+	  [ $$rc -eq 0 ] || docker compose --profile desktop --profile demo logs --no-color --tail 300 desktop-robot; docker compose --profile desktop --profile demo logs --no-color --tail 40 desktop-fixture demo-dashboard; \
 	  docker compose --profile desktop stop desktop-robot desktop-fixture >/dev/null 2>&1; exit $$rc
 
 desktop-fixture-test: ## M3: headless mutter proves capture and EIS input, then the session helper's handover of both (docs/15#the-desktop-test-lab)

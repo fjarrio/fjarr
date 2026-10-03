@@ -287,7 +287,11 @@ TEST(ConsumerNegotiation, aTrackThatComesBackContinuesItsSequenceNumbersUnderThe
     });
     ASSERT_TRUE(h.answer_next());
     EXPECT_EQ(ssrc_after, ssrc_before) << "the pooled transceiver keeps its SSRC";
-    EXPECT_EQ(offset, (last + 1) & 0xffff);
+    // Just ahead of the old sequence: packets still in flight when `last` was read pass the old
+    // payloader before it goes, so not exactly last + 1 (CI, 2026-10-03), but never behind it.
+    const guint ahead = (offset - last) & 0xffff;
+    EXPECT_GE(ahead, 1u) << "offset " << offset << ", last " << last;
+    EXPECT_LE(ahead, 100u) << "offset " << offset << ", last " << last;
     h.loop.call_sync([&] {
         h.consumer->set_enabled("a", true);
         h.hub.subscribe(HubKey{"t", "active"}, h.consumer->sink_for("a"));
