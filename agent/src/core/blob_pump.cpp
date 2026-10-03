@@ -18,6 +18,12 @@ void BlobPump::pump(ChannelSender *sender) {
         BlobTransfer &t = queue_.front();
         const std::uint64_t len = t.data.size();
         bool stalled = false;
+        // An empty blob is one chunk with no payload (docs/08#blob-frames): else nothing would ever
+        // complete its reference. `sent_empty` keeps it from going twice after a stall.
+        if (len == 0 && !t.sent_empty) {
+            if (!sender->send_binary(blob::encode_chunk(t.id, 0, 0, {}))) break;
+            t.sent_empty = true;
+        }
         while (t.offset < len) {
             const std::size_t n = static_cast<std::size_t>(std::min<std::uint64_t>(chunk_, len - t.offset));
             const auto *p = reinterpret_cast<const std::byte *>(t.data.data()) + t.offset;

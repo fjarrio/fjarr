@@ -256,7 +256,9 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         }, r.get(), nullptr);
         g_source_attach(r->timeout, ctx_);
         reads_[id] = std::move(r);
-        send({{"type", "clipboard-read"}, {"id", id}, {"type", mime}});
+        // `mime`, not `type`: a second "type" key was dropped, and mutter was asked for "clipboard-read"
+        // (docs/23#desktop-helper-protocol; mini-PC, 2026-10-03).
+        send({{"type", "clipboard-read"}, {"id", id}, {"mime", mime}});
     }
 
     void write(const std::string& type, std::string bytes, std::function<void(bool, std::string)> done) override {

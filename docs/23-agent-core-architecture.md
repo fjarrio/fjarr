@@ -604,9 +604,14 @@ its name is bumped with the module seam's.
   says the robot owns the clipboard (`session-is-owner: false`), with
   mutter's mime types; an echo of our own selection is not sent. The module
   maps them to Fjarr's (`text/plain` when any text type is there).
-  `clipboard-read {id, type}` makes the helper call `SelectionRead` and
+  `clipboard-read {id, mime}` makes the helper call `SelectionRead` and
   reply `clipboard-data {id}` with **one descriptor**, the read end, or
   `clipboard-failed {id, reason}`. The module reads at most 1 MiB from it.
+  The name is `mime`, never `type`, which names the message. The helper
+  refuses a `mime` the robot's current owner does not offer: an application
+  answers only the names it offers, so a wrong name reads nothing, and the
+  test fixture's `wl-copy` answers any name, which hid exactly that
+  (mini-PC, 2026-10-03).
   `clipboard-set {id, types}` arrives with **one descriptor**, a sealed memfd
   holding the bytes. The helper calls `SetSelection` with every name an
   application may ask text for (`text/plain;charset=utf-8`, `text/plain`,

@@ -234,3 +234,42 @@ test("the Desktop panel's \"Add a screen\" gives the operator a monitor of their
   await expect(picker).toHaveCount(0, { timeout: 10_000 });
   await expect(page.locator("[data-demo-add-screen]")).toBeVisible();
 });
+
+test("the Desktop panel in fullscreen: the pointer lands where it does in the page, and clicks reach the robot (mini-PC, 2026-10-03)", async ({ dashboard, stack, page }) => {
+  await stack.requireServer();
+  needs(await stack.dashboardReachable(), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
+  const oracleUrl = process.env.E2E_DESKTOP_ORACLE ?? "http://desktop-fixture:8090/testwin.log";
+  const oracle = () => fetch(oracleUrl, { signal: AbortSignal.timeout(2000) }).then((r) => (r.ok ? r.text() : ""), () => "");
+  needs(Boolean(await oracle()), `the desktop fixture's log is not reachable at ${oracleUrl} — \`make desktop-e2e\` brings it up`);
+
+  await dashboard.goto();
+  await page.getByRole("button", { name: /Desktop Robot 01/ }).click();
+  await dashboard.connect("desktop-robot-01");
+  await dashboard.waitForState("desktop-robot-01", "connected");
+  const view = page.locator("[data-fjarr-desktop]");
+  await expect(view.locator('[data-fjarr-track^="desk-"]')).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
+
+  // The robot's pixel under a point of its picture: the video's content box, as object-fit contain draws it.
+  const clickAt = async (fx: number, fy: number) => {
+    const p = await view.locator("video").evaluate((v: HTMLVideoElement, [fx, fy]: [number, number]) => {
+      const r = v.getBoundingClientRect();
+      const s = Math.min(r.width / v.videoWidth, r.height / v.videoHeight);
+      const w = v.videoWidth * s, h = v.videoHeight * s;
+      return { x: r.left + (r.width - w) / 2 + w * fx, y: r.top + (r.height - h) / 2 + h * fy };
+    }, [fx, fy] as [number, number]);
+    const mark = (await oracle()).length;
+    await page.mouse.click(p.x, p.y);
+    await expect.poll(async () => (await oracle()).slice(mark), { timeout: 5000 }).toMatch(/click button=1 x=\d+ y=\d+/);
+    const m = (await oracle()).slice(mark).match(/click button=1 x=(\d+) y=(\d+)/);
+    return { x: Number(m?.[1]), y: Number(m?.[2]) };
+  };
+  const inPage = await clickAt(0.25, 0.25);
+
+  await page.getByRole("button", { name: "Fullscreen" }).click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement !== null)).toBe(true);
+  const inFullscreen = await clickAt(0.25, 0.25);
+  await page.screenshot({ path: dashboard.out.path("desktop-fullscreen.png") });
+  // The same robot pixel, give or take the rounding of two different scales.
+  expect(Math.abs(inFullscreen.x - inPage.x)).toBeLessThanOrEqual(3);
+  expect(Math.abs(inFullscreen.y - inPage.y)).toBeLessThanOrEqual(3);
+});

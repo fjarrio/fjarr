@@ -183,6 +183,46 @@ describe("DesktopClipboard", () => {
     release();
   });
 
+  it("a GNOME app's copy is a burst of offers: the latest one is read and lands, a stale refusal does not win (mini-PC, 2026-10-03)", async () => {
+    // A copy in GNOME Text Editor reached the agent as three changes within a millisecond: no types,
+    // then text/plain twice. The agent refuses a read of any offer but its latest (docs/08).
+    const bytes = new TextEncoder().encode("från roboten åäö");
+    let agent!: MockAgent;
+    agent = new MockAgent({
+      now: () => Date.now(),
+      bulkCaps: ["fjarr.desktop"],
+      onRequest: (env) => {
+        if (env.type !== "clipboard-read") return undefined;
+        if ((env.payload as { offer_id: string }).offer_id !== "offer-3")
+          return { ok: false, error: { code: "payload_invalid", message: "the robot's clipboard changed since that offer" } };
+        setTimeout(() => agent.sendBulk("fjarr.desktop", encodeBlobChunk(BLOB, 0, bytes.length, bytes)), 2); // the helper's read takes a moment
+        return { ok: true, blob: { blob: BLOB, len: bytes.length, type: "text/plain" } };
+      },
+    });
+    const client = createFjarrClient({
+      serverUrl: "wss://fjarr.test/ws",
+      grant: async () => "jwt",
+      socketFactory: agent.socketFactory,
+      peerConnectionFactory: agent.peerConnectionFactory,
+      createMediaStream: fakeMediaStreamFactory,
+      now: () => Date.now(),
+      random: () => 0.5,
+    });
+    const session: Session = client.sessions.open("robot-1");
+    await tick();
+    const written: string[] = [];
+    const { clipboard, release } = acquireDesktopClipboard(session, { writeText: async (t) => void written.push(t) });
+    agent.sendEvent("fjarr.desktop", "clipboard-offer", { offer_id: "offer-1", types: [] });
+    agent.sendEvent("fjarr.desktop", "clipboard-offer", { offer_id: "offer-2", types: ["text/plain"] });
+    agent.sendEvent("fjarr.desktop", "clipboard-offer", { offer_id: "offer-3", types: ["text/plain"] });
+    await tick(12);
+    await vi.advanceTimersByTimeAsync(10);
+    await tick(12);
+    expect(written).toEqual(["från roboten åäö"]);
+    expect(clipboard.snapshot.sync).toBe("synced");
+    release();
+  });
+
   it("the robot's bytes may arrive before the read's result: they are kept, not dropped (CI, 2026-10-03)", async () => {
     // The result travels on fjarr:control and the bytes on fjarr:bulk:fjarr.desktop; either can come
     // first. A receiver made only after the result dropped bytes that had overtaken it.

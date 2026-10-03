@@ -255,6 +255,7 @@ class Helper {
             // our own selection's echo does not, and a copy on the robot ends our selection.
             input_->on_selection_owner([this](bool ours, std::vector<std::string> types) {
                 say(std::string("clipboard owner: ") + (ours ? "this session" : "the robot (" + std::to_string(types.size()) + " types)"));
+                robot_types_ = ours ? std::vector<std::string>{} : types;
                 if (ours) return;
                 clipboard_.reset();
                 send({{"type", "clipboard-changed"}, {"types", types}});
@@ -280,12 +281,20 @@ class Helper {
     // --- the clipboard -------------------------------------------------------------------------
     void clipboard_read(const json& req) {
         const int id = req.value("id", 0);
+        const std::string mime = req.value("mime", std::string{});
+        // An application answers only the names it offers: any other reads nothing (docs/23).
+        if (std::find(robot_types_.begin(), robot_types_.end(), mime) == robot_types_.end()) {
+            say("copy from the robot refused: it offers no '" + mime + "'");
+            send({{"type", "clipboard-failed"}, {"id", id}, {"reason", "the robot's clipboard offers no '" + mime + "'"}});
+            return;
+        }
         std::string err;
-        const int fd = input().enable_clipboard(&err) ? input().selection_read(req.value("type", std::string{}), &err) : -1;
+        const int fd = input().enable_clipboard(&err) ? input().selection_read(mime, &err) : -1;
         if (fd < 0) {
             send({{"type", "clipboard-failed"}, {"id", id}, {"reason", err}});
             return;
         }
+        say("copy from the robot: " + mime);
         send({{"type", "clipboard-data"}, {"id", id}}, {fd}); // the module reads it, at most 1 MiB
         ::close(fd);
     }
@@ -405,6 +414,7 @@ class Helper {
     std::unique_ptr<helper::InputSession> input_;
     std::map<int, Recording> captures_; // by the agent's capture id
     std::unique_ptr<std::string> clipboard_; // what the agent set, served to every paste until the robot copies
+    std::vector<std::string> robot_types_;   // what the robot's own copy offers; empty while ours or none
     std::map<std::uint32_t, std::unique_ptr<Transfer>> transfers_; // pastes in progress, by mutter's serial
 };
 

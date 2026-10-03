@@ -338,7 +338,9 @@ Rules:
 
 - A blob is **complete** when every byte of `[0, blob_len)` has arrived.
   Chunks of one blob are sent in offset order (the channel is ordered);
-  chunks of different blobs may interleave.
+  chunks of different blobs may interleave. An **empty** blob is still
+  sent: one chunk with `byte_offset` 0, `blob_len` 0 and no payload, so a
+  reference to it completes like any other.
 - A chunk whose version is not 1, whose `payload_len` disagrees with the
   message length, or whose `byte_offset + payload_len` exceeds `blob_len`
   is dropped and counted; the blob it belongs to is discarded.

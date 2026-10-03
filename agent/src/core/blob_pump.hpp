@@ -20,6 +20,7 @@ struct BlobTransfer {
     std::string data;
     std::uint64_t offset = 0;
     std::function<void(bool ok)> done;
+    bool sent_empty = false; // an empty blob's one chunk went out (docs/08#blob-frames)
 };
 
 class BlobPump {

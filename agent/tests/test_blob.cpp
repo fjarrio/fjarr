@@ -192,3 +192,20 @@ TEST(BlobPump, cancelAndFailAllReportFalseAndAnEnqueueFromDoneIsServed) {
     EXPECT_EQ(outcomes.back(), "third:cancelled");
     EXPECT_EQ(pump.size(), 0u);
 }
+
+// docs/08#blob-frames: an empty blob is one chunk with no payload. The pump sent none, so the
+// browser's read of an empty robot clipboard waited out its 30 s (mini-PC, 2026-10-03).
+TEST(BlobPump, anEmptyBlobIsOneChunkThatCompletesAtTheReceiver) {
+    FakeBulk sender(1 << 20);
+    core::BlobPump pump(64);
+    std::vector<bool> done;
+    pump.enqueue(core::BlobTransfer{ID, "", 0, [&](bool ok) { done.push_back(ok); }});
+    pump.pump(&sender);
+    ASSERT_EQ(sender.frames.size(), 1u);
+    EXPECT_EQ(done, std::vector<bool>{true});
+    blob::BlobAssembler a;
+    const auto chunk = blob::parse_chunk(sender.frames[0]);
+    ASSERT_TRUE(chunk);
+    EXPECT_EQ(a.on_chunk(*chunk), ID);
+    EXPECT_EQ(a.take(ID), "");
+}
