@@ -875,6 +875,14 @@ serves every viewer of a tier. The two meet like this (ADR-0007; planned
   others never see less than half the target. The price is a quality
   step for the demoted viewer instead of a slide; a middle tier is one
   more encoder if the demos show the step is too coarse.
+- **Per producer: motion or sharpness** (slice 3.5). `select-tracks`
+  carries a viewer's `preference` (docs/08). `motion`, the default, keeps the
+  frame rate and lets each frame's quality fall with the bitrate. `sharpness`
+  keeps each frame's quality: when a tier's target falls below its band's
+  top, its frame rate falls in proportion (`videorate max-rate` = the tier's
+  rate × target ÷ top, never below 5), so text stays legible on a slow link
+  and a still screen costs nothing more. A producer serves `sharpness` while
+  any of its viewers asks for it; a viewer's preference goes with the viewer.
 - **Where it shows.** `bandwidth-stats` per track (docs/08), the session
   pipeline's snapshot (the encoder's current bitrate property, the
   estimator's numbers under `session:<sid8>/<track>/rate`), `/stats`, and
