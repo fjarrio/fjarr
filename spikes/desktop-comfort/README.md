@@ -45,3 +45,20 @@ What the implementation must do, each learned by failing first:
   refused ("This seat has no keyboard"). In the agent the EIS keyboard device is that keyboard.
 
 `wl-clipboard` was installed into the running fixture by hand for this spike only.
+
+## 3. Can the cursor reader share the node with `pipewiresrc`? Yes, if it is linked first.
+
+`two_consumers.py` and `reader_first.py`: one node recorded with `cursor-mode=2`, the cursor reader
+and `pipewiresrc` linked to it at once.
+
+- **Both are served.** `pipewiresrc` kept producing (60 frames in 6 s with `keepalive-time=100`)
+  while the reader saw every pointer move (16 of 16 frames with the cursor meta). So frames can stay
+  with `pipewiresrc` as they are, and the reader only reads metadata.
+- **The shape goes to whoever is linked when it is sent.** Joining a stream whose pointer already
+  existed, the reader never got a bitmap: mutter sends it once per sprite change, and that frame had
+  gone. Linked **first**, with the pointer already there (as on any robot), the reader's first frame
+  carried the shape (24×24, hotspot 3,1) and the position (100,50); `pipewiresrc` linking a second
+  later still got its frames (33 in 3 s).
+
+So module E links the reader as soon as the capture starts, before any viewer makes the media plane
+build the `pipewiresrc` pipeline, and keeps it linked for the capture's life.
