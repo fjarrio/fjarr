@@ -226,6 +226,11 @@ goes down (decided 2026-10-01, on the mini-PC):
   rescheduled, never as a failure or a pass.
   Proven by hand on the mini-PC on 2026-10-02: prepare, a reboot, the machine
   verifying itself at boot, and `report` giving the verdict "passed".
+  **A verdict counts only for tonight's prepare.** Verify first asks GitHub
+  for the night's `lab-desktop-prepare` run and fails when it did not
+  succeed; `report --prepare-run <id>` then refuses a verdict written for any
+  other run. On 2026-10-03 prepare failed before reaching the machine and
+  verify reported the previous night's "passed" as that night's.
 
 `fjarr-opsim` runs on the lab machine itself and decodes with `openh264dec`, which
 the robot already has for its software encoder. libav (GPL) is never installed on
