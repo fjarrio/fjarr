@@ -3,18 +3,53 @@
  * monitor, demands its `desk-<id>` track for sharp text at interactive latency, and keeps a
  * placeholder while the monitor is gone (3.1). Input goes through `DesktopInput` from @fjarr/core;
  * this file only wires the DOM to it: focus, pointer capture, the non-passive wheel, IME, Keyboard
- * Lock in fullscreen, and the control domain (3.2). The cursor overlay (3.5) and presentation mode
- * (3.6) are added to this same component.
+ * Lock in fullscreen, and the control domain (3.2), and the clipboard: a held-back paste chord and
+ * the robot's copies (3.5, `DesktopClipboard`, one per session). The cursor overlay (3.5) and
+ * presentation mode (3.6) are added to this same component.
  * spec: docs/22-remote-desktop-client.md#anatomy-of-desktopview · #input-pipeline · #focus-model ·
- *       #browser-reserved-shortcuts · #ownership-and-view-only · #hot-plug
+ *       #browser-reserved-shortcuts · #ownership-and-view-only · #hot-plug · #clipboard
  */
-import { useEffect, useId, useImperativeHandle, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react";
-import { contentBox, DesktopInput, type MonitorInfo, type ResultPayload, type Session, type TextResult } from "@fjarr/core";
+import { useEffect, useId, useImperativeHandle, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type Ref } from "react";
+import {
+  acquireDesktopClipboard,
+  contentBox,
+  DesktopInput,
+  isPasteChord,
+  type DesktopClipboard,
+  type DesktopClipboardState,
+  type MonitorInfo,
+  type ResultPayload,
+  type Session,
+  type TextResult,
+} from "@fjarr/core";
 import { useSession } from "./context.js";
 import { useControl, useInputFocus, useMonitors } from "./hooks.js";
 import { VideoTile } from "./components.js";
 
 export type MonitorPolicy = "primary" | "first";
+
+const IDLE: DesktopClipboardState = { sync: "idle" };
+
+/**
+ * The session's robot clipboard (docs/22#clipboard), shared with every `<DesktopView>` of it:
+ * `state.sync` is `needs-gesture` when the browser refused the robot's latest copy, and
+ * `copyFromRobot()` from a click finishes it.
+ */
+export function useDesktopClipboard(session?: Session): { state: DesktopClipboardState; clipboard: DesktopClipboard | null; copyFromRobot: () => Promise<void> } {
+  const s = useSession(session);
+  const [clipboard, setClipboard] = useState<DesktopClipboard | null>(null);
+  useEffect(() => {
+    const { clipboard: c, release } = acquireDesktopClipboard(s);
+    setClipboard(c);
+    return release;
+  }, [s]);
+  const state = useSyncExternalStore(
+    (l) => (clipboard ? clipboard.subscribe(l) : () => undefined),
+    () => clipboard?.snapshot ?? IDLE,
+    () => IDLE,
+  );
+  return { state, clipboard, copyFromRobot: () => clipboard?.copyFromRobot() ?? Promise.resolve() };
+}
 
 /** What a host's toolbar drives (docs/22: special keys, fullscreen with Keyboard Lock). */
 export interface DesktopViewHandle {
@@ -25,6 +60,8 @@ export interface DesktopViewHandle {
   keyCombo(codes: readonly string[]): Promise<ResultPayload>;
   /** Text typed through the robot's keymap; rejects naming what its layout cannot type. */
   typeText(text: string): Promise<TextResult>;
+  /** From a click: the robot's latest copy onto the browser's clipboard (when auto-sync was refused). */
+  copyFromRobot(): Promise<void>;
 }
 
 export interface DesktopViewProps {
@@ -37,6 +74,8 @@ export interface DesktopViewProps {
   viewOnly?: boolean;
   /** The key that gives the keyboard back to the page (docs/22 focus model); null: only clicking away. */
   releaseKey?: string | null;
+  /** The clipboard both ways (docs/22#clipboard); false: pastes are typed keys only, copies stay on the robot. */
+  clipboard?: boolean;
   ref?: Ref<DesktopViewHandle>;
   /** Overlays and the host's toolbar. */
   children?: ReactNode;
@@ -64,7 +103,7 @@ const placeholderStyle: CSSProperties = {
   fontSize: 13,
 };
 
-export function DesktopView({ session, monitorId, policy = "primary", viewOnly = false, releaseKey = "Escape", ref, children, className, style }: DesktopViewProps) {
+export function DesktopView({ session, monitorId, policy = "primary", viewOnly = false, releaseKey = "Escape", clipboard: clipboardOn = true, ref, children, className, style }: DesktopViewProps) {
   const s = useSession(session);
   const monitor = pickMonitor(useMonitors(s), monitorId, policy);
   const control = useControl(s, "desktop");
@@ -85,6 +124,19 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
   const mayInput = inputOn && (!control.known || control.free || control.you);
   const mayInputRef = useRef(mayInput);
   mayInputRef.current = mayInput;
+  const clip = useDesktopClipboard(s);
+  // A paste chord waiting for the browser's `paste` event (docs/22#clipboard): the robot gets Ctrl+V
+  // only once its clipboard holds what the operator pasted, or after 300 ms with no paste at all.
+  const pasteWait = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const finishPaste = async (text: string | null) => {
+    if (pasteWait.current) clearTimeout(pasteWait.current);
+    pasteWait.current = null;
+    if (!input) return;
+    if (text && clip.clipboard) await clip.clipboard.write(text).catch(() => undefined);
+    // Cmd+V on a Mac: the robot's Super must not be down for the robot's Ctrl+V.
+    for (const meta of ["MetaLeft", "MetaRight"]) if (input.held.keys.has(meta)) input.keyUp({ code: meta, repeat: false });
+    await input.keyCombo(["ControlLeft", "KeyV"]).catch(() => undefined);
+  };
   const focusId = `fjarr-desktop-${useId()}`;
   const { registration, focused } = useInputFocus(focusId, { onLost: () => input?.releaseAll() });
 
@@ -133,8 +185,9 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
       },
       keyCombo: (codes) => (input ? input.keyCombo(codes) : Promise.reject(new Error("the desktop view is not ready"))),
       typeText: (text) => (input ? input.text(text) : Promise.reject(new Error("the desktop view is not ready"))),
+      copyFromRobot: () => clip.copyFromRobot(),
     }),
-    [input],
+    [input, clip.clipboard],
   );
 
   const frame: CSSProperties = { position: "relative", background: "#000", aspectRatio: monitor ? `${monitor.w} / ${monitor.h}` : "16 / 9", ...style };
@@ -203,7 +256,17 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
             editor.current?.blur(); // the keyboard back to the page; onLost releases what is held
             return;
           }
+          if (clipboardOn && isPasteChord(e)) {
+            // Held back and not prevented: the browser fires `paste` on this editable with the text.
+            if (!e.repeat && !pasteWait.current) pasteWait.current = setTimeout(() => void finishPaste(null), 300);
+            return;
+          }
           if (input.keyDown(e.nativeEvent)) e.preventDefault(); // the robot's key, not the browser's
+        }}
+        onPaste={(e) => {
+          e.preventDefault(); // nothing lands in the hidden editable
+          if (!focused || !mayInput || !clipboardOn) return;
+          void finishPaste(e.clipboardData.getData("text/plain") || null);
         }}
         onKeyUp={(e) => {
           if (input.keyUp(e.nativeEvent)) e.preventDefault();

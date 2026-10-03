@@ -147,3 +147,35 @@ test("a monitor plugged into the robot appears in the Desktop panel's layout, an
   await expect(page.locator("[data-fjarr-desktop-layout]")).toHaveCount(0);
   await expect(page.locator("[data-fjarr-desktop] [data-fjarr-track^='desk-']")).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
 });
+
+test("the Desktop panel's clipboard: a copy on the robot reaches the browser, and a paste in the browser pastes on the robot (M3 3.5)", async ({ dashboard, stack, page }) => {
+  await stack.requireServer();
+  needs(await stack.dashboardReachable(), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
+  const plugd = process.env.E2E_DESKTOP_PLUG ?? "http://desktop-fixture:8091";
+  const call = (what: string) => fetch(`${plugd}/${what}`, { signal: AbortSignal.timeout(10_000) }).then((r) => r.text(), () => "");
+  needs(await fetch(`${plugd}/`, { signal: AbortSignal.timeout(2000) }).then(() => true, () => false), `the fixture's oracle is not reachable at ${plugd} — \`make desktop-e2e\` brings it up`);
+  await dashboard.goto();
+  // The page may use the clipboard as an operator's would, once they have clicked into it.
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(page.url()).origin });
+  await page.getByRole("button", { name: /Desktop Robot 01/ }).click();
+  await dashboard.connect("desktop-robot-01");
+  await dashboard.waitForState("desktop-robot-01", "connected");
+  const surface = page.locator("[data-fjarr-desktop]").first();
+  await expect(surface.locator("[data-fjarr-track^='desk-']")).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
+  await surface.click({ position: { x: 40, y: 40 } }); // focus, a user gesture, and the desktop's control
+
+  // 1. Robot → browser: copied on the robot, on this browser's clipboard by itself.
+  const robotText = "robot says åäö";
+  expect(await call(`copy?text=${encodeURIComponent(robotText)}`)).toBe("copied");
+  await expect(page.locator("[data-demo-clipboard]")).toHaveAttribute("data-demo-clipboard", /synced|needs-gesture/, { timeout: 5000 });
+  if ((await page.locator("[data-demo-clipboard]").getAttribute("data-demo-clipboard")) === "needs-gesture") await page.getByRole("button", { name: "Copy from robot" }).click();
+  await expect(page.locator("[data-demo-clipboard]")).toHaveAttribute("data-demo-clipboard", "synced", { timeout: 5000 });
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(robotText);
+
+  // 2. Browser → robot: the operator's clipboard, Ctrl+V in the view, and the robot pastes it.
+  const operatorText = "operator says ÅÄÖ";
+  await page.evaluate((t) => navigator.clipboard.writeText(t), operatorText);
+  await surface.click({ position: { x: 40, y: 40 } });
+  await page.keyboard.press("Control+V");
+  await expect.poll(() => call("paste"), { timeout: 5000, message: "the robot's clipboard after the operator's Ctrl+V" }).toBe(operatorText);
+});

@@ -626,3 +626,63 @@ describe("<DesktopLayout> (M3 3.4)", () => {
     expect(view.container.textContent).toContain("no display connected");
   });
 });
+
+describe("<DesktopView> clipboard (M3 3.5)", () => {
+  const mon: MonitorInfo = { id: "virtual-1", index: 0, primary: true, x: 0, y: 0, w: 1280, h: 720, scale: 1, connector: "Meta-0" };
+  const track = { track_id: "desk-virtual-1", cap: "fjarr.desktop", kind: "video" as const, label: "Meta-0", codec: "H264", pt: 96, mid: "0", monitor: mon };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("IntersectionObserver", undefined);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  async function mount() {
+    const { agent, client } = setup({
+      tracks: [track],
+      bulkCaps: ["fjarr.desktop"],
+      onRequest: (env) => (env.type === "clipboard-write" || env.type === "key-combo" ? { ok: true } : undefined),
+    });
+    const session = client.sessions.open("robot-1");
+    await tick();
+    const view = render(
+      <FjarrProvider client={client}>
+        <DesktopView session={session} />
+      </FjarrProvider>,
+    );
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    const surface = view.container.querySelector<HTMLElement>("[data-fjarr-desktop]")!;
+    const editor = view.container.querySelector<HTMLElement>("[contenteditable]")!;
+    fireEvent.pointerDown(surface, { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    const sent = () => agent.received.filter((e) => e.cap === "fjarr.desktop" && !["select-tracks", "pointer", "button"].includes(e.type)).map((e) => [e.type, e.payload] as const);
+    return { editor, sent };
+  }
+
+  it("a paste puts the operator's text on the robot's clipboard before the robot gets Ctrl+V", async () => {
+    const { editor, sent } = await mount();
+    fireEvent.keyDown(editor, { code: "ControlLeft", key: "Control", ctrlKey: true });
+    const v = fireEvent.keyDown(editor, { code: "KeyV", key: "v", ctrlKey: true });
+    expect(v).toBe(true); // not prevented: the browser must still fire `paste`
+    expect(sent().map(([t]) => t)).toEqual(["key"]); // only Ctrl: V is held back
+    fireEvent.paste(editor, { clipboardData: { getData: (t: string) => (t === "text/plain" ? "operator says ÅÄÖ" : "") } });
+    await tick(12);
+    const types = sent().map(([t]) => t);
+    expect(types).toEqual(["key", "clipboard-write", "key-combo"]);
+    expect(sent()[2][1]).toEqual({ codes: ["ControlLeft", "KeyV"] });
+  });
+
+  it("a paste chord with no paste event (nothing textual to paste) still reaches the robot after 300 ms", async () => {
+    const { editor, sent } = await mount();
+    fireEvent.keyDown(editor, { code: "KeyV", key: "v", ctrlKey: true });
+    await act(() => vi.advanceTimersByTimeAsync(299));
+    expect(sent()).toEqual([]);
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    await tick();
+    expect(sent()).toEqual([["key-combo", { codes: ["ControlLeft", "KeyV"] }]]);
+  });
+});

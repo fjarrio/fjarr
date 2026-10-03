@@ -410,6 +410,24 @@ monitor plugged into the fixture appeared in the layout streaming, and left it
 again when unplugged. Remaining in 3.4: the mini-PC run, with a real monitor,
 the DisplayPort chain and two ghosts.
 
+**3.5, the clipboard both ways (2026-10-03).** A spike first
+([spikes/desktop-comfort](../spikes/desktop-comfort/README.md)): mutter's
+clipboard works on the helper's unlinked input session, both ways, given every
+text name an application may ask for, an answer to every transfer, blocking
+descriptors and a keyboard on the seat. The same spike showed the cursor
+arriving as `SPA_META_Cursor` on every pointer move, with its shape once per
+change, which is what the local cursor is built on next. Built: `clipboard-offer`,
+`-read` and `-write` ([docs/08](08-protocol.md#input-events-fjarrdesktop)), the
+helper's relay and module E's `ClipboardHandle`
+([docs/23](23-agent-core-architecture.md#desktop-helper-protocol)),
+`DesktopClipboard` (one per session) and `<DesktopView>`'s held-back paste
+chord ([docs/22](22-remote-desktop-client.md#clipboard)). In CI, opsim's
+`desktop-clipboard` reads "robot says åäö" copied on the fixture and pastes
+"operator says ÅÄÖ" there, 7/7. In the lab browser, the demo's Desktop panel
+does the same through the real browser clipboard and a real Ctrl+V. Remaining
+in 3.5: the local cursor, `sharpness`, per-session virtual monitors, and
+copy and paste on the mini-PC.
+
 ## M3.5 — Hear the robot {#m35}
 
 **`fjarr.audio`** (robot microphone downlink, push-to-talk uplink through the

@@ -29,6 +29,7 @@ import {
   heldBy,
   isFjarrError,
   useControl,
+  useDesktopClipboard,
   useFjarrClient,
   useMonitors,
   usePublisher,
@@ -228,6 +229,9 @@ function DesktopPanel({ session }: { session: Session }) {
   const view = useRef<DesktopViewHandle>(null);
   const desktop = useControl(session, "desktop");
   const monitors = useMonitors(session);
+  // The robot's clipboard (docs/22#clipboard): a copy on the robot lands on this browser's clipboard by
+  // itself, or, when the browser wants a click first, through "Copy from robot".
+  const clipboard = useDesktopClipboard(session);
   // The picker stores the monitor's stable id, never its index or connector (docs/22#hot-plug).
   const [shown, setShown] = useState<string>("primary");
   const [note, setNote] = useState<string | null>(null);
@@ -261,6 +265,10 @@ function DesktopPanel({ session }: { session: Session }) {
             <button onClick={() => run(() => view.current!.enterFullscreen())}>Fullscreen</button>
           </>
         )}
+        {clipboard.state.sync === "needs-gesture" && <button onClick={() => run(clipboard.copyFromRobot)}>Copy from robot</button>}
+        <span data-demo-clipboard={clipboard.state.sync} style={{ color: "#8b93a1" }}>
+          {clipboard.state.sync === "synced" ? "robot's clipboard copied here" : clipboard.state.sync === "failed" ? `clipboard: ${clipboard.state.error}` : ""}
+        </span>
         {note && <span style={{ color: "#f85149" }}>{note}</span>}
       </div>
       {shown === "all" && monitors.length > 1 ? (

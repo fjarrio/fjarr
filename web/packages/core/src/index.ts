@@ -78,12 +78,18 @@ export {
 } from "./stats.js";
 export { FocusRegistry, type FocusOptions, type FocusRegistration, type WindowLike } from "./focus.js";
 export {
+  acquireDesktopClipboard,
   contentBox,
+  DesktopClipboard,
   DesktopInput,
+  isPasteChord,
   normalizedPoint,
   WHEEL_LINE_PX,
+  type ClipboardSync,
   type ContentBox,
   type DesktopButton,
+  type DesktopClipboardOptions,
+  type DesktopClipboardState,
   type DesktopInputOptions,
   type KeyLike,
   type PointerLike,

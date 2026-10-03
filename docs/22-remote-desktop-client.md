@@ -307,7 +307,10 @@ Browser side of the docs/06 offer/request model:
   is the case right after a copy on the robot (the operator's Ctrl+C was
   that key). When the browser refuses, `DesktopClipboard` keeps the text and
   reports `"needs-gesture"`, and the toolbar offers a "Copy from robot"
-  button that writes it on click.
+  button that writes it on click. There is **one `DesktopClipboard` per
+  session** (`acquireDesktopClipboard` in `@fjarr/core`), however many
+  monitors are shown, so a copy is read once; `useDesktopClipboard(session)`
+  gives a toolbar its state and `copyFromRobot()`.
 - **Browser → robot**: the operator's paste is caught on the focused input
   surface. A Ctrl+V or Cmd+V keydown is **held back**, not forwarded. The
   browser then fires `paste` on the surface with the clipboard's text,

@@ -4,7 +4,8 @@
  * spec: docs/22-remote-desktop-client.md#input-pipeline · #testing-docs15 · docs/08#input-events-fjarrdesktop
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { contentBox, createFjarrClient, DesktopInput, FjarrError, normalizedPoint, type Session } from "../src/index.js";
+import { acquireDesktopClipboard, contentBox, createFjarrClient, DesktopInput, FjarrError, isPasteChord, normalizedPoint, type Session } from "../src/index.js";
+import { encodeBlobChunk } from "../src/blob.js";
 import { fakeMediaStreamFactory, MockAgent, type MockAgentOptions } from "../src/testing/index.js";
 
 const tick = async (n = 6) => {
@@ -131,5 +132,105 @@ describe("DesktopInput", () => {
     input.pointerMove({ clientX: 1, clientY: 1 }, BOX);
     await tick();
     expect(sent().map(([t]) => t)).toEqual(["key", "release-all"]);
+  });
+});
+
+/**
+ * The clipboard (docs/08 clipboard-*, docs/22#clipboard): one per session, the robot's copy read on
+ * an offer and written to the browser, a refusal kept for a click, the operator's paste as a blob.
+ */
+describe("DesktopClipboard", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const BLOB = "01930000-0000-7000-8000-00000000c11b";
+  async function clipRig(robotText: string) {
+    const bytes = new TextEncoder().encode(robotText);
+    const agent = new MockAgent({
+      now: () => Date.now(),
+      bulkCaps: ["fjarr.desktop"],
+      onRequest: (env) =>
+        env.cap === "fjarr.desktop" && env.type === "clipboard-read" ? { ok: true, blob: { blob: BLOB, len: bytes.length, type: "text/plain" } } : env.type === "clipboard-write" ? { ok: true } : undefined,
+    });
+    const client = createFjarrClient({
+      serverUrl: "wss://fjarr.test/ws",
+      grant: async () => "jwt",
+      socketFactory: agent.socketFactory,
+      peerConnectionFactory: agent.peerConnectionFactory,
+      createMediaStream: fakeMediaStreamFactory,
+      now: () => Date.now(),
+      random: () => 0.5,
+    });
+    const session: Session = client.sessions.open("robot-1");
+    await tick();
+    const robotCopies = async () => {
+      agent.sendEvent("fjarr.desktop", "clipboard-offer", { offer_id: "offer-1", types: ["text/plain"] });
+      await tick();
+      agent.sendBulk("fjarr.desktop", encodeBlobChunk(BLOB, 0, bytes.length, bytes)); // the bytes follow the result
+      await tick(12);
+    };
+    return { agent, session, robotCopies };
+  }
+
+  it("a copy on the robot is read on its offer and lands on the browser's clipboard", async () => {
+    const { session, robotCopies, agent } = await clipRig("robot says åäö");
+    const written: string[] = [];
+    const { clipboard, release } = acquireDesktopClipboard(session, { writeText: async (t) => void written.push(t) });
+    await robotCopies();
+    expect(agent.received.find((e) => e.type === "clipboard-read")?.payload).toEqual({ offer_id: "offer-1", type: "text/plain" });
+    expect(written).toEqual(["robot says åäö"]);
+    expect(clipboard.snapshot.sync).toBe("synced");
+    release();
+  });
+
+  it("when the browser refuses without a gesture, the text is kept and a click copies it", async () => {
+    const { session, robotCopies, agent } = await clipRig("kept for a click");
+    let allowed = false;
+    const written: string[] = [];
+    const { clipboard, release } = acquireDesktopClipboard(session, {
+      writeText: async (t) => {
+        if (!allowed) throw new DOMException("no gesture", "NotAllowedError");
+        written.push(t);
+      },
+    });
+    await robotCopies();
+    expect(clipboard.snapshot.sync).toBe("needs-gesture");
+    allowed = true;
+    await clipboard.copyFromRobot();
+    expect(written).toEqual(["kept for a click"]);
+    expect(agent.received.filter((e) => e.type === "clipboard-read")).toHaveLength(1); // not read again
+    expect(clipboard.snapshot.sync).toBe("synced");
+    release();
+  });
+
+  it("is one per session: every view shares it, and the robot's copy is read once", async () => {
+    const { session, robotCopies, agent } = await clipRig("once");
+    const a = acquireDesktopClipboard(session, { writeText: async () => undefined });
+    const b = acquireDesktopClipboard(session);
+    expect(b.clipboard).toBe(a.clipboard);
+    await robotCopies();
+    expect(agent.received.filter((e) => e.type === "clipboard-read")).toHaveLength(1);
+    a.release();
+    b.release();
+    expect(acquireDesktopClipboard(session).clipboard).not.toBe(a.clipboard); // the last release disposed it
+  });
+
+  it("the operator's paste goes to the robot as a blob, after its request", async () => {
+    const { session, agent } = await clipRig("");
+    const { clipboard, release } = acquireDesktopClipboard(session);
+    const done = clipboard.write("operator says ÅÄÖ");
+    await tick(12);
+    await done;
+    const req = agent.received.find((e) => e.type === "clipboard-write");
+    expect(req?.payload).toMatchObject({ type: "text/plain", blob: { len: new TextEncoder().encode("operator says ÅÄÖ").length, type: "text/plain" } });
+    release();
+  });
+
+  it("the paste chord is Ctrl+V or Cmd+V, nothing else", () => {
+    expect(isPasteChord({ code: "KeyV", ctrlKey: true })).toBe(true);
+    expect(isPasteChord({ code: "KeyV", metaKey: true })).toBe(true);
+    expect(isPasteChord({ code: "KeyV" })).toBe(false);
+    expect(isPasteChord({ code: "KeyV", ctrlKey: true, shiftKey: true })).toBe(false);
+    expect(isPasteChord({ code: "KeyC", ctrlKey: true })).toBe(false);
   });
 });

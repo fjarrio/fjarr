@@ -4,6 +4,7 @@
  * in @fjarr/react wires it to the DOM. Every rule here is a row in docs/22's input pipeline table.
  * spec: docs/22-remote-desktop-client.md#input-pipeline · docs/08-protocol.md#input-events-fjarrdesktop
  */
+import type { BlobRef } from "./blob.js";
 import type { Publisher } from "./channels.js";
 import type { ResultPayload } from "./protocol.js";
 import type { Session } from "./session.js";
@@ -213,4 +214,161 @@ export class DesktopInput {
     this.pointer.release();
     this.disposed = true;
   }
+}
+
+// --- the clipboard (docs/08 clipboard-*, docs/22#clipboard; M3 3.5) ---------------------------------
+
+/** Where the robot's latest copy stands in the browser. */
+export type ClipboardSync = "idle" | "synced" | "needs-gesture" | "failed";
+
+export interface DesktopClipboardState {
+  sync: ClipboardSync;
+  /** Why `failed`. */
+  error?: string;
+}
+
+export interface DesktopClipboardOptions {
+  /** Put the robot's text on the browser's clipboard as soon as it is offered (default true). */
+  autoSync?: boolean;
+  /** The browser's clipboard; `navigator.clipboard.writeText` by default. */
+  writeText?: (text: string) => Promise<void>;
+}
+
+interface ClipboardOffer {
+  offer_id: string;
+  types: string[];
+}
+
+/**
+ * The robot's clipboard, for one session: there is one per session however many monitors are
+ * shown, so take it with `acquireDesktopClipboard`. A copy on the robot arrives as an offer; with
+ * auto-sync the text is read and written to the browser's clipboard, and when the browser refuses
+ * (no recent user gesture) the state is `needs-gesture` and `copyFromRobot()` — called from a click
+ * — finishes the job. `write()` puts the operator's paste on the robot's clipboard.
+ */
+export class DesktopClipboard {
+  private state: DesktopClipboardState = { sync: "idle" };
+  private offer: ClipboardOffer | null = null;
+  private held: string | null = null; // the robot's text the browser would not take yet
+  private readonly listeners = new Set<() => void>();
+  private readonly off: () => void;
+
+  constructor(
+    private readonly session: Session,
+    private readonly options: DesktopClipboardOptions = {},
+  ) {
+    this.off = session.on(CAP, "clipboard-offer", (env) => void this.onOffer(env.payload as ClipboardOffer));
+  }
+
+  get snapshot(): DesktopClipboardState {
+    return this.state;
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private set(state: DesktopClipboardState): void {
+    this.state = state;
+    for (const l of this.listeners) l();
+  }
+
+  private async onOffer(offer: ClipboardOffer): Promise<void> {
+    this.offer = offer;
+    this.held = null;
+    if (!offer.types?.includes("text/plain")) return this.set({ sync: "idle" });
+    if (this.options.autoSync ?? true) await this.pull();
+  }
+
+  /** The robot's current text, read on demand (docs/08 clipboard-read); null when it holds none. */
+  async readRobot(): Promise<string | null> {
+    const offer = this.offer;
+    if (!offer || !offer.types?.includes("text/plain")) return null;
+    const res = await this.session.request<ResultPayload & { blob: BlobRef }>(CAP, "clipboard-read", { offer_id: offer.offer_id, type: "text/plain" });
+    const bytes = await this.session.bulk(CAP).receive(res.blob);
+    return new TextDecoder().decode(bytes);
+  }
+
+  private async pull(): Promise<void> {
+    let text: string | null;
+    try {
+      text = await this.readRobot();
+    } catch (e) {
+      return this.set({ sync: "failed", error: (e as Error).message });
+    }
+    if (text === null) return;
+    try {
+      await this.writeText(text);
+      this.held = null;
+      this.set({ sync: "synced" });
+    } catch {
+      // The browser wants a user gesture first (docs/22): keep the text for copyFromRobot().
+      this.held = text;
+      this.set({ sync: "needs-gesture" });
+    }
+  }
+
+  /** From a click: the robot's latest copy onto the browser's clipboard. */
+  async copyFromRobot(): Promise<void> {
+    const text = this.held ?? (await this.readRobot());
+    if (text === null) return;
+    await this.writeText(text);
+    this.held = null;
+    this.set({ sync: "synced" });
+  }
+
+  /**
+   * The operator's paste onto the robot's clipboard (docs/08 clipboard-write). Resolves once the
+   * robot holds it, so a paste keystroke sent after it pastes this text. It is input: it claims the
+   * desktop control domain (docs/10).
+   */
+  async write(text: string): Promise<void> {
+    const { ref, done } = this.session.bulk(CAP).sendBlob(new TextEncoder().encode(text), "text/plain");
+    await Promise.all([this.session.request(CAP, "clipboard-write", { type: "text/plain", blob: ref }), done]);
+  }
+
+  private writeText(text: string): Promise<void> {
+    return (this.options.writeText ?? ((t: string) => navigator.clipboard.writeText(t)))(text);
+  }
+
+  dispose(): void {
+    this.off();
+    this.listeners.clear();
+  }
+}
+
+const clipboards = new WeakMap<Session, { clipboard: DesktopClipboard; refs: number }>();
+
+/**
+ * The session's one DesktopClipboard, shared by every view of it. `release()` when done; the last
+ * release disposes it.
+ */
+export function acquireDesktopClipboard(session: Session, options?: DesktopClipboardOptions): { clipboard: DesktopClipboard; release: () => void } {
+  let entry = clipboards.get(session);
+  if (!entry) {
+    entry = { clipboard: new DesktopClipboard(session, options), refs: 0 };
+    clipboards.set(session, entry);
+  }
+  entry.refs++;
+  const e = entry;
+  let released = false;
+  return {
+    clipboard: e.clipboard,
+    release: () => {
+      if (released) return;
+      released = true;
+      if (--e.refs > 0) return;
+      e.clipboard.dispose();
+      clipboards.delete(session);
+    },
+  };
+}
+
+/**
+ * Is this keydown the operator's paste chord (Ctrl+V, or Cmd+V on a Mac)? `<DesktopView>` holds it
+ * back until the browser's `paste` has put the text on the robot's clipboard (docs/22#clipboard).
+ */
+export function isPasteChord(e: { code: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; shiftKey?: boolean }): boolean {
+  return e.code === "KeyV" && !!(e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey;
 }
