@@ -152,8 +152,9 @@ jobs:
           E2E_INTROSPECT_HTTP: http://localhost:7381
           E2E_VIEWER_URL: http://demo-robot:7381/
           CI: "true"
-        # pnpm 10 forwards `--` literally: call playwright through `exec` to pass flags
-        run: pnpm --filter '@fjarr/e2e' exec playwright test --project loopback --project stack
+        # pnpm 10 forwards `--` literally: call playwright through `exec` to pass flags.
+        # The 4.5f login gate needs fjarr-connect and the tunnel: `make tunnel-login` runs it below.
+        run: pnpm --filter '@fjarr/e2e' exec playwright test --project loopback --project stack --grep-invert "4\\.5f gate"
       - name: fjarr-opsim scenarios against the demo robot (docs/23 gate 2)
         # From the runner: the target execs into the demo robot's container itself.
         run: make opsim-all
