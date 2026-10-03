@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include <fjarr/errors.hpp>
 #include <fjarr/session_context.hpp>
 
 namespace fjarr::testing {
@@ -49,7 +50,11 @@ struct RecordingContext final : SessionContext {
     /// The realtime channel: the envelopes sent on it, in order.
     struct EnvelopeRecorder final : ChannelSender {
         std::vector<Envelope> envelopes;
-        void send(const Envelope &e) override { envelopes.push_back(e); }
+        bool open = true; // false: refuses as the core's does before the session connects
+        void send(const Envelope &e) override {
+            if (!open) throw FjarrError("capability-denied", "fjarr:realtime is not open");
+            envelopes.push_back(e);
+        }
         bool send_binary(std::span<const std::byte>) override { return false; }
         std::size_t buffered_amount() const override { return 0; }
         void on_drain(std::function<void()>) override {}

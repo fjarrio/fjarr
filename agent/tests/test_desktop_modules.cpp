@@ -207,6 +207,16 @@ TEST(DesktopInput, staleOrOffScreenPointerMotionIsDropped) {
     EXPECT_EQ(r.calls(), (std::vector<std::string>{"pointer 7 0.100000 0.100000"}));
 }
 
+TEST(DesktopInput, aPressLandsWhereItSaysEvenWhenItsMotionIsLateOrLost) {
+    // docs/08 `button`: motion on realtime, the press on control. The pointer was left on GNOME's
+    // stop button; the press overtook its motion and stopped the sharing (mini-PC, 2026-10-03).
+    InputRig r;
+    r.send(r.a, "button", {{"button", "left"}, {"down", true}, {"track_id", "desk-virtual-1"}, {"x", 0.5}, {"y", 0.75}, {"seq", 9}});
+    r.send(r.a, "pointer", {{"track_id", "desk-virtual-1"}, {"x", 0.9}, {"y", 0.1}, {"seq", 8}}); // sent before it, arrived after
+    r.send(r.a, "button", {{"button", "left"}, {"down", false}});
+    EXPECT_EQ(r.calls(), (std::vector<std::string>{"pointer 7 0.500000 0.750000", "button 0 down", "button 0 up"}));
+}
+
 TEST(DesktopInput, textIsTypedWholeOrRefusedNamingWhatTheLayoutLacks) {
     InputRig r;
     r.send(r.a, "text", {{"text", "hej"}}, "request");
@@ -645,4 +655,18 @@ TEST(DesktopSharing, aCaptureThatEndsAloneIsNotAStopOnTheRobot) {
     lose(7);
     EXPECT_EQ(last(r.a, "sharing"), nullptr);
     EXPECT_FALSE(offers(r.a, "desk-virtual-1")) << "its track still leaves the offer";
+}
+
+TEST(DesktopCursor, aSessionWhoseRealtimeChannelIsNotOpenYetIsSkippedNotACrash) {
+    // A session still connecting has no fjarr:realtime: the core's sender throws. A pointer move on
+    // the robot then aborted the agent (mini-PC, 2026-10-03). Positions are newest-wins: drop it.
+    InputRig r;
+    fjarr::testing::RecordingContext connecting;
+    connecting.sid = "session-connecting";
+    connecting.realtime_sender.open = false;
+    r.cap.session_attached(connecting, nlohmann::json::object());
+    auto cursor = stub_cursor();
+    EXPECT_NO_THROW(cursor("", 0.25, 0.5));
+    EXPECT_EQ(r.a.realtime_sender.envelopes.size(), 1u) << "the connected sessions still get it";
+    EXPECT_TRUE(connecting.realtime_sender.envelopes.empty());
 }

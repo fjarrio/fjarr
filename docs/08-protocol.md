@@ -295,12 +295,18 @@ Pointer motion (realtime channel, coalesced client-side to ≤ 60 Hz):
 ```
 
 `x`/`y` are normalized [0,1] within that monitor's track — DPI/scaling
-agnostic by construction. `seq` is monotonic; receivers drop stale.
+agnostic by construction. `seq` is monotonic **per session**, across every
+view a client has of it: one counter for the session, never one per view,
+so a view mounted later (another monitor in a layout, or a view remounted
+after the robot stopped sharing) never restarts it. Receivers drop stale.
+A counter per view made the agent drop every move from a remounted view as
+stale while its clicks still landed, where the pointer had been left
+(mini-PC, 2026-10-03).
 Control-channel input messages (all `cap: "fjarr.desktop"`):
 
 | `type` | payload | notes |
 |---|---|---|
-| `button` | `{"button": "left" \| "middle" \| "right" \| "back" \| "forward", "down": bool}` | |
+| `button` | `{"button": "left" \| "middle" \| "right" \| "back" \| "forward", "down": bool, "track_id"?, "x"?, "y"?, "seq"?}` | a press carries where it lands, the same normalized point and `seq` as `pointer`, and the agent moves the pointer there before pressing; a `pointer` older than its `seq` that arrives later is stale. Motion travels on realtime and the press on control, so a press could overtake its own motion and land where the pointer was. A release carries none: it ends where the pointer is |
 | `wheel` | `{"dx": px, "dy": px}` | already normalized to pixels by the client |
 | `key` | `{"code": "KeyA", "down": bool}` | `code` = `KeyboardEvent.code` (physical key), mapped to Linux keycodes agent-side; clients MUST NOT forward browser auto-repeat — the held key repeats natively |
 | `key-combo` | `{"codes": ["ControlLeft", "AltLeft", "Delete"]}` | atomic press-and-release for combos the browser cannot capture |

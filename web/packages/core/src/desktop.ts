@@ -92,9 +92,19 @@ export interface TextResult extends ResultPayload {
  * One per desktop view. Holds which keys and buttons it has pressed, so focus loss lets go of
  * exactly those: the agent's own release on session end is the backstop, not the mechanism.
  */
+/**
+ * docs/08: `seq` is monotonic per session, across every view of it. A counter per view restarted in a
+ * remounted view, and the agent dropped all its motion as stale (mini-PC, 2026-10-03).
+ */
+const pointerSeqs = new WeakMap<Session, number>();
+function nextPointerSeq(session: Session): number {
+  const n = (pointerSeqs.get(session) ?? 0) + 1;
+  pointerSeqs.set(session, n);
+  return n;
+}
+
 export class DesktopInput {
   private readonly pointer: Publisher<{ track_id: string; x: number; y: number; seq: number }>;
-  private seq = 0;
   private readonly keys = new Set<string>();
   private readonly buttons = new Set<DesktopButton>();
   private wheelDx = 0;
@@ -124,11 +134,17 @@ export class DesktopInput {
 
   /** Pointer motion; false (and nothing sent) outside the monitor's pixels. */
   pointerMove(e: PointerLike, box: ContentBox | null): boolean {
+    return this.point(e, box) !== null;
+  }
+
+  /** The motion to `e`, published; null (and nothing sent) outside the monitor's pixels. */
+  private point(e: PointerLike, box: ContentBox | null): { track_id: string; x: number; y: number; seq: number } | null {
     const track = this.track();
     const p = box && normalizedPoint(box, e.clientX, e.clientY);
-    if (this.disposed || !track || !p) return false;
-    this.pointer.publish({ track_id: track, x: p.x, y: p.y, seq: ++this.seq });
-    return true;
+    if (this.disposed || !track || !p) return null;
+    const motion = { track_id: track, x: p.x, y: p.y, seq: nextPointerSeq(this.session) };
+    this.pointer.publish(motion);
+    return motion;
   }
 
   /**
@@ -139,12 +155,16 @@ export class DesktopInput {
     const button = BUTTONS[e.button ?? 0];
     if (this.disposed || !button) return false;
     if (down) {
-      if (!this.pointerMove(e, box)) return false; // the press lands where the pointer is
+      // The press carries where it lands (docs/08 `button`): its motion goes on realtime and the
+      // press on control, so the press could overtake it and land where the pointer was left.
+      const at = this.point(e, box);
+      if (!at) return false;
       this.buttons.add(button);
-    } else {
-      if (!this.buttons.has(button)) return false;
-      this.buttons.delete(button);
+      this.session.send(CAP, "button", { button, down, ...at });
+      return true;
     }
+    if (!this.buttons.has(button)) return false;
+    this.buttons.delete(button);
     this.session.send(CAP, "button", { button, down });
     return true;
   }

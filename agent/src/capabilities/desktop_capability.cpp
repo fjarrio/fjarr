@@ -150,7 +150,12 @@ struct DesktopCapability::Impl {
         auto s = sessions.find(id);
         auto c = cursors.find(id);
         if (s == sessions.end() || c == cursors.end() || !c->second.pending) return;
-        s->second->realtime().send(protocol::make_envelope("fjarr.desktop", "cursor-position", "event", std::move(*c->second.pending)));
+        try {
+            s->second->realtime().send(protocol::make_envelope("fjarr.desktop", "cursor-position", "event", std::move(*c->second.pending)));
+        } catch (const FjarrError&) {
+            // Not open yet (still connecting) or no longer: positions are newest-wins, so this one is
+            // dropped. Uncaught, a pointer move during a connect aborted the agent (mini-PC, 2026-10-03).
+        }
         c->second.pending.reset();
         c->second.last = std::chrono::steady_clock::now();
     }
@@ -551,7 +556,17 @@ void DesktopCapability::on_message(SessionContext& ctx, const Envelope& msg) {
             {"left", MouseButton::Left}, {"middle", MouseButton::Middle}, {"right", MouseButton::Right}, {"back", MouseButton::Back}, {"forward", MouseButton::Forward}};
         const auto it = buttons.find(p.value("button", std::string{}));
         if (it == buttons.end()) return refuse(error_codes::payload_invalid, "button is left, middle, right, back or forward");
-        d.pointer_button(it->second, p.value("down", false));
+        const bool down = p.value("down", false);
+        // docs/08 `button`: a press carries where it lands. Its motion went on realtime and could
+        // arrive after it, or never: the press would land where the pointer was left.
+        if (down && p.contains("x")) {
+            const double x = p.value("x", -1.0), y = p.value("y", -1.0);
+            const auto m = impl_->monitor_for(p.value("track_id", std::string{}));
+            if (m && x >= 0 && x <= 1 && y >= 0 && y <= 1) d.pointer_motion(m->id, x, y);
+            auto& last = impl_->pointer_seq[ctx.id()];
+            last = std::max(last, p.value("seq", std::uint64_t{0})); // older motion arriving after it is stale
+        }
+        d.pointer_button(it->second, down);
     } else if (msg.type == "wheel") {
         d.pointer_wheel(p.value("dx", 0.0), p.value("dy", 0.0));
     } else if (msg.type == "key") {

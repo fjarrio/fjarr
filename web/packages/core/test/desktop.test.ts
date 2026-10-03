@@ -88,10 +88,23 @@ describe("DesktopInput", () => {
     expect(input.pointerButton({ clientX: 100, clientY: 100, button: 2 }, true, BOX)).toBe(true);
     expect(input.pointerButton({ clientX: 5000, clientY: 5000, button: 2 }, false, BOX)).toBe(true);
     await tick();
+    // The press carries its point and seq (docs/08 `button`): it could overtake its own motion.
     expect(sent().filter(([t]) => t === "button")).toEqual([
-      ["button", { button: "right", down: true }],
+      ["button", { button: "right", down: true, track_id: "desk-virtual-1", x: 100 / 1280, y: 100 / 720, seq: 1 }],
       ["button", { button: "right", down: false }],
     ]);
+  });
+
+  it("seq is one counter per session: a view mounted later continues it, never restarts it (mini-PC, 2026-10-03)", async () => {
+    const { session, input, agent } = await rig();
+    input.pointerMove({ clientX: 10, clientY: 10 }, BOX);
+    await tick();
+    input.dispose(); // the view goes (a resume remounted it), and a new one comes
+    const later = new DesktopInput(session, { trackId: "desk-virtual-1" });
+    later.pointerMove({ clientX: 20, clientY: 20 }, BOX);
+    await tick();
+    const seqs = agent.received.filter((e) => e.type === "pointer").map((e) => (e.payload as { seq: number }).seq);
+    expect(seqs).toEqual([1, 2]);
   });
 
   it("wheel: lines × 16, pages × the viewport, accumulated into one message per interval", async () => {
