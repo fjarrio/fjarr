@@ -683,15 +683,20 @@ on that monitor whichever is primary.
 ### When the robot stops sharing (M3 slice 3.5) {#desktop-sharing-stopped}
 
 GNOME's screen-sharing indicator stops every capture and the input session
-from the robot's side. The helper sees mutter close them and sends
-`capture-lost {reason: "stream-stopped"}` per capture; module E reports
-`CaptureLost::SourceStopped` (docs/09) and asks for input again only with its
-next capture. A virtual monitor's stream ends its monitor, so it leaves the
-layout as a hot-plug and is not brought back.
+from the robot's side. A lost capture alone does not tell the stop apart: an
+unplugged monitor's capture also ends, before the layout change arrives
+(fixture, 2026-10-03). The input session does: only the stop closes it. So
+the helper sends `sharing-stopped {}` when mutter closes the input session,
+beside `capture-lost {reason: "stream-stopped"}` per capture, and drops the
+dead input session so the next `open-input` makes a new one. Module E then
+reports `CaptureLost::SharingStopped` (docs/09) for every capture and asks
+for input again only with its next capture. A virtual monitor's stream ends
+its monitor, so it is reported `MonitorGone`, leaves the layout as a
+hot-plug, and is not brought back.
 
-The capability turns the first `SourceStopped` into `sharing: stopped`
+The capability turns the first `SharingStopped` into `sharing: stopped`
 (docs/08) for every session: each stopped screen's source is unavailable, so
-the re-offer drops its track. On `resume-sharing` it stops and starts the
+the re-offer drops its track. A `SourceStopped` alone changes nothing here. On `resume-sharing` it stops and starts the
 capture of every stopped screen through the backend (`stop_capture`, then
 `start_capture` with the same options), which brings the input back with
 it; each track returns as its new source becomes available, and `sharing:

@@ -250,7 +250,20 @@ class Helper {
     helper::InputSession& input() {
         if (!input_) {
             input_ = std::make_unique<helper::InputSession>(bus_);
-            input_->on_closed([this] { say("mutter closed the input session; the agent asks again"); });
+            input_->on_closed([this] {
+                // GNOME's stop button, or mutter ending it otherwise: the session is dead, so the next
+                // open-input makes a new one (docs/23#desktop-sharing-stopped). Deferred: this runs
+                // inside the session's own signal handler.
+                say("mutter closed the input session; the agent asks again");
+                g_idle_add([](gpointer d) {
+                    auto* self = static_cast<Helper*>(d);
+                    self->input_.reset();
+                    self->robot_types_.clear();
+                    // Only the stop closes it: an unplug ends a capture, never the input (docs/23).
+                    self->send({{"type", "sharing-stopped"}});
+                    return G_SOURCE_REMOVE;
+                }, this);
+            });
             // The clipboard (docs/23#desktop-helper-protocol): the robot's copies go to the agent;
             // our own selection's echo does not, and a copy on the robot ends our selection.
             input_->on_selection_owner([this](bool ours, std::vector<std::string> types) {

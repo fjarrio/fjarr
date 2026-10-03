@@ -59,6 +59,9 @@ struct DesktopCapability::Impl {
     };
     std::map<std::string, Screen> screens; // by wire id
     bool had_monitors = false;             // the first set is `initial`
+    // docs/23#desktop-sharing-stopped: the robot ended these captures (GNOME's stop button); they
+    // stay stopped until a session sends resume-sharing.
+    std::set<std::string> stopped; // wire ids
     // Input (M3 3.2). The core lets only the desktop domain's holder through (docs/10); this is
     // the session whose input is on the desktop now, so only its end releases what it holds.
     std::optional<SessionId> input_session;
@@ -289,6 +292,51 @@ struct DesktopCapability::Impl {
         for (const Screen* sc : ordered()) list.push_back(protocol::monitor_to_json(info(sc->monitor, index++)));
         for (auto& [_, ctx] : sessions) ctx->event("monitors", {{"monitors", list}, {"reason", reason}});
     }
+    /// A monitor's capture as its track's source, re-offered as it comes and goes.
+    std::shared_ptr<VideoSource> capture(const Monitor& m) {
+        // Local cursor where the backend has one (docs/22#cursor-strategy): the video leaves it out,
+        // and the shape and position arrive beside it.
+        CaptureOptions options;
+        options.cursor_in_video = !driver->features().local_cursor;
+        auto source = driver->start_capture(m.id, options);
+        if (source) {
+            const std::string id = "desk-" + m.wire_id;
+            source->on_availability_changed([this, id](bool now) {
+                log::info("desktop", now ? "track available" : "track unavailable", {{"track", id}});
+                reoffer();
+            });
+        }
+        return source;
+    }
+    void tell_sharing(SessionContext& ctx) { ctx.event("sharing", {{"state", stopped.empty() ? "on" : "stopped"}}); }
+    /// docs/08 `sharing`: someone at the robot stopped it. A lost capture alone is not that: an
+    /// unplugged monitor's ends before the layout says so (docs/23#desktop-sharing-stopped).
+    void on_capture_lost(MonitorId monitor, CaptureLost why) {
+        if (why != CaptureLost::SharingStopped) return;
+        for (auto& [wire, sc] : screens) {
+            if (sc.monitor.id != monitor) continue;
+            const bool first = stopped.empty();
+            stopped.insert(wire);
+            if (!first) return;
+            log::info("desktop", "sharing stopped on the robot", {{"monitor", wire}});
+            for (auto& [_, ctx] : sessions) tell_sharing(*ctx);
+            return;
+        }
+    }
+    /// docs/08 `resume-sharing`: every stopped capture again; their tracks return as they become available.
+    void resume(const SessionContext& by) {
+        if (stopped.empty()) return;
+        for (const auto& wire : stopped) {
+            auto it = screens.find(wire);
+            if (it == screens.end()) continue; // gone since
+            driver->stop_capture(it->second.monitor.id);
+            it->second.source = capture(it->second.monitor);
+        }
+        stopped.clear();
+        log::info("desktop", "sharing resumed", {{"operator", by.operator_info().id}});
+        for (auto& [_, ctx] : sessions) tell_sharing(*ctx);
+        reoffer();
+    }
     /// The monitor set changed (docs/23#desktop-monitors): diff by wire id.
     void on_monitors(const std::vector<Monitor>& monitors) {
         bool set_changed = false;
@@ -300,6 +348,7 @@ struct DesktopCapability::Impl {
                 continue;
             }
             log::info("desktop", "monitor gone", {{"monitor", it->first}});
+            stopped.erase(it->first);
             driver->stop_capture(it->second.monitor.id);
             it = screens.erase(it);
             set_changed = true;
@@ -310,18 +359,7 @@ struct DesktopCapability::Impl {
                 it->second.monitor = m; // same monitor: new geometry, mode or primary flag, same track
                 continue;
             }
-            // Local cursor where the backend has one (docs/22#cursor-strategy): the video leaves it out,
-            // and the shape and position arrive beside it.
-            CaptureOptions options;
-            options.cursor_in_video = !driver->features().local_cursor;
-            Screen sc{m, driver->start_capture(m.id, options)};
-            if (sc.source) {
-                const std::string id = "desk-" + m.wire_id;
-                sc.source->on_availability_changed([this, id](bool now) {
-                    log::info("desktop", now ? "track available" : "track unavailable", {{"track", id}});
-                    reoffer();
-                });
-            }
+            Screen sc{m, capture(m)};
             log::info("desktop", "monitor present", {{"monitor", m.wire_id}, {"connector", m.connector}, {"primary", m.primary ? "yes" : "no"}});
             screens.emplace(m.wire_id, std::move(sc));
             set_changed = true;
@@ -419,6 +457,7 @@ void DesktopCapability::configure(const nlohmann::json& config, const SourceFact
         return;
     }
     impl_->driver->on_monitors_changed([this](std::vector<Monitor> monitors) { impl_->on_monitors(monitors); });
+    impl_->driver->on_capture_lost([this](MonitorId m, CaptureLost why) { impl_->on_capture_lost(m, why); });
     if (auto* clip = impl_->driver->clipboard()) clip->on_changed([this](std::vector<std::string> types) { impl_->on_clipboard_changed(std::move(types)); });
     impl_->driver->on_cursor_shape([this](const CursorShape& shape) { impl_->on_cursor_shape(shape); });
     impl_->driver->on_cursor_position([this](MonitorId m, double x, double y) { impl_->on_cursor_position(m, x, y); });
@@ -429,6 +468,7 @@ void DesktopCapability::session_attached(SessionContext& ctx, const nlohmann::js
     for (auto& spec : impl_->specs()) ctx.add_track(std::move(spec)); // unavailable until the helper hands it over: held back by the core
     if (!impl_->offer_id.empty()) impl_->offer(ctx); // what the robot holds now, so a late viewer can paste it too
     impl_->send_shape(ctx);                          // the cursor as it is now (docs/08 `cursor`)
+    if (!impl_->stopped.empty()) impl_->tell_sharing(ctx); // docs/08 `sharing`: at the start while stopped
 }
 
 void DesktopCapability::session_detached(const SessionId& id, DetachReason, std::string_view) {
@@ -458,6 +498,12 @@ void DesktopCapability::on_message(SessionContext& ctx, const Envelope& msg) {
     if (!impl_->driver) return refuse(error_codes::unavailable, impl_->unavailable.empty() ? "no desktop backend is running" : impl_->unavailable);
     auto& d = *impl_->driver;
     const auto& p = msg.payload;
+    if (msg.type == "resume-sharing") {
+        // Not input (docs/10): it restores what every session sees, so any session may, view-only included.
+        impl_->resume(ctx);
+        if (request) ctx.result(msg, {{"ok", true}});
+        return;
+    }
     if (msg.type == "clipboard-read") {
         // Reading claims no control (docs/10), so it comes before the input bookkeeping below.
         if (view_only(ctx)) return refuse(error_codes::capability_denied, "a view-only session sees no clipboard");

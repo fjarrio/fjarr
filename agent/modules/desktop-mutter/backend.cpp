@@ -536,12 +536,22 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
                 }
         } else if (type == "capture-failed") {
             say(2, "the helper could not capture: " + m.body.value("reason", std::string{"?"}));
+        } else if (type == "sharing-stopped") {
+            // docs/23#desktop-sharing-stopped: someone at the robot stopped it; every capture went with it.
+            say(1, "sharing stopped on the robot");
+            for (auto& [monitor, c] : captures_) {
+                if (c.is_virtual) continue; // its stream was the monitor: it leaves as a hot-plug
+                c.source->lost("sharing stopped on the robot");
+                if (lost_cb_) lost_cb_(monitor, CaptureLost::SharingStopped);
+            }
         } else if (type == "capture-lost") {
             const int id = m.body.value("id", 0);
             for (auto& [monitor, c] : captures_)
                 if (c.id == id) {
                     c.source->lost("the stream stopped");
-                    if (lost_cb_) lost_cb_(monitor, m.body.value("reason", std::string{}) == "monitor-gone" ? CaptureLost::MonitorGone : CaptureLost::SourceStopped);
+                    // A virtual monitor's stream is the monitor: when it ends, the monitor has gone (docs/23).
+                    const bool gone = c.is_virtual || m.body.value("reason", std::string{}) == "monitor-gone";
+                    if (lost_cb_) lost_cb_(monitor, gone ? CaptureLost::MonitorGone : CaptureLost::SourceStopped);
                 }
         }
     }

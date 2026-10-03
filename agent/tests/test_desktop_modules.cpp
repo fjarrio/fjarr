@@ -556,3 +556,93 @@ TEST(DesktopVirtual, addingAndRemovingAMonitorIsDesktopInput) {
     EXPECT_NE(std::find(inputs.begin(), inputs.end(), "add-monitor"), inputs.end());
     EXPECT_NE(std::find(inputs.begin(), inputs.end(), "remove-monitor"), inputs.end());
 }
+
+// --- when the robot stops sharing (M3 3.5) -----------------------------------------------------------------
+// spec: docs/08 sharing, resume-sharing · docs/10#session-ownership · docs/23#desktop-sharing-stopped
+
+namespace {
+/// One monitor, virtual-1 (id 7), captured as the helper's first `monitors` would make it.
+void plug_one() {
+    void* so = ::dlopen((std::string(FJARR_STUB_MODULE_DIR) + "/libfjarr-desktop-stub.so").c_str(), RTLD_NOW | RTLD_NOLOAD);
+    auto plug = reinterpret_cast<void (*)(const char*)>(::dlsym(so, "fjarr_stub_plug"));
+    ASSERT_NE(plug, nullptr);
+    plug("virtual-1:7:0:1280:1");
+}
+void stop_sharing() {
+    void* so = ::dlopen((std::string(FJARR_STUB_MODULE_DIR) + "/libfjarr-desktop-stub.so").c_str(), RTLD_NOW | RTLD_NOLOAD);
+    auto stop = reinterpret_cast<void (*)()>(::dlsym(so, "fjarr_stub_stop_sharing"));
+    ASSERT_NE(stop, nullptr);
+    stop();
+}
+bool offers(const fjarr::testing::RecordingContext& ctx, const std::string& track) {
+    if (ctx.updates.empty()) return false;
+    const auto& last_set = ctx.updates.back();
+    return std::find(last_set.begin(), last_set.end(), track) != last_set.end();
+}
+} // namespace
+
+TEST(DesktopSharing, aStopOnTheRobotTellsEverySessionAndTakesTheScreenOutOfTheOffer) {
+    InputRig r;
+    plug_one();
+    ASSERT_TRUE(offers(r.a, "desk-virtual-1"));
+    stop_sharing();
+    for (auto* ctx : {&r.a, &r.b}) {
+        const auto* ev = last(*ctx, "sharing");
+        ASSERT_NE(ev, nullptr);
+        EXPECT_EQ(ev->payload, (nlohmann::json{{"state", "stopped"}}));
+        EXPECT_FALSE(offers(*ctx, "desk-virtual-1"));
+    }
+    // A session that starts while it is stopped hears so at once; nothing resumes by itself.
+    fjarr::testing::RecordingContext late;
+    late.sid = "session-late";
+    r.cap.session_attached(late, nlohmann::json::object());
+    ASSERT_NE(last(late, "sharing"), nullptr);
+    EXPECT_EQ(last(late, "sharing")->payload["state"], "stopped");
+    const auto calls = r.calls();
+    EXPECT_EQ(std::count(calls.begin(), calls.end(), "capture 7"), 1) << "not restarted unasked";
+}
+
+TEST(DesktopSharing, anySessionResumesItViewOnlyIncludedAndTheScreenComesBack) {
+    InputRig r;
+    plug_one();
+    stop_sharing();
+    fjarr::testing::RecordingContext viewer;
+    viewer.sid = "session-viewer";
+    viewer.grants = {{"view_only", true}};
+    r.cap.session_attached(viewer, nlohmann::json::object());
+    r.send(viewer, "resume-sharing", nlohmann::json::object(), "request");
+    const auto* res = last(viewer, "resume-sharing");
+    ASSERT_NE(res, nullptr);
+    EXPECT_TRUE(res->payload.value("ok", false)) << res->payload.dump();
+    const auto calls = r.calls();
+    ASSERT_GE(calls.size(), 2u);
+    EXPECT_EQ(calls[calls.size() - 2], "stop 7");
+    EXPECT_EQ(calls.back(), "capture 7");
+    for (auto* ctx : {&r.a, &r.b, &viewer}) {
+        EXPECT_EQ(last(*ctx, "sharing")->payload["state"], "on");
+        EXPECT_TRUE(offers(*ctx, "desk-virtual-1"));
+    }
+    // While it is on, a resume is answered and starts nothing.
+    r.send(r.a, "resume-sharing", nlohmann::json::object(), "request");
+    EXPECT_TRUE(last(r.a, "resume-sharing")->payload.value("ok", false));
+    EXPECT_EQ(r.calls().size(), calls.size());
+}
+
+TEST(DesktopSharing, resumingIsNotInputSoItClaimsNoControl) {
+    fjarr::DesktopCapability cap;
+    const auto inputs = cap.manifest().control_inputs;
+    EXPECT_EQ(std::find(inputs.begin(), inputs.end(), "resume-sharing"), inputs.end());
+}
+
+TEST(DesktopSharing, aCaptureThatEndsAloneIsNotAStopOnTheRobot) {
+    // An unplugged monitor's capture ends before the layout says it has gone (fixture, 2026-10-03):
+    // that is a hot-plug on its way, not someone stopping the sharing.
+    InputRig r;
+    plug_one();
+    void* so = ::dlopen((std::string(FJARR_STUB_MODULE_DIR) + "/libfjarr-desktop-stub.so").c_str(), RTLD_NOW | RTLD_NOLOAD);
+    auto lose = reinterpret_cast<void (*)(unsigned)>(::dlsym(so, "fjarr_stub_lose"));
+    ASSERT_NE(lose, nullptr);
+    lose(7);
+    EXPECT_EQ(last(r.a, "sharing"), nullptr);
+    EXPECT_FALSE(offers(r.a, "desk-virtual-1")) << "its track still leaves the offer";
+}

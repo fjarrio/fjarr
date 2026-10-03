@@ -237,6 +237,8 @@ function DesktopPanel({ session }: { session: Session }) {
   // A screen of our own on the robot (docs/22#virtual-monitors-slice-35), sized to this window; it goes
   // when the session ends.
   const [myScreen, setMyScreen] = useState<string | null>(null);
+  // When someone at the robot stops the screen sharing (docs/22#when-the-robot-stops-sharing).
+  const [autoResume, setAutoResume] = useState(false);
   const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(v / 8) * 8));
   // The picker stores the monitor's stable id, never its index or connector (docs/22#hot-plug).
   const [shown, setShown] = useState<string>("primary");
@@ -299,6 +301,10 @@ function DesktopPanel({ session }: { session: Session }) {
             Remove my screen
           </button>
         )}
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <input type="checkbox" data-demo-auto-resume checked={autoResume} onChange={(e) => setAutoResume(e.target.checked)} />
+          Resume when the robot stops sharing
+        </label>
         {clipboard.state.sync === "needs-gesture" && <button onClick={() => run(clipboard.copyFromRobot)}>Copy from robot</button>}
         <span data-demo-clipboard={clipboard.state.sync} style={{ color: "#8b93a1" }}>
           {clipboard.state.sync === "synced" ? "robot's clipboard copied here" : clipboard.state.sync === "failed" ? `clipboard: ${clipboard.state.error}` : ""}
@@ -306,13 +312,14 @@ function DesktopPanel({ session }: { session: Session }) {
         {note && <span style={{ color: "#f85149" }}>{note}</span>}
       </div>
       {shown === "all" && monitors.length > 1 ? (
-        <DesktopLayout session={session} viewOnly={desktop.viewOnly} style={{ maxHeight: "70vh" }} />
+        <DesktopLayout session={session} viewOnly={desktop.viewOnly} onRobotStop={autoResume ? "resume" : "ask"} style={{ maxHeight: "70vh" }} />
       ) : (
         <DesktopView
           ref={view}
           session={session}
           monitorId={shown === "primary" || shown === "all" ? undefined : shown}
           viewOnly={desktop.viewOnly}
+          onRobotStop={autoResume ? "resume" : "ask"}
           style={{ maxHeight: "70vh", borderRadius: 8, overflow: "hidden" }}
         />
       )}

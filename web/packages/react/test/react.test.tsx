@@ -688,6 +688,71 @@ describe("<DesktopView> clipboard (M3 3.5)", () => {
   });
 });
 
+describe("<DesktopView> when the robot stops sharing (M3 3.5)", () => {
+  // spec: docs/22#when-the-robot-stops-sharing · docs/08 sharing, resume-sharing
+  const mon: MonitorInfo = { id: "virtual-1", index: 0, primary: true, x: 0, y: 0, w: 1280, h: 720, scale: 1, connector: "Meta-0" };
+  const track = { track_id: "desk-virtual-1", cap: "fjarr.desktop", kind: "video" as const, label: "Meta-0", codec: "H264", pt: 96, mid: "0", monitor: mon };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("IntersectionObserver", undefined);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  async function mount(props: { onRobotStop?: "ask" | "resume"; viewOnly?: boolean } = {}) {
+    const { agent, client } = setup({ tracks: [track], onRequest: (env) => (env.type === "resume-sharing" ? { ok: true } : undefined) });
+    const session = client.sessions.open("robot-1");
+    await tick();
+    const view = render(
+      <FjarrProvider client={client}>
+        <DesktopView session={session} {...props} />
+      </FjarrProvider>,
+    );
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    const stop = async () => {
+      agent.sendEvent("fjarr.desktop", "sharing", { state: "stopped" });
+      await act(() => vi.advanceTimersByTimeAsync(10));
+    };
+    const resumes = () => agent.received.filter((e) => e.type === "resume-sharing").length;
+    return { view, agent, stop, resumes };
+  }
+
+  it("ask (the default): the view says so and offers Resume, which asks the robot", async () => {
+    const { view, stop, resumes } = await mount();
+    await stop();
+    const el = view.container.querySelector("[data-fjarr-desktop]")!;
+    expect(el.getAttribute("data-fjarr-status")).toBe("stopped-on-robot");
+    expect(el.textContent).toContain("Sharing was stopped on the robot");
+    expect(resumes()).toBe(0);
+    fireEvent.click(view.container.querySelector("[data-fjarr-resume-sharing]")!);
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    expect(resumes()).toBe(1);
+  });
+
+  it("resume: each stop is resumed at once, with no button", async () => {
+    const { view, agent, stop, resumes } = await mount({ onRobotStop: "resume" });
+    await stop();
+    expect(resumes()).toBe(1);
+    expect(view.container.querySelector("[data-fjarr-resume-sharing]")).toBeNull();
+    agent.sendEvent("fjarr.desktop", "sharing", { state: "on" });
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    await stop();
+    expect(resumes()).toBe(2);
+  });
+
+  it("a view-only view may resume too: it restores the screen and moves nothing (docs/10)", async () => {
+    const { view, stop, resumes } = await mount({ viewOnly: true });
+    await stop();
+    fireEvent.click(view.container.querySelector("[data-fjarr-resume-sharing]")!);
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    expect(resumes()).toBe(1);
+  });
+});
+
 describe("<DesktopView> cursor (M3 3.5)", () => {
   const mon: MonitorInfo = { id: "virtual-1", index: 0, primary: true, x: 0, y: 0, w: 1280, h: 720, scale: 1, connector: "Meta-0" };
   const track = { track_id: "desk-virtual-1", cap: "fjarr.desktop", kind: "video" as const, label: "Meta-0", codec: "H264", pt: 96, mid: "0", monitor: mon };

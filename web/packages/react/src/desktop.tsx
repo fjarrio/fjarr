@@ -13,6 +13,7 @@ import { useEffect, useId, useImperativeHandle, useRef, useState, useSyncExterna
 import {
   acquireDesktopClipboard,
   acquireDesktopCursor,
+  acquireDesktopSharing,
   contentBox,
   cursorDataUrl,
   DesktopInput,
@@ -21,6 +22,8 @@ import {
   type DesktopClipboardState,
   type DesktopCursor,
   type DesktopCursorState,
+  type DesktopSharing,
+  type DesktopSharingState,
   type MonitorInfo,
   type ResultPayload,
   type Session,
@@ -72,6 +75,26 @@ export function useDesktopClipboard(session?: Session): { state: DesktopClipboar
   return { state, clipboard, copyFromRobot: () => clipboard?.copyFromRobot() ?? Promise.resolve() };
 }
 
+/**
+ * The robot's screen sharing (docs/22#when-the-robot-stops-sharing): `stopped` once someone at the
+ * robot stopped it, until a session resumes it. Any session may resume, view-only included.
+ */
+export function useDesktopSharing(session?: Session): { state: DesktopSharingState; resume: () => Promise<void> } {
+  const s = useSession(session);
+  const [sharing, setSharing] = useState<DesktopSharing | null>(null);
+  useEffect(() => {
+    const { sharing: sh, release } = acquireDesktopSharing(s);
+    setSharing(sh);
+    return release;
+  }, [s]);
+  const state = useSyncExternalStore(
+    (l) => (sharing ? sharing.subscribe(l) : () => undefined),
+    () => sharing?.snapshot ?? "on",
+    () => "on" as const,
+  );
+  return { state, resume: () => sharing?.resume() ?? Promise.resolve() };
+}
+
 /** What a host's toolbar drives (docs/22: special keys, fullscreen with Keyboard Lock). */
 export interface DesktopViewHandle {
   /** Fullscreen with Keyboard Lock, so Alt+Tab, Super and Esc reach the robot. */
@@ -97,6 +120,11 @@ export interface DesktopViewProps {
   releaseKey?: string | null;
   /** The clipboard both ways (docs/22#clipboard); false: pastes are typed keys only, copies stay on the robot. */
   clipboard?: boolean;
+  /**
+   * When someone at the robot stops the screen sharing (docs/22#when-the-robot-stops-sharing):
+   * "ask" (default) shows it with a Resume button; "resume" resumes each time at once.
+   */
+  onRobotStop?: "ask" | "resume";
   ref?: Ref<DesktopViewHandle>;
   /** Overlays and the host's toolbar. */
   children?: ReactNode;
@@ -124,7 +152,7 @@ const placeholderStyle: CSSProperties = {
   fontSize: 13,
 };
 
-export function DesktopView({ session, monitorId, policy = "primary", viewOnly = false, releaseKey = "Escape", clipboard: clipboardOn = true, ref, children, className, style }: DesktopViewProps) {
+export function DesktopView({ session, monitorId, policy = "primary", viewOnly = false, releaseKey = "Escape", clipboard: clipboardOn = true, onRobotStop = "ask", ref, children, className, style }: DesktopViewProps) {
   const s = useSession(session);
   const monitor = pickMonitor(useMonitors(s), monitorId, policy);
   const control = useControl(s, "desktop");
@@ -146,6 +174,16 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
   const mayInputRef = useRef(mayInput);
   mayInputRef.current = mayInput;
   const clip = useDesktopClipboard(s);
+  const sharing = useDesktopSharing(s);
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  const resume = () => {
+    setResumeError(null);
+    sharing.resume().catch((e: unknown) => setResumeError(e instanceof Error ? e.message : String(e)));
+  };
+  // "resume": each stop is answered at once, nothing more (docs/22).
+  useEffect(() => {
+    if (onRobotStop === "resume" && sharing.state === "stopped") resume();
+  }, [sharing.state, onRobotStop]); // eslint-disable-line react-hooks/exhaustive-deps
   const cursor = useDesktopCursor(s);
   const [hovered, setHovered] = useState(false);
   // A paste chord waiting for the browser's `paste` event (docs/22#clipboard): the robot gets Ctrl+V
@@ -214,6 +252,23 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
   );
 
   const frame: CSSProperties = { position: "relative", background: "#000", aspectRatio: monitor ? `${monitor.w} / ${monitor.h}` : "16 / 9", ...style };
+  if (sharing.state === "stopped") {
+    // The robot's tracks are gone until a resume: say why, rather than "no display".
+    return (
+      <div data-fjarr-desktop data-fjarr-status="stopped-on-robot" className={className} style={frame}>
+        <div data-fjarr-placeholder style={{ ...placeholderStyle, alignContent: "center", gap: 8 }}>
+          <span>Sharing was stopped on the robot</span>
+          {onRobotStop === "ask" && (
+            <button data-fjarr-resume-sharing onClick={resume}>
+              Resume
+            </button>
+          )}
+          {resumeError && <span style={{ color: "#f85149" }}>{resumeError}</span>}
+        </div>
+        {children}
+      </div>
+    );
+  }
   if (!monitor) {
     // No track to demand: the placeholder holds the place until a monitor (re)appears.
     return (
@@ -354,6 +409,8 @@ export interface DesktopLayoutProps {
   gap?: number;
   /** Viewers only: no input surface on any monitor. */
   viewOnly?: boolean;
+  /** As on `<DesktopView>`: ask, or resume at once, when someone at the robot stops the sharing. */
+  onRobotStop?: "ask" | "resume";
   className?: string;
   style?: CSSProperties;
 }
@@ -363,12 +420,15 @@ export interface DesktopLayoutProps {
  * settings, reflowing on every hot-plug. Each monitor is a `<DesktopView monitorId>`, so each keeps
  * its own demand, input surface and placeholder (docs/22#hot-plug).
  */
-export function DesktopLayout({ session, showMirrors = false, gap = 4, viewOnly, className, style }: DesktopLayoutProps) {
+export function DesktopLayout({ session, showMirrors = false, gap = 4, viewOnly, onRobotStop, className, style }: DesktopLayoutProps) {
   const s = useSession(session);
   const all = useMonitors(s);
+  const sharing = useDesktopSharing(s);
   const monitors = showMirrors
     ? all
     : all.filter((m, i) => !all.some((o, j) => j < i && o.x === m.x && o.y === m.y && o.w === m.w && o.h === m.h));
+  // Stopped on the robot: its monitors' tracks are gone, and one view says why (docs/22).
+  if (sharing.state === "stopped" && monitors.length === 0) return <DesktopView session={s} viewOnly={viewOnly} onRobotStop={onRobotStop} className={className} style={style} />;
   if (monitors.length === 0) {
     return (
       <div data-fjarr-desktop-layout data-fjarr-status="no-display" className={className} style={{ position: "relative", aspectRatio: "16 / 9", background: "#000", ...style }}>
@@ -397,7 +457,7 @@ export function DesktopLayout({ session, showMirrors = false, gap = 4, viewOnly,
             height: `calc(${pct(m.h, height)} - ${gap}px)`,
           }}
         >
-          <DesktopView session={s} monitorId={m.id} viewOnly={viewOnly} style={{ width: "100%", height: "100%", aspectRatio: "auto" }} />
+          <DesktopView session={s} monitorId={m.id} viewOnly={viewOnly} onRobotStop={onRobotStop} style={{ width: "100%", height: "100%", aspectRatio: "auto" }} />
         </div>
       ))}
     </div>

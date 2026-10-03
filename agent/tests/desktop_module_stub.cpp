@@ -4,6 +4,7 @@
  * behaviour is controlled by environment variables so one binary can play every case the loader
  * has to handle.
  */
+#include <map>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -21,14 +22,25 @@ void record(const std::string& line) {
     if (const char* f = std::getenv("FJARR_STUB_RECORD"); f && *f) std::ofstream(f, std::ios::app) << line << "\n";
 }
 
-/// A capture that is always available: what the capability's diffing needs, nothing more.
+/// A capture, available until the robot stops sharing (fjarr_stub_stop_sharing, below).
 class StubSource final : public VideoSource {
   public:
     SourceInfo describe() const override { return {}; }
     GstBin* create_bin() override { return nullptr; }
-    bool available() const override { return true; }
-    void on_availability_changed(std::function<void(bool)>) override {}
+    bool available() const override { return available_; }
+    void on_availability_changed(std::function<void(bool)> cb) override { cb_ = std::move(cb); }
+    void stop() {
+        available_ = false;
+        if (cb_) cb_(false);
+    }
+
+  private:
+    bool available_ = true;
+    std::function<void(bool)> cb_;
 };
+/// Every capture started, by monitor, and who hears that one ended.
+std::map<MonitorId, std::weak_ptr<StubSource>> g_sources;
+std::function<void(MonitorId, CaptureLost)> g_lost_cb;
 
 /// Monitors the test plugs and unplugs through fjarr_stub_plug (below).
 std::vector<Monitor> g_monitors;
@@ -63,11 +75,13 @@ class StubBackend final : public DesktopBackend, public ClipboardHandle {
         return {default_monitor()};
     }
     void on_monitors_changed(std::function<void(std::vector<Monitor>)> cb) override { g_monitors_cb = std::move(cb); }
-    void on_capture_lost(std::function<void(MonitorId, CaptureLost)>) override {}
+    void on_capture_lost(std::function<void(MonitorId, CaptureLost)> cb) override { g_lost_cb = std::move(cb); }
     std::shared_ptr<VideoSource> start_capture(MonitorId m, CaptureOptions) override {
         if (!std::getenv("FJARR_STUB_RECORD")) return nullptr;
         record("capture " + std::to_string(m));
-        return std::make_shared<StubSource>();
+        auto s = std::make_shared<StubSource>();
+        g_sources[m] = s;
+        return s;
     }
     void stop_capture(MonitorId m) override { record("stop " + std::to_string(m)); }
     /// A virtual monitor joins the layout at once, as mutter's does once its stream has a consumer.
@@ -167,6 +181,21 @@ extern "C" void fjarr_stub_cursor(const char* id, double x, double y) {
         g_shape_cb(c);
     }
     if (x >= 0 && g_position_cb) g_position_cb(7, x, y);
+}
+
+/// The test's hand on GNOME's stop button: every capture ends, as mutter ends them (docs/23#desktop-sharing-stopped).
+extern "C" void fjarr_stub_stop_sharing() {
+    for (auto& [m, w] : g_sources)
+        if (auto s = w.lock()) {
+            s->stop();
+            if (g_lost_cb) g_lost_cb(m, CaptureLost::SharingStopped);
+        }
+}
+
+/// The test's hand on one capture ending by itself, as an unplugged monitor's does before the layout says so.
+extern "C" void fjarr_stub_lose(unsigned monitor) {
+    if (auto s = g_sources[static_cast<MonitorId>(monitor)].lock()) s->stop();
+    if (g_lost_cb) g_lost_cb(static_cast<MonitorId>(monitor), CaptureLost::SourceStopped);
 }
 
 /// The test's hand on the robot's clipboard: the robot copies `text` ("" clears it: no types).

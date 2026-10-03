@@ -605,3 +605,76 @@ export async function addDesktopMonitor(session: Session, size: { width: number;
 export async function removeDesktopMonitor(session: Session, id: string): Promise<void> {
   await session.request(CAP, "remove-monitor", { id });
 }
+
+/** Whether the robot's desktop is shared (docs/08 `sharing`). */
+export type DesktopSharingState = "on" | "stopped";
+
+/**
+ * The robot's screen sharing (docs/22#when-the-robot-stops-sharing): someone at the robot can stop
+ * it (GNOME's indicator), and it stays stopped until a session resumes it. One per session, so
+ * take it with `acquireDesktopSharing`. Any session may resume, a `view_only` one included (docs/10).
+ */
+export class DesktopSharing {
+  private state: DesktopSharingState;
+  private readonly listeners = new Set<() => void>();
+  private readonly off: () => void;
+
+  constructor(private readonly session: Session) {
+    // The agent says so once, at a session's start: a sharing made later reads what the session kept.
+    this.state = DesktopSharing.parse(session.latest(CAP, "sharing").current?.payload);
+    this.off = session.on(CAP, "sharing", (env) => this.set(DesktopSharing.parse(env.payload)));
+  }
+
+  private static parse(payload: unknown): DesktopSharingState {
+    return (payload as { state?: string } | undefined)?.state === "stopped" ? "stopped" : "on";
+  }
+
+  get snapshot(): DesktopSharingState {
+    return this.state;
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private set(state: DesktopSharingState): void {
+    if (state === this.state) return;
+    this.state = state;
+    for (const l of this.listeners) l();
+  }
+
+  /** Ask the robot to share its desktop again (docs/08 `resume-sharing`); it claims no control. */
+  async resume(): Promise<void> {
+    await this.session.request(CAP, "resume-sharing", {});
+  }
+
+  dispose(): void {
+    this.off();
+    this.listeners.clear();
+  }
+}
+
+const sharings = new WeakMap<Session, { sharing: DesktopSharing; refs: number }>();
+
+/** The session's one `DesktopSharing`; `release()` when done, and the last release disposes it. */
+export function acquireDesktopSharing(session: Session): { sharing: DesktopSharing; release: () => void } {
+  let entry = sharings.get(session);
+  if (!entry) {
+    entry = { sharing: new DesktopSharing(session), refs: 0 };
+    sharings.set(session, entry);
+  }
+  entry.refs++;
+  const e = entry;
+  let released = false;
+  return {
+    sharing: e.sharing,
+    release: () => {
+      if (released) return;
+      released = true;
+      if (--e.refs > 0) return;
+      e.sharing.dispose();
+      sharings.delete(session);
+    },
+  };
+}

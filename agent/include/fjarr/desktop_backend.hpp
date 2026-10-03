@@ -66,6 +66,9 @@ enum class CaptureLost : std::uint8_t {
     MonitorGone,   // its monitor was unplugged (mutter says nothing: the backend must detect it)
     SourceStopped, // the display server or portal ended the stream
     SessionEnded,  // the desktop session itself ended
+    /// Someone at the robot stopped the screen sharing (GNOME's indicator): every capture, and the
+    /// input with them. spec: docs/23-agent-core-architecture.md#desktop-sharing-stopped
+    SharingStopped,
 };
 
 struct CaptureOptions {

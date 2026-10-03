@@ -4,7 +4,7 @@
  * spec: docs/22-remote-desktop-client.md#input-pipeline · #testing-docs15 · docs/08#input-events-fjarrdesktop
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { acquireDesktopClipboard, acquireDesktopCursor, addDesktopMonitor, contentBox, createFjarrClient, cursorDataUrl, DesktopInput, encodePng, FjarrError, isPasteChord, normalizedPoint, removeDesktopMonitor, type Session } from "../src/index.js";
+import { acquireDesktopClipboard, acquireDesktopCursor, acquireDesktopSharing, addDesktopMonitor, contentBox, createFjarrClient, cursorDataUrl, DesktopInput, encodePng, FjarrError, isPasteChord, normalizedPoint, removeDesktopMonitor, type Session } from "../src/index.js";
 import { encodeBlobChunk } from "../src/blob.js";
 import { fakeMediaStreamFactory, MockAgent, type MockAgentOptions } from "../src/testing/index.js";
 
@@ -367,5 +367,43 @@ describe("virtual monitors (docs/08 add-monitor)", () => {
     await tick();
     await removed;
     expect(agent.received.find((e) => e.type === "remove-monitor")?.payload).toEqual({ id: "virtual-2" });
+  });
+});
+
+/**
+ * When the robot stops sharing (docs/08 sharing, resume-sharing; docs/22#when-the-robot-stops-sharing):
+ * the state as the agent says it, also to a sharing made after it said so, and a resume that any
+ * session may send.
+ */
+describe("DesktopSharing", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("a stop said before the sharing was taken is still known, and each change after it is heard", async () => {
+    const { agent, session } = await rig();
+    agent.sendEvent("fjarr.desktop", "sharing", { state: "stopped" }); // at the session's start
+    await tick();
+    const { sharing, release } = acquireDesktopSharing(session);
+    expect(sharing.snapshot).toBe("stopped");
+    const seen: string[] = [];
+    const off = sharing.subscribe(() => seen.push(sharing.snapshot));
+    agent.sendEvent("fjarr.desktop", "sharing", { state: "on" });
+    await tick();
+    expect(seen).toEqual(["on"]);
+    off();
+    release();
+  });
+
+  it("resume asks the robot and claims nothing; one sharing per session", async () => {
+    const { agent, session } = await rig((env) => (env.type === "resume-sharing" ? { ok: true } : undefined));
+    const a = acquireDesktopSharing(session);
+    const b = acquireDesktopSharing(session);
+    expect(b.sharing).toBe(a.sharing);
+    expect(a.sharing.snapshot).toBe("on");
+    await a.sharing.resume();
+    expect(agent.received.filter((e) => e.type === "resume-sharing").map((e) => [e.kind, e.payload])).toEqual([["request", {}]]);
+    a.release();
+    b.release();
+    expect(acquireDesktopSharing(session).sharing).not.toBe(a.sharing); // the last release disposed it
   });
 });
