@@ -201,6 +201,9 @@ public:
   // monitor). Returns an invalid source when unsupported.
   virtual std::shared_ptr<VideoSource> start_audio_capture() = 0;
   virtual void stop_audio_capture() = 0;
+  // A monitor whose capture fell back to the cursor drawn into its video says so in
+  // Monitor::cursor_in_video (docs/23, The stream reader), and its MonitorInfo carries
+  // cursor = "embedded".
   // Local-cursor mode (docs/22#cursor-strategy): the shape, on every change, and
   // where the pointer is, normalized within one monitor, for captures started
   // without the cursor in the video. CursorShape {shape_id, visible, w, h, hot_x, hot_y, rgba}.

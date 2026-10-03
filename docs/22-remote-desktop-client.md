@@ -280,7 +280,10 @@ pointer, while the view may send input, it sets the surface's CSS `cursor` to
 the shape (`url(<image as PNG>) hotspot, default`): the browser draws it, with
 no lag at all. Otherwise, a viewer or an operator whose pointer is elsewhere, an
 overlay draws the shape at the last `cursor-position`, offset by its hotspot.
-A `hidden` shape hides both.
+A `hidden` shape hides both. A monitor whose info says `cursor:
+"embedded"` has the cursor in its video already (the agent fell back for it,
+[docs/23](23-agent-core-architecture.md#desktop-helper-protocol)): there the
+view keeps the browser's default cursor and draws no overlay.
 
 **On Wayland, the cursor comes from Fjarr's own PipeWire reader.** Mutter and
 the portal deliver the cursor as metadata on the PipeWire stream (cursor mode

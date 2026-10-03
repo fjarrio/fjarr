@@ -233,7 +233,10 @@ Sent inside `offer.tracks`, before any media flows:
 model and serial, lowercased, with every run of other characters replaced by
 one `-` (`del-dell-u2720q-8xk2n13`). Desktop `track_id`s derive from it
 (`desk-<id>`), so a monitor keeps its identity across unplug and replug, across
-sessions, and on whichever connector it is plugged into. **Connector names are
+sessions, and on whichever connector it is plugged into. `cursor: "embedded"`,
+when present, says this monitor's video has the robot's cursor drawn into it,
+so a client draws none of its own there; absent, the cursor arrives beside the
+video (`cursor`, `cursor-position` below). **Connector names are
 not identities.** A replug of a DisplayPort MST chain renamed DP-4, DP-6 and
 DP-8 to DP-5, DP-9 and DP-11 on the spike machine
 ([ADR-0006](adr/0006-desktop-backend-selection.md)). The current connector

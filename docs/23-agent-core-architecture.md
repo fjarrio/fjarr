@@ -558,7 +558,19 @@ its name is bumped with the module seam's.
   at once. Two consumers on one node do not work: mutter sends the shape, and
   on a still screen the only frame, to whoever is linked when it is produced,
   so a reader linked first starved `pipewiresrc` of its first frame, and one
-  linked second never learnt the shape (both measured). Each shape is named by
+  linked second never learnt the shape (both measured). **A capture that streams
+  without a frame falls back to the cursor in the video.** In metadata mode
+  mutter copies a monitor's last painted image, and a freshly plugged monitor
+  that has not painted yet gives none: every buffer then carries only the
+  cursor (a 0-byte chunk flagged corrupted), on a still screen for good, and
+  a new capture of the same monitor fared no better (measured on the
+  fixture's virtual monitors, about one hot-plug in four, 2026-10-03). Embedded
+  mode renders the frame itself and never failed (10 of 10). So when a
+  capture has streamed 500 ms without a frame, module E restarts it with
+  `cursor: "embedded"`, marks the monitor, and the capability announces it
+  (`monitors`, `mode-change`) with `cursor: "embedded"` in its info
+  ([docs/08](08-protocol.md#track-manifest)): that monitor's video carries the
+  cursor, and the client draws none there. Each shape is named by
   a hash of its pixels and hotspot (mutter's own id does not change with the
   shape); positions are normalized to the capture's rectangle. Results reach
   the core loop by posting; the PipeWire thread never waits on it, because a
