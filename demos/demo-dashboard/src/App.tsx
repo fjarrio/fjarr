@@ -15,7 +15,7 @@
  *  - a Diagnostics tab: the robot's live pipeline graphs through
  *    `fjarr.introspect`, which only the developer role is granted (docs/24).
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   ConnectButton,
   ConnectionQuality,
@@ -116,52 +116,80 @@ function Shell() {
     localStorage.setItem(ROLE_KEY, r);
     setRole(r);
   };
+  // The robot list folds to a strip, for room to work on one robot; remembered per browser.
+  const [folded, setFolded] = useState(() => {
+    try {
+      return localStorage.getItem("demo.sidebar") === "folded";
+    } catch {
+      return false;
+    }
+  });
+  const fold = (f: boolean) => {
+    setFolded(f);
+    try {
+      localStorage.setItem("demo.sidebar", f ? "folded" : "open");
+    } catch {
+      // private mode: just not remembered
+    }
+  };
   return (
-    <div style={{ fontFamily: "system-ui, sans-serif", display: "grid", gridTemplateColumns: "280px 1fr", minHeight: "100vh", margin: 0 }}>
-      <aside style={{ background: "#1b1e24", color: "#c9d1d9", padding: 16 }}>
-        <h1 style={{ fontSize: 18 }}>Acme Fleet</h1>
-        <p style={{ fontSize: 12, opacity: 0.7 }}>
-          demo dashboard embedding <code>@fjarr/react</code>
-        </p>
-        {FAKE_ROBOTS.map((r) => {
-          const s = sessions.get(r.id);
-          return (
-            <button
-              key={r.id}
-              onClick={() => setSelected(r)}
-              style={{ display: "block", width: "100%", textAlign: "left", margin: "6px 0", padding: 10, borderRadius: 6, border: "none", cursor: "pointer", background: r.id === selected.id ? "#2f81f7" : "#22262e", color: "inherit" }}
-            >
-              <b>{r.name}</b>
-              <br />
-              <small>{r.site}</small>
-              {s && (
-                <>
-                  {" · "}
-                  <SessionStatus session={s} render={(state) => <small>{state}</small>} />
-                </>
-              )}
+    <div style={{ fontFamily: "system-ui, sans-serif", display: "grid", gridTemplateColumns: `${folded ? 32 : 200}px minmax(0, 1fr)`, minHeight: "100vh" }}>
+      {folded ? (
+        <aside style={{ background: "#1b1e24", color: "#c9d1d9", padding: "8px 0", textAlign: "center" }}>
+          <button onClick={() => fold(false)} title="Show the robots" style={sideToggle} data-demo-sidebar="folded">
+            »
+          </button>
+        </aside>
+      ) : (
+        <aside style={{ background: "#1b1e24", color: "#c9d1d9", padding: 10, fontSize: 12 }} data-demo-sidebar="open">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "2px 0 8px" }}>
+            <h1 style={{ fontSize: 15, margin: 0 }} title="demo dashboard embedding @fjarr/react">
+              Acme Fleet
+            </h1>
+            <button onClick={() => fold(true)} title="Hide the robots: more room for the robot" style={sideToggle}>
+              «
             </button>
-          );
-        })}
-        <label style={{ display: "block", fontSize: 12, marginTop: 16 }}>
-          Signed in as{" "}
-          <select value={currentRole} onChange={(e) => pickRole(e.target.value as Role)} data-demo-role={currentRole}>
-            <option value="operator">operator (cameras)</option>
-            <option value="developer">developer (+ diagnostics)</option>
-          </select>
-          <br />
-          <small style={{ opacity: 0.6 }}>the backend mints the grant for this role; applies to the next connect</small>
-        </label>
-        <p style={{ fontSize: 11, opacity: 0.6, marginTop: 24 }}>
-          Sessions stay open while you switch robots — that is the point (
-          <a href="https://fjarr.io/docs/21-web-client-architecture/" style={{ color: "inherit" }}>
-            docs/21
-          </a>
-          ).
-        </p>
-      </aside>
-      <main style={{ padding: 24 }}>
-        <header style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16 }}>
+          </div>
+          {FAKE_ROBOTS.map((r) => {
+            const s = sessions.get(r.id);
+            return (
+              <button
+                key={r.id}
+                onClick={() => setSelected(r)}
+                style={{ display: "block", width: "100%", textAlign: "left", margin: "3px 0", padding: "5px 8px", borderRadius: 5, border: "none", cursor: "pointer", background: r.id === selected.id ? "#2f81f7" : "#22262e", color: "inherit", fontSize: 12 }}
+              >
+                <b>{r.name}</b>
+                <div style={{ fontSize: 11, opacity: 0.8 }}>
+                  {r.site}
+                  {s && (
+                    <>
+                      {" · "}
+                      <SessionStatus session={s} render={(state) => <span>{state}</span>} />
+                    </>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+          <label style={{ display: "block", marginTop: 12 }} title="the backend mints the grant for this role; applies to the next connect">
+            Signed in as
+            <select value={currentRole} onChange={(e) => pickRole(e.target.value as Role)} data-demo-role={currentRole} style={{ display: "block", width: "100%", marginTop: 2 }}>
+              <option value="operator">operator (cameras)</option>
+              <option value="developer">developer (+ diagnostics)</option>
+            </select>
+          </label>
+          <p style={{ fontSize: 10, opacity: 0.6, marginTop: 12 }}>
+            Sessions stay open while you switch robots (
+            <a href="https://fjarr.io/docs/21-web-client-architecture/" style={{ color: "inherit" }}>
+              docs/21
+            </a>
+            ).
+          </p>
+        </aside>
+      )}
+      {/* minWidth 0: wide content (a row of controls, a video) shrinks or wraps instead of widening the page. */}
+      <main style={{ padding: 24, minWidth: 0 }}>
+        <header style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 16 }}>
           <h2 style={{ margin: 0 }}>{selected.name}</h2>
           <ConnectButton robotId={selected.id} />
           {session && <SessionStatus session={session} />}
@@ -197,9 +225,9 @@ function RemoteView() {
     wasDriving.current = motion.you;
   }, [motion.you]);
   return (
-    <div style={{ display: "grid", gap: 16 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 16 }}>
       <Panel title="Robot status (host-owned, built on useTelemetry)">
-        <code style={{ fontSize: 12 }}>{JSON.stringify(status)}</code>
+        <code style={{ fontSize: 12, overflowWrap: "anywhere" }}>{JSON.stringify(status)}</code>
       </Panel>
       {/* Stopped on the robot, it has no monitors to offer: the panel stays, to say so and resume (docs/22). */}
       {(monitors.length > 0 || sharing.state === "stopped") && (
@@ -253,7 +281,7 @@ function DesktopPanel({ session }: { session: Session }) {
   const who = !desktop.known ? "—" : desktop.you ? "You" : desktop.holder ? desktop.holder.label : "free (the next click or key takes it)";
   return (
     <div style={{ display: "grid", gap: 8 }}>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }} data-demo-desktop-control={desktop.you ? "you" : desktop.free ? "free" : "held"}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", fontSize: 13 }} data-demo-desktop-control={desktop.you ? "you" : desktop.free ? "free" : "held"}>
         <span>desktop: {who}</span>
         {!desktop.viewOnly && desktop.known && !desktop.you && !desktop.free && <button onClick={() => run(desktop.takeControl)}>Take control</button>}
         {desktop.you && <button onClick={() => run(desktop.releaseControl)}>Release</button>}
@@ -359,7 +387,7 @@ function MotionControl({ session }: { session: Session }) {
     });
   };
   return (
-    <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "0 0 8px", fontSize: 13 }} data-demo-motion={motion.you ? "you" : motion.free ? "free" : "held"}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", margin: "0 0 8px", fontSize: 13 }} data-demo-motion={motion.you ? "you" : motion.free ? "free" : "held"}>
       <span>
         driver: <b>{who}</b>
       </span>
@@ -400,7 +428,7 @@ function TeleopPanel({ session }: { session: Session }) {
     </button>
   );
   return (
-    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
       {btn("▲", 1)}
       {btn("▼", -1)}
       <label style={{ fontSize: 12 }}>
@@ -410,8 +438,10 @@ function TeleopPanel({ session }: { session: Session }) {
   );
 }
 
+const sideToggle: CSSProperties = { background: "none", border: "none", color: "inherit", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "2px 6px" };
+
 function Panel({ title, children }: { title: string; children: ReactNode }) {
-  const style = useMemo(() => ({ border: "1px solid #d0d7de", borderRadius: 8, padding: 12 }), []);
+  const style = useMemo(() => ({ border: "1px solid #d0d7de", borderRadius: 8, padding: 12, minWidth: 0 }), []);
   return (
     <section style={style}>
       <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>{title}</h3>

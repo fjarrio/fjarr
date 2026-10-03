@@ -20,17 +20,18 @@ export function Diagnostics({ session }: { session: Session }) {
   if (status.error) return <small style={{ color: "#b35c00" }} data-demo-diagnostics="denied">not available for this role: {status.error}</small>;
   if (!current) return <small style={{ color: "#8b93a1" }}>{status.live ? "no pipelines yet" : "connecting…"}</small>;
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: 12 }} data-demo-diagnostics="live">
+    <div style={{ display: "grid", gridTemplateColumns: "220px minmax(0, 1fr)", gap: 12 }} data-demo-diagnostics="live">
       <ul style={{ listStyle: "none", padding: 0, margin: 0, fontSize: 12 }}>
         {pipelines.map((p) => (
           <li key={p.id}>
-            <button onClick={() => setSelected(p.id)} style={{ width: "100%", textAlign: "left", fontWeight: p.id === current ? "bold" : "normal" }}>
+            <button onClick={() => setSelected(p.id)} style={{ width: "100%", textAlign: "left", overflowWrap: "anywhere", fontWeight: p.id === current ? "bold" : "normal" }}>
               {p.id} <small>#{p.seq} {p.state}</small>
             </button>
           </li>
         ))}
       </ul>
-      <div>
+      {/* A wide graph scrolls in its own box, never the page. */}
+      <div style={{ minWidth: 0, overflowX: "auto" }}>
         <label style={{ fontSize: 12 }}>
           history <input type="range" min={1} max={latest?.seq ?? 1} value={scrub ?? latest?.seq ?? 1} onChange={(e) => setScrub(Number(e.target.value))} />{" "}
           #{scrub ?? latest?.seq ?? "-"} {scrub !== undefined && <button onClick={() => setScrub(undefined)}>live</button>}

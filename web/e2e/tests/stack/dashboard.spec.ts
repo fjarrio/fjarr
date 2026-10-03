@@ -273,3 +273,26 @@ test("the Desktop panel in fullscreen: the pointer lands where it does in the pa
   expect(Math.abs(inFullscreen.x - inPage.x)).toBeLessThanOrEqual(3);
   expect(Math.abs(inFullscreen.y - inPage.y)).toBeLessThanOrEqual(3);
 });
+
+test("the dashboard with its Desktop panel fills the window edge to edge and never scrolls sideways (2026-10-03)", async ({ dashboard, stack, page }) => {
+  await stack.requireServer();
+  needs(await stack.dashboardReachable(), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
+  const desktopRobot = process.env.E2E_DESKTOP_ROBOT_HTTP ?? "http://desktop-robot:7381";
+  needs(await fetch(desktopRobot, { signal: AbortSignal.timeout(2000) }).then(() => true, () => false), `desktop-robot is not running at ${desktopRobot} — \`make desktop-e2e\``);
+
+  await dashboard.goto();
+  await page.getByRole("button", { name: /Desktop Robot 01/ }).click();
+  await dashboard.connect("desktop-robot-01");
+  await dashboard.waitForState("desktop-robot-01", "connected");
+  await expect(page.locator("[data-fjarr-desktop] [data-fjarr-track^='desk-']")).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
+  for (const width of [800, 1280, 1920]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect
+      .poll(() => page.evaluate(() => {
+        const d = document.documentElement;
+        const sticking = [...document.querySelectorAll<HTMLElement>("body *")].filter((e) => e.getBoundingClientRect().right > d.clientWidth + 1).map((e) => e.tagName);
+        return { margin: getComputedStyle(document.body).margin, overflow: d.scrollWidth - d.clientWidth, sticking: sticking.slice(0, 3) };
+      }), { message: `at ${width} px` })
+      .toEqual({ margin: "0px", overflow: 0, sticking: [] });
+  }
+});
