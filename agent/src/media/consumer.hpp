@@ -52,6 +52,9 @@ struct ConsumerTrack {
     std::string demanded_tier = "active"; // what the client asked for (docs/23 rate control may send lower)
     double allotment_bps = 0;             // this viewer's share of its estimate for the track
     bool pooled = false; // removed from the manifest, transceiver kept inactive
+    // Where the next payloader on this SSRC starts: a branch rebuilt on a pooled transceiver keeps
+    // its SSRC, and SRTP refuses packet indexes that SSRC already sent (as replays).
+    std::optional<guint> next_seqnum;
     glib::GstElementPtr appsrc, queue, valve, payloader;
     glib::GstPadPtr sink_pad; // webrtcbin.sink_%u
     glib::GObjectPtr<GstWebRTCRTPTransceiver> transceiver;

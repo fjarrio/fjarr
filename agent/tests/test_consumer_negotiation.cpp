@@ -12,6 +12,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <gst/sdp/sdp.h>
 #include <gst/webrtc/webrtc.h>
@@ -51,6 +52,7 @@ struct Harness {
     std::string last_offer;
     int offers = 0;
     std::atomic<bool> connected{false};
+    std::vector<std::string> errors; // the consumer's pipeline errors (under m)
 
     explicit Harness(bool bundle) : peer(bundle) {}
 
@@ -74,6 +76,10 @@ struct Harness {
         };
         hooks.on_connection_state = [this](const std::string& st) {
             if (st == "connected") connected = true;
+        };
+        hooks.on_error = [this](const std::string& e) {
+            std::lock_guard<std::mutex> l(m);
+            errors.push_back(e);
         };
         peer.on_candidate = [this](unsigned mline, std::string cand) {
             loop.post([this, mline, cand] {
@@ -247,6 +253,49 @@ TEST(ConsumerNegotiation, aTrackTheAnswerRejectedNeverOpensAndStillRemovesCleanl
             h.hub.unsubscribe(HubKey{"t", "active"}, sink);
             h.consumer->remove_track("b");
         });
+    }
+    h.stop();
+}
+
+// A track that leaves and comes back reuses its pooled transceiver, and with it its SSRC, under a
+// new payloader. One that started its sequence numbers anywhere below the old one's made libsrtp
+// refuse the packets as replays, and the session ended with a media error: a desktop resumed after
+// GNOME's stop on the mini-PC, 2026-10-03. The new payloader continues where the old one stopped.
+TEST(ConsumerNegotiation, aTrackThatComesBackContinuesItsSequenceNumbersUnderTheSameSsrc) {
+    Harness h(true);
+    ASSERT_TRUE(h.start()) << "the loopback never connected";
+    std::this_thread::sleep_for(std::chrono::milliseconds(300)); // packets out, under SRTP
+    guint last = 0, ssrc_before = 0;
+    h.loop.call_sync([&] {
+        auto* t = h.consumer->track("a");
+        g_object_get(t->payloader.get(), "seqnum", &last, nullptr);
+        ssrc_before = t->ssrc;
+        h.hub.unsubscribe(HubKey{"t", "active"}, h.consumer->sink_for("a"));
+        h.consumer->remove_track("a");
+        h.consumer->create_offer();
+    });
+    ASSERT_TRUE(h.answer_next());
+    guint offset = 0, ssrc_after = 0;
+    h.loop.call_sync([&] {
+        fjarr::TrackSpec a;
+        a.track_id = "a";
+        auto* t = h.consumer->add_track(a, "fjarr.camera");
+        ASSERT_NE(t, nullptr);
+        ssrc_after = t->ssrc;
+        g_object_get(t->payloader.get(), "seqnum-offset", &offset, nullptr);
+        h.consumer->create_offer();
+    });
+    ASSERT_TRUE(h.answer_next());
+    EXPECT_EQ(ssrc_after, ssrc_before) << "the pooled transceiver keeps its SSRC";
+    EXPECT_EQ(offset, (last + 1) & 0xffff);
+    h.loop.call_sync([&] {
+        h.consumer->set_enabled("a", true);
+        h.hub.subscribe(HubKey{"t", "active"}, h.consumer->sink_for("a"));
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    {
+        std::lock_guard<std::mutex> l(h.m);
+        EXPECT_TRUE(h.errors.empty()) << h.errors.front();
     }
     h.stop();
 }

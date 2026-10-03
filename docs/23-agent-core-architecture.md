@@ -298,7 +298,11 @@ exact API sequences):
   `inactive` and re-offer, the JSEP way; the track leaves the manifest and
   the transceiver stays in a pool, so the next addition of the same kind
   (re-plugging a monitor) reuses the m-section by flipping it back to
-  `sendonly`. The valve-first order matters: an offerer keeps pushing RTP
+  `sendonly`. A reused m-section keeps its SSRC, so the rebuilt payloader
+  continues the old one's sequence numbers: one that started below them
+  sent packet indexes SRTP had seen on that SSRC, libsrtp refused them as
+  replays, and the session ended (a resumed desktop, mini-PC, 2026-10-03).
+  The valve-first order matters: an offerer keeps pushing RTP
   on an `inactive` m-section until its valve closes ([re-run](../agent/spikes/webrtcbin-probe/README.md#re-run-on-gstreamer-128)).
   The 1.24 stall was the *answerer* sending EOS down its source pad, and it
   reproduces on a 1.28 answerer with default properties; with

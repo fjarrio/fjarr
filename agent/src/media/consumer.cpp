@@ -324,6 +324,8 @@ bool ConsumerPipeline::build_branch(ConsumerTrack& t) {
     t.payloader = glib::make_element("rtph264pay", p + "/payloader");
     g_object_set(t.payloader.get(), "pt", static_cast<guint>(t.pt), "ssrc", static_cast<guint>(t.ssrc), "config-interval", -1,
                  "aggregate-mode", 1 /* zero-latency */, nullptr);
+    // On a reused transceiver the SSRC is the old one: continue its sequence (SRTP replay check).
+    if (t.next_seqnum) g_object_set(t.payloader.get(), "seqnum-offset", static_cast<gint>(*t.next_seqnum), nullptr);
     gst_bin_add_many(GST_BIN(pipeline_.get()), t.appsrc.get(), t.queue.get(), t.valve.get(), t.payloader.get(), nullptr);
     if (!gst_element_link_many(t.appsrc.get(), t.queue.get(), t.valve.get(), t.payloader.get(), nullptr)) {
         if (hooks_.on_error) hooks_.on_error("cannot link track branch " + t.track_id);
@@ -373,6 +375,9 @@ bool ConsumerPipeline::build_branch(ConsumerTrack& t) {
 
 void ConsumerPipeline::teardown_branch(ConsumerTrack& t) {
     if (!t.appsrc) return;
+    guint seqnum = 0;
+    g_object_get(t.payloader.get(), "seqnum", &seqnum, nullptr);
+    t.next_seqnum = (seqnum + 1) & 0xffff;
     t.keyunit_probe = glib::PadProbe();
     t.pay_counter.reset();
     t.sink.reset(); // the hub subscription was dropped by the session before this
