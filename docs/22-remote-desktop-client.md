@@ -297,6 +297,16 @@ It is built in M3, and local cursor is the default on Wayland as everywhere
 else. X11 needs nothing new: XFixes reports shape changes, and `ximagesrc
 show-pointer=false` captures without the cursor.
 
+## Virtual monitors (slice 3.5)
+
+`addDesktopMonitor(session, {width, height})` in `@fjarr/core` asks the robot
+for an extra screen of that size for this session (docs/08 `add-monitor`), for
+instance one sized to the operator's window, and resolves with its monitor id
+once it is in the layout; `removeDesktopMonitor(session, id)` takes it away,
+and it goes by itself when the session ends. It arrives like any hot-plugged
+monitor: `useMonitors` lists it, `<DesktopLayout>` places it, and
+`<DesktopView monitorId>` shows it. The demo's Desktop panel has "Add a screen".
+
 ## Latency knobs (desktop-specific)
 
 - `RTCRtpReceiver.jitterBufferTarget = 0` on desktop tracks — trade

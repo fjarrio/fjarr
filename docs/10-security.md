@@ -79,6 +79,9 @@ thing take turns; everyone else works side by side.**
   input-bearing grant claims nothing.
 - **`view_only: true` in a grant** means that session can never claim or take
   control, whatever its client does.
+- **Virtual monitors.** Adding or removing one changes the robot's desktop:
+  it is input in the `desktop` domain, refused to `view_only`, at most two per
+  session, and each goes with the session that added it.
 - **The clipboard.** Writing the robot's clipboard is input in the `desktop`
   domain: it claims, and a non-holder is answered `control-held`. Reading it
   claims nothing, but a `view_only` session gets no offers and its reads are

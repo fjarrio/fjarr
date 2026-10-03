@@ -619,6 +619,18 @@ its name is bumped with the module seam's.
   non-blocking. A paste on the robot needs a keyboard on the seat; the EIS
   keyboard device is that keyboard (the spike's wl-paste refused without
   one).
+- **Virtual monitors** (slice 3.5). mutter's `RecordVirtual` makes the
+  monitor and is its stream: the monitor exists while that stream has a
+  consumer, and takes its size from the consumer's format. So `add-virtual
+  {id, width, height, cursor}` makes the helper start a ScreenCast session
+  with `RecordVirtual` and answer like a capture, `capture-started {id, node,
+  x, y, width, height, connector}` with the narrowed connection, naming the
+  connector the new monitor got (the one that appeared in the layout).
+  `stop-capture {id}` ends the session and the monitor with it. Module E's
+  stream reader asks for exactly that size in its format, and when the
+  capability then asks to capture the new monitor, module E hands it this
+  stream's source rather than recording the monitor a second time. A virtual
+  monitor's capture is never reported `monitor-gone`: it is the monitor.
 - **Loss.** The helper sends `capture-lost {id, reason: "monitor-gone" |
   "stream-stopped"}` when a capture ends without being asked. mutter does not
   say when a recorded monitor goes away: there is no `Stopped` on the stream and
