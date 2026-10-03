@@ -680,6 +680,26 @@ A capture costs little while nobody watches, because its producer starts on the
 first demand (above). Pointer input names its monitor by `track_id`, so it lands
 on that monitor whichever is primary.
 
+### When the robot stops sharing (M3 slice 3.5) {#desktop-sharing-stopped}
+
+GNOME's screen-sharing indicator stops every capture and the input session
+from the robot's side. The helper sees mutter close them and sends
+`capture-lost {reason: "stream-stopped"}` per capture; module E reports
+`CaptureLost::SourceStopped` (docs/09) and asks for input again only with its
+next capture. A virtual monitor's stream ends its monitor, so it leaves the
+layout as a hot-plug and is not brought back.
+
+The capability turns the first `SourceStopped` into `sharing: stopped`
+(docs/08) for every session: each stopped screen's source is unavailable, so
+the re-offer drops its track. On `resume-sharing` it stops and starts the
+capture of every stopped screen through the backend (`stop_capture`, then
+`start_capture` with the same options), which brings the input back with
+it; each track returns as its new source becomes available, and `sharing:
+on` goes out. Nothing resumes by itself: a stop holds until a session asks
+(docs/10). Mutter refuses `Stop` on a session from anyone but its owner and
+the test fixture runs no gnome-shell, so CI drives this through the test
+module's `SourceStopped`; the indicator itself is checked on the mini-PC.
+
 ### Encoders and tiers
 
 The core owns encoding through the `EncoderAdapter` seam, so a source never

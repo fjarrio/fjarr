@@ -82,6 +82,13 @@ thing take turns; everyone else works side by side.**
 - **Virtual monitors.** Adding or removing one changes the robot's desktop:
   it is input in the `desktop` domain, refused to `view_only`, at most two per
   session, and each goes with the session that added it.
+- **Resuming the sharing.** When someone at the robot stops the screen
+  sharing (GNOME's indicator), any session may resume it, `view_only`
+  included (docs/08 `resume-sharing`): it restores the screen every session
+  is given and moves nothing on the robot, so it is not input and claims
+  nothing. The resume is logged with its operator. Whether a dashboard
+  resumes at once or asks its operator is the dashboard's choice
+  ([docs/22](22-remote-desktop-client.md#when-the-robot-stops-sharing)).
 - **The clipboard.** Writing the robot's clipboard is input in the `desktop`
   domain: it claims, and a non-holder is answered `control-held`. Reading it
   claims nothing, but a `view_only` session gets no offers and its reads are

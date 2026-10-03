@@ -307,6 +307,27 @@ and it goes by itself when the session ends. It arrives like any hot-plugged
 monitor: `useMonitors` lists it, `<DesktopLayout>` places it, and
 `<DesktopView monitorId>` shows it. The demo's Desktop panel has "Add a screen".
 
+## When the robot stops sharing
+
+GNOME shows a screen-sharing indicator in the top bar while Fjarr captures,
+and its stop button ends the capture and the input (measured on the mini-PC,
+2026-10-03). The agent reports it as `sharing: stopped` (docs/08) and keeps
+it stopped until a session sends `resume-sharing`. What happens then is the
+dashboard's choice, so it is a prop:
+
+- `<DesktopView onRobotStop="ask">` (the default) shows "Sharing was stopped
+  on the robot" over the view, with a **Resume** button, and sets
+  `data-fjarr-status="stopped-on-robot"`.
+- `<DesktopView onRobotStop="resume">` sends `resume-sharing` each time the
+  stop arrives, so the person at the robot sees sharing come straight back.
+  Nothing else is done: no backoff and no limit.
+
+Both are available to a `view_only` view: resuming restores the screen and
+moves nothing (docs/10). Headless, `useDesktopSharing(session)` gives
+`{state: "on" | "stopped", resume()}` from `DesktopSharing` in
+`@fjarr/core`, one per session like `DesktopClipboard`. The demo's Desktop
+panel has a "Resume when the robot stops sharing" checkbox.
+
 ## Latency knobs (desktop-specific)
 
 - `RTCRtpReceiver.jitterBufferTarget = 0` on desktop tracks — trade
