@@ -354,8 +354,12 @@ services:
       - .:/workspace:cached
       - pnpm-store:/home/dev/.local/share/pnpm
     working_dir: /workspace
+    environment:
+      # 0 when node_modules was installed outside this container (CI: the runner's pnpm, another
+      # store), where pnpm here would ask to purge and reinstall it, get no answer, and exit.
+      DASHBOARD_PNPM_INSTALL: ${DASHBOARD_PNPM_INSTALL:-1}
     command: >
-      bash -c "corepack enable && pnpm install
+      bash -c "corepack enable && { [ \"$$DASHBOARD_PNPM_INSTALL\" = 0 ] || pnpm install; }
       && pnpm --filter fjarr-demo-dashboard dev --host 0.0.0.0"
     ports:
       - "5173:5173"

@@ -105,8 +105,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # The viewer's build output is what the demo robot serves from introspect.viewer_dir (docs/24).
-      - run: pnpm -r --filter '@fjarr/introspect-viewer...' build
+      # The viewer's build output is served by the robot (docs/24); the dashboard imports @fjarr/* from dist.
+      - run: pnpm -r --filter '@fjarr/introspect-viewer...' --filter 'fjarr-demo-dashboard^...' build
       - run: pnpm --filter '@fjarr/e2e' typecheck
       - name: the runner's .env (uid, groups, the software encoder)
         run: bash tools/ci/runner-env.sh
@@ -255,7 +255,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -r --filter '@fjarr/introspect-viewer...' build
+      # The viewer's build output is served by the robot (docs/24); the dashboard imports @fjarr/* from dist.
+      - run: pnpm -r --filter '@fjarr/introspect-viewer...' --filter 'fjarr-demo-dashboard^...' build
       - name: the runner's .env (uid, groups, the software encoder)
         run: bash tools/ci/runner-env.sh
       - uses: docker/login-action@v3
