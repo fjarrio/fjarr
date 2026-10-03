@@ -83,7 +83,8 @@ const robots = [
   { id: "demo-robot-02", name: "Demo Robot 02", site: "Warehouse", capabilities: FLEET_ROBOT },
   { id: "demo-robot-03", name: "Demo Robot 03", site: "Yard", capabilities: FLEET_ROBOT },
   // A robot with a screen and no camera: the headless-mutter fixture (`make desktop-e2e`, docs/12#services).
-  { id: "desktop-robot-01", name: "Desktop Robot 01", site: "Lab", capabilities: ["fjarr.test", "fjarr.desktop", "fjarr.introspect"] },
+  // Its own site: the 4.5f gate connects by "lab", which must name demo-robot-01 alone.
+  { id: "desktop-robot-01", name: "Desktop Robot 01", site: "Office", capabilities: ["fjarr.test", "fjarr.desktop", "fjarr.introspect"] },
 ];
 
 // ---------------------------------------------------------------- the operator API (docs/09#operator-api)
