@@ -183,6 +183,21 @@ describe("DesktopClipboard", () => {
     release();
   });
 
+  it("the robot's bytes may arrive before the read's result: they are kept, not dropped (CI, 2026-10-03)", async () => {
+    // The result travels on fjarr:control and the bytes on fjarr:bulk:fjarr.desktop; either can come
+    // first. A receiver made only after the result dropped bytes that had overtaken it.
+    const { session, agent } = await clipRig("overtook the result");
+    const written: string[] = [];
+    const { clipboard, release } = acquireDesktopClipboard(session, { writeText: async (t) => void written.push(t) });
+    const bytes = new TextEncoder().encode("overtook the result");
+    agent.sendBulk("fjarr.desktop", encodeBlobChunk(BLOB, 0, bytes.length, bytes)); // before even the offer
+    agent.sendEvent("fjarr.desktop", "clipboard-offer", { offer_id: "offer-1", types: ["text/plain"] });
+    await tick(12);
+    expect(written).toEqual(["overtook the result"]);
+    expect(clipboard.snapshot.sync).toBe("synced");
+    release();
+  });
+
   it("when the browser refuses without a gesture, the text is kept and a click copies it", async () => {
     const { session, robotCopies, agent } = await clipRig("kept for a click");
     let allowed = false;

@@ -343,7 +343,9 @@ export interface BulkSender {
   /**
    * Resolve a blob reference found in an envelope: the whole bytes once complete (16 MiB cap),
    * whichever of the envelope and the chunks arrived first; rejects after the docs/08 timeout, on a
-   * length mismatch, or when the channel closes.
+   * length mismatch, or when the channel closes. Chunks are kept only once `session.bulk(cap)` has
+   * been called for that capability: call it **before** the request whose answer names a blob, never
+   * after the answer — the bytes can overtake it, and before that call they are dropped.
    */
   receive(ref: BlobRef, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<Uint8Array>;
   /** Streaming form: every validated chunk in order (files, M4). */

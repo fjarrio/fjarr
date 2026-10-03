@@ -5,7 +5,7 @@
  * spec: docs/22-remote-desktop-client.md#input-pipeline · docs/08-protocol.md#input-events-fjarrdesktop
  */
 import type { BlobRef } from "./blob.js";
-import type { Publisher } from "./channels.js";
+import type { BulkSender, Publisher } from "./channels.js";
 import type { ResultPayload } from "./protocol.js";
 import type { Session } from "./session.js";
 
@@ -252,11 +252,16 @@ export class DesktopClipboard {
   private held: string | null = null; // the robot's text the browser would not take yet
   private readonly listeners = new Set<() => void>();
   private readonly off: () => void;
+  // Taken now, not per read: the channel keeps a blob's chunks only for a receiver that exists, and
+  // the bytes (on fjarr:bulk) can overtake the read's result (on fjarr:control). Made after the
+  // result, the receiver missed bytes that came first, and the read waited out its timeout (CI).
+  private readonly bulk: BulkSender;
 
   constructor(
     private readonly session: Session,
     private readonly options: DesktopClipboardOptions = {},
   ) {
+    this.bulk = session.bulk(CAP);
     this.off = session.on(CAP, "clipboard-offer", (env) => void this.onOffer(env.payload as ClipboardOffer));
   }
 
@@ -286,7 +291,7 @@ export class DesktopClipboard {
     const offer = this.offer;
     if (!offer || !offer.types?.includes("text/plain")) return null;
     const res = await this.session.request<ResultPayload & { blob: BlobRef }>(CAP, "clipboard-read", { offer_id: offer.offer_id, type: "text/plain" });
-    const bytes = await this.session.bulk(CAP).receive(res.blob);
+    const bytes = await this.bulk.receive(res.blob);
     return new TextDecoder().decode(bytes);
   }
 
@@ -324,7 +329,7 @@ export class DesktopClipboard {
    * desktop control domain (docs/10).
    */
   async write(text: string): Promise<void> {
-    const { ref, done } = this.session.bulk(CAP).sendBlob(new TextEncoder().encode(text), "text/plain");
+    const { ref, done } = this.bulk.sendBlob(new TextEncoder().encode(text), "text/plain");
     await Promise.all([this.session.request(CAP, "clipboard-write", { type: "text/plain", blob: ref }), done]);
   }
 
