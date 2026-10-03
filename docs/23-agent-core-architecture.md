@@ -569,13 +569,14 @@ its name is bumped with the module seam's.
   `clipboard-read {id, type}` makes the helper call `SelectionRead` and
   reply `clipboard-data {id}` with **one descriptor**, the read end, or
   `clipboard-failed {id, reason}`. The module reads at most 1 MiB from it.
-  `clipboard-set {types}` arrives with **one descriptor**, a sealed memfd
+  `clipboard-set {id, types}` arrives with **one descriptor**, a sealed memfd
   holding the bytes. The helper calls `SetSelection` with every name an
   application may ask text for (`text/plain;charset=utf-8`, `text/plain`,
   `UTF8_STRING`, `STRING`, `TEXT`) and answers **every**
   `SelectionTransfer(mime, serial)` from the memfd (`SelectionWrite`, write,
-  close, `SelectionWriteDone`). It replies `clipboard-set-done {}` once the
-  selection is set. It keeps the memfd until the next set, or until the
+  close, `SelectionWriteDone`), from a write that never blocks the helper on
+  an application that reads slowly. It replies `clipboard-set-done {id}` once
+  the selection is set, or `clipboard-failed {id, reason}`. It keeps the memfd until the next set, or until the
   robot copies something itself. mutter hands its descriptors over
   non-blocking. A paste on the robot needs a keyboard on the seat; the EIS
   keyboard device is that keyboard (the spike's wl-paste refused without

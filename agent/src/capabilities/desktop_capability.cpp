@@ -2,11 +2,15 @@
 #include <fjarr/desktop_capability.hpp>
 
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <map>
 #include <optional>
-#include <tuple>
+#include <random>
 #include <set>
+#include <tuple>
 
+#include <fjarr/blob.hpp>
 #include <fjarr/errors.hpp>
 #include <fjarr/session_context.hpp>
 
@@ -21,6 +25,21 @@ namespace {
 /// Where packages install their modules (ADR-0021). Overridable so the dev stack and the tests
 /// can point somewhere writable without pretending to be an installed system.
 constexpr const char* DEFAULT_MODULE_DIR = "/usr/lib/fjarr/desktop";
+constexpr std::size_t CLIPBOARD_MAX = 1024 * 1024; // docs/08: 1 MiB in either direction
+
+std::string random_uuid() {
+    static std::mt19937_64 rng{std::random_device{}()};
+    std::array<std::uint8_t, 16> b{};
+    for (auto& x : b) x = static_cast<std::uint8_t>(rng());
+    b[6] = static_cast<std::uint8_t>((b[6] & 0x0F) | 0x40); // version 4
+    b[8] = static_cast<std::uint8_t>((b[8] & 0x3F) | 0x80);
+    return blob::uuid_text(b);
+}
+
+bool view_only(SessionContext& ctx) {
+    const auto& p = ctx.granted_params("fjarr.desktop");
+    return p.is_object() && p.value("view_only", false);
+}
 } // namespace
 
 struct DesktopCapability::Impl {
@@ -45,6 +64,65 @@ struct DesktopCapability::Impl {
     std::optional<SessionId> input_session;
     std::map<SessionId, std::uint64_t> pointer_seq; // docs/08: receivers drop stale motion
     std::set<std::string> unknown_codes;            // logged once each
+
+    // The clipboard (docs/08 clipboard-*, M3 3.5). The robot's current content, as offered.
+    std::string offer_id;
+    std::vector<std::string> offer_types;
+    // clipboard-write: its request and its bytes travel on different channels, so either can come
+    // first; they meet here by blob id.
+    struct Incoming {
+        SessionId session;
+        std::optional<Envelope> request;
+        std::string type;
+        std::uint64_t len = 0;
+        std::string bytes;
+        bool complete = false;
+        std::chrono::steady_clock::time_point first = std::chrono::steady_clock::now();
+    };
+    std::map<std::string, Incoming> incoming; // by blob id
+
+    void offer(SessionContext& ctx) {
+        if (view_only(ctx)) return; // docs/10: a viewer is given the screen, not the clipboard
+        ctx.event("clipboard-offer", {{"offer_id", offer_id}, {"types", offer_types}});
+    }
+    void on_clipboard_changed(std::vector<std::string> types) {
+        offer_id = random_uuid();
+        offer_types = std::move(types);
+        log::info("desktop", "the robot's clipboard changed", {{"types", nlohmann::json(offer_types).dump()}});
+        for (auto& [_, ctx] : sessions) offer(*ctx);
+    }
+    /// A clipboard-write whose request and bytes have both arrived: onto the robot's clipboard.
+    void try_write(const std::string& blob_id) {
+        auto it = incoming.find(blob_id);
+        if (it == incoming.end() || !it->second.request || !it->second.complete) return;
+        Incoming in = std::move(it->second);
+        incoming.erase(it);
+        auto* clip = driver ? driver->clipboard() : nullptr;
+        auto s = sessions.find(in.session);
+        if (s == sessions.end()) return;
+        if (!clip) return s->second->fail(*in.request, error_codes::unavailable, "this robot's desktop has no clipboard");
+        const SessionId sid = in.session;
+        const Envelope req = *in.request;
+        clip->write(in.type, std::move(in.bytes), [this, sid, req](bool ok, std::string error) {
+            auto s2 = sessions.find(sid);
+            if (s2 == sessions.end()) return;
+            if (ok) s2->second->result(req, {{"ok", true}});
+            else s2->second->fail(req, error_codes::unavailable, "the robot's clipboard was not set: " + error);
+        });
+    }
+    /// Writes whose other half never came (a client that stopped mid-write) are dropped after 10 s.
+    void expire_incoming() {
+        const auto now = std::chrono::steady_clock::now();
+        for (auto it = incoming.begin(); it != incoming.end();) {
+            if (now - it->second.first < std::chrono::seconds(10)) {
+                ++it;
+                continue;
+            }
+            auto s = sessions.find(it->second.session);
+            if (s != sessions.end() && it->second.request) s->second->fail(*it->second.request, error_codes::payload_invalid, "the clipboard's bytes did not all arrive");
+            it = incoming.erase(it);
+        }
+    }
 
     /// The monitor a desktop track shows, by its wire id.
     std::optional<Monitor> monitor_for(const std::string& track_id) const {
@@ -166,13 +244,15 @@ CapabilityManifest DesktopCapability::manifest() const {
     CapabilityManifest m;
     m.name = "fjarr.desktop";
     m.version = {0, 1, 0};
-    m.channels = {{ChannelClass::Control}, {ChannelClass::Realtime}};
+    // Bulk carries the clipboard's bytes as blob frames, both ways (docs/08 clipboard-read, -write).
+    m.channels = {{ChannelClass::Control}, {ChannelClass::Realtime}, {ChannelClass::Bulk, BulkFraming::Blob}};
     m.consumers.peer = true;
     m.input_bearing = true;
     m.control_domain = "desktop"; // docs/10: one pointer, one keyboard — one holder at a time
     // docs/08#input-events-fjarrdesktop. Not `release-all`: a viewer's window losing focus sends
     // it, and that must never claim a free desktop.
-    m.control_inputs = {"pointer", "button", "wheel", "key", "key-combo", "text"};
+    // clipboard-write is input too (docs/10): a paste lands where the holder is typing. clipboard-read is not.
+    m.control_inputs = {"pointer", "button", "wheel", "key", "key-combo", "text", "clipboard-write"};
     m.config_schema = nlohmann::json{
         {"type", "object"},
         {"additionalProperties", false},
@@ -231,16 +311,19 @@ void DesktopCapability::configure(const nlohmann::json& config, const SourceFact
         return;
     }
     impl_->driver->on_monitors_changed([this](std::vector<Monitor> monitors) { impl_->on_monitors(monitors); });
+    if (auto* clip = impl_->driver->clipboard()) clip->on_changed([this](std::vector<std::string> types) { impl_->on_clipboard_changed(std::move(types)); });
 }
 
 void DesktopCapability::session_attached(SessionContext& ctx, const nlohmann::json&) {
     impl_->sessions[ctx.id()] = &ctx;
     for (auto& spec : impl_->specs()) ctx.add_track(std::move(spec)); // unavailable until the helper hands it over: held back by the core
+    if (!impl_->offer_id.empty()) impl_->offer(ctx); // what the robot holds now, so a late viewer can paste it too
 }
 
 void DesktopCapability::session_detached(const SessionId& id, DetachReason, std::string_view) {
     impl_->sessions.erase(id);
     impl_->pointer_seq.erase(id);
+    for (auto it = impl_->incoming.begin(); it != impl_->incoming.end();) it = it->second.session == id ? impl_->incoming.erase(it) : std::next(it);
     if (impl_->input_session == id) impl_->input_session.reset();
 }
 
@@ -262,6 +345,31 @@ void DesktopCapability::on_message(SessionContext& ctx, const Envelope& msg) {
     if (!impl_->driver) return refuse(error_codes::unavailable, impl_->unavailable.empty() ? "no desktop backend is running" : impl_->unavailable);
     auto& d = *impl_->driver;
     const auto& p = msg.payload;
+    if (msg.type == "clipboard-read") {
+        // Reading claims no control (docs/10), so it comes before the input bookkeeping below.
+        if (view_only(ctx)) return refuse(error_codes::capability_denied, "a view-only session sees no clipboard");
+        auto* clip = d.clipboard();
+        if (!clip) return refuse(error_codes::unavailable, "this robot's desktop has no clipboard");
+        const std::string type = p.value("type", std::string{});
+        if (p.value("offer_id", std::string{}) != impl_->offer_id || impl_->offer_id.empty())
+            return refuse(error_codes::payload_invalid, "the robot's clipboard changed since that offer");
+        if (std::find(impl_->offer_types.begin(), impl_->offer_types.end(), type) == impl_->offer_types.end())
+            return refuse(error_codes::payload_invalid, "the offer has no '" + type + "'");
+        const SessionId sid = ctx.id();
+        const Envelope req = msg;
+        clip->read(type, CLIPBOARD_MAX, [this, sid, req, type](std::optional<std::string> bytes, std::string error) {
+            auto s = impl_->sessions.find(sid);
+            if (s == impl_->sessions.end()) return;
+            SessionContext& c = *s->second;
+            if (!bytes) {
+                if (error == "too-large") return c.fail(req, error_codes::unavailable, "larger than 1 MiB", {{"reason", "too-large"}, {"limit", CLIPBOARD_MAX}});
+                return c.fail(req, error_codes::unavailable, "the robot's clipboard could not be read: " + error);
+            }
+            const auto ref = c.send_blob(std::move(*bytes), type);
+            c.result(req, {{"ok", true}, {"blob", ref.to_json()}});
+        });
+        return;
+    }
     if (msg.type == "release-all") {
         // Never claims: only the session whose input is on the desktop can let go of it.
         release_all_input(ctx.id());
@@ -300,6 +408,23 @@ void DesktopCapability::on_message(SessionContext& ctx, const Envelope& msg) {
         for (const auto k : keys) d.key(k, true);
         for (auto it = keys.rbegin(); it != keys.rend(); ++it) d.key(*it, false);
         if (request) ctx.result(msg, {{"ok", true}});
+    } else if (msg.type == "clipboard-write") {
+        // Input in the desktop domain (control_inputs): the core let it through only for the holder.
+        if (!d.clipboard()) return refuse(error_codes::unavailable, "this robot's desktop has no clipboard");
+        const std::string type = p.value("type", std::string{});
+        if (type != "text/plain") return refuse(error_codes::payload_invalid, "the clipboard takes text/plain");
+        const auto ref = blob::BlobRef::from_json(p.value("blob", nlohmann::json{}));
+        if (!ref) return refuse(error_codes::payload_invalid, "clipboard-write needs a blob reference");
+        if (ref->len > CLIPBOARD_MAX) return ctx.fail(msg, error_codes::unavailable, "larger than 1 MiB", {{"reason", "too-large"}, {"limit", CLIPBOARD_MAX}});
+        impl_->expire_incoming();
+        auto& in = impl_->incoming[ref->id];
+        if (!in.session.empty() && in.session != ctx.id()) return refuse(error_codes::payload_invalid, "that blob belongs to another session");
+        in.session = ctx.id();
+        in.request = msg;
+        in.type = type;
+        in.len = ref->len;
+        if (ref->len == 0) in.complete = true; // an empty clipboard: no frames will come
+        impl_->try_write(ref->id);
     } else if (msg.type == "text") {
         // Typed through the robot's keymap, whole or not at all (docs/08 `text`).
         std::string error;
@@ -312,6 +437,21 @@ void DesktopCapability::on_message(SessionContext& ctx, const Envelope& msg) {
         if (request) ctx.result(msg, {{"ok", true}});
     } else {
         refuse(error_codes::payload_invalid, "fjarr.desktop has no message '" + msg.type + "'");
+    }
+}
+
+void DesktopCapability::on_blob_chunk(SessionContext& ctx, const BlobChunk& chunk) {
+    // spec: docs/08 clipboard-write — the only blobs fjarr.desktop receives.
+    if (chunk.blob_len > CLIPBOARD_MAX) return; // refused when its request arrives
+    impl_->expire_incoming();
+    auto& in = impl_->incoming[chunk.blob_id];
+    if (!in.session.empty() && in.session != ctx.id()) return;
+    in.session = ctx.id();
+    if (chunk.offset == 0) in.bytes.clear();
+    in.bytes.append(reinterpret_cast<const char*>(chunk.payload.data()), chunk.payload.size());
+    if (in.bytes.size() >= chunk.blob_len) {
+        in.complete = true;
+        impl_->try_write(chunk.blob_id);
     }
 }
 

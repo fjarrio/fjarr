@@ -22,6 +22,8 @@ class DesktopCapability final : public Capability {
     void session_attached(SessionContext& ctx, const nlohmann::json& granted_params) override;
     void session_detached(const SessionId& id, DetachReason reason, std::string_view detail) override;
     void on_message(SessionContext& ctx, const Envelope& msg) override;
+    /// clipboard-write's bytes (docs/08 clipboard-write, blob frames on fjarr:bulk:fjarr.desktop).
+    void on_blob_chunk(SessionContext& ctx, const BlobChunk& chunk) override;
     /// Session end, and the desktop domain changing hands: every held key and button released
     /// (docs/15#safety-behaviors). Forwarded to the backend.
     void release_all_input(const SessionId& id) override;

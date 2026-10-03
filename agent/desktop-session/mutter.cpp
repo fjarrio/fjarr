@@ -238,13 +238,17 @@ int InputSession::connect_eis(std::string* error) {
     if (!ensure_started(error)) return -1;
     GVariantBuilder opts;
     g_variant_builder_init(&opts, G_VARIANT_TYPE("a{sv}"));
+    return call_for_fd("ConnectToEIS", g_variant_new("(a{sv})", &opts), error);
+}
+
+/// A session method that answers one descriptor, `(h)`: the descriptor, or -1 with `error` set.
+int InputSession::call_for_fd(const char* method, GVariant* params, std::string* error) {
     GError* e = nullptr;
     GUnixFDList* out_fds = nullptr;
-    GVariant* r = g_dbus_connection_call_with_unix_fd_list_sync(bus_, RD, path_.c_str(), "org.gnome.Mutter.RemoteDesktop.Session", "ConnectToEIS",
-                                                               g_variant_new("(a{sv})", &opts), G_VARIANT_TYPE("(h)"), G_DBUS_CALL_FLAGS_NONE, 5000,
-                                                               nullptr, &out_fds, nullptr, &e);
+    GVariant* r = g_dbus_connection_call_with_unix_fd_list_sync(bus_, RD, path_.c_str(), "org.gnome.Mutter.RemoteDesktop.Session", method, params,
+                                                               G_VARIANT_TYPE("(h)"), G_DBUS_CALL_FLAGS_NONE, 5000, nullptr, &out_fds, nullptr, &e);
     if (!r) {
-        if (error) *error = "ConnectToEIS: " + take_error(e);
+        if (error) *error = std::string(method) + ": " + take_error(e);
         else take_error(e);
         return -1;
     }
@@ -253,11 +257,95 @@ int InputSession::connect_eis(std::string* error) {
     g_variant_unref(r);
     const int fd = g_unix_fd_list_get(out_fds, handle, &e);
     g_object_unref(out_fds);
-    if (fd < 0 && error) *error = "ConnectToEIS: " + take_error(e);
+    if (fd < 0) {
+        if (error) *error = std::string(method) + ": " + take_error(e);
+        else take_error(e);
+    }
     return fd;
 }
 
+bool InputSession::enable_clipboard(std::string* error) {
+    if (clipboard_enabled_) return true;
+    if (!ensure_started(error)) return false;
+    auto subscribe = [this](const char* signal, GDBusSignalCallback cb) {
+        clipboard_subs_.push_back(g_dbus_connection_signal_subscribe(bus_, RD, "org.gnome.Mutter.RemoteDesktop.Session", signal, path_.c_str(), nullptr,
+                                                                     G_DBUS_SIGNAL_FLAGS_NONE, cb, this, nullptr));
+    };
+    subscribe("SelectionOwnerChanged", [](GDBusConnection*, const gchar*, const gchar*, const gchar*, const gchar*, GVariant* params, gpointer d) {
+        auto* self = static_cast<InputSession*>(d);
+        GVariant* opts = g_variant_get_child_value(params, 0);
+        gboolean ours = FALSE;
+        g_variant_lookup(opts, "session-is-owner", "b", &ours);
+        std::vector<std::string> types;
+        if (GVariant* mt = g_variant_lookup_value(opts, "mime-types", G_VARIANT_TYPE("(as)"))) {
+            GVariant* arr = g_variant_get_child_value(mt, 0);
+            for (gsize i = 0; i < g_variant_n_children(arr); i++) {
+                const gchar* s = nullptr;
+                g_variant_get_child(arr, i, "&s", &s);
+                types.emplace_back(s);
+            }
+            g_variant_unref(arr);
+            g_variant_unref(mt);
+        } else if (GVariant* mt2 = g_variant_lookup_value(opts, "mime-types", G_VARIANT_TYPE("as"))) {
+            for (gsize i = 0; i < g_variant_n_children(mt2); i++) {
+                const gchar* s = nullptr;
+                g_variant_get_child(mt2, i, "&s", &s);
+                types.emplace_back(s);
+            }
+            g_variant_unref(mt2);
+        }
+        g_variant_unref(opts);
+        if (self->owner_) self->owner_(ours, std::move(types));
+    });
+    subscribe("SelectionTransfer", [](GDBusConnection*, const gchar*, const gchar*, const gchar*, const gchar*, GVariant* params, gpointer d) {
+        auto* self = static_cast<InputSession*>(d);
+        const gchar* mime = nullptr;
+        guint32 serial = 0;
+        g_variant_get(params, "(&su)", &mime, &serial);
+        if (self->transfer_) self->transfer_(mime, serial);
+    });
+    GVariantBuilder opts;
+    g_variant_builder_init(&opts, G_VARIANT_TYPE("a{sv}"));
+    GVariant* r = call(bus_, RD, path_, "org.gnome.Mutter.RemoteDesktop.Session", "EnableClipboard", g_variant_new("(a{sv})", &opts), nullptr, error);
+    if (!r) return false;
+    g_variant_unref(r);
+    clipboard_enabled_ = true;
+    return true;
+}
+
+int InputSession::selection_read(const std::string& mime_type, std::string* error) {
+    if (!clipboard_enabled_) {
+        if (error) *error = "the clipboard is not enabled";
+        return -1;
+    }
+    return call_for_fd("SelectionRead", g_variant_new("(s)", mime_type.c_str()), error);
+}
+
+bool InputSession::set_selection(const std::vector<std::string>& mime_types, std::string* error) {
+    if (!clipboard_enabled_ && !enable_clipboard(error)) return false;
+    GVariantBuilder types;
+    g_variant_builder_init(&types, G_VARIANT_TYPE("as"));
+    for (const auto& t : mime_types) g_variant_builder_add(&types, "s", t.c_str());
+    GVariantBuilder opts;
+    g_variant_builder_init(&opts, G_VARIANT_TYPE("a{sv}"));
+    g_variant_builder_add(&opts, "{sv}", "mime-types", g_variant_builder_end(&types));
+    GVariant* r = call(bus_, RD, path_, "org.gnome.Mutter.RemoteDesktop.Session", "SetSelection", g_variant_new("(a{sv})", &opts), nullptr, error);
+    if (!r) return false;
+    g_variant_unref(r);
+    return true;
+}
+
+int InputSession::selection_write(std::uint32_t serial, std::string* error) { return call_for_fd("SelectionWrite", g_variant_new("(u)", serial), error); }
+
+void InputSession::selection_write_done(std::uint32_t serial, bool ok) {
+    if (GVariant* r = call(bus_, RD, path_, "org.gnome.Mutter.RemoteDesktop.Session", "SelectionWriteDone", g_variant_new("(ub)", serial, ok), nullptr, nullptr))
+        g_variant_unref(r);
+}
+
 void InputSession::stop() {
+    for (guint s : clipboard_subs_) g_dbus_connection_signal_unsubscribe(bus_, s);
+    clipboard_subs_.clear();
+    clipboard_enabled_ = false;
     if (closed_sub_) g_dbus_connection_signal_unsubscribe(bus_, closed_sub_);
     closed_sub_ = 0;
     if (!path_.empty()) {

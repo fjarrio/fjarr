@@ -4,9 +4,11 @@
 // X11 implements INTO this shape).
 // spec: docs/09-interfaces.md#the-desktop-backend-interface-wayland-first-shape
 // spec: docs/07-desktop-backends.md — implementations chosen by ADR-0006.
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -78,7 +80,19 @@ struct CursorShape {
     std::vector<std::uint8_t> rgba; // width*height*4, straight alpha
 };
 
-class ClipboardHandle;
+/// The robot's clipboard (docs/08 clipboard-*, M3 3.5). Types are Fjarr's ("text/plain" = UTF-8
+/// text); the backend maps them to the compositor's names. Every callback runs on the core loop.
+/// spec: docs/09-interfaces.md (ClipboardHandle) · docs/23-agent-core-architecture.md#desktop-helper-protocol
+class ClipboardHandle {
+  public:
+    virtual ~ClipboardHandle() = default;
+    /// The robot copied something (not what write() put there): what it can be read as. Empty = cleared.
+    virtual void on_changed(std::function<void(std::vector<std::string> types)> callback) = 0;
+    /// The current content as `type`, at most `max_bytes`; nullopt and a reason otherwise.
+    virtual void read(const std::string& type, std::size_t max_bytes, std::function<void(std::optional<std::string> bytes, std::string error)> done) = 0;
+    /// The robot's clipboard holds `bytes` as `type` once done(true) runs.
+    virtual void write(const std::string& type, std::string bytes, std::function<void(bool ok, std::string error)> done) = 0;
+};
 
 class DesktopBackend {
   public:
@@ -137,6 +151,7 @@ class DesktopBackend {
     /// spec: docs/15-testing-strategy.md#safety-behaviors
     virtual void release_all_input() = 0;
 
+    /// Null when features().clipboard is false.
     virtual ClipboardHandle* clipboard() = 0;
 };
 

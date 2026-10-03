@@ -5,6 +5,8 @@
 # connector; GET /unplug removes the newest. mutter reports them like any monitor: MonitorsChanged,
 # and gone from the layout when their session stops (measured 2026-10-01, mutter 50).
 # spec: docs/15-testing-strategy.md#the-desktop-test-lab
+import subprocess
+import urllib.parse
 import socket
 
 import dbus
@@ -69,14 +71,37 @@ def unplug():
     return "200 " + connector
 
 
+def copy(text):
+    # The robot copies (M3 3.5): wl-copy stays behind to serve the selection, detached from us.
+    subprocess.Popen(["wl-copy", "--", text], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    return "200 copied"
+
+
+def paste():
+    # The robot pastes: what an application asking for text/plain gets.
+    r = subprocess.run(["wl-paste", "--no-newline", "--type", "text/plain"], capture_output=True, timeout=5)
+    return ("200 " if r.returncode == 0 else "500 ") + (r.stdout if r.returncode == 0 else r.stderr).decode(errors="replace")
+
+
 def on_request(server, _cond):
     conn, _ = server.accept()
     try:
-        line = conn.recv(1024).decode(errors="replace").split("\r\n")[0]
+        line = conn.recv(4096).decode(errors="replace").split("\r\n")[0]
         target = line.split(" ")[1] if len(line.split(" ")) > 1 else ""
-        result = plug() if target == "/plug" else unplug() if target == "/unplug" else "404 /plug or /unplug"
+        path, _, query = target.partition("?")
+        if path == "/plug":
+            result = plug()
+        elif path == "/unplug":
+            result = unplug()
+        elif path == "/copy":
+            result = copy(urllib.parse.parse_qs(query).get("text", [""])[0])
+        elif path == "/paste":
+            result = paste()
+        else:
+            result = "404 /plug, /unplug, /copy?text= or /paste"
         code, body = result.split(" ", 1)
-        conn.sendall(f"HTTP/1.0 {code} X\r\nContent-Type: text/plain\r\nContent-Length: {len(body)}\r\n\r\n{body}".encode())
+        data = body.encode()
+        conn.sendall(f"HTTP/1.0 {code} X\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {len(data)}\r\n\r\n".encode() + data)
     finally:
         conn.close()
     return True
@@ -87,5 +112,5 @@ server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server.bind(("0.0.0.0", PORT))
 server.listen(4)
 GLib.io_add_watch(server.fileno(), GLib.IO_IN, lambda *_: on_request(server, None))
-print(f"plugd: monitor hot-plug on :{PORT} (/plug, /unplug)", flush=True)
+print(f"plugd: monitor hot-plug and the clipboard on :{PORT} (/plug, /unplug, /copy?text=, /paste)", flush=True)
 GLib.MainLoop().run()

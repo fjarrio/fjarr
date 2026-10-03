@@ -297,3 +297,107 @@ TEST(DesktopMonitors, oneTrackPerMonitorDiffedByIdWithTheMonitorsEventBeforeEach
     EXPECT_EQ(last_tracks(), std::vector<std::string>{"desk-virtual-1"});
     plug(""); // leave the stub with no monitors for the other tests
 }
+
+// --- the clipboard (M3 3.5) ---------------------------------------------------------------------------
+// spec: docs/08 clipboard-offer / -read / -write · docs/10#session-ownership
+namespace {
+void (*stub_copy())(const char*) {
+    void* so = ::dlopen((std::string(FJARR_STUB_MODULE_DIR) + "/libfjarr-desktop-stub.so").c_str(), RTLD_NOW | RTLD_NOLOAD);
+    return so ? reinterpret_cast<void (*)(const char*)>(::dlsym(so, "fjarr_stub_copy")) : nullptr;
+}
+const fjarr::testing::RecordingContext::Sent* last(const fjarr::testing::RecordingContext& c, const std::string& type) {
+    for (auto it = c.sent.rbegin(); it != c.sent.rend(); ++it)
+        if (it->type == type) return &*it;
+    return nullptr;
+}
+fjarr::BlobChunk chunk(const std::string& id, std::uint64_t offset, std::uint64_t len, const std::string& bytes) {
+    return fjarr::BlobChunk{id, offset, len, std::span<const std::byte>(reinterpret_cast<const std::byte*>(bytes.data()), bytes.size())};
+}
+} // namespace
+
+TEST(DesktopClipboard, aCopyOnTheRobotIsOfferedToEverySessionButAViewer) {
+    InputRig r;
+    fjarr::testing::RecordingContext viewer;
+    viewer.sid = "session-viewer";
+    viewer.grants = {{"view_only", true}};
+    r.cap.session_attached(viewer, nlohmann::json::object());
+    auto copy = stub_copy();
+    ASSERT_NE(copy, nullptr);
+    copy("robot says åäö");
+    const auto* oa = last(r.a, "clipboard-offer");
+    ASSERT_NE(oa, nullptr);
+    EXPECT_EQ(oa->payload["types"], nlohmann::json::array({"text/plain"}));
+    const std::string offer = oa->payload["offer_id"]; // copied: `sent` grows below, and `oa` would dangle
+    EXPECT_FALSE(offer.empty());
+    ASSERT_NE(last(r.b, "clipboard-offer"), nullptr);
+    EXPECT_EQ(last(viewer, "clipboard-offer"), nullptr) << "docs/10: a viewer is given the screen, not what the robot copied";
+
+    // The bytes come on request, as a blob, and the reply names it.
+    r.send(r.a, "clipboard-read", {{"offer_id", offer}, {"type", "text/plain"}}, "request");
+    ASSERT_EQ(r.a.blobs.size(), 1u);
+    EXPECT_EQ(r.a.blobs[0].bytes, "robot says åäö");
+    const auto* res = &r.a.sent.back();
+    EXPECT_TRUE(res->payload["ok"].get<bool>());
+    EXPECT_EQ(res->payload["blob"]["blob"], r.a.blobs[0].ref.id);
+
+    // A viewer that asks anyway is refused, and reading took no control: the input session is unchanged.
+    r.send(viewer, "clipboard-read", {{"offer_id", offer}, {"type", "text/plain"}}, "request");
+    ASSERT_FALSE(viewer.sent.empty());
+    EXPECT_EQ(viewer.sent.back().payload["error"]["code"], "capability-denied");
+    EXPECT_TRUE(r.calls().empty()) << "a read is not input";
+}
+
+TEST(DesktopClipboard, aStaleOfferOrATypeItDidNotListIsRefused) {
+    InputRig r;
+    auto copy = stub_copy();
+    copy("first");
+    const std::string first = last(r.a, "clipboard-offer")->payload["offer_id"];
+    copy("second");
+    r.send(r.a, "clipboard-read", {{"offer_id", first}, {"type", "text/plain"}}, "request");
+    EXPECT_EQ(r.a.sent.back().payload["error"]["code"], "payload-invalid") << "the robot's clipboard changed since that offer";
+    const std::string second = last(r.a, "clipboard-offer")->payload["offer_id"];
+    r.send(r.a, "clipboard-read", {{"offer_id", second}, {"type", "image/png"}}, "request");
+    EXPECT_EQ(r.a.sent.back().payload["error"]["code"], "payload-invalid");
+    EXPECT_TRUE(r.a.blobs.empty());
+}
+
+TEST(DesktopClipboard, aPasteReachesTheRobotOnceItsRequestAndItsBytesHaveBothArrivedInEitherOrder) {
+    InputRig r;
+    const std::string text = "operator says ÅÄÖ";
+    // Request first, then the bytes in two chunks.
+    const std::string id1 = "01930000-0000-7000-8000-000000000001";
+    r.send(r.a, "clipboard-write", {{"type", "text/plain"}, {"blob", {{"blob", id1}, {"len", text.size()}, {"type", "text/plain"}}}}, "request");
+    EXPECT_TRUE(r.a.sent.empty()) << "not answered before the bytes are there";
+    r.cap.on_blob_chunk(r.a, chunk(id1, 0, text.size(), text.substr(0, 5)));
+    r.cap.on_blob_chunk(r.a, chunk(id1, 5, text.size(), text.substr(5)));
+    ASSERT_EQ(r.a.sent.size(), 1u);
+    EXPECT_TRUE(r.a.sent[0].payload["ok"].get<bool>());
+    // The bytes first (the bulk channel overtook control), then the request.
+    const std::string id2 = "01930000-0000-7000-8000-000000000002";
+    r.cap.on_blob_chunk(r.a, chunk(id2, 0, 3, "abc"));
+    r.send(r.a, "clipboard-write", {{"type", "text/plain"}, {"blob", {{"blob", id2}, {"len", std::uint64_t{3}}, {"type", "text/plain"}}}}, "request");
+    ASSERT_EQ(r.a.sent.size(), 2u);
+    EXPECT_TRUE(r.a.sent[1].payload["ok"].get<bool>());
+    EXPECT_EQ(r.calls(), (std::vector<std::string>{"clipboard text/plain " + text, "clipboard text/plain abc"}));
+}
+
+TEST(DesktopClipboard, aPasteLargerThanAMebibyteIsRefusedWithTheLimit) {
+    InputRig r;
+    r.send(r.a, "clipboard-write", {{"type", "text/plain"}, {"blob", {{"blob", "01930000-0000-7000-8000-000000000003"}, {"len", std::uint64_t{2 * 1024 * 1024}}, {"type", "text/plain"}}}}, "request");
+    ASSERT_EQ(r.a.sent.size(), 1u);
+    EXPECT_EQ(r.a.sent[0].payload["error"]["code"], "unavailable");
+    EXPECT_EQ(r.a.sent[0].payload["error"]["data"]["reason"], "too-large");
+    EXPECT_TRUE(r.calls().empty());
+}
+
+TEST(DesktopClipboard, aWriteIsDesktopInputAndAReadIsNot) {
+    // The core lets control_inputs through only for the domain's holder and never for a view-only
+    // grant (docs/10): clipboard-write must be one, clipboard-read must not.
+    fjarr::DesktopCapability cap;
+    const auto inputs = cap.manifest().control_inputs;
+    EXPECT_NE(std::find(inputs.begin(), inputs.end(), "clipboard-write"), inputs.end());
+    EXPECT_EQ(std::find(inputs.begin(), inputs.end(), "clipboard-read"), inputs.end());
+    bool blob_bulk = false;
+    for (const auto& c : cap.manifest().channels) blob_bulk = blob_bulk || (c.channel == fjarr::ChannelClass::Bulk && c.framing == fjarr::BulkFraming::Blob);
+    EXPECT_TRUE(blob_bulk) << "the clipboard's bytes travel as blob frames on fjarr:bulk:fjarr.desktop";
+}

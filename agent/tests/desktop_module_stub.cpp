@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <optional>
 
 #include "desktop/module.hpp"
 
@@ -32,10 +33,17 @@ class StubSource final : public VideoSource {
 /// Monitors the test plugs and unplugs through fjarr_stub_plug (below).
 std::vector<Monitor> g_monitors;
 std::function<void(std::vector<Monitor>)> g_monitors_cb;
+/// The robot's clipboard, which the test fills through fjarr_stub_copy (below).
+std::string g_clipboard;
+std::function<void(std::vector<std::string>)> g_clipboard_cb;
 
-class StubBackend final : public DesktopBackend {
+class StubBackend final : public DesktopBackend, public ClipboardHandle {
   public:
-    Features features() override { return {}; }
+    Features features() override {
+        Features f;
+        f.clipboard = std::getenv("FJARR_STUB_RECORD") != nullptr;
+        return f;
+    }
     std::vector<Monitor> monitors() override {
         if (!std::getenv("FJARR_STUB_RECORD")) return {};
         if (!g_monitors.empty()) return g_monitors;
@@ -75,8 +83,20 @@ class StubBackend final : public DesktopBackend {
         record("text " + utf8);
         return {};
     }
-    ClipboardHandle* clipboard() override { return nullptr; }
+    ClipboardHandle* clipboard() override { return std::getenv("FJARR_STUB_RECORD") ? this : nullptr; }
     void release_all_input() override { record("release-all"); }
+
+    // The clipboard: reads answer what fjarr_stub_copy put there; writes are recorded.
+    void on_changed(std::function<void(std::vector<std::string>)> cb) override { g_clipboard_cb = std::move(cb); }
+    void read(const std::string& type, std::size_t max_bytes, std::function<void(std::optional<std::string>, std::string)> done) override {
+        if (type != "text/plain") return done(std::nullopt, "no " + type);
+        if (g_clipboard.size() > max_bytes) return done(std::nullopt, "too-large");
+        done(g_clipboard, {});
+    }
+    void write(const std::string& type, std::string bytes, std::function<void(bool, std::string)> done) override {
+        record("clipboard " + type + " " + bytes);
+        done(true, {});
+    }
 };
 
 const char* probe() {
@@ -102,6 +122,12 @@ extern "C" const desktop::ModuleV1* fjarr_desktop_module_v1() { return &MODULE; 
 
 /// The test's hand on the monitors: "wire:id:x:width:primary;…" (empty: none), then the change is
 /// reported as a helper's `monitors` message would be.
+/// The test's hand on the robot's clipboard: the robot copies `text` ("" clears it: no types).
+extern "C" void fjarr_stub_copy(const char* text) {
+    g_clipboard = text ? text : "";
+    if (g_clipboard_cb) g_clipboard_cb(g_clipboard.empty() ? std::vector<std::string>{} : std::vector<std::string>{"text/plain"});
+}
+
 extern "C" void fjarr_stub_plug(const char* spec) {
     g_monitors.clear();
     std::string s = spec ? spec : "";

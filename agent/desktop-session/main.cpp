@@ -21,6 +21,7 @@
 #include <gio/gio.h>
 #include <glib-unix.h>
 
+#include "desktop/clipboard_types.hpp"
 #include "desktop/helper_protocol.hpp"
 #include "mutter.hpp"
 #include "pipewire.hpp"
@@ -81,6 +82,8 @@ class Helper {
         sock_ = -1;
         welcomed_ = false;
         captures_.clear();
+        clipboard_.reset();
+        transfers_.clear();
         if (monitors_sub_) g_dbus_connection_signal_unsubscribe(bus_, monitors_sub_);
         monitors_sub_ = 0;
         input_.reset(); // mutter's sessions stop with them: nothing is captured for an agent that is gone
@@ -125,6 +128,10 @@ class Helper {
             captures_.erase(m.body.value("id", 0)); // its ScreenCast session stops; no other is touched
         } else if (type == "open-input") {
             open_input();
+        } else if (type == "clipboard-read") {
+            clipboard_read(m.body);
+        } else if (type == "clipboard-set") {
+            clipboard_set(m);
         } // unknown types are ignored: fjarr-desktop-1 grows by adding them
     }
 
@@ -215,13 +222,26 @@ class Helper {
         captures_[id] = Recording{connector, std::move(cap)};
     }
 
-    void open_input() {
+    helper::InputSession& input() {
         if (!input_) {
             input_ = std::make_unique<helper::InputSession>(bus_);
             input_->on_closed([this] { say("mutter closed the input session; the agent asks again"); });
+            // The clipboard (docs/23#desktop-helper-protocol): the robot's copies go to the agent;
+            // our own selection's echo does not, and a copy on the robot ends our selection.
+            input_->on_selection_owner([this](bool ours, std::vector<std::string> types) {
+                say(std::string("clipboard owner: ") + (ours ? "this session" : "the robot (" + std::to_string(types.size()) + " types)"));
+                if (ours) return;
+                clipboard_.reset();
+                send({{"type", "clipboard-changed"}, {"types", types}});
+            });
+            input_->on_selection_transfer([this](std::string mime, std::uint32_t serial) { answer_transfer(mime, serial); });
         }
+        return *input_;
+    }
+
+    void open_input() {
         std::string err;
-        const int eis = input_->connect_eis(&err);
+        const int eis = input().connect_eis(&err);
         if (eis < 0) {
             send({{"type", "input-failed"}, {"reason", err}});
             return;
@@ -229,6 +249,117 @@ class Helper {
         send({{"type", "input-opened"}}, {eis});
         ::close(eis);
         say("input opened");
+        if (!input().enable_clipboard(&err)) say("no clipboard: " + err); // input works without it
+    }
+
+    // --- the clipboard -------------------------------------------------------------------------
+    void clipboard_read(const json& req) {
+        const int id = req.value("id", 0);
+        std::string err;
+        const int fd = input().enable_clipboard(&err) ? input().selection_read(req.value("type", std::string{}), &err) : -1;
+        if (fd < 0) {
+            send({{"type", "clipboard-failed"}, {"id", id}, {"reason", err}});
+            return;
+        }
+        send({{"type", "clipboard-data"}, {"id", id}}, {fd}); // the module reads it, at most 1 MiB
+        ::close(fd);
+    }
+
+    void clipboard_set(const proto::Message& m) {
+        const int id = m.body.value("id", 0);
+        auto failed = [&](const std::string& why) { send({{"type", "clipboard-failed"}, {"id", id}, {"reason", why}}); };
+        if (m.fds.empty()) return failed("no content came with clipboard-set");
+        // The content is a memfd the agent filled; read it whole, at most 1 MiB (docs/08).
+        std::string bytes;
+        char buf[65536];
+        ::lseek(m.fds[0].get(), 0, SEEK_SET);
+        for (;;) {
+            const ssize_t n = ::read(m.fds[0].get(), buf, sizeof buf);
+            if (n < 0 && errno == EINTR) continue;
+            if (n < 0) return failed(std::string("reading the content: ") + std::strerror(errno));
+            if (n == 0) break;
+            bytes.append(buf, static_cast<std::size_t>(n));
+            if (bytes.size() > clipboard::MAX_BYTES) return failed("larger than 1 MiB");
+        }
+        std::string err;
+        if (!input().set_selection(clipboard::text_aliases(), &err)) return failed(err);
+        say("the agent set the clipboard: " + std::to_string(bytes.size()) + " bytes");
+        clipboard_ = std::make_unique<std::string>(std::move(bytes));
+        send({{"type", "clipboard-set-done"}, {"id", id}});
+    }
+
+    /// One paste on the robot: write our content to mutter's descriptor as it drains, never blocking
+    /// the loop on an application that reads slowly or not at all.
+    void answer_transfer(const std::string& mime, std::uint32_t serial) {
+        std::string err;
+        if (!clipboard_) {
+            say("paste of " + mime + " on the robot: nothing to give");
+            input().selection_write_done(serial, false);
+            return;
+        }
+        const int fd = input().selection_write(serial, &err);
+        if (fd < 0) {
+            say("paste of " + mime + " on the robot: " + err);
+            input().selection_write_done(serial, false);
+            return;
+        }
+        // Built in place: a temporary Transfer's destructor would close mutter's descriptor before a
+        // byte was written (it did: every paste was empty).
+        auto t = std::make_unique<Transfer>();
+        t->self = this;
+        t->fd = fd;
+        t->data = *clipboard_;
+        t->serial = serial;
+        Transfer* raw = t.get();
+        raw->watch = g_unix_fd_add(fd, static_cast<GIOCondition>(G_IO_OUT | G_IO_ERR | G_IO_HUP), &Helper::on_writable, raw);
+        transfers_[serial] = std::move(t);
+    }
+
+    struct Transfer {
+        Helper* self = nullptr;
+        int fd = -1;
+        std::string data;
+        std::size_t off = 0;
+        std::uint32_t serial = 0;
+        guint watch = 0;
+        Transfer() = default;
+        Transfer(const Transfer&) = delete; // it owns the descriptor and the watch
+        Transfer& operator=(const Transfer&) = delete;
+        ~Transfer() {
+            if (watch) g_source_remove(watch);
+            if (fd >= 0) ::close(fd);
+        }
+    };
+
+    static gboolean on_writable(gint fd, GIOCondition cond, gpointer d) {
+        auto* t = static_cast<Transfer*>(d);
+        bool ok = true, done = false;
+        if (cond & G_IO_OUT) {
+            while (t->off < t->data.size()) {
+                const ssize_t n = ::write(fd, t->data.data() + t->off, t->data.size() - t->off);
+                if (n < 0 && errno == EINTR) continue;
+                if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return G_SOURCE_CONTINUE;
+                if (n < 0) {
+                    ok = false;
+                    break;
+                }
+                t->off += static_cast<std::size_t>(n);
+            }
+            done = true;
+        } else {
+            ok = false; // the reader went away
+            done = true;
+        }
+        if (!done) return G_SOURCE_CONTINUE;
+        Helper* self = t->self;
+        const std::uint32_t serial = t->serial;
+        say("paste " + std::to_string(serial) + " on the robot: " + std::to_string(t->off) + " of " + std::to_string(t->data.size()) + " bytes" + (ok ? "" : ", failed"));
+        t->watch = 0; // removed by returning G_SOURCE_REMOVE
+        ::close(t->fd);
+        t->fd = -1;
+        self->input().selection_write_done(serial, ok);
+        self->transfers_.erase(serial);
+        return G_SOURCE_REMOVE;
     }
 
     GMainLoop* loop_;
@@ -246,6 +377,8 @@ class Helper {
     };
     std::unique_ptr<helper::InputSession> input_;
     std::map<int, Recording> captures_; // by the agent's capture id
+    std::unique_ptr<std::string> clipboard_; // what the agent set, served to every paste until the robot copies
+    std::map<std::uint32_t, std::unique_ptr<Transfer>> transfers_; // pastes in progress, by mutter's serial
 };
 
 } // namespace

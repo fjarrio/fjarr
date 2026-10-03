@@ -14,6 +14,7 @@
 #include <grp.h>
 #include <linux/input-event-codes.h>
 #include <pwd.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -22,6 +23,7 @@
 #include <glib-unix.h>
 #include <gst/gst.h>
 
+#include "desktop/clipboard_types.hpp"
 #include "desktop/helper_protocol.hpp"
 #include "desktop/module.hpp"
 #include "desktop/monitor_identity.hpp"
@@ -95,7 +97,7 @@ class MonitorSource final : public VideoSource {
     std::function<void(bool)> availability_;
 };
 
-class MutterBackend final : public DesktopBackend {
+class MutterBackend final : public DesktopBackend, public ClipboardHandle {
   public:
     explicit MutterBackend(const desktop::ModuleHost& host, const json& config)
         : ctx_(host.context), log_(host.log), socket_path_(config.value("socket", std::string{"/run/fjarr/desktop.sock"})),
@@ -145,7 +147,11 @@ class MutterBackend final : public DesktopBackend {
     }
 
     // --- DesktopBackend ----------------------------------------------------------------------
-    Features features() override { return {}; } // cursor, virtual monitors, audio, clipboard: later slices
+    Features features() override {
+        Features f;
+        f.clipboard = true; // through the helper's input session (docs/23#desktop-helper-protocol)
+        return f;
+    }
     std::vector<Monitor> monitors() override { return monitors_; }
     void on_monitors_changed(std::function<void(std::vector<Monitor>)> cb) override { monitors_cb_ = std::move(cb); }
     void on_capture_lost(std::function<void(MonitorId, CaptureLost)> cb) override { lost_cb_ = std::move(cb); }
@@ -193,9 +199,116 @@ class MutterBackend final : public DesktopBackend {
     void key(LinuxKeycode code, bool down) override { input_.key(code, down); }
     std::vector<std::string> type_text(const std::string& utf8, std::string& error) override { return input_.type_text(utf8, &error); }
     void release_all_input() override { input_.release_all(); }
-    ClipboardHandle* clipboard() override { return nullptr; }
+    ClipboardHandle* clipboard() override { return this; }
+
+    // --- ClipboardHandle (docs/09; docs/23#desktop-helper-protocol, Clipboard) -----------------
+    void on_changed(std::function<void(std::vector<std::string>)> cb) override { clipboard_changed_ = std::move(cb); }
+
+    void read(const std::string& type, std::size_t max_bytes, std::function<void(std::optional<std::string>, std::string)> done) override {
+        const std::string mime = desktop::clipboard::compositor_type_for(type, robot_types_);
+        if (conn_ < 0 || !welcomed_) return done(std::nullopt, "no desktop session");
+        if (mime.empty()) return done(std::nullopt, "the robot's clipboard has no " + type);
+        const int id = next_clip_id_++;
+        auto r = std::make_unique<ClipRead>();
+        r->self = this;
+        r->id = id;
+        r->max = max_bytes;
+        r->done = std::move(done);
+        // A reader that never closes must not hold the request forever.
+        r->timeout = g_timeout_source_new_seconds(5);
+        g_source_set_callback(r->timeout, [](gpointer d) -> gboolean {
+            auto* cr = static_cast<ClipRead*>(d);
+            cr->timeout = nullptr;
+            cr->self->finish_read(cr->id, std::nullopt, "the robot's clipboard did not answer within 5 s");
+            return G_SOURCE_REMOVE;
+        }, r.get(), nullptr);
+        g_source_attach(r->timeout, ctx_);
+        reads_[id] = std::move(r);
+        send({{"type", "clipboard-read"}, {"id", id}, {"type", mime}});
+    }
+
+    void write(const std::string& type, std::string bytes, std::function<void(bool, std::string)> done) override {
+        if (type != desktop::clipboard::TEXT) return done(false, "only text/plain is supported");
+        if (conn_ < 0 || !welcomed_) return done(false, "no desktop session");
+        // The bytes travel as a memfd beside the message (one datagram is at most 64 KiB).
+        const int fd = ::memfd_create("fjarr-clipboard", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+        if (fd < 0) return done(false, std::string("memfd_create: ") + std::strerror(errno));
+        std::size_t off = 0;
+        while (off < bytes.size()) {
+            const ssize_t n = ::write(fd, bytes.data() + off, bytes.size() - off);
+            if (n < 0 && errno == EINTR) continue;
+            if (n < 0) {
+                ::close(fd);
+                return done(false, std::string("memfd: ") + std::strerror(errno));
+            }
+            off += static_cast<std::size_t>(n);
+        }
+        ::fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE | F_SEAL_SEAL);
+        const int id = next_clip_id_++;
+        writes_[id] = std::move(done);
+        std::string err;
+        if (!desktop::proto::send(conn_, {{"type", "clipboard-set"}, {"id", id}, {"types", json::array({desktop::clipboard::TEXT})}}, {fd}, &err)) {
+            auto cb = std::move(writes_[id]);
+            writes_.erase(id);
+            cb(false, "to the helper: " + err);
+        }
+        ::close(fd);
+    }
 
   private:
+    /// One read of the robot's clipboard: the descriptor mutter handed over, drained as it fills.
+    struct ClipRead {
+        MutterBackend* self = nullptr;
+        int id = 0;
+        std::size_t max = 0;
+        std::string bytes;
+        int fd = -1;
+        GSource* watch = nullptr;
+        GSource* timeout = nullptr;
+        std::function<void(std::optional<std::string>, std::string)> done;
+        ClipRead() = default;
+        ClipRead(const ClipRead&) = delete; // it owns the descriptor and its sources
+        ClipRead& operator=(const ClipRead&) = delete;
+        ~ClipRead() {
+            if (watch) g_source_destroy(watch), g_source_unref(watch);
+            if (timeout) g_source_destroy(timeout), g_source_unref(timeout);
+            if (fd >= 0) ::close(fd);
+        }
+    };
+
+    gboolean drain(ClipRead* r, int fd) {
+        char buf[65536];
+        for (;;) {
+            const ssize_t n = ::read(fd, buf, sizeof buf);
+            if (n < 0 && errno == EINTR) continue;
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return G_SOURCE_CONTINUE;
+            if (n < 0) {
+                finish_read(r->id, std::nullopt, std::string("reading the clipboard: ") + std::strerror(errno));
+                return G_SOURCE_REMOVE;
+            }
+            if (n == 0) {
+                finish_read(r->id, std::move(r->bytes), {});
+                return G_SOURCE_REMOVE;
+            }
+            r->bytes.append(buf, static_cast<std::size_t>(n));
+            if (r->bytes.size() > r->max) {
+                finish_read(r->id, std::nullopt, "too-large");
+                return G_SOURCE_REMOVE;
+            }
+        }
+    }
+
+    /// Completes a read once: its callback runs, its sources go. Safe from inside its own sources.
+    void finish_read(int id, std::optional<std::string> bytes, std::string error) {
+        auto it = reads_.find(id);
+        if (it == reads_.end()) return;
+        auto r = std::move(it->second);
+        reads_.erase(it);
+        // The source whose callback is running returns REMOVE itself; destroying it here is harmless.
+        auto done = std::move(r->done);
+        done(std::move(bytes), std::move(error));
+    }
+
     struct Capture {
         int id = 0;
         int x = 0, y = 0, width = 0, height = 0; // the stream's logical rectangle, from capture-started
@@ -293,6 +406,30 @@ class MutterBackend final : public DesktopBackend {
         } else if (type == "input-failed") {
             input_requested_ = false;
             say(2, "the helper could not open input: " + m.body.value("reason", std::string{"?"}));
+        } else if (type == "clipboard-changed") {
+            robot_types_.clear();
+            for (const auto& t : m.body.value("types", json::array()))
+                if (t.is_string()) robot_types_.push_back(t.get<std::string>());
+            if (clipboard_changed_) clipboard_changed_(desktop::clipboard::fjarr_types(robot_types_));
+        } else if (type == "clipboard-data") {
+            const int id = m.body.value("id", 0);
+            auto it = reads_.find(id);
+            if (it == reads_.end() || m.fds.empty()) return;
+            ClipRead* r = it->second.get();
+            r->fd = m.fds[0].release();
+            ::fcntl(r->fd, F_SETFL, ::fcntl(r->fd, F_GETFL) | O_NONBLOCK);
+            r->watch = g_unix_fd_source_new(r->fd, static_cast<GIOCondition>(G_IO_IN | G_IO_HUP | G_IO_ERR));
+            GUnixFDSourceFunc on_data = [](gint fd, GIOCondition, gpointer d) -> gboolean { return static_cast<ClipRead*>(d)->self->drain(static_cast<ClipRead*>(d), fd); };
+            g_source_set_callback(r->watch, G_SOURCE_FUNC(on_data), r, nullptr);
+            g_source_attach(r->watch, ctx_);
+        } else if (type == "clipboard-set-done" || (type == "clipboard-failed" && writes_.count(m.body.value("id", 0)))) {
+            auto it = writes_.find(m.body.value("id", 0));
+            if (it == writes_.end()) return;
+            auto cb = std::move(it->second);
+            writes_.erase(it);
+            cb(type == "clipboard-set-done", m.body.value("reason", std::string{}));
+        } else if (type == "clipboard-failed") {
+            finish_read(m.body.value("id", 0), std::nullopt, m.body.value("reason", std::string{"the helper could not read the clipboard"}));
         } else if (type == "capture-failed") {
             say(2, "the helper could not capture: " + m.body.value("reason", std::string{"?"}));
         } else if (type == "capture-lost") {
@@ -353,6 +490,11 @@ class MutterBackend final : public DesktopBackend {
         conn_ = -1;
         welcomed_ = false;
         input_.detach(); // mutter's session went with the helper; it released what was held
+        robot_types_.clear();
+        for (auto it = reads_.begin(); it != reads_.end();) finish_read((it++)->first, std::nullopt, "the desktop session ended");
+        auto writes = std::move(writes_);
+        writes_.clear();
+        for (auto& [id, cb] : writes) cb(false, "the desktop session ended");
         input_requested_ = false;
         say(1, why);
         for (auto& [monitor, c] : captures_) {
@@ -383,6 +525,11 @@ class MutterBackend final : public DesktopBackend {
     std::function<void(MonitorId, CaptureLost)> lost_cb_;
     desktop::mutter::EisInput input_;
     bool input_requested_ = false;
+    std::vector<std::string> robot_types_; // what the robot's clipboard offers, in the compositor's names
+    std::function<void(std::vector<std::string>)> clipboard_changed_;
+    std::map<int, std::unique_ptr<ClipRead>> reads_;
+    std::map<int, std::function<void(bool, std::string)>> writes_;
+    int next_clip_id_ = 1;
 };
 
 const char* probe() { return nullptr; } // usable wherever it is installed: the helper says the rest

@@ -45,6 +45,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <fjarr/blob.hpp>
 #include <fjarr/capability.hpp>
 
 #include <fcntl.h>
@@ -99,8 +100,8 @@ void usage() {
                  "                   [--introspect http://127.0.0.1:7381] [--introspect-token <t>] [--verbose]\n"
                  "                   [--exec '<command>'] (tunnel: run it with the link up, $FJARR_ADDR set)\n"
                  "                   [--desktop-oracle <url of the fixture's test-window log>] (desktop-control)\n"
-                 "                   [--desktop-plug <url of the fixture's monitor hot-plug>] (desktop-hotplug)\n"
-                 "scenarios: smoke toggle hotplug rejected-track desktop-see desktop-control desktop-hotplug silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer tunnel\n"
+                 "                   [--desktop-plug <url of the fixture's monitor hot-plug>] (desktop-hotplug, desktop-clipboard)\n"
+                 "scenarios: smoke toggle hotplug rejected-track desktop-see desktop-control desktop-hotplug desktop-clipboard silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer tunnel\n"
                  "           soak (--cycles N, needs --introspect)\n"
                  "           netem-{lan,wifi-ok,4g,lossy,bad} (the profile is applied externally: docker/lab/netem.sh)\n"
                  "exit: 0 all assertions pass, 1 any fail, 2 usage, 3 timeout\n");
@@ -2427,6 +2428,93 @@ void scenario_desktop_control(Operator& op) {
 /// M3 3.4: monitor hot-plug against the fixture's virtual monitors (docs/06 hot-plug criteria,
 /// docs/23#desktop-monitors): a plugged monitor becomes a track within 2 s while the first keeps
 /// flowing, an unplugged one leaves, and a re-plugged one returns under the same track_id.
+/// The clipboard both ways (M3 3.5; docs/08 clipboard-*): a copy on the robot is offered and read as
+/// a blob, and a write from here pastes on the robot, non-ASCII included. The fixture's oracle
+/// copies and pastes on the robot with wl-clipboard (--desktop-plug: GET /copy?text=, GET /paste).
+void scenario_desktop_clipboard(Operator& op) {
+    Report& r = op.report();
+    if (op.desktop_plug().empty()) {
+        r.check("desktop-plug", false, "--desktop-plug not given: nothing can copy or paste on the robot");
+        return;
+    }
+    connect_and_report(op);
+    std::string desk;
+    for (const auto& id : op.manifest_tracks())
+        if (id.rfind("desk-", 0) == 0) desk = id;
+    // A paste needs a keyboard on the robot's seat, which the agent's EIS keyboard is: it exists once
+    // a capture has started and input is open (docs/23#desktop-helper-protocol, Clipboard).
+    const std::uint64_t f0 = desk.empty() ? 0 : op.frames(desk);
+    if (desk.empty() || !op.select(desk, true, "active", 5000, "fjarr.desktop") || !op.wait_frames(desk, f0, 5, 10000)) {
+        r.check("desktop-frames", false, "no desktop track streaming" + why_no_frames(op));
+        return;
+    }
+    const std::string label = "fjarr:bulk:fjarr.desktop";
+    std::mutex mu;
+    fjarr::blob::BlobAssembler assembler;
+    std::map<std::string, std::string> blobs;
+    op.peer()->on_binary([&](const std::string& l, const std::string& bytes) {
+        if (l != label) return;
+        auto chunk = fjarr::blob::parse_chunk(std::span<const std::byte>(reinterpret_cast<const std::byte*>(bytes.data()), bytes.size()));
+        if (!chunk) return;
+        std::lock_guard<std::mutex> lk(mu);
+        if (auto done = assembler.on_chunk(*chunk))
+            if (auto b = assembler.take(*done)) blobs[*done] = std::move(*b);
+    });
+    // The handler holds this function's locals: it must be gone before they are.
+    struct Unhook {
+        Operator& op;
+        ~Unhook() { op.peer()->on_binary({}); }
+    } unhook{op};
+    auto escape = [](const std::string& s) {
+        gchar* e = g_uri_escape_string(s.c_str(), nullptr, FALSE);
+        std::string out = e;
+        g_free(e);
+        return out;
+    };
+
+    // 1. Robot → operator: copied on the robot, offered, read on request as a blob.
+    const std::string robot_text = "robot says åäö";
+    std::size_t mark = op.inbox_mark();
+    auto copied = op.http_get_url(op.desktop_plug() + "/copy?text=" + escape(robot_text));
+    r.check("clipboard-robot-copy", copied.status == 200, "the robot copied: " + copied.body + (copied.error.empty() ? "" : " " + copied.error));
+    auto offer = op.wait_envelope(mark, "fjarr.desktop", "clipboard-offer", "event", 5000);
+    const json types = offer ? offer->payload.value("types", json::array()) : json::array();
+    r.check("clipboard-offer", offer && types == json::array({"text/plain"}), offer ? "offered " + types.dump() : "no clipboard-offer after the robot copied");
+    if (!offer) return;
+    auto read = op.request("fjarr.desktop", "clipboard-read", json{{"offer_id", offer->payload.value("offer_id", std::string())}, {"type", "text/plain"}});
+    const json ref = read && read->payload.value("ok", false) ? read->payload.value("blob", json::object()) : json::object();
+    std::string got;
+    for (int i = 0; i < 100 && got.empty() && ref.contains("blob"); i++) {
+        {
+            std::lock_guard<std::mutex> lk(mu);
+            auto it = blobs.find(ref.value("blob", std::string()));
+            if (it != blobs.end()) got = it->second;
+        }
+        if (got.empty()) std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    r.check("clipboard-read", got == robot_text, read ? "read '" + got + "'" + (read->payload.value("ok", false) ? "" : " " + read->payload.dump()) : "no answer to clipboard-read");
+
+    // 2. Operator → robot: the bytes as a blob, the write, then a paste on the robot.
+    const std::string op_text = "operator says ÅÄÖ";
+    std::array<std::uint8_t, 16> idb{};
+    for (std::size_t i = 0; i < idb.size(); i++) idb[i] = static_cast<std::uint8_t>(g_random_int());
+    idb[6] = static_cast<std::uint8_t>((idb[6] & 0x0F) | 0x40);
+    idb[8] = static_cast<std::uint8_t>((idb[8] & 0x3F) | 0x80);
+    const std::string id = fjarr::blob::uuid_text(idb);
+    const auto frame = fjarr::blob::encode_chunk(id, 0, op_text.size(), std::span<const std::byte>(reinterpret_cast<const std::byte*>(op_text.data()), op_text.size()));
+    // Bytes first, then the request: the agent pairs them in either order (the unit tests cover the
+    // request first); request() waits for the answer, so the bytes cannot follow it from here.
+    const bool sent = op.peer()->send_binary(label, std::string(reinterpret_cast<const char*>(frame.data()), frame.size()));
+    mark = op.inbox_mark();
+    auto wrote = op.request("fjarr.desktop", "clipboard-write", json{{"type", "text/plain"}, {"blob", {{"blob", id}, {"len", op_text.size()}, {"type", "text/plain"}}}});
+    r.check("clipboard-write", sent && wrote && wrote->payload.value("ok", false), wrote ? wrote->payload.dump() : "no answer to clipboard-write");
+    auto pasted = op.http_get_url(op.desktop_plug() + "/paste");
+    r.check("clipboard-robot-paste", pasted.status == 200 && pasted.body == op_text, "pasted on the robot: '" + pasted.body + "'" + (pasted.error.empty() ? "" : " " + pasted.error));
+    // Our own write is never offered back to us (docs/08 clipboard-offer).
+    auto echo = op.wait_envelope(mark, "fjarr.desktop", "clipboard-offer", "event", 1000);
+    r.check("clipboard-no-echo", !echo, echo ? "our own write came back as an offer" : "our write was not offered back");
+}
+
 void scenario_desktop_hotplug(Operator& op) {
     Report& r = op.report();
     if (op.desktop_plug().empty()) {
@@ -3080,7 +3168,7 @@ const std::map<std::string, ScenarioFn> kScenarios = {
     {"smoke", scenario_smoke},       {"toggle", scenario_toggle},   {"hotplug", scenario_hotplug},     {"silent-operator", scenario_silent_operator},
     {"no-answer", scenario_no_answer}, {"socket-drop", scenario_socket_drop}, {"ice-restart", scenario_ice_restart}, {"deadman", scenario_deadman},
     {"congested-viewer", scenario_congested_viewer}, {"rejected-track", scenario_rejected_track},
-    {"desktop-see", scenario_desktop_see}, {"desktop-control", scenario_desktop_control}, {"desktop-hotplug", scenario_desktop_hotplug},
+    {"desktop-see", scenario_desktop_see}, {"desktop-control", scenario_desktop_control}, {"desktop-hotplug", scenario_desktop_hotplug}, {"desktop-clipboard", scenario_desktop_clipboard},
     {"relay-only", scenario_relay_only}, {"tunnel", scenario_tunnel}, {"soak", scenario_soak},
     // netem-<profile>: one function, the profile is read from the scenario name (unknown profile → usage, exit 2).
     {"netem-lan", scenario_netem},     {"netem-wifi-ok", scenario_netem}, {"netem-4g", scenario_netem},     {"netem-lossy", scenario_netem},

@@ -35,10 +35,8 @@ struct RecordingContext final : SessionContext {
     const SessionId &id() const override { return sid; }
     OperatorInfo op;
     const OperatorInfo &operator_info() const override { return op; }
-    const nlohmann::json &granted_params(std::string_view) const override {
-        static nlohmann::json j = nlohmann::json::object();
-        return j;
-    }
+    nlohmann::json grants = nlohmann::json::object(); // what granted_params() answers, for every capability
+    const nlohmann::json &granted_params(std::string_view) const override { return grants; }
     void add_track(TrackSpec spec) override { added.push_back(spec.track_id); }
     void update_tracks(std::vector<TrackSpec> full_set) override {
         std::vector<std::string> ids;

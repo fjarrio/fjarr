@@ -53,12 +53,33 @@ class InputSession {
     void on_closed(std::function<void()> cb) { closed_ = std::move(cb); }
     void stop();
 
+    // The clipboard belongs to the RemoteDesktop session, and works on this unlinked one
+    // (spike 2026-10-03; docs/23#desktop-helper-protocol, Clipboard).
+    /// EnableClipboard, starting the session first if needed; once per session.
+    bool enable_clipboard(std::string* error);
+    /// SelectionOwnerChanged: who owns the clipboard now (`ours` = this session) and its mime types.
+    void on_selection_owner(std::function<void(bool ours, std::vector<std::string> mime_types)> cb) { owner_ = std::move(cb); }
+    /// SelectionTransfer: an application pastes what this session set; answer with selection_write.
+    void on_selection_transfer(std::function<void(std::string mime_type, std::uint32_t serial)> cb) { transfer_ = std::move(cb); }
+    /// SelectionRead: a descriptor to read the robot's clipboard as `mime_type` from (non-blocking), or -1.
+    int selection_read(const std::string& mime_type, std::string* error);
+    /// SetSelection: this session owns the clipboard, offering `mime_types`.
+    bool set_selection(const std::vector<std::string>& mime_types, std::string* error);
+    /// SelectionWrite: a descriptor to write transfer `serial`'s bytes to (non-blocking), or -1.
+    int selection_write(std::uint32_t serial, std::string* error);
+    void selection_write_done(std::uint32_t serial, bool ok);
+
   private:
     bool ensure_started(std::string* error);
+    int call_for_fd(const char* method, GVariant* params, std::string* error);
     GDBusConnection* bus_;
     std::string path_;
     guint closed_sub_ = 0;
+    std::vector<guint> clipboard_subs_;
+    bool clipboard_enabled_ = false;
     std::function<void()> closed_;
+    std::function<void(bool, std::vector<std::string>)> owner_;
+    std::function<void(std::string, std::uint32_t)> transfer_;
 };
 
 /// One monitor's capture: a ScreenCast session of its own, so it starts and stops without touching
