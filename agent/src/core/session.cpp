@@ -485,6 +485,10 @@ void Session::on_channel_open(GstWebRTCDataChannel* dc, const std::string& label
         s->dc = dc;
         senders_[label] = std::move(s);
         control_open_ = true;
+        // What capabilities sent before the channel opened goes first, in order (docs/23).
+        auto early = std::move(early_outbound_);
+        early_outbound_.clear();
+        for (const auto& e : early) send_control(e);
         milestone("control-open");
         maybe_connected();
     } else if (label == "fjarr:realtime") {
@@ -1016,7 +1020,12 @@ void Session::sample_stats() {
 
 void Session::send_control(const Envelope& env) {
     auto it = senders_.find("fjarr:control");
-    if (it == senders_.end()) return; // not open yet / gone: dropped (docs/23 counts it)
+    if (it == senders_.end()) {
+        // Not open yet: held and sent when it opens (docs/23, "And the same outbound"). Gone: dropped.
+        if (!control_open_ && !closing() && early_outbound_.size() < MAX_EARLY_OUTBOUND) early_outbound_.push_back(env);
+        else dropped_envelopes_++;
+        return;
+    }
     try {
         it->second->send(env);
     } catch (const FjarrError& e) {

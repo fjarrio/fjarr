@@ -497,11 +497,11 @@ DEB_ARCH ?= $(shell dpkg --print-architecture 2>/dev/null || uname -m)
 DEB_BUILDER ?= build
 DEB_BUILDER_IMAGE = $(if $(filter prebuilt,$(DEB_BUILDER)),docker image inspect fjarr-deb-builder >/dev/null 2>&1 || { echo "DEB_BUILDER=prebuilt but there is no fjarr-deb-builder image (tools/ci/image.py build fjarr-deb-builder docker/deb-builder)"; exit 1; },docker build -q -t fjarr-deb-builder docker/deb-builder >/dev/null)
 .PHONY: desktop-e2e
-desktop-e2e: ## M3: the fixture's desktop end to end — see it (frames, a still screen), drive it (input, text, input-to-photon, release on close), hot-plug monitors, the clipboard both ways, through helper → module E → agent → opsim (host-run; make agent-build first)
+desktop-e2e: ## M3: the fixture's desktop end to end — see it (frames, a still screen), drive it (input, text, input-to-photon, release on close), hot-plug monitors, the clipboard both ways, the local cursor, through helper → module E → agent → opsim (host-run; make agent-build first)
 	docker compose --profile desktop --profile stack up -d --build --wait desktop-fixture fjarr-server
 	docker compose --profile desktop --profile stack up -d --no-deps --force-recreate desktop-robot
 	@for i in $$(seq 30); do docker compose --profile desktop logs --no-color desktop-robot 2>/dev/null | grep -q "capture of .* ready" && break; sleep 1; done
-	@rc=0; for s in desktop-see desktop-control desktop-hotplug desktop-clipboard; do \
+	@rc=0; for s in desktop-see desktop-control desktop-hotplug desktop-clipboard desktop-cursor; do \
 	  $(MAKE) --no-print-directory opsim OPSIM_ROBOT=desktop-robot-01 OPSIM_SCENARIO=$$s OPSIM_INTROSPECT=http://desktop-robot:7381 \
 	    OPSIM_EXTRA="--introspect-token $(INTROSPECT_TOKEN) --desktop-oracle http://desktop-fixture:8090/testwin.log --desktop-plug http://desktop-fixture:8091" || rc=1; \
 	done; \

@@ -33,6 +33,9 @@ class StubSource final : public VideoSource {
 /// Monitors the test plugs and unplugs through fjarr_stub_plug (below).
 std::vector<Monitor> g_monitors;
 std::function<void(std::vector<Monitor>)> g_monitors_cb;
+/// The robot's cursor, which the test moves and reshapes through fjarr_stub_cursor (below).
+std::function<void(const CursorShape&)> g_shape_cb;
+std::function<void(MonitorId, double, double)> g_position_cb;
 /// The robot's clipboard, which the test fills through fjarr_stub_copy (below).
 std::string g_clipboard;
 std::function<void(std::vector<std::string>)> g_clipboard_cb;
@@ -67,7 +70,8 @@ class StubBackend final : public DesktopBackend, public ClipboardHandle {
     void destroy_virtual_monitor(MonitorId) override {}
     std::shared_ptr<VideoSource> start_audio_capture() override { return nullptr; }
     void stop_audio_capture() override {}
-    void on_cursor_shape(std::function<void(const CursorShape&)>) override {}
+    void on_cursor_shape(std::function<void(const CursorShape&)> cb) override { g_shape_cb = std::move(cb); }
+    void on_cursor_position(std::function<void(MonitorId, double, double)> cb) override { g_position_cb = std::move(cb); }
     void pointer_motion(MonitorId m, double x, double y) override { record("pointer " + std::to_string(m) + " " + std::to_string(x) + " " + std::to_string(y)); }
     void pointer_button(MouseButton b, bool down) override { record("button " + std::to_string(static_cast<int>(b)) + (down ? " down" : " up")); }
     void pointer_wheel(double dx, double dy) override { record("wheel " + std::to_string(dx) + " " + std::to_string(dy)); }
@@ -122,6 +126,25 @@ extern "C" const desktop::ModuleV1* fjarr_desktop_module_v1() { return &MODULE; 
 
 /// The test's hand on the monitors: "wire:id:x:width:primary;…" (empty: none), then the change is
 /// reported as a helper's `monitors` message would be.
+/// The test's hand on the robot's cursor: a shape `id` (a 2x1 image; "" = no change, "hidden" = no
+/// cursor), then the pointer at (x, y) on monitor 7 when x >= 0.
+extern "C" void fjarr_stub_cursor(const char* id, double x, double y) {
+    const std::string sid = id ? id : "";
+    if (!sid.empty() && g_shape_cb) {
+        CursorShape c;
+        c.shape_id = sid;
+        c.visible = sid != "hidden";
+        if (c.visible) {
+            c.width = 2;
+            c.height = 1;
+            c.hot_x = 1;
+            c.rgba = {255, 0, 0, 255, 0, 0, 255, 128};
+        }
+        g_shape_cb(c);
+    }
+    if (x >= 0 && g_position_cb) g_position_cb(7, x, y);
+}
+
 /// The test's hand on the robot's clipboard: the robot copies `text` ("" clears it: no types).
 extern "C" void fjarr_stub_copy(const char* text) {
     g_clipboard = text ? text : "";

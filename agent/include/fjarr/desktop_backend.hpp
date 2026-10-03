@@ -74,7 +74,8 @@ struct CaptureOptions {
 
 /// One cursor image, delivered whenever the shape changes.
 struct CursorShape {
-    std::uint32_t shape_id = 0; // changes with the shape; the client caches by it
+    std::string shape_id;  // names the shape by its content; the client caches images by it (docs/08 `cursor`)
+    bool visible = true;   // false: no cursor is shown
     int width = 0, height = 0;
     int hot_x = 0, hot_y = 0;
     std::vector<std::uint8_t> rgba; // width*height*4, straight alpha
@@ -133,6 +134,9 @@ class DesktopBackend {
 
     /// Local-cursor mode: every shape change, for captures started with cursor_in_video=false.
     virtual void on_cursor_shape(std::function<void(const CursorShape&)> callback) = 0;
+    /// Where the pointer is, normalized within one monitor, while it is on a captured one
+    /// (docs/08 `cursor-position`). spec: docs/22-remote-desktop-client.md#cursor-strategy
+    virtual void on_cursor_position(std::function<void(MonitorId, double nx, double ny)> callback) = 0;
 
     /// Absolute pointer position, normalized [0,1] within one monitor.
     /// spec: docs/08-protocol.md#input-events-fjarrdesktop

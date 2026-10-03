@@ -101,7 +101,7 @@ void usage() {
                  "                   [--exec '<command>'] (tunnel: run it with the link up, $FJARR_ADDR set)\n"
                  "                   [--desktop-oracle <url of the fixture's test-window log>] (desktop-control)\n"
                  "                   [--desktop-plug <url of the fixture's monitor hot-plug>] (desktop-hotplug, desktop-clipboard)\n"
-                 "scenarios: smoke toggle hotplug rejected-track desktop-see desktop-control desktop-hotplug desktop-clipboard silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer tunnel\n"
+                 "scenarios: smoke toggle hotplug rejected-track desktop-see desktop-control desktop-hotplug desktop-clipboard desktop-cursor silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer tunnel\n"
                  "           soak (--cycles N, needs --introspect)\n"
                  "           netem-{lan,wifi-ok,4g,lossy,bad} (the profile is applied externally: docker/lab/netem.sh)\n"
                  "exit: 0 all assertions pass, 1 any fail, 2 usage, 3 timeout\n");
@@ -713,8 +713,30 @@ class Peer {
         return v;
     }
 
-    /// Called on the SCTP thread for every binary message on `label`.
-    void on_binary(std::function<void(const std::string& label, const std::string& bytes)> fn) { on_binary_ = std::move(fn); }
+    /// Called on the SCTP thread for every binary message on `label`. Messages that came before a
+    /// handler was set (a blob the agent sent the moment its channel opened) are kept, at most 256,
+    /// and handed to the next handler first: a scenario installs its handler after connecting.
+    void on_binary(std::function<void(const std::string& label, const std::string& bytes)> fn) {
+        std::deque<std::pair<std::string, std::string>> early;
+        {
+            std::lock_guard<std::mutex> lk(binary_mu_);
+            on_binary_ = fn;
+            if (fn) early.swap(early_binary_);
+        }
+        for (auto& [label, bytes] : early) fn(label, bytes);
+    }
+    void deliver_binary(const std::string& label, std::string bytes) {
+        std::function<void(const std::string&, const std::string&)> fn;
+        {
+            std::lock_guard<std::mutex> lk(binary_mu_);
+            if (!on_binary_) {
+                if (early_binary_.size() < 256) early_binary_.emplace_back(label, std::move(bytes));
+                return;
+            }
+            fn = on_binary_;
+        }
+        fn(label, bytes);
+    }
 
     bool send(const std::string& label, const std::string& text) {
         GstWebRTCDataChannel* dc = nullptr;
@@ -1027,7 +1049,7 @@ class Peer {
                 auto* p = static_cast<std::pair<Peer*, std::string>*>(d);
                 gsize n = 0;
                 const auto* b = static_cast<const char*>(data ? g_bytes_get_data(data, &n) : nullptr);
-                if (p->first->on_binary_) p->first->on_binary_(p->second, std::string(b ? b : "", b ? n : 0));
+                p->first->deliver_binary(p->second, std::string(b ? b : "", b ? n : 0));
             })),
             new std::pair<Peer*, std::string>(this, label), [](gpointer d, GClosure*) { delete static_cast<std::pair<Peer*, std::string>*>(d); });
         dc_signals_.emplace_back(ch, "on-error", G_CALLBACK((+[](GstWebRTCDataChannel*, GError* e, gpointer) {
@@ -1080,6 +1102,8 @@ class Peer {
     std::vector<glib::PadProbe> probes_;
     std::mutex dc_mu_;
     std::function<void(const std::string&, const std::string&)> on_binary_;
+    std::mutex binary_mu_; // on_binary_ and early_binary_: set from the scenario, read on the SCTP thread
+    std::deque<std::pair<std::string, std::string>> early_binary_;
     std::map<std::string, glib::GObjectPtr<GstWebRTCDataChannel>> channels_;
     std::mutex cand_mu_;
     bool remote_described_ = false;
@@ -2515,6 +2539,75 @@ void scenario_desktop_clipboard(Operator& op) {
     r.check("clipboard-no-echo", !echo, echo ? "our own write came back as an offer" : "our write was not offered back");
 }
 
+/// The local cursor (M3 3.5; docs/08 `cursor`, `cursor-position`): mutter's cursor metadata through
+/// module E's reader. The shape arrives with its pixels as a blob, and the pointer moved by this
+/// operator's input comes back as positions where it was put.
+void scenario_desktop_cursor(Operator& op) {
+    Report& r = op.report();
+    const std::size_t start = op.inbox_mark();
+    connect_and_report(op);
+    std::string desk;
+    for (const auto& id : op.manifest_tracks())
+        if (id.rfind("desk-", 0) == 0) desk = id;
+    const std::uint64_t f0 = desk.empty() ? 0 : op.frames(desk);
+    if (desk.empty() || !op.select(desk, true, "active", 5000, "fjarr.desktop") || !op.wait_frames(desk, f0, 5, 10000)) {
+        r.check("desktop-frames", false, "no desktop track streaming" + why_no_frames(op));
+        return;
+    }
+    std::mutex mu;
+    fjarr::blob::BlobAssembler assembler;
+    std::map<std::string, std::string> blobs;
+    op.peer()->on_binary([&](const std::string& l, const std::string& bytes) {
+        if (l != "fjarr:bulk:fjarr.desktop") return;
+        auto chunk = fjarr::blob::parse_chunk(std::span<const std::byte>(reinterpret_cast<const std::byte*>(bytes.data()), bytes.size()));
+        if (!chunk) return;
+        std::lock_guard<std::mutex> lk(mu);
+        if (auto done = assembler.on_chunk(*chunk))
+            if (auto b = assembler.take(*done)) blobs[*done] = std::move(*b);
+    });
+    struct Unhook {
+        Operator& op;
+        ~Unhook() { op.peer()->on_binary({}); }
+    } unhook{op};
+
+    // Move the pointer: mutter's reader reports where it is, and the first move makes a sprite.
+    std::uint64_t seq = 0;
+    auto point = [&](double x, double y) { op.event("fjarr:realtime", "fjarr.desktop", "pointer", json{{"track_id", desk}, {"x", x}, {"y", y}, {"seq", ++seq}}); };
+    std::size_t mark = op.inbox_mark();
+    point(0.25, 0.25);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    point(0.60, 0.40);
+    // The shape: sent at the session's start or on the first sprite, from the start of the run.
+    auto shape = op.wait_envelope(start, "fjarr.desktop", "cursor", "event", 5000,
+                                  [](const Envelope& e) { return !e.payload.value("hidden", false) && e.payload.contains("image"); });
+    std::string image_note = "no cursor event with an image";
+    bool image_ok = false;
+    if (shape) {
+        const json img = shape->payload["image"];
+        const std::size_t want = static_cast<std::size_t>(img.value("w", 0)) * img.value("h", 0) * 4;
+        std::string got;
+        for (int i = 0; i < 60 && got.empty(); i++) {
+            {
+                std::lock_guard<std::mutex> lk(mu);
+                auto it = blobs.find(img["blob"].value("blob", std::string()));
+                if (it != blobs.end()) got = it->second;
+            }
+            if (got.empty()) std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        image_ok = want > 0 && got.size() == want;
+        image_note = "shape " + shape->payload.value("shape_id", std::string()) + ", " + std::to_string(img.value("w", 0)) + "x" +
+                     std::to_string(img.value("h", 0)) + ", hotspot " + shape->payload["hotspot"].dump() + ", " + std::to_string(got.size()) + " bytes";
+    }
+    r.check("cursor-shape", image_ok, image_note);
+    // The position after the second move: where it was put, give or take a pixel's rounding.
+    auto near = [](const Envelope& e, double x, double y) {
+        return std::abs(e.payload.value("x", -1.0) - x) < 0.01 && std::abs(e.payload.value("y", -1.0) - y) < 0.01;
+    };
+    auto pos = op.wait_envelope(mark, "fjarr.desktop", "cursor-position", "event", 3000, [&](const Envelope& e) { return near(e, 0.60, 0.40); });
+    r.check("cursor-position", pos && pos->payload.value("track_id", std::string()) == desk,
+            pos ? "at " + pos->payload.dump() : "no cursor-position near (0.60, 0.40) on " + desk);
+}
+
 void scenario_desktop_hotplug(Operator& op) {
     Report& r = op.report();
     if (op.desktop_plug().empty()) {
@@ -3168,7 +3261,7 @@ const std::map<std::string, ScenarioFn> kScenarios = {
     {"smoke", scenario_smoke},       {"toggle", scenario_toggle},   {"hotplug", scenario_hotplug},     {"silent-operator", scenario_silent_operator},
     {"no-answer", scenario_no_answer}, {"socket-drop", scenario_socket_drop}, {"ice-restart", scenario_ice_restart}, {"deadman", scenario_deadman},
     {"congested-viewer", scenario_congested_viewer}, {"rejected-track", scenario_rejected_track},
-    {"desktop-see", scenario_desktop_see}, {"desktop-control", scenario_desktop_control}, {"desktop-hotplug", scenario_desktop_hotplug}, {"desktop-clipboard", scenario_desktop_clipboard},
+    {"desktop-see", scenario_desktop_see}, {"desktop-control", scenario_desktop_control}, {"desktop-hotplug", scenario_desktop_hotplug}, {"desktop-clipboard", scenario_desktop_clipboard}, {"desktop-cursor", scenario_desktop_cursor},
     {"relay-only", scenario_relay_only}, {"tunnel", scenario_tunnel}, {"soak", scenario_soak},
     // netem-<profile>: one function, the profile is read from the scenario name (unknown profile → usage, exit 2).
     {"netem-lan", scenario_netem},     {"netem-wifi-ok", scenario_netem}, {"netem-4g", scenario_netem},     {"netem-lossy", scenario_netem},

@@ -256,6 +256,12 @@ exact API sequences):
   reproduced 2026-09-30 by blocking the loop while DTLS and SCTP came up). A
   message that reaches the loop before its channel's `on-open` is held and
   delivered right after it.
+- **And the same outbound.** A capability may send events from
+  `session_attached`, before `fjarr:control` is open (the cursor's current
+  shape, the robot's clipboard offer). Those envelopes are held, at most 64,
+  and sent in order the moment the channel opens, before anything else goes
+  out on it. Dropping them lost the cursor's shape for every session after the
+  first (2026-10-03): the shape only goes out again when it changes.
 - **Caps-gated offer.** A `GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM` probe on
   each track's payloader source pad waits for caps with fixed `payload`
   and `ssrc` (1–3 ms after PLAYING); the offer is created only when every
@@ -527,31 +533,36 @@ its name is bumped with the module seam's.
   **ScreenCast session of its own**, not linked to the input session (below),
   starts it, and replies `capture-started {id, node, x, y, width, height}`
   with **one descriptor: a PipeWire connection**, or `capture-failed {id,
-  reason}`. With `cursor: "metadata"` it hands **a second descriptor**, a
-  second connection narrowed to the same node, for the cursor reader
-  (below). `stop-capture {id}` ends it. The module reads the stream with
-  `pipewiresrc fd=… path=<node> keepalive-time=<ms>`: mutter's stream is
-  damage-driven and silent on a static screen, and the keepalive re-sends the
-  last frame so the encoder keeps producing. Silence is never capture loss.
+  reason}`. `stop-capture {id}` ends it. The module reads the stream with
+  its own **stream reader** (below), which re-sends the last frame on a still
+  screen: mutter's stream is damage-driven and silent then, and the encoder
+  must keep producing. Silence is never capture loss.
   The connection is narrowed to that node before it is handed over (above), so
   one connection serves one capture. One session per capture is what hot-plug
   needs (measured 2026-10-01, mutter 50). A started RemoteDesktop session takes
   no new linked ScreenCast session, and a `RecordMonitor` on its started
   ScreenCast session is accepted but never produces a stream. A capture of its
   own starts and stops without touching any other.
-- **The cursor** (slice 3.5; spike 2026-10-03, `spikes/desktop-comfort`).
-  mutter puts the cursor on the stream as `SPA_META_Cursor`: the position
-  on every pointer move, the shape once per change, an empty shape when there
-  is no cursor. `pipewiresrc` drops it, so module E has a **cursor reader** of
-  its own: a `pw_stream` on the second connection that asks only for that
-  meta and hands every buffer straight back. It is linked **as soon as the
-  capture starts**, before a viewer makes the media plane build the
-  `pipewiresrc` pipeline, because the shape goes only to whoever is linked
-  when it is sent (a reader that joined later never got one). Both are served
-  from one node. The reader runs on the core loop (PipeWire's loop polled
-  from GLib), names each shape by a hash of its pixels and hotspot (mutter's
-  own id does not change with the shape), and reports positions normalized
-  to the capture's rectangle.
+- **The stream reader and the cursor** (slice 3.5; spikes 2026-10-03,
+  `spikes/desktop-comfort`). mutter puts the cursor on the stream as
+  `SPA_META_Cursor`: the position on every pointer move, the shape once per
+  change, an empty shape when there is no cursor. `pipewiresrc` drops it. So
+  module E reads each capture's stream itself: a `pw_stream` on the handed
+  connection, on a PipeWire thread of its own, linked **as soon as the
+  capture starts** and the node's **only** consumer. From every buffer it
+  takes the frame (copied into a `GstBuffer`, as `pipewiresrc` did with
+  `always-copy`, the DMA-BUF path having failed on the spike machine,
+  ADR-0006) and the cursor. The frames go to the track's source, an `appsrc`:
+  the reader pushes each new one, re-sends the last one every keepalive
+  interval on a still screen, and gives a newly built pipeline the last frame
+  at once. Two consumers on one node do not work: mutter sends the shape, and
+  on a still screen the only frame, to whoever is linked when it is produced,
+  so a reader linked first starved `pipewiresrc` of its first frame, and one
+  linked second never learnt the shape (both measured). Each shape is named by
+  a hash of its pixels and hotspot (mutter's own id does not change with the
+  shape); positions are normalized to the capture's rectangle. Results reach
+  the core loop by posting; the PipeWire thread never waits on it, because a
+  buffer goes back to mutter only once its consumer has returned it.
 - **Input.** `open-input {}` makes the helper start its one RemoteDesktop
   session, if it has not, call `ConnectToEIS` on it, and reply `input-opened {}`
   with **one descriptor: the EIS socket**. The module is its libei sender

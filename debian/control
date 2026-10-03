@@ -45,8 +45,7 @@ Description: Fjarr operator tools: fjarr-connect
 
 Package: fjarr-desktop-wayland
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, fjarr-agent (= ${binary:Version}),
- gstreamer1.0-pipewire
+Depends: ${shlibs:Depends}, ${misc:Depends}, fjarr-agent (= ${binary:Version})
 Recommends: gdm3, gnome-shell
 Description: Fjarr remote desktop for GNOME on Wayland
  The robot's screen as a video track, and the operator's pointer and keyboard

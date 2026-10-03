@@ -81,6 +81,70 @@ struct DesktopCapability::Impl {
     };
     std::map<std::string, Incoming> incoming; // by blob id
 
+    // The cursor (docs/08 `cursor`, `cursor-position`; docs/22#cursor-strategy).
+    std::optional<CursorShape> cursor_shape;
+    struct CursorSession {
+        std::set<std::string> images;       // shape ids whose image this session has been sent
+        std::optional<nlohmann::json> pending; // the newest position not yet sent
+        std::chrono::steady_clock::time_point last{};
+        std::unique_ptr<Timer> timer;
+    };
+    std::map<SessionId, CursorSession> cursors;
+    static constexpr std::chrono::milliseconds POSITION_INTERVAL{33}; // ≤ 30 per second per session
+
+    void send_shape(SessionContext& ctx) {
+        if (!cursor_shape) return;
+        const CursorShape& s = *cursor_shape;
+        auto& cs = cursors[ctx.id()];
+        nlohmann::json p{{"shape_id", s.shape_id}, {"hotspot", {{"x", s.hot_x}, {"y", s.hot_y}}}};
+        if (!s.visible) {
+            p["hidden"] = true;
+        } else if (!cs.images.count(s.shape_id) && !s.rgba.empty()) {
+            // The pixels as a blob: an envelope is at most 16 KiB (docs/08 `cursor`).
+            const auto ref = ctx.send_blob(std::string(s.rgba.begin(), s.rgba.end()), "application/x-fjarr-rgba");
+            p["image"] = {{"w", s.width}, {"h", s.height}, {"blob", ref.to_json()}};
+            cs.images.insert(s.shape_id);
+        }
+        ctx.event("cursor", std::move(p));
+    }
+    void on_cursor_shape(const CursorShape& shape) {
+        log::debug("desktop", "cursor shape", {{"shape", shape.shape_id}, {"size", std::to_string(shape.width) + "x" + std::to_string(shape.height)}});
+        cursor_shape = shape;
+        for (auto& [_, ctx] : sessions) send_shape(*ctx);
+    }
+    void flush_position(const SessionId& id) {
+        auto s = sessions.find(id);
+        auto c = cursors.find(id);
+        if (s == sessions.end() || c == cursors.end() || !c->second.pending) return;
+        s->second->realtime().send(protocol::make_envelope("fjarr.desktop", "cursor-position", "event", std::move(*c->second.pending)));
+        c->second.pending.reset();
+        c->second.last = std::chrono::steady_clock::now();
+    }
+    void on_cursor_position(MonitorId monitor, double nx, double ny) {
+        std::string track; // the monitor's track, as pointer input names it (monitor_for)
+        if (driver)
+            for (const auto& m : driver->monitors())
+                if (m.id == monitor) track = "desk-" + m.wire_id;
+        if (track.empty()) return;
+        const auto now = std::chrono::steady_clock::now();
+        for (auto& [id, ctx] : sessions) {
+            auto& cs = cursors[id];
+            cs.pending = nlohmann::json{{"track_id", track}, {"x", nx}, {"y", ny}};
+            if (now - cs.last >= POSITION_INTERVAL) {
+                flush_position(id);
+            } else if (!cs.timer) {
+                // Newest wins: one deferred send carries whatever is pending when it fires.
+                const SessionId sid = id;
+                cs.timer = ctx->every(POSITION_INTERVAL, [this, sid] {
+                    flush_position(sid);
+                    auto c = cursors.find(sid);
+                    if (c != cursors.end()) c->second.timer.reset();
+                    return false;
+                });
+            }
+        }
+    }
+
     void offer(SessionContext& ctx) {
         if (view_only(ctx)) return; // docs/10: a viewer is given the screen, not the clipboard
         ctx.event("clipboard-offer", {{"offer_id", offer_id}, {"types", offer_types}});
@@ -207,7 +271,11 @@ struct DesktopCapability::Impl {
                 it->second.monitor = m; // same monitor: new geometry, mode or primary flag, same track
                 continue;
             }
-            Screen sc{m, driver->start_capture(m.id, CaptureOptions{})};
+            // Local cursor where the backend has one (docs/22#cursor-strategy): the video leaves it out,
+            // and the shape and position arrive beside it.
+            CaptureOptions options;
+            options.cursor_in_video = !driver->features().local_cursor;
+            Screen sc{m, driver->start_capture(m.id, options)};
             if (sc.source) {
                 const std::string id = "desk-" + m.wire_id;
                 sc.source->on_availability_changed([this, id](bool now) {
@@ -312,17 +380,21 @@ void DesktopCapability::configure(const nlohmann::json& config, const SourceFact
     }
     impl_->driver->on_monitors_changed([this](std::vector<Monitor> monitors) { impl_->on_monitors(monitors); });
     if (auto* clip = impl_->driver->clipboard()) clip->on_changed([this](std::vector<std::string> types) { impl_->on_clipboard_changed(std::move(types)); });
+    impl_->driver->on_cursor_shape([this](const CursorShape& shape) { impl_->on_cursor_shape(shape); });
+    impl_->driver->on_cursor_position([this](MonitorId m, double x, double y) { impl_->on_cursor_position(m, x, y); });
 }
 
 void DesktopCapability::session_attached(SessionContext& ctx, const nlohmann::json&) {
     impl_->sessions[ctx.id()] = &ctx;
     for (auto& spec : impl_->specs()) ctx.add_track(std::move(spec)); // unavailable until the helper hands it over: held back by the core
     if (!impl_->offer_id.empty()) impl_->offer(ctx); // what the robot holds now, so a late viewer can paste it too
+    impl_->send_shape(ctx);                          // the cursor as it is now (docs/08 `cursor`)
 }
 
 void DesktopCapability::session_detached(const SessionId& id, DetachReason, std::string_view) {
     impl_->sessions.erase(id);
     impl_->pointer_seq.erase(id);
+    impl_->cursors.erase(id); // its timer goes with it
     for (auto it = impl_->incoming.begin(); it != impl_->incoming.end();) it = it->second.session == id ? impl_->incoming.erase(it) : std::next(it);
     if (impl_->input_session == id) impl_->input_session.reset();
 }

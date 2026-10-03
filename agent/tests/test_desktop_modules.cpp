@@ -401,3 +401,73 @@ TEST(DesktopClipboard, aWriteIsDesktopInputAndAReadIsNot) {
     for (const auto& c : cap.manifest().channels) blob_bulk = blob_bulk || (c.channel == fjarr::ChannelClass::Bulk && c.framing == fjarr::BulkFraming::Blob);
     EXPECT_TRUE(blob_bulk) << "the clipboard's bytes travel as blob frames on fjarr:bulk:fjarr.desktop";
 }
+
+// --- the cursor (M3 3.5) ------------------------------------------------------------------------------
+// spec: docs/08 `cursor`, `cursor-position` · docs/22#cursor-strategy
+namespace {
+void (*stub_cursor())(const char*, double, double) {
+    void* so = ::dlopen((std::string(FJARR_STUB_MODULE_DIR) + "/libfjarr-desktop-stub.so").c_str(), RTLD_NOW | RTLD_NOLOAD);
+    return so ? reinterpret_cast<void (*)(const char*, double, double)>(::dlsym(so, "fjarr_stub_cursor")) : nullptr;
+}
+std::vector<nlohmann::json> cursor_events(const fjarr::testing::RecordingContext& c) {
+    std::vector<nlohmann::json> out;
+    for (const auto& s : c.sent)
+        if (s.type == "cursor") out.push_back(s.payload);
+    return out;
+}
+} // namespace
+
+TEST(DesktopCursor, aShapeGoesToEverySessionWithItsImageOnlyTheFirstTimeAsABlob) {
+    InputRig r;
+    auto cursor = stub_cursor();
+    ASSERT_NE(cursor, nullptr);
+    cursor("arrow", -1, 0);
+    auto ev = cursor_events(r.a);
+    ASSERT_EQ(ev.size(), 1u);
+    EXPECT_EQ(ev[0]["shape_id"], "arrow");
+    EXPECT_EQ(ev[0]["hotspot"], (nlohmann::json{{"x", 1}, {"y", 0}}));
+    ASSERT_TRUE(ev[0].contains("image"));
+    EXPECT_EQ(ev[0]["image"]["w"], 2);
+    ASSERT_EQ(r.a.blobs.size(), 1u);
+    EXPECT_EQ(r.a.blobs[0].bytes.size(), 8u) << "2x1 RGBA";
+    EXPECT_EQ(r.a.blobs[0].ref.type, "application/x-fjarr-rgba");
+    EXPECT_EQ(ev[0]["image"]["blob"]["blob"], r.a.blobs[0].ref.id);
+    ASSERT_EQ(cursor_events(r.b).size(), 1u);
+
+    cursor("hidden", -1, 0);
+    cursor("arrow", -1, 0); // seen before: no image again, the client has it by its id
+    ev = cursor_events(r.a);
+    ASSERT_EQ(ev.size(), 3u);
+    EXPECT_TRUE(ev[1].value("hidden", false));
+    EXPECT_FALSE(ev[1].contains("image"));
+    EXPECT_FALSE(ev[2].contains("image"));
+    EXPECT_EQ(r.a.blobs.size(), 1u);
+
+    // A session that starts later is sent the cursor as it is now, with its image.
+    fjarr::testing::RecordingContext late;
+    late.sid = "session-late";
+    r.cap.session_attached(late, nlohmann::json::object());
+    ev = cursor_events(late);
+    ASSERT_EQ(ev.size(), 1u);
+    EXPECT_EQ(ev[0]["shape_id"], "arrow");
+    EXPECT_TRUE(ev[0].contains("image"));
+}
+
+TEST(DesktopCursor, positionsGoOutOnRealtimeNormalizedPerMonitorAtMostThirtyASecondNewestWinning) {
+    InputRig r;
+    auto cursor = stub_cursor();
+    cursor("", 0.25, 0.5);
+    ASSERT_EQ(r.a.realtime_sender.envelopes.size(), 1u);
+    const auto& first = r.a.realtime_sender.envelopes[0];
+    EXPECT_EQ(first.type, "cursor-position");
+    EXPECT_EQ(first.payload, (nlohmann::json{{"track_id", "desk-virtual-1"}, {"x", 0.25}, {"y", 0.5}}));
+    cursor("", 0.30, 0.5); // within 33 ms: held
+    cursor("", 0.35, 0.5); // replaces it
+    EXPECT_EQ(r.a.realtime_sender.envelopes.size(), 1u);
+    ASSERT_FALSE(r.a.timers.empty());
+    EXPECT_EQ(r.a.timers.back(), std::chrono::milliseconds(33));
+    r.a.fire_timer();
+    ASSERT_EQ(r.a.realtime_sender.envelopes.size(), 2u);
+    EXPECT_EQ(r.a.realtime_sender.envelopes[1].payload["x"], 0.35) << "newest wins";
+    EXPECT_EQ(r.b.realtime_sender.envelopes.size(), 1u) << "every session is told, each at its own pace";
+}

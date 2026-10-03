@@ -184,7 +184,7 @@ public:
   // Returns immediately and never waits for a first frame. Capture may be
   // variable-rate: a still screen produces no frames, not even a first one.
   // The backend provokes a first frame where it can, and repeats the last one
-  // (pipewiresrc keepalive-time on mutter). The result is the track's source
+  // (module E's stream reader on mutter, docs/23). The result is the track's source
   // (the video source contract): unavailable until the display server has
   // handed the stream over, then available, so the capability declares the
   // track at once and the core adds it when it is ready. Null for an unknown

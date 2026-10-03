@@ -46,7 +46,16 @@ struct RecordingContext final : SessionContext {
     TrackState track_state(std::string_view) const override { return {}; }
     unsigned manifest_version() const override { return 1; }
     ChannelSender &control() override { throw std::runtime_error("no channel"); }
-    ChannelSender &realtime() override { throw std::runtime_error("no channel"); }
+    /// The realtime channel: the envelopes sent on it, in order.
+    struct EnvelopeRecorder final : ChannelSender {
+        std::vector<Envelope> envelopes;
+        void send(const Envelope &e) override { envelopes.push_back(e); }
+        bool send_binary(std::span<const std::byte>) override { return false; }
+        std::size_t buffered_amount() const override { return 0; }
+        void on_drain(std::function<void()>) override {}
+    };
+    EnvelopeRecorder realtime_sender;
+    ChannelSender &realtime() override { return realtime_sender; }
     ChannelSender &bulk() override { throw std::runtime_error("no channel"); }
     /// A stream channel that records what was sent and can be told to refuse, the way a real one
     /// does above its watermark — which is how a lossy capability's drop path gets tested.

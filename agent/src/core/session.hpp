@@ -7,6 +7,7 @@
 //       docs/08-protocol.md#datachannel-topology · #fjarr-core · #track-control · #renegotiation
 #include <chrono>
 #include <functional>
+#include <deque>
 #include <map>
 #include <memory>
 #include <optional>
@@ -261,6 +262,9 @@ class Session : public std::enable_shared_from_this<Session> {
     std::map<std::string, BlobPump> blob_pumps_; // bulk label → outbound blobs (docs/08#blob-frames)
     std::vector<std::weak_ptr<Deadman>> deadmans_;
     unsigned long dropped_envelopes_ = 0;
+    // docs/23: control envelopes a capability sends before fjarr:control is open, sent when it opens.
+    std::deque<Envelope> early_outbound_;
+    static constexpr std::size_t MAX_EARLY_OUTBOUND = 64;
     unsigned long dropped_binary_ = 0;
     unsigned long dropped_control_ = 0; // input refused by a control domain (docs/10)
     nlohmann::json last_stats_ = nlohmann::json::object();

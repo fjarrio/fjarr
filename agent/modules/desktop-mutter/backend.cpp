@@ -2,7 +2,7 @@
 // module runs in the agent's process as the agent's own account and never opens the desktop user's
 // bus. It listens on the helper socket, and the helper hands it one PipeWire connection per capture
 // (and, from slice 3.2, mutter's EIS socket for input). Frames flow from that descriptor into
-// `pipewiresrc` and on into the media plane like any other video source.
+// module E's stream reader and an appsrc, and on into the media plane like any other video source.
 // spec: docs/23-agent-core-architecture.md#desktop-helper-protocol · docs/09 (DesktopBackend)
 #include <cerrno>
 #include <cstring>
@@ -27,6 +27,7 @@
 #include "desktop/helper_protocol.hpp"
 #include "desktop/module.hpp"
 #include "desktop/monitor_identity.hpp"
+#include "stream_reader.hpp"
 #include "eis_input.hpp"
 
 using namespace fjarr;
@@ -36,63 +37,38 @@ namespace {
 
 constexpr const char* COMPONENT = "desktop";
 
-/// The track's source for one monitor: unavailable until the helper hands the stream over.
+/// The track's source for one monitor: unavailable until the helper hands the stream over. Its frames
+/// come from the capture's stream reader (docs/23#desktop-helper-protocol), through an appsrc.
 class MonitorSource final : public VideoSource {
   public:
-    MonitorSource(std::string identity, int keepalive_ms) : identity_(std::move(identity)), keepalive_ms_(keepalive_ms) {}
-    ~MonitorSource() override {
-        if (fd_ >= 0) ::close(fd_);
-    }
+    explicit MonitorSource(std::string identity) : identity_(std::move(identity)) {}
 
     SourceInfo describe() const override { return {identity_, {{"src", TrackKind::Video, "video/x-raw"}}}; }
 
-    /// `pipewiresrc` on a duplicate of the handed connection: PipeWire takes ownership of the
-    /// descriptor it is given, and the producer may build the bin more than once.
-    GstBin* create_bin() override {
-        if (fd_ < 0) return nullptr;
-        const int fd = ::fcntl(fd_, F_DUPFD_CLOEXEC, 3);
-        if (fd < 0) return nullptr;
-        // always-copy: the DMA-BUF path failed on the spike machine, so capture copies (ADR-0006).
-        // keepalive-time: mutter's stream is damage-driven and silent on a still screen; the last
-        // frame is re-sent so the encoder keeps producing (docs/23#desktop-helper-protocol).
-        const std::string desc = "pipewiresrc fd=" + std::to_string(fd) + " path=" + std::to_string(node_) +
-                                 " keepalive-time=" + std::to_string(keepalive_ms_) + " always-copy=true do-timestamp=true";
-        GError* e = nullptr;
-        GstElement* bin = gst_parse_bin_from_description(desc.c_str(), TRUE, &e);
-        if (!bin) {
-            if (e) g_error_free(e);
-            ::close(fd);
-            return nullptr;
-        }
-        return GST_BIN(bin);
-    }
+    /// The reader's appsrc, starting with the last frame; the producer may build the bin more than once.
+    GstBin* create_bin() override { return reader_ ? reader_->create_bin() : nullptr; }
 
-    bool available() const override { return fd_ >= 0; }
+    bool available() const override { return reader_ != nullptr; }
     void on_availability_changed(std::function<void(bool)> cb) override { availability_ = std::move(cb); }
-    std::string unavailable_reason() const override { return fd_ >= 0 ? "" : reason_; }
+    std::string unavailable_reason() const override { return reader_ ? "" : reason_; }
 
-    /// The helper handed the stream over.
-    void ready(int fd, std::uint32_t node) {
-        if (fd_ >= 0) ::close(fd_);
-        fd_ = fd;
-        node_ = node;
+    /// The helper handed the stream over and the reader is linked.
+    void ready(std::unique_ptr<desktop::mutter::StreamReader> reader) {
+        reader_ = std::move(reader);
         reason_.clear();
-        if (availability_) availability_(true);
+        if (availability_) availability_(reader_ != nullptr);
     }
     /// The stream ended (monitor gone, stream stopped, helper gone).
     void lost(const std::string& why) {
-        const bool was = fd_ >= 0;
-        if (fd_ >= 0) ::close(fd_);
-        fd_ = -1;
+        const bool was = reader_ != nullptr;
+        reader_.reset();
         reason_ = why;
         if (was && availability_) availability_(false);
     }
 
   private:
     std::string identity_;
-    int keepalive_ms_;
-    int fd_ = -1;
-    std::uint32_t node_ = 0;
+    std::unique_ptr<desktop::mutter::StreamReader> reader_;
     std::string reason_ = "waiting for the desktop session to hand the stream over";
     std::function<void(bool)> availability_;
 };
@@ -149,7 +125,8 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
     // --- DesktopBackend ----------------------------------------------------------------------
     Features features() override {
         Features f;
-        f.clipboard = true; // through the helper's input session (docs/23#desktop-helper-protocol)
+        f.clipboard = true;    // through the helper's input session (docs/23#desktop-helper-protocol)
+        f.local_cursor = true; // mutter's cursor metadata, through module E's cursor reader
         return f;
     }
     std::vector<Monitor> monitors() override { return monitors_; }
@@ -160,7 +137,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         const Monitor* m = find(monitor);
         if (!m) return nullptr;
         auto& c = captures_[monitor];
-        if (!c.source) c.source = std::make_shared<MonitorSource>("desktop:" + m->wire_id, keepalive_ms_);
+        if (!c.source) c.source = std::make_shared<MonitorSource>("desktop:" + m->wire_id);
         c.id = next_id_++;
         c.connector = m->connector;
         c.cursor = options.cursor_in_video ? "embedded" : "metadata";
@@ -180,7 +157,11 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
     void destroy_virtual_monitor(MonitorId) override {}
     std::shared_ptr<VideoSource> start_audio_capture() override { return nullptr; }
     void stop_audio_capture() override {}
-    void on_cursor_shape(std::function<void(const CursorShape&)>) override {}
+    void on_cursor_shape(std::function<void(const CursorShape&)> cb) override {
+        cursor_shape_cb_ = std::move(cb);
+        if (cursor_shape_cb_ && have_shape_) cursor_shape_cb_(shape_);
+    }
+    void on_cursor_position(std::function<void(MonitorId, double, double)> cb) override { cursor_position_cb_ = std::move(cb); }
     // Input through the EIS socket the helper hands over (docs/23#desktop-helper-protocol).
     void pointer_motion(MonitorId monitor, double nx, double ny) override {
         // The pointer's region is the stream's logical rectangle: its position plus the point.
@@ -256,6 +237,27 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
     }
 
   private:
+    std::unique_ptr<desktop::mutter::StreamReader> start_reader(MonitorId monitor, int fd, std::uint32_t node) {
+        return desktop::mutter::StreamReader::start(
+            ctx_, fd, node, keepalive_ms_,
+            [this](const desktop::mutter::CursorImage& img) {
+                if (have_shape_ && img.shape_id == shape_.shape_id) return; // another monitor's reader, same shape
+                shape_.shape_id = img.shape_id;
+                shape_.visible = img.visible;
+                shape_.width = img.width;
+                shape_.height = img.height;
+                shape_.hot_x = img.hot_x;
+                shape_.hot_y = img.hot_y;
+                shape_.rgba = img.rgba;
+                have_shape_ = true;
+                if (cursor_shape_cb_) cursor_shape_cb_(shape_);
+            },
+            [this, monitor](double nx, double ny) {
+                if (cursor_position_cb_) cursor_position_cb_(monitor, nx, ny);
+            },
+            [this](int level, const std::string& msg) { say(level, msg); });
+    }
+
     /// One read of the robot's clipboard: the descriptor mutter handed over, drained as it fills.
     struct ClipRead {
         MutterBackend* self = nullptr;
@@ -395,7 +397,9 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
                     c.y = m.body.value("y", 0);
                     c.width = m.body.value("width", 0);
                     c.height = m.body.value("height", 0);
-                    c.source->ready(m.fds[0].release(), m.body.value("node", 0u));
+                    // The node's only consumer, linked now: mutter sends the cursor's shape, and on a
+                    // still screen the only frame, to whoever is linked when it is produced (spikes).
+                    c.source->ready(start_reader(monitor, m.fds[0].release(), m.body.value("node", 0u)));
                     request_input();
                     say(1, "capture of " + c.connector + " ready: node " + std::to_string(m.body.value("node", 0u)) + ", " +
                                std::to_string(m.body.value("width", 0)) + "x" + std::to_string(m.body.value("height", 0)));
@@ -525,6 +529,10 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
     std::function<void(MonitorId, CaptureLost)> lost_cb_;
     desktop::mutter::EisInput input_;
     bool input_requested_ = false;
+    std::function<void(const CursorShape&)> cursor_shape_cb_;
+    std::function<void(MonitorId, double, double)> cursor_position_cb_;
+    CursorShape shape_; // the latest, for a capability that subscribes later
+    bool have_shape_ = false;
     std::vector<std::string> robot_types_; // what the robot's clipboard offers, in the compositor's names
     std::function<void(std::vector<std::string>)> clipboard_changed_;
     std::map<int, std::unique_ptr<ClipRead>> reads_;
