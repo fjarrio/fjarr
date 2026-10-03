@@ -225,7 +225,7 @@ jobs:
           if-no-files-found: ignore
       - name: stack logs on failure
         if: failure()
-        run: docker compose --profile lab --profile stack --profile demo logs --no-color --tail 200 browser fjarr-server demo-robot demo-backend
+        run: docker compose --profile lab --profile stack --profile demo logs --no-color --tail 200 browser fjarr-server demo-robot demo-backend demo-dashboard
 
   agent-image:
     # The runtime image from the .debs the packages job built (docs/30#artifacts-built-once), the demo
@@ -315,7 +315,7 @@ jobs:
           if-no-files-found: ignore
       - name: stack logs on failure
         if: failure()
-        run: docker compose --profile lab --profile stack --profile demo logs --no-color --tail 200 browser fjarr-server demo-robot demo-backend
+        run: docker compose --profile lab --profile stack --profile demo logs --no-color --tail 200 browser fjarr-server demo-robot demo-backend demo-dashboard
 
   tsan:
     # Its own job since 2026-10-02 (docs/30): it needs the dev image and the sysctl, not the stack.
