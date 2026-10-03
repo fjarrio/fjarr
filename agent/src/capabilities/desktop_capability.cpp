@@ -168,6 +168,13 @@ struct DesktopCapability::Impl {
         const SessionId sid = in.session;
         const Envelope req = *in.request;
         clip->write(in.type, std::move(in.bytes), [this, sid, req](bool ok, std::string error) {
+            // The robot's clipboard is the operator's paste now: the last offer no longer describes
+            // it, and offering it to a later session made that session read our own selection
+            // (refused by mutter, 2026-10-03). Our own write is never offered (docs/08).
+            if (ok) {
+                offer_id.clear();
+                offer_types.clear();
+            }
             auto s2 = sessions.find(sid);
             if (s2 == sessions.end()) return;
             if (ok) s2->second->result(req, {{"ok", true}});

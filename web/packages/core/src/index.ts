@@ -79,8 +79,12 @@ export {
 export { FocusRegistry, type FocusOptions, type FocusRegistration, type WindowLike } from "./focus.js";
 export {
   acquireDesktopClipboard,
+  acquireDesktopCursor,
   contentBox,
+  cursorDataUrl,
   DesktopClipboard,
+  DesktopCursor,
+  encodePng,
   DesktopInput,
   isPasteChord,
   normalizedPoint,
@@ -90,6 +94,10 @@ export {
   type DesktopButton,
   type DesktopClipboardOptions,
   type DesktopClipboardState,
+  type CursorImage,
+  type CursorPosition,
+  type CursorShape,
+  type DesktopCursorState,
   type DesktopInputOptions,
   type KeyLike,
   type PointerLike,

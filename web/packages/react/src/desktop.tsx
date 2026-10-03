@@ -12,11 +12,15 @@
 import { useEffect, useId, useImperativeHandle, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type Ref } from "react";
 import {
   acquireDesktopClipboard,
+  acquireDesktopCursor,
   contentBox,
+  cursorDataUrl,
   DesktopInput,
   isPasteChord,
   type DesktopClipboard,
   type DesktopClipboardState,
+  type DesktopCursor,
+  type DesktopCursorState,
   type MonitorInfo,
   type ResultPayload,
   type Session,
@@ -29,6 +33,23 @@ import { VideoTile } from "./components.js";
 export type MonitorPolicy = "primary" | "first";
 
 const IDLE: DesktopClipboardState = { sync: "idle" };
+const NO_CURSOR: DesktopCursorState = { shape: null, position: null };
+
+/** The robot's cursor for this session (docs/22#cursor-strategy): its shape and where its pointer is. */
+export function useDesktopCursor(session?: Session): DesktopCursorState {
+  const s = useSession(session);
+  const [cursor, setCursor] = useState<DesktopCursor | null>(null);
+  useEffect(() => {
+    const { cursor: c, release } = acquireDesktopCursor(s);
+    setCursor(c);
+    return release;
+  }, [s]);
+  return useSyncExternalStore(
+    (l) => (cursor ? cursor.subscribe(l) : () => undefined),
+    () => cursor?.snapshot ?? NO_CURSOR,
+    () => NO_CURSOR,
+  );
+}
 
 /**
  * The session's robot clipboard (docs/22#clipboard), shared with every `<DesktopView>` of it:
@@ -125,6 +146,8 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
   const mayInputRef = useRef(mayInput);
   mayInputRef.current = mayInput;
   const clip = useDesktopClipboard(s);
+  const cursor = useDesktopCursor(s);
+  const [hovered, setHovered] = useState(false);
   // A paste chord waiting for the browser's `paste` event (docs/22#clipboard): the robot gets Ctrl+V
   // only once its clipboard holds what the operator pasted, or after 300 ms with no paste at all.
   const pasteWait = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -206,10 +229,37 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
   const video = (
     <VideoTile session={s} trackId={desktopTrackId(monitor)} tier="active" preference="sharpness" latencyMode="interactive" style={{ position: "absolute", inset: 0 }} />
   );
+  // The robot's cursor (docs/22#cursor-strategy). Under the operator's own pointer, while they may send
+  // input, it is the surface's CSS cursor: the browser draws it, with no lag. Otherwise it is drawn
+  // at the robot's position, scaled with the video (percentages of the monitor's width).
+  const shape = cursor.shape;
+  const image = shape && !shape.hidden ? shape.image : undefined;
+  const cssCursor = !shape ? "default" : shape.hidden ? "none" : image ? `url(${cursorDataUrl(shape.id, image)}) ${shape.hotspot.x} ${shape.hotspot.y}, default` : "default";
+  const local = inputOn && mayInput && hovered;
+  const pos = cursor.position;
+  const overlay =
+    !local && image && shape && pos && pos.trackId === desktopTrackId(monitor) ? (
+      <img
+        data-fjarr-cursor={shape.id}
+        alt=""
+        src={cursorDataUrl(shape.id, image)}
+        style={{
+          position: "absolute",
+          left: `${pos.x * 100}%`,
+          top: `${pos.y * 100}%`,
+          width: `${(image.w / monitor.w) * 100}%`,
+          // Percent margins are of the width, like the image's own scale: the hotspot lands on the point.
+          marginLeft: `${(-shape.hotspot.x / monitor.w) * 100}%`,
+          marginTop: `${(-shape.hotspot.y / monitor.w) * 100}%`,
+          pointerEvents: "none",
+        }}
+      />
+    ) : null;
   if (!inputOn || !input) {
     return (
       <div data-fjarr-desktop data-fjarr-input="view-only" className={className} style={frame}>
         {video}
+        {overlay}
         {children}
       </div>
     );
@@ -222,8 +272,11 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
       data-fjarr-desktop
       data-fjarr-input={mayInput ? (focused ? "focused" : "hover") : "held-elsewhere"}
       className={className}
-      style={{ ...frame, outline: focused ? "2px solid #2f81f7" : "none", outlineOffset: -2, cursor: mayInput ? "default" : "not-allowed", touchAction: "none" }}
+      data-fjarr-cursor-shape={shape?.id}
+      style={{ ...frame, outline: focused ? "2px solid #2f81f7" : "none", outlineOffset: -2, cursor: mayInput ? cssCursor : "not-allowed", touchAction: "none" }}
       onContextMenu={(e) => e.preventDefault()}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
       onPointerMove={(e) => {
         if (mayInput) input.pointerMove(e, box());
       }}
@@ -239,6 +292,7 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
       }}
     >
       {video}
+      {overlay}
       {/* The keyboard target: a hidden editable, so IME composition and beforeinput have somewhere to happen. */}
       <div
         ref={editor}

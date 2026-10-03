@@ -8,6 +8,7 @@ import { act, render, screen, cleanup, fireEvent } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFjarrClient, type FjarrClient, type MonitorInfo } from "@fjarr/core";
 import { MockAgent } from "@fjarr/core/testing";
+import { encodeBlobChunk } from "@fjarr/core";
 import { DesktopLayout, DesktopView, FjarrProvider, SessionScope, SessionStatus, VideoGrid, VideoTile, pickMonitor, usePublisher, useTelemetry } from "../src/index.js";
 
 const tick = async (n = 6) => {
@@ -684,5 +685,70 @@ describe("<DesktopView> clipboard (M3 3.5)", () => {
     await act(() => vi.advanceTimersByTimeAsync(10));
     await tick();
     expect(sent()).toEqual([["key-combo", { codes: ["ControlLeft", "KeyV"] }]]);
+  });
+});
+
+describe("<DesktopView> cursor (M3 3.5)", () => {
+  const mon: MonitorInfo = { id: "virtual-1", index: 0, primary: true, x: 0, y: 0, w: 1280, h: 720, scale: 1, connector: "Meta-0" };
+  const track = { track_id: "desk-virtual-1", cap: "fjarr.desktop", kind: "video" as const, label: "Meta-0", codec: "H264", pt: 96, mid: "0", monitor: mon };
+  const BLOB = "01930000-0000-7000-8000-0000000c0502";
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("IntersectionObserver", undefined);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  async function mount(viewOnly = false) {
+    const { agent, client } = setup({ tracks: [track], bulkCaps: ["fjarr.desktop"] });
+    const session = client.sessions.open("robot-1");
+    await tick();
+    const view = render(
+      <FjarrProvider client={client}>
+        <DesktopView session={session} viewOnly={viewOnly} />
+      </FjarrProvider>,
+    );
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    const rgba = new Uint8Array([255, 0, 0, 255, 0, 0, 255, 128]);
+    agent.sendBulk("fjarr.desktop", encodeBlobChunk(BLOB, 0, rgba.length, rgba));
+    act(() => agent.sendEvent("fjarr.desktop", "cursor", { shape_id: "arrow", hotspot: { x: 1, y: 0 }, image: { w: 2, h: 1, blob: { blob: BLOB, len: rgba.length, type: "application/x-fjarr-rgba" } } }));
+    await tick(12);
+    const surface = () => view.container.querySelector<HTMLElement>("[data-fjarr-desktop]")!;
+    const overlay = () => view.container.querySelector<HTMLImageElement>("[data-fjarr-cursor]");
+    return { agent, surface, overlay };
+  }
+
+  it("the operator's pointer over the view is the robot's cursor, drawn by the browser; hidden hides it", async () => {
+    const { agent, surface } = await mount();
+    expect(surface().style.cursor).toMatch(/^url\("?data:image\/png;base64,[^)]+"?\) 1 0, default$/);
+    act(() => agent.sendEvent("fjarr.desktop", "cursor", { shape_id: "hidden", hidden: true, hotspot: { x: 0, y: 0 } }));
+    await tick();
+    expect(surface().style.cursor).toBe("none");
+  });
+
+  it("elsewhere the cursor is drawn at the robot's position, until the operator's own pointer comes over the view", async () => {
+    const { agent, surface, overlay } = await mount();
+    act(() => agent.sendEvent("fjarr.desktop", "cursor-position", { track_id: "desk-virtual-1", x: 0.25, y: 0.5 }));
+    await tick();
+    expect(overlay()).not.toBeNull();
+    expect(overlay()!.style.left).toBe("25%");
+    expect(overlay()!.style.top).toBe("50%");
+    fireEvent.pointerEnter(surface());
+    await tick();
+    expect(overlay()).toBeNull(); // the browser draws it at the operator's pointer instead
+    fireEvent.pointerLeave(surface());
+    await tick();
+    expect(overlay()).not.toBeNull();
+  });
+
+  it("a viewer sees the robot's cursor where the robot's pointer is", async () => {
+    const { agent, overlay } = await mount(true);
+    act(() => agent.sendEvent("fjarr.desktop", "cursor-position", { track_id: "desk-virtual-1", x: 0.75, y: 0.1 }));
+    await tick();
+    expect(overlay()?.style.left).toBe("75%");
   });
 });

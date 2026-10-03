@@ -377,3 +377,212 @@ export function acquireDesktopClipboard(session: Session, options?: DesktopClipb
 export function isPasteChord(e: { code: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; shiftKey?: boolean }): boolean {
   return e.code === "KeyV" && !!(e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey;
 }
+
+// --- the cursor (docs/08 `cursor`, `cursor-position`; docs/22#cursor-strategy; M3 3.5) ----------------
+
+export interface CursorImage {
+  w: number;
+  h: number;
+  /** Straight-alpha RGBA, w*h*4 bytes. */
+  rgba: Uint8Array;
+}
+
+export interface CursorShape {
+  id: string;
+  hidden: boolean;
+  hotspot: { x: number; y: number };
+  /** Undefined while its blob is on its way (or for a hidden cursor). */
+  image?: CursorImage;
+}
+
+export interface CursorPosition {
+  trackId: string;
+  x: number;
+  y: number;
+}
+
+export interface DesktopCursorState {
+  shape: CursorShape | null;
+  position: CursorPosition | null;
+}
+
+interface CursorEvent {
+  shape_id: string;
+  hidden?: boolean;
+  hotspot?: { x: number; y: number };
+  image?: { w: number; h: number; blob: BlobRef };
+}
+
+/**
+ * The robot's cursor, for one session (take it with `acquireDesktopCursor`): its shape, with images
+ * cached by their content id, and where the robot's pointer is. `<DesktopView>` draws it at the
+ * operator's own pointer while they move it, and at the robot's position otherwise.
+ */
+export class DesktopCursor {
+  private state: DesktopCursorState = { shape: null, position: null };
+  private readonly images = new Map<string, CursorImage>();
+  private readonly listeners = new Set<() => void>();
+  private readonly offs: Array<() => void>;
+  // Taken at once: the agent sends the current shape's image as the session starts (docs/08).
+  private readonly bulk: BulkSender;
+
+  constructor(private readonly session: Session) {
+    this.bulk = session.bulk(CAP);
+    this.offs = [
+      session.on(CAP, "cursor", (env) => void this.onShape(env.payload as CursorEvent)),
+      session.on(CAP, "cursor-position", (env) => {
+        const p = env.payload as { track_id?: string; x?: number; y?: number };
+        if (typeof p?.track_id !== "string" || typeof p.x !== "number" || typeof p.y !== "number") return;
+        this.set({ ...this.state, position: { trackId: p.track_id, x: p.x, y: p.y } });
+      }),
+    ];
+  }
+
+  get snapshot(): DesktopCursorState {
+    return this.state;
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private set(state: DesktopCursorState): void {
+    this.state = state;
+    for (const l of this.listeners) l();
+  }
+
+  private async onShape(ev: CursorEvent): Promise<void> {
+    if (typeof ev?.shape_id !== "string") return;
+    const shape: CursorShape = { id: ev.shape_id, hidden: !!ev.hidden, hotspot: ev.hotspot ?? { x: 0, y: 0 }, image: this.images.get(ev.shape_id) };
+    this.set({ ...this.state, shape });
+    if (shape.image || shape.hidden || !ev.image) return;
+    try {
+      const rgba = await this.bulk.receive(ev.image.blob);
+      const image = { w: ev.image.w, h: ev.image.h, rgba };
+      this.images.set(ev.shape_id, image);
+      // Still the current shape? Then it is drawable now.
+      if (this.state.shape?.id === ev.shape_id) this.set({ ...this.state, shape: { ...this.state.shape, image } });
+    } catch {
+      // The image never arrived: the shape stays without one, and the view keeps its default cursor.
+    }
+  }
+
+  dispose(): void {
+    for (const off of this.offs) off();
+    this.listeners.clear();
+  }
+}
+
+const cursors = new WeakMap<Session, { cursor: DesktopCursor; refs: number }>();
+
+/** The session's one DesktopCursor, shared by every view of it. The last release disposes it. */
+export function acquireDesktopCursor(session: Session): { cursor: DesktopCursor; release: () => void } {
+  let entry = cursors.get(session);
+  if (!entry) {
+    entry = { cursor: new DesktopCursor(session), refs: 0 };
+    cursors.set(session, entry);
+  }
+  entry.refs++;
+  const e = entry;
+  let released = false;
+  return {
+    cursor: e.cursor,
+    release: () => {
+      if (released) return;
+      released = true;
+      if (--e.refs > 0) return;
+      e.cursor.dispose();
+      cursors.delete(session);
+    },
+  };
+}
+
+const pngCache = new Map<string, string>();
+
+/**
+ * A cursor image as a PNG data URL, for CSS `cursor: url(…)` and an <img>. Encoded here (stored
+ * deflate blocks, no compression: cursors are small) so it needs no canvas. Cached by shape id.
+ */
+export function cursorDataUrl(shapeId: string, image: CursorImage): string {
+  const cached = pngCache.get(shapeId);
+  if (cached) return cached;
+  const url = `data:image/png;base64,${base64(encodePng(image))}`;
+  pngCache.set(shapeId, url);
+  return url;
+}
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+
+function crc32(parts: Uint8Array[]): number {
+  let c = 0xffffffff;
+  for (const p of parts) for (let i = 0; i < p.length; i++) c = CRC_TABLE[(c ^ p[i]!) & 0xff]! ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+/** A minimal RGBA PNG: IHDR, one IDAT of stored deflate blocks, IEND. */
+export function encodePng({ w, h, rgba }: CursorImage): Uint8Array {
+  const raw = new Uint8Array(h * (w * 4 + 1)); // a filter byte (0) per row
+  for (let y = 0; y < h; y++) raw.set(rgba.subarray(y * w * 4, (y + 1) * w * 4), y * (w * 4 + 1) + 1);
+  // zlib: header, stored blocks of ≤ 65535 bytes, Adler-32.
+  const blocks = Math.max(1, Math.ceil(raw.length / 65535));
+  const z = new Uint8Array(2 + raw.length + blocks * 5 + 4);
+  z[0] = 0x78;
+  z[1] = 0x01;
+  let o = 2;
+  for (let i = 0; i < blocks; i++) {
+    const chunk = raw.subarray(i * 65535, Math.min(raw.length, (i + 1) * 65535));
+    z[o++] = i === blocks - 1 ? 1 : 0;
+    z[o++] = chunk.length & 0xff;
+    z[o++] = chunk.length >>> 8;
+    z[o++] = ~chunk.length & 0xff;
+    z[o++] = (~chunk.length >>> 8) & 0xff;
+    z.set(chunk, o);
+    o += chunk.length;
+  }
+  let a = 1;
+  let b = 0;
+  for (let i = 0; i < raw.length; i++) {
+    a = (a + raw[i]!) % 65521;
+    b = (b + a) % 65521;
+  }
+  new DataView(z.buffer).setUint32(o, ((b << 16) | a) >>> 0);
+  const enc = new TextEncoder();
+  const chunk = (type: string, data: Uint8Array) => {
+    const t = enc.encode(type);
+    const out = new Uint8Array(12 + data.length);
+    const dv = new DataView(out.buffer);
+    dv.setUint32(0, data.length);
+    out.set(t, 4);
+    out.set(data, 8);
+    dv.setUint32(8 + data.length, crc32([t, data]));
+    return out;
+  };
+  const ihdr = new Uint8Array(13);
+  const dv = new DataView(ihdr.buffer);
+  dv.setUint32(0, w);
+  dv.setUint32(4, h);
+  ihdr.set([8, 6, 0, 0, 0], 8); // 8-bit RGBA, no interlace
+  const parts = [new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", z), chunk("IEND", new Uint8Array(0))];
+  const png = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let p = 0;
+  for (const part of parts) {
+    png.set(part, p);
+    p += part.length;
+  }
+  return png;
+}
+
+function base64(bytes: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]!);
+  return btoa(s);
+}

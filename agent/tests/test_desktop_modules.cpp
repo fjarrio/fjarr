@@ -471,3 +471,17 @@ TEST(DesktopCursor, positionsGoOutOnRealtimeNormalizedPerMonitorAtMostThirtyASec
     EXPECT_EQ(r.a.realtime_sender.envelopes[1].payload["x"], 0.35) << "newest wins";
     EXPECT_EQ(r.b.realtime_sender.envelopes.size(), 1u) << "every session is told, each at its own pace";
 }
+
+TEST(DesktopClipboard, afterAPasteALaterSessionIsNotOfferedWhatTheRobotNoLongerHolds) {
+    // The robot copied, then an operator pasted: the robot's clipboard is the paste now. A session
+    // that starts afterwards must not be offered the old copy (reading it read our own selection).
+    InputRig r;
+    stub_copy()("robot says åäö");
+    const std::string id = "01930000-0000-7000-8000-000000000009";
+    r.cap.on_blob_chunk(r.a, chunk(id, 0, 3, "abc"));
+    r.send(r.a, "clipboard-write", {{"type", "text/plain"}, {"blob", {{"blob", id}, {"len", std::uint64_t{3}}, {"type", "text/plain"}}}}, "request");
+    fjarr::testing::RecordingContext late;
+    late.sid = "session-late";
+    r.cap.session_attached(late, nlohmann::json::object());
+    EXPECT_EQ(last(late, "clipboard-offer"), nullptr);
+}

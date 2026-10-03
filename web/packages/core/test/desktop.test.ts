@@ -4,7 +4,7 @@
  * spec: docs/22-remote-desktop-client.md#input-pipeline · #testing-docs15 · docs/08#input-events-fjarrdesktop
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { acquireDesktopClipboard, contentBox, createFjarrClient, DesktopInput, FjarrError, isPasteChord, normalizedPoint, type Session } from "../src/index.js";
+import { acquireDesktopClipboard, acquireDesktopCursor, contentBox, createFjarrClient, cursorDataUrl, DesktopInput, encodePng, FjarrError, isPasteChord, normalizedPoint, type Session } from "../src/index.js";
 import { encodeBlobChunk } from "../src/blob.js";
 import { fakeMediaStreamFactory, MockAgent, type MockAgentOptions } from "../src/testing/index.js";
 
@@ -247,5 +247,66 @@ describe("DesktopClipboard", () => {
     expect(isPasteChord({ code: "KeyV" })).toBe(false);
     expect(isPasteChord({ code: "KeyV", ctrlKey: true, shiftKey: true })).toBe(false);
     expect(isPasteChord({ code: "KeyC", ctrlKey: true })).toBe(false);
+  });
+});
+
+/** The robot's cursor (docs/08 `cursor`, `cursor-position`; docs/22#cursor-strategy). */
+describe("DesktopCursor", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const IMG = "01930000-0000-7000-8000-0000000c0501";
+  async function cursorRig() {
+    const agent = new MockAgent({ now: () => Date.now(), bulkCaps: ["fjarr.desktop"] });
+    const client = createFjarrClient({
+      serverUrl: "wss://fjarr.test/ws",
+      grant: async () => "jwt",
+      socketFactory: agent.socketFactory,
+      peerConnectionFactory: agent.peerConnectionFactory,
+      createMediaStream: fakeMediaStreamFactory,
+      now: () => Date.now(),
+      random: () => 0.5,
+    });
+    const session: Session = client.sessions.open("robot-1");
+    await tick();
+    return { agent, session };
+  }
+
+  it("a shape arrives with its image as a blob, cached by id; positions are kept as they come", async () => {
+    const { agent, session } = await cursorRig();
+    const { cursor, release } = acquireDesktopCursor(session);
+    const rgba = new Uint8Array([255, 0, 0, 255, 0, 0, 255, 128]);
+    agent.sendBulk("fjarr.desktop", encodeBlobChunk(IMG, 0, rgba.length, rgba)); // the bytes may come first
+    agent.sendEvent("fjarr.desktop", "cursor", { shape_id: "arrow", hotspot: { x: 1, y: 0 }, image: { w: 2, h: 1, blob: { blob: IMG, len: rgba.length, type: "application/x-fjarr-rgba" } } });
+    await tick(12);
+    expect(cursor.snapshot.shape).toMatchObject({ id: "arrow", hidden: false, hotspot: { x: 1, y: 0 }, image: { w: 2, h: 1 } });
+    expect(Array.from(cursor.snapshot.shape!.image!.rgba)).toEqual(Array.from(rgba));
+
+    agent.sendEvent("fjarr.desktop", "cursor", { shape_id: "hidden", hidden: true, hotspot: { x: 0, y: 0 } });
+    await tick();
+    expect(cursor.snapshot.shape).toMatchObject({ id: "hidden", hidden: true });
+    // The arrow again, without an image this time: the cache has it.
+    agent.sendEvent("fjarr.desktop", "cursor", { shape_id: "arrow", hotspot: { x: 1, y: 0 } });
+    await tick();
+    expect(cursor.snapshot.shape?.image?.w).toBe(2);
+
+    agent.sendEvent("fjarr.desktop", "cursor-position", { track_id: "desk-virtual-1", x: 0.25, y: 0.5 });
+    await tick();
+    expect(cursor.snapshot.position).toEqual({ trackId: "desk-virtual-1", x: 0.25, y: 0.5 });
+    release();
+  });
+
+  it("encodePng makes a PNG whose pixels are the image's, rows filtered with none", async () => {
+    const { inflateSync } = await import("node:zlib");
+    const rgba = new Uint8Array(3 * 2 * 4).map((_, i) => i * 7);
+    const png = encodePng({ w: 3, h: 2, rgba });
+    expect(Array.from(png.subarray(0, 8))).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+    const dv = new DataView(png.buffer, png.byteOffset);
+    expect(dv.getUint32(16)).toBe(3); // IHDR width
+    expect(dv.getUint32(20)).toBe(2); // IHDR height
+    const idatLen = dv.getUint32(33);
+    const raw = inflateSync(png.subarray(41, 41 + idatLen));
+    expect(Array.from(raw)).toEqual([0, ...Array.from(rgba.subarray(0, 12)), 0, ...Array.from(rgba.subarray(12, 24))]);
+    expect(cursorDataUrl("t", { w: 3, h: 2, rgba })).toMatch(/^data:image\/png;base64,iVBORw0KGgo/);
   });
 });

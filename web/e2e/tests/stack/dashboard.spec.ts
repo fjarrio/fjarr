@@ -179,3 +179,33 @@ test("the Desktop panel's clipboard: a copy on the robot reaches the browser, an
   await page.keyboard.press("Control+V");
   await expect.poll(() => call("paste"), { timeout: 5000, message: "the robot's clipboard after the operator's Ctrl+V" }).toBe(operatorText);
 });
+
+test("the Desktop panel shows the robot's own cursor: under the operator's pointer, and where the robot's pointer is (M3 3.5)", async ({ dashboard, stack, page }) => {
+  await stack.requireServer();
+  needs(await stack.dashboardReachable(), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
+  const desktopRobot = process.env.E2E_DESKTOP_ROBOT_HTTP ?? "http://desktop-robot:7381";
+  needs(await fetch(desktopRobot, { signal: AbortSignal.timeout(2000) }).then(() => true, () => false), `desktop-robot is not running at ${desktopRobot} — \`make desktop-e2e\``);
+
+  await dashboard.goto();
+  await page.getByRole("button", { name: /Desktop Robot 01/ }).click();
+  await dashboard.connect("desktop-robot-01");
+  await dashboard.waitForState("desktop-robot-01", "connected");
+  const surface = page.locator("[data-fjarr-desktop]").first();
+  await expect(surface.locator("[data-fjarr-track^='desk-']")).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
+
+  // The operator's pointer over the view moves the robot's; the robot's cursor comes back as the
+  // surface's own CSS cursor, the robot's real shape (mutter's arrow), drawn by this browser.
+  const box = (await surface.boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.3);
+  await page.mouse.move(box.x + box.width * 0.4, box.y + box.height * 0.4, { steps: 5 });
+  await expect.poll(() => surface.evaluate((el) => (el as HTMLElement).style.cursor), { timeout: 5000 }).toMatch(/^url\("?data:image\/png;base64,/);
+
+  // Away from the view, the cursor is drawn where the robot's pointer was left.
+  await page.mouse.move(box.x + box.width + 40, box.y - 40);
+  const overlay = surface.locator("[data-fjarr-cursor]");
+  await expect(overlay).toBeVisible({ timeout: 5000 });
+  const left = parseFloat((await overlay.evaluate((el) => (el as HTMLElement).style.left)) || "0");
+  expect(left).toBeGreaterThan(35);
+  expect(left).toBeLessThan(45);
+  await page.screenshot({ path: dashboard.out.path("desktop-cursor.png") });
+});

@@ -424,9 +424,20 @@ helper's relay and module E's `ClipboardHandle`
 chord ([docs/22](22-remote-desktop-client.md#clipboard)). In CI, opsim's
 `desktop-clipboard` reads "robot says åäö" copied on the fixture and pastes
 "operator says ÅÄÖ" there, 7/7. In the lab browser, the demo's Desktop panel
-does the same through the real browser clipboard and a real Ctrl+V. Remaining
-in 3.5: the local cursor, `sharpness`, per-session virtual monitors, and
-copy and paste on the mini-PC.
+does the same through the real browser clipboard and a real Ctrl+V.
+**The local cursor (2026-10-03).** Module E now reads each capture's stream
+itself, frames and the cursor, as the node's only consumer: a second
+consumer beside `pipewiresrc` lost either the first frame of a still screen
+or the shape (both measured). The robot's shape becomes the surface's CSS
+cursor under the operator's own pointer, and an overlay at the robot's
+position everywhere else. In CI, opsim's `desktop-cursor` receives mutter's
+24×24 arrow with its pixels and the pointer where its input put it. In the
+lab browser, the demo's Desktop panel shows the same arrow both ways.
+Found on the way: control envelopes sent before the control channel opened
+were dropped, which lost the cursor's shape and the clipboard offer for every
+session but the first; they are now held until it opens. Remaining in 3.5:
+`sharpness`, per-session virtual monitors, and the clipboard and cursor on
+the mini-PC.
 
 ## M3.5 — Hear the robot {#m35}
 
