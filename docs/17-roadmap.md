@@ -867,4 +867,5 @@ power-cut-mid-write and failing-post-hook rollback demos.
 
 ## Explicitly later
 
-Session recording/replay, mobile operator apps — [open questions](18-open-questions.md).
+Session recording/replay, mobile operator apps, clipboard sync on focus
+(#41) — [open questions](18-open-questions.md).

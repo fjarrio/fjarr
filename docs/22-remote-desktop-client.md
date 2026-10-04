@@ -396,6 +396,11 @@ Browser side of the docs/06 offer/request model:
   `image/png`; the client sends it as `clipboard-write` of `image/png`
   before the Ctrl+V, in preference to any text beside it. The limit is
   8 MiB (docs/08).
+- The browser hands the page its clipboard only on a paste **in the view**
+  (Ctrl+V while it has focus). A paste started on the robot (right-click →
+  Paste in its file manager) gets the robot's own clipboard. Syncing on
+  focus would close that; it is
+  [open question #41](18-open-questions.md), unscheduled.
 - Files on the clipboard route through `fjarr.files` (M4+); drag-and-drop
   onto the view uploads via the same capability. A browser cannot put files
   on the operator's clipboard, so a copy of files on the robot can at most
