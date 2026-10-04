@@ -485,7 +485,7 @@ permission. Built: `useSeparateWindows` and `<DesktopView>` using its own
 window ([docs/22](22-remote-desktop-client.md#presentation-mode)); a browser
 test opens a window, streams, clicks into the robot from it, goes fullscreen
 on its button and closes with the dashboard; verified by the user on two
-screens with the Mini PC on demo.fjarr.io. Remaining in 3.6: Firefox.
+screens with the Mini PC on demo.fjarr.io, and in Firefox. 3.6 is done.
 
 ## M3.5 — Hear the robot {#m35}
 
