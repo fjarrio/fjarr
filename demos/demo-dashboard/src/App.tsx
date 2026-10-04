@@ -61,7 +61,9 @@ const SIGNALING = params?.get("fjarr_server") ?? import.meta.env.VITE_FJARR_SERV
 // (operator: media; developer: media + fjarr.introspect). Real backends read this from their auth.
 type Role = "operator" | "developer";
 const ROLE_KEY = "fjarr-demo-role";
-let role: Role = (params?.get("fjarr_role") as Role | null) ?? (localStorage.getItem(ROLE_KEY) as Role | null) ?? "operator";
+// Developer by default: the demo shows everything a robot offers (diagnostics, the terminal) unless an
+// operator's narrower view is picked.
+let role: Role = (params?.get("fjarr_role") as Role | null) ?? (localStorage.getItem(ROLE_KEY) as Role | null) ?? "developer";
 
 interface Robot {
   id: string;
