@@ -30,6 +30,7 @@
 #include <fjarr/desktop_backend.hpp>
 #include <fjarr/video_source.hpp>
 
+#include "clipboard.hpp"
 #include "desktop/cursor_image.hpp"
 #include "desktop/edid.hpp"
 #include "desktop/keymap.hpp"
@@ -84,15 +85,26 @@ class X11MonitorSource final : public VideoSource {
     std::function<void(bool)> cb_;
 };
 
+class X11Backend;
+/// The X connection's event source (see connect()).
+struct XSource {
+    GSource base;
+    Display* dpy;
+    X11Backend* self;
+    gpointer tag;
+};
+
 class X11Backend final : public DesktopBackend {
   public:
     X11Backend(const desktop::ModuleHost& host, const json& config)
-        : host_(host), display_name_(config.value("display", std::string{})) {
+        : host_(host), display_name_(config.value("display", std::string{})),
+          clipboard_(host.context, [this](int level, const std::string& msg) { say(level, msg); }) {
         if (display_name_.empty()) display_name_ = std::getenv("DISPLAY") && *std::getenv("DISPLAY") ? std::getenv("DISPLAY") : ":0";
     }
     ~X11Backend() override {
         if (tick_) g_source_destroy(tick_), g_source_unref(tick_);
         if (pointer_tick_) g_source_destroy(pointer_tick_), g_source_unref(pointer_tick_);
+        clipboard_.detach("", /*notify=*/false); // the capability is going with us
         disconnect();
     }
 
@@ -115,7 +127,8 @@ class X11Backend final : public DesktopBackend {
     Features features() override {
         Features f;
         f.local_cursor = true;
-        return f; // no virtual monitors (mutter's RecordVirtual) and, until 3.7c, no clipboard
+        f.clipboard = true;
+        return f; // no virtual monitors (mutter's RecordVirtual)
     }
     std::vector<Monitor> monitors() override { return monitors_; }
     void on_monitors_changed(std::function<void(std::vector<Monitor>)> cb) override {
@@ -253,7 +266,7 @@ class X11Backend final : public DesktopBackend {
         held_buttons_.clear();
         XFlush(dpy_);
     }
-    ClipboardHandle* clipboard() override { return nullptr; } // slice 3.7c
+    ClipboardHandle* clipboard() override { return &clipboard_; } // X selections (docs/23#desktop-x11)
 
   private:
     static constexpr double WHEEL_STEP = 48.0;
@@ -299,17 +312,37 @@ class X11Backend final : public DesktopBackend {
         root_ = DefaultRootWindow(dpy_);
         XRRSelectInput(dpy_, root_, RRScreenChangeNotifyMask | RROutputChangeNotifyMask | RRCrtcChangeNotifyMask);
         XFixesSelectCursorInput(dpy_, root_, XFixesDisplayCursorNotifyMask);
+        clipboard_.attach(dpy_, fixes_event_);
         XFlush(dpy_);
-        watch_ = g_unix_fd_source_new(ConnectionNumber(dpy_), static_cast<GIOCondition>(G_IO_IN | G_IO_HUP | G_IO_ERR));
-        g_source_set_callback(watch_, G_SOURCE_FUNC(+[](gint, GIOCondition cond, gpointer d) -> gboolean {
-            auto* self = static_cast<X11Backend*>(d);
-            if (cond & (G_IO_HUP | G_IO_ERR)) {
-                self->lost("the X server closed the connection");
-                return G_SOURCE_REMOVE;
-            }
-            self->drain();
-            return self->dpy_ ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
-        }), this, nullptr);
+        // The connection's events, from the socket AND from Xlib's own queue: every round trip made
+        // outside drain() (the monitor re-read, the pointer poll, a property read) moves whatever
+        // events had arrived into that queue, where a descriptor watch never sees them. An INCR
+        // transfer is a ping-pong of such events, and stalled until its timeout (3.7c, 2026-10-05).
+        static GSourceFuncs funcs = {
+            /*prepare=*/[](GSource* s, gint* timeout) -> gboolean {
+                *timeout = -1;
+                return XQLength(reinterpret_cast<XSource*>(s)->dpy) > 0;
+            },
+            /*check=*/[](GSource* s) -> gboolean {
+                auto* x = reinterpret_cast<XSource*>(s);
+                return (g_source_query_unix_fd(s, x->tag) & (G_IO_IN | G_IO_HUP | G_IO_ERR)) || XQLength(x->dpy) > 0;
+            },
+            /*dispatch=*/[](GSource* s, GSourceFunc, gpointer) -> gboolean {
+                auto* x = reinterpret_cast<XSource*>(s);
+                X11Backend* self = x->self;
+                if (g_source_query_unix_fd(s, x->tag) & (G_IO_HUP | G_IO_ERR)) {
+                    self->lost("the X server closed the connection");
+                    return G_SOURCE_REMOVE;
+                }
+                self->drain();
+                return self->dpy_ ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
+            },
+            /*finalize=*/nullptr, nullptr, nullptr};
+        auto* xs = reinterpret_cast<XSource*>(g_source_new(&funcs, sizeof(XSource)));
+        xs->dpy = dpy_;
+        xs->self = this;
+        xs->tag = g_source_add_unix_fd(&xs->base, ConnectionNumber(dpy_), static_cast<GIOCondition>(G_IO_IN | G_IO_HUP | G_IO_ERR));
+        watch_ = &xs->base;
         g_source_attach(watch_, host_.context);
         say(1, "the X display " + display_name_ + " is open (RandR " + std::to_string(rmaj) + "." + std::to_string(rmin) + ")");
         keymap_.reset();
@@ -324,6 +357,7 @@ class X11Backend final : public DesktopBackend {
         while (dpy_ && XPending(dpy_)) {
             XEvent e;
             XNextEvent(dpy_, &e);
+            if (clipboard_.handle(e)) continue;
             if (e.type == rr_event_ + RRScreenChangeNotify || e.type == rr_event_ + RRNotify) {
                 XRRUpdateConfiguration(&e);
                 layout = true;
@@ -512,6 +546,7 @@ class X11Backend final : public DesktopBackend {
         if (watch_) g_source_destroy(watch_), g_source_unref(watch_);
         watch_ = nullptr;
         if (dpy_) {
+            clipboard_.detach("the X display closed");
             dead_displays().erase(dpy_);
             XCloseDisplay(dpy_);
         }
@@ -544,6 +579,7 @@ class X11Backend final : public DesktopBackend {
     std::function<void(bool)> session_cb_;
     std::function<void(const CursorShape&)> shape_cb_;
     std::function<void(MonitorId, double, double)> position_cb_;
+    desktop::x11::X11Clipboard clipboard_; // last: its log goes through say()
 };
 
 const char* probe() { return nullptr; } // usable wherever it is installed: `create` says why the display will not open
