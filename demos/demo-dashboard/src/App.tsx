@@ -34,6 +34,7 @@ import {
   useDesktopClipboard,
   useDesktopSharing,
   useDesktopState,
+  useSeparateWindows,
   useFjarrClient,
   useMonitors,
   usePublisher,
@@ -275,6 +276,10 @@ function DesktopPanel({ session }: { session: Session }) {
   const [myScreen, setMyScreen] = useState<string | null>(null);
   // When someone at the robot stops the screen sharing (docs/22#when-the-robot-stops-sharing).
   const [autoResume, setAutoResume] = useState(false);
+  // A robot monitor in a window of its own (docs/22#presentation-mode): open is one click, fullscreen
+  // is that window's own button.
+  const separate = useSeparateWindows(session);
+  const [blocked, setBlocked] = useState(false);
   const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(v / 8) * 8));
   // The picker stores the monitor's stable id, never its index or connector (docs/22#hot-plug).
   const [shown, setShown] = useState<string>("primary");
@@ -337,6 +342,18 @@ function DesktopPanel({ session }: { session: Session }) {
             Remove my screen
           </button>
         )}
+        {monitors.length > 0 && (
+          <button
+            data-demo-separate-window
+            onClick={() => {
+              const id = shown === "primary" || shown === "all" ? (monitors.find((m) => m.primary) ?? monitors[0])!.id : shown;
+              setBlocked(!separate.open(id));
+            }}
+          >
+            Open in separate window
+          </button>
+        )}
+        {blocked && <span style={{ color: "#f85149" }}>the browser blocked the window: allow pop-ups for this site</span>}
         <label style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
           <input type="checkbox" data-demo-auto-resume checked={autoResume} onChange={(e) => setAutoResume(e.target.checked)} />
           Resume when the robot stops sharing
@@ -359,6 +376,7 @@ function DesktopPanel({ session }: { session: Session }) {
           style={{ maxHeight: "70vh", borderRadius: 8, overflow: "hidden" }}
         />
       )}
+      {separate.windows}
     </div>
   );
 }

@@ -227,7 +227,14 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
     await input.keyCombo(["ControlLeft", "KeyV"]).catch(() => undefined);
   };
   const focusId = `fjarr-desktop-${useId()}`;
-  const { registration, focused } = useInputFocus(focusId, { onLost: () => input?.releaseAll() });
+  // The window this view lives in: the page's own, or a separate window it is portaled into
+  // (docs/22#presentation-mode). Focus, fullscreen, Keyboard Lock and visibility are that window's.
+  const [win, setWin] = useState<Window | null>(null);
+  useEffect(() => {
+    const w = surface.current?.ownerDocument.defaultView ?? null;
+    if (w && w !== win) setWin(w);
+  });
+  const { registration, focused } = useInputFocus(focusId, { window: win ?? undefined, onLost: () => input?.releaseAll() });
 
   const box = () => {
     const video = surface.current?.querySelector("video");
@@ -236,12 +243,13 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
 
   // A hidden tab never gets the key-ups: release before the page goes away (docs/22 input table).
   useEffect(() => {
+    const doc = (win ?? window).document;
     const onHidden = () => {
-      if (document.visibilityState === "hidden") input?.releaseAll();
+      if (doc.visibilityState === "hidden") input?.releaseAll();
     };
-    document.addEventListener("visibilitychange", onHidden);
-    return () => document.removeEventListener("visibilitychange", onHidden);
-  }, [input]);
+    doc.addEventListener("visibilitychange", onHidden);
+    return () => doc.removeEventListener("visibilitychange", onHidden);
+  }, [input, win]);
 
   // The wheel must be non-passive to keep the page from scrolling; React's onWheel is passive.
   useEffect(() => {
@@ -250,7 +258,7 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
     const onWheel = (e: WheelEvent) => {
       if (!mayInputRef.current) return;
       e.preventDefault();
-      input.wheel(e, window.innerHeight);
+      input.wheel(e, (el.ownerDocument.defaultView ?? window).innerHeight);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -263,14 +271,16 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
         const el = surface.current;
         if (!el) return;
         await el.requestFullscreen();
-        // Keyboard Lock exists only in fullscreen, and only in some browsers (docs/22).
-        const kb = (navigator as Navigator & { keyboard?: { lock?: () => Promise<void> } }).keyboard;
+        // Keyboard Lock exists only in fullscreen, and only in some browsers (docs/22); per window.
+        const nav = (el.ownerDocument.defaultView ?? window).navigator;
+        const kb = (nav as Navigator & { keyboard?: { lock?: () => Promise<void> } }).keyboard;
         await kb?.lock?.().catch(() => undefined);
         editor.current?.focus();
       },
       async exitFullscreen() {
-        (navigator as Navigator & { keyboard?: { unlock?: () => void } }).keyboard?.unlock?.();
-        if (document.fullscreenElement) await document.exitFullscreen();
+        const doc = surface.current?.ownerDocument ?? document;
+        ((doc.defaultView ?? window).navigator as Navigator & { keyboard?: { unlock?: () => void } }).keyboard?.unlock?.();
+        if (doc.fullscreenElement) await doc.exitFullscreen();
       },
       keyCombo: (codes) => (input ? input.keyCombo(codes) : Promise.reject(new Error("the desktop view is not ready"))),
       typeText: (text) => (input ? input.text(text) : Promise.reject(new Error("the desktop view is not ready"))),
@@ -401,7 +411,7 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
         onBlur={() => registration?.blur()}
         onKeyDown={(e) => {
           if (!focused || !mayInput) return;
-          if (releaseKey && e.code === releaseKey && !document.fullscreenElement) {
+          if (releaseKey && e.code === releaseKey && !e.currentTarget.ownerDocument.fullscreenElement) {
             e.preventDefault();
             editor.current?.blur(); // the keyboard back to the page; onLost releases what is held
             return;

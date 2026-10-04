@@ -351,3 +351,41 @@ test("the Desktop panel stays when the robot's desktop session goes, says why, a
   }
   await expect(view.locator("[data-fjarr-track^='desk-']")).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
 });
+
+test("the Desktop panel opens a robot monitor in a separate window: it streams, takes input, goes fullscreen on its own button, and closes with the dashboard (M3 3.6)", async ({ dashboard, stack, page }) => {
+  await stack.requireServer();
+  needs(await stack.dashboardReachable(), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
+  const oracleUrl = process.env.E2E_DESKTOP_ORACLE ?? "http://desktop-fixture:8090/testwin.log";
+  const oracle = () => fetch(oracleUrl, { signal: AbortSignal.timeout(2000) }).then((r) => (r.ok ? r.text() : ""), () => "");
+  needs(Boolean(await oracle()), `the desktop fixture's log is not reachable at ${oracleUrl} — \`make desktop-e2e\` brings it up`);
+
+  await dashboard.goto();
+  await page.getByRole("button", { name: /Desktop Robot 01/ }).click();
+  await dashboard.connect("desktop-robot-01");
+  await dashboard.waitForState("desktop-robot-01", "connected");
+  await expect(page.locator("[data-fjarr-desktop] [data-fjarr-track^='desk-']").first()).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
+
+  // One click: the monitor in a window of its own, a portal on this page's session.
+  const opened = page.context().waitForEvent("page", { timeout: 5000 });
+  await page.locator("[data-demo-separate-window]").click();
+  const win = await opened;
+  const inWin = win.locator("[data-fjarr-separate-window]");
+  await expect(inWin.locator("[data-fjarr-track^='desk-']")).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
+
+  // Input from that window reaches the robot.
+  const mark = (await oracle()).length;
+  await expect(async () => {
+    await inWin.locator("[data-fjarr-desktop]").click({ position: { x: 200, y: 150 } });
+    expect((await oracle()).slice(mark)).toMatch(/click button=1/);
+  }).toPass({ timeout: 15_000 });
+
+  // Fullscreen is its own click, on the window's button.
+  expect(await win.evaluate(() => document.fullscreenElement !== null)).toBe(false);
+  await win.locator("[data-fjarr-separate-fullscreen]").click();
+  await expect.poll(() => win.evaluate(() => document.fullscreenElement?.hasAttribute("data-fjarr-desktop") ?? false)).toBe(true);
+  await win.screenshot({ path: dashboard.out.path("separate-window.png") });
+
+  // Leaving the dashboard closes it.
+  await page.close();
+  await expect.poll(() => win.isClosed(), { timeout: 5000 }).toBe(true);
+});
