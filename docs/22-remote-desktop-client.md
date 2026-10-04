@@ -124,10 +124,12 @@ every browser, so each robot monitor shown fullscreen elsewhere is a window
 of its own.
 
 **One action, the same in every browser: "Open in separate window".** It
-opens one robot monitor in one new window, one click per window. The
-operator drags the window where they want it and uses the view's own
-fullscreen button there (`enterFullscreen()`, with Keyboard Lock, so Alt+Tab
-and Super reach the robot). Nothing is placed or mapped automatically and
+opens one robot monitor in one new, normal window, one click per window.
+Fullscreen is its own, second click: the operator drags the window where
+they want it and uses the view's fullscreen button there
+(`enterFullscreen()`, with Keyboard Lock, so Alt+Tab and Super reach the
+robot). A window never opens fullscreen by itself: two separate steps are
+easier to understand than one that does both. Nothing is placed or mapped automatically and
 no permission is asked: the Window Management API could open a window on a
 chosen screen, or fill two screens from one click through the fullscreen
 companion window, but measured in Chrome it still opens one popup per click,
