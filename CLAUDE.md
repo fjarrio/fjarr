@@ -85,6 +85,7 @@ CI mirrors all of this in `.github/workflows/ci.yml`.
 | Looking at what the media plane is doing (live pipeline graphs, `curl localhost:7381`) | docs/24-pipeline-introspection.md |
 | Driving a real browser: e2e, wire captures, network profiles, CPU/memory profiles (`fjarr-lab`) | docs/25-browser-lab.md |
 | Changing CI: jobs, what runs on which change, CI images, caches, timings | docs/30-continuous-integration.md |
+| The public demo server (signal/demo/turn.fjarr.io, Caddy, coturn, Cloudflare) | docs/31-hosted-demo.md |
 | Installing the agent and vendor drivers on a robot (catalog, `setup`, `drivers`) | docs/26-robot-install-and-drivers.md |
 | Capability plugin rules | docs/05-extension-model.md + `/new-capability` |
 | Security constraints | docs/10-security.md |
