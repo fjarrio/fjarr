@@ -109,11 +109,11 @@ detail is incorporated here).
   place (new geometry, keyframe). Zero monitors (headless robot, everything
   unplugged) is a valid state the session survives; a re-plugged monitor
   returns under its old identity. Web side: [docs/22](22-remote-desktop-client.md#monitors-and-geometry).
-- **Presentation mode**: the operator's screens become the robot's screens
-  — one fullscreen browser window per robot monitor with Keyboard Lock,
-  automated on Chromium via the Window Management API, manual (drag, then
-  fullscreen) elsewhere; one session and one `desktop` control claim behind all
-  windows ([docs/22](22-remote-desktop-client.md#presentation-mode)).
+- **Separate windows**: "Open in separate window" puts one robot monitor in
+  a browser window of its own, which the operator places and makes
+  fullscreen with Keyboard Lock; one click per window, the same in every
+  browser; one session and one `desktop` control claim behind all windows
+  ([docs/22](22-remote-desktop-client.md#presentation-mode)).
 - Pointer: absolute normalized coordinates per monitor, lossy channel;
   buttons/wheel reliable. Keyboard: physical `KeyboardEvent.code` →
   Linux keycodes, reliable channel; layout handling per backend
@@ -149,11 +149,10 @@ within 2 s with zero dropped frames on the other two, unplugging one leaves
 a placeholder and the rest untouched, re-plugging restores it under the same
 `track_id`, a mode change keeps input coordinates correct, and unplugging
 everything then plugging one back recovers without a reconnect;
-**presentation mode**: on a two-screen Chromium desktop one click fills
-both screens with the two mapped robot monitors, Alt+Tab typed on either
-screen reaches the robot, closing the dashboard tab closes both windows,
-and on Firefox the same button opens the windows and the operator finishes
-manually without errors.
+**separate windows**: one click opens a robot monitor in a window of its
+own, which streams, takes input, and goes fullscreen with Keyboard Lock so
+Alt+Tab typed there reaches the robot; closing the dashboard tab closes it;
+the same on Firefox.
 
 ## `fjarr.telemetry` — sensor/telemetry streaming (M4)
 

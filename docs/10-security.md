@@ -95,9 +95,10 @@ thing take turns; everyone else works side by side.**
   `capability-denied`. Clipboard text is often a password: a viewer is given
   the screen, not what the robot copied.
 - A claim is keyed on the **operator identity in the grant**, not on the
-  session: several sessions of the same operator (one per browser window in
-  the desktop [presentation mode](22-remote-desktop-client.md#presentation-mode)
-  fallback) share one claim and all may send input.
+  session: several sessions of the same operator (a dashboard open in two
+  tabs, say) share one claim and all may send input. Separate desktop
+  windows ([docs/22](22-remote-desktop-client.md#presentation-mode)) need
+  none of this: they are views of one session.
 - **Input from a non-holder** is dropped and counted (events), or answered
   `control-held`, naming the holder and since when (requests). Every session
   is told who holds each domain whenever that changes (`control-state`), so a

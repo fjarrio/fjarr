@@ -115,87 +115,57 @@ focused window wherever it is; pointer events carry the monitor's
 `track_id`, so a single keyboard owner with several monitor views is the
 normal case.
 
-### Presentation mode — multi-monitor fullscreen {#presentation-mode}
+### Separate windows {#presentation-mode}
 
-The goal: the operator's two screens *become* the robot's two screens,
-fullscreen, with Keyboard Lock on each. The platform constraint that shapes
-the design: **a document can be fullscreen on one screen only** — every
-browser, no exceptions. Spanning N screens therefore means N browser
-windows, one per robot monitor, orchestrated by the dashboard page.
+The goal: an operator can put a robot monitor in a window of its own, for
+instance on another local screen, fullscreen there with Keyboard Lock. The
+platform constraint: **a document can be fullscreen on one screen only**, in
+every browser, so each robot monitor shown fullscreen elsewhere is a window
+of its own.
 
-**What the platform provides (Chromium-family only)** — the Window
-Management API:
+**One action, the same in every browser: "Open in separate window".** It
+opens one robot monitor in one new window, one click per window. The
+operator drags the window where they want it and uses the view's own
+fullscreen button there (`enterFullscreen()`, with Keyboard Lock, so Alt+Tab
+and Super reach the robot). Nothing is placed or mapped automatically and
+no permission is asked: the Window Management API could open a window on a
+chosen screen, or fill two screens from one click through the fullscreen
+companion window, but measured in Chrome it still opens one popup per click,
+and it exists in Chromium only. One action that behaves the same everywhere
+is easier to understand (decided 2026-10-04,
+[spikes/presentation-mode](../spikes/presentation-mode/README.md)).
 
-| Need | API | Permission |
-|---|---|---|
-| "Is spanning even relevant?" | `screen.isExtended` | none — gates the toolbar button |
-| Local screens with position/size/scale/`isPrimary`/label, plus `screenschange` | `window.getScreenDetails()` | `window-management` (prompt from a gesture, remembered per origin) |
-| Place a popup on another screen | `window.open(url, name, "left=,top=,width=,height=")` | `window-management` (without it: clamped to the current screen). **One popup per gesture even with it** (measured, Chrome on Linux, 2026-10-04) |
-| Fullscreen this window on one screen and open one popup on another, from one gesture (the *fullscreen companion window*) | `element.requestFullscreen({ screen })`, then `window.open(...)` in the same gesture | `window-management` (measured working) |
-| Open straight into fullscreen on that screen | `popup,fullscreen` window feature (Chrome ≥ 123) | `window-management` |
-| Fullscreen from inside an existing popup | `element.requestFullscreen({ screen })` (needs a gesture *in that window*; fullscreen capability delegation via `postMessage` bridges the opener's click) | `window-management` |
-| Lock Esc/Alt+Tab/Super per window | `navigator.keyboard.lock()` — per window, fullscreen only | none |
+**One session, portaled views** (the spike settled it, closing open
+question #19). The dashboard page keeps the one session, the one grant and
+the one docs/10 `desktop` claim; a separate window is only a rendering
+surface. `useSeparateWindows(session)` in `@fjarr/react`:
 
-Firefox and Safari implement none of the placement APIs; there the
-**degraded path** is the one every browser supports: the dashboard opens
-one normal window per monitor, the operator drags each to a screen and
-clicks the view's own fullscreen button (`enterFullscreen()` above). Same
-components, no extra code path — only the automation is missing. The
-toolbar copy says so ("drag this window to the screen, then fullscreen").
-
-**Design: one session, portaled views** (the M3 spike settled it,
-[spikes/presentation-mode](../spikes/presentation-mode/README.md), closing
-open question #19). The dashboard page keeps the one session, the one grant
-and the one docs/10 `desktop` claim; each popup document is just a
-rendering surface. `usePresentation(session)`:
-
-1. On the operator's click, requests `window-management` if needed, reads
-   `getScreenDetails()`, and computes the **screen mapping** (below).
-2. The **dashboard window itself** goes fullscreen on its screen, showing
-   one mapped monitor, and the same gesture opens **one companion popup**
-   on the next mapped screen: two screens, one click. Each further mapped
-   screen is a "next screen" button in the presentation toolbar, a click
-   each (Chrome opens one popup per gesture, permission or not). A popup
-   opens with `popup,fullscreen` where that works, otherwise it shows a
-   "fullscreen here" button: the opener cannot make another window
-   fullscreen (measured: a `TypeError`, and no activation in the popup).
-3. Renders a `<DesktopView monitorId=… presentation>` into each popup's
-   `document.body` through a React portal. The React tree, the session, the
-   track handles and the focus registry all stay in the opener; the
-   `<video>` element lives in the popup and receives the opener's
-   `MediaStream` as `srcObject` (same-origin popups share the opener's
-   agent cluster, so the object is usable across the two documents). React
-   attaches its event listeners to portal containers, so the docs/22 input
-   pipeline works unchanged; Keyboard Lock is requested per popup window.
-4. Focus: the focus registry stays per *page* (opener), but a presentation
-   window that has OS focus owns the keyboard — the registry treats each
-   popup window's `focus`/`blur` as the view's focus events, so exactly one
+1. `open(monitorId)`, from a click, opens an empty same-origin popup
+   (`window.open("", …)`), which stays in the opener's browsing context
+   group under any `Cross-Origin-Opener-Policy` the host sets. A popup that
+   loaded a page of its own lost `window.opener` under COOP `same-origin`
+   on the opener alone.
+2. The hook renders `<DesktopView monitorId={…}>` into the popup's
+   `document.body` through a React portal (`windows`, which the host puts in
+   its tree). The React tree, the session, the track handles and the focus
+   registry stay in the opener; the `<video>` lives in the popup and plays
+   the opener's `MediaStream`. React attaches its event listeners to a
+   portal's container, so the input pipeline works there unchanged. The
+   view uses its element's own `ownerDocument` and `defaultView` for
+   fullscreen, Keyboard Lock, focus, visibility and sizes, never the
+   opener's `window` and `document`.
+3. Focus: a separate window that has the OS focus owns the keyboard; the
+   focus registry treats each window's `focus`/`blur` as its view's, so one
    keyboard owner still holds across all windows.
-5. Teardown: closing any popup releases that monitor's demand (unmount →
-   `release()`, docs/21) and sends `release-all` for keys held from that
-   window; `pagehide`/`beforeunload` on the opener closes every popup
-   (orphaned fullscreen windows with no session behind them are a bug);
-   the operator's own `screenschange` (a local screen vanished) closes the
-   popup that was on it and re-opens it on the fallback screen after a
-   confirmation.
+4. Teardown: closing a separate window releases that monitor's demand
+   (unmount → `release()`, docs/21) and sends `release-all` for keys held
+   from it; `pagehide` on the opener closes every separate window (a window
+   with no session behind it is a bug). A robot monitor that goes away
+   leaves its window showing the placeholder, as inline; re-plugging
+   rebinds it.
 
-Every `<DesktopView>` remains usable inline too — presentation mode is a
-layout choice, never a different component.
-
-**Not built: one session per window.** No browser needed it (the portal
-works under every COOP, and an empty popup stays in the opener's browsing
-context group, where a popup that loads its own page does not). Kept here
-in case a browser ever does. If the portal approach fails a
-browser (`Cross-Origin-Opener-Policy: same-origin` host apps, `noopener`,
-or a future process-isolation change that breaks cross-document
-`srcObject`), each popup is a plain route (the host app provides it —
-`/desktop/:robot/:monitor` in the demo) that opens its *own* session and
-acquires only its monitor's track. Demand-driven delivery means no
-duplicated video and FrameHub means no extra encode; the cost is N
-signaling/ICE/DTLS setups and N grants. Input from the extra windows is
-legitimate because a docs/10 control claim is keyed on the **operator identity in
-the grant**, not the session — the same operator's windows share one
-claim. It would be `usePresentation({ mode: "route" })`.
+Every `<DesktopView>` remains usable inline too: a separate window is a
+place to show it, never a different component.
 
 **Measured limit.** Two fullscreen windows on two screens rendered ~15 fps
 each from a 30 fps stream on Chrome under X11 (one window alone: ~28),
@@ -203,27 +173,10 @@ whatever the track sharing; a session per window would pay it too. It is
 the desktop's presentation cost, to be measured again on Wayland and
 another GPU, not the design's.
 
-**Screen mapping.** Local screens rarely match robot monitors 1:1:
-
-- Auto: `primary` ↔ `isPrimary`; then by relative position (left-of/
-  right-of/above/below the primary, using `x/y` on both sides); leftover
-  robot monitors get no window (they stay reachable inline); leftover
-  local screens stay free for the host app.
-- Operator override: a small dialog showing both arrangements (local from
-  `getScreenDetails()`, robot from `useMonitors`) with drag-to-assign;
-  persisted per `(robot, set of monitor ids)` in `localStorage`, so the
-  second visit to the same robot from the same desk is one click.
-- Robot hot-plug during presentation: a new robot monitor gets a window only
-  if a free local screen is mapped to it (otherwise it appears inline); a
-  vanished robot monitor leaves its window showing the placeholder (the
-  same behavior as inline — the window is not closed, so re-plug rebinds).
-
 **Not the browser's job.** A fixed control room (an operator desk with
 three screens permanently dedicated to one robot) is better served by
-Chrome kiosk mode or a Tauri/Electron shell hosting the same dashboard:
-there multi-window fullscreen is unconditional instead of permission- and
-gesture-gated. Fjarr documents that recipe (docs/12 later) rather than
-building a shell.
+Chrome kiosk mode or a Tauri/Electron shell hosting the same dashboard.
+Fjarr documents that recipe (docs/12 later) rather than building a shell.
 
 ## Input pipeline
 
