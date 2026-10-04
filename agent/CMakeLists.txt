@@ -110,6 +110,17 @@ target_link_libraries(fjarr-desktop-mutter PRIVATE PkgConfig::GST PkgConfig::GIO
 set_target_properties(fjarr-desktop-mutter PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/desktop-modules" PREFIX "lib" CXX_VISIBILITY_PRESET hidden)
 
+# Backend A (ADR-0006, ADR-0021, M3 3.7): an X11 kiosk from the agent's own process, `ximagesrc` per
+# RandR monitor, XTest input, the XFixes cursor (docs/23#desktop-x11). Its X libraries are the
+# module's, shipped in fjarr-desktop-x11, never libfjarr's.
+pkg_check_modules(X11LIBS REQUIRED IMPORTED_TARGET x11 xtst xfixes xrandr)
+add_library(fjarr-desktop-x11 MODULE modules/desktop-x11/backend.cpp src/desktop/edid.cpp
+  src/desktop/monitor_identity.cpp src/desktop/keymap.cpp src/desktop/cursor_image.cpp)
+target_include_directories(fjarr-desktop-x11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(fjarr-desktop-x11 PRIVATE PkgConfig::GST PkgConfig::X11LIBS PkgConfig::XKBCOMMON nlohmann_json::nlohmann_json)
+set_target_properties(fjarr-desktop-x11 PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/desktop-modules" PREFIX "lib" CXX_VISIBILITY_PRESET hidden)
+
 add_executable(fjarr-agent daemon/main.cpp)
 target_link_libraries(fjarr-agent PRIVATE fjarr::fjarr PkgConfig::GST)
 # The reference daemon, unlike the demos, may use libfjarr's internals for installation concerns an

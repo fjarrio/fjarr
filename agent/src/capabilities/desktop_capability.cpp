@@ -420,6 +420,7 @@ CapabilityManifest DesktopCapability::manifest() const {
          {{"enabled", {{"type", "boolean"}}},
           {"backend", {{"type", "string"}, {"enum", {"auto", "x11", "wayland"}}}},
           {"module_dir", {{"type", "string"}, {"description", "where backend modules are installed (ADR-0021)"}}},
+          {"display", {{"type", "string"}, {"description", "the X11 backend's display (default :0; docs/23#desktop-x11)"}}},
           {"helper",
            {{"type", "object"},
             {"description", "the session helper (ADR-0028): its socket, the desktop account it runs as, the socket's group"},
@@ -460,7 +461,10 @@ void DesktopCapability::configure(const nlohmann::json& config, const SourceFact
     const auto* registry = dynamic_cast<const media::SourceRegistry*>(&sources);
     GMainContext* loop = registry ? registry->context() : nullptr;
     if (!loop) return;
-    const std::string helper_config = impl_->helper.dump();
+    // The backend's own settings: the session helper's (module E), the X display (backend A).
+    nlohmann::json backend_config = impl_->helper;
+    if (config.contains("display")) backend_config["display"] = config["display"];
+    const std::string helper_config = backend_config.dump();
     const desktop::ModuleHost host{helper_config.c_str(), loop, &module_log};
     std::string error;
     impl_->driver = impl_->loader.create(*f, host, &error);

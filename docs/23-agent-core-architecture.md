@@ -713,16 +713,21 @@ descriptor is watched there, and no Xlib call is made from another thread.
   (`startx/starty/endx/endy`, inclusive), `show-pointer=false` (the cursor
   travels beside the video, local-cursor mode, as on GNOME) and
   `use-damage=false` (damage regions cost more than they save at 30 fps;
-  ADR-0006 measured 14 ms paint-to-capture p50). A monitor's capture is
+  ADR-0006 measured 14 ms paint-to-capture p50). `ximagesrc` reads through
+  MIT-SHM, so the agent must share the X server's IPC namespace: on a robot
+  it does; a container needs `ipc: host` or the X server's namespace, or it
+  silently captures stale frames (the fixture did, 2026-10-04). A monitor's capture is
   available from the start; a vanished monitor's capture ends with it.
   The root never moves a capture: a monitor that changes geometry is
   restarted on its new rectangle.
 - **Input.** XTest. Pointer: a monitor's normalized point → the root's
   `x + nx·w, y + ny·h`; buttons 1–3 and 8–9 (back, forward); the wheel as
-  button 4–7 clicks, one per 120 units accumulated. Keys: X keycode =
-  evdev code + 8 (Xorg's evdev rule). `type_text` uses the shared
-  `KeymapIndex` on the X server's own keymap (xkbcommon-x11), exactly as on
-  GNOME; characters no key produces are refused by name.
+  button 4–7 clicks, one per 48 px accumulated (three of the client's
+  16 px lines). Keys: X keycode = evdev code + 8 (Xorg's evdev rule); a key
+  held through XTest auto-repeats on the robot as a real one does.
+  `type_text` uses the shared `KeymapIndex`, built from the layout and
+  variant the X server publishes on the root window (`_XKB_RULES_NAMES`),
+  as on GNOME; characters no key produces are refused by name.
   `release_all_input` releases every key and button XTest pressed.
 - **Cursor.** XFixes: `XFixesSelectCursorInput` for shape changes,
   `XFixesGetCursorImage` for the pixels (premultiplied ARGB → the shared

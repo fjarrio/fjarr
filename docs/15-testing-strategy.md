@@ -261,9 +261,14 @@ Backend A (X11 kiosk, slice 3.7) uses robot-sim, the Xvfb service CI already
 runs: a 3840×1080 root carved into RandR monitors (`xrandr --setmonitor`;
 the root cannot grow, [docs/07](07-desktop-backends.md#simulating-hot-plug)),
 a test window that logs what it receives, a service that plugs and unplugs
-monitors, and a separate agent account with the `xhost` grant. The same
-`fjarr-opsim` desktop scenarios and browser tests run against it
-(`make x11-e2e`, `make x11-browser`) on every push.
+monitors, and a separate agent account (uid 10003) with the `xhost` grant,
+Xvfb started with `-noreset` (it otherwise regenerates when its last client
+leaves, wiping the grant) and the robot in the fixture's IPC namespace
+(`ximagesrc` reads through MIT-SHM). The `fjarr-opsim` desktop scenarios
+`desktop-see`, `-control`, `-hotplug` and `-cursor` run against it
+(`make x11-e2e`) on every push; the browser side is the same for every
+backend, so the browser tests stay on the mutter fixture. The clipboard
+joins in slice 3.7c.
 
 Every lab job starts from a baseline: `setup --undo desktop`, install the build
 under test, then `setup desktop` with the job's own settings. The machine's

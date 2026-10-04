@@ -102,6 +102,48 @@ services:
       || { echo 'the agent or backend module E is not built yet: make agent-build'; sleep infinity; };
       exec ./build/release/agent/daemon/fjarr-agent --config docker/desktop-fixture/agent.toml"
 
+  # The X11 kiosk fixture (M3 3.7, docs/15#the-desktop-test-lab): robot-sim's image in fixture mode,
+  # with access control on and the agent's account (uid 10003) granted, a 3840x1080 root carved into
+  # RandR monitors, a test window logging input on :8090 and monitor hot-plug on :8091.
+  x11-fixture:
+    profiles: [x11]
+    build: docker/robot-sim
+    image: fjarr-robot-sim
+    environment:
+      SIM_FIXTURE: "1"
+    # ximagesrc reads frames through MIT-SHM: the agent must share the X server's IPC namespace, as
+    # on a real kiosk where both run on one machine.
+    ipc: shareable
+    volumes:
+      - x11-fixture-sock:/tmp/.X11-unix
+
+  # Backend A's robot: the agent as uid 10003, which the fixture's `xhost +si:localuser:fjarr` names.
+  x11-robot:
+    profiles: [x11]
+    image: fjarr-dev
+    user: "10003:10003"
+    ipc: "service:x11-fixture"
+    depends_on:
+      fjarr-server: { condition: service_started, required: false }
+    working_dir: /workspace
+    volumes:
+      - .:/workspace:cached
+      - x11-fixture-sock:/tmp/.X11-unix
+    environment:
+      HOME: /tmp
+      FJARR_SERVER_URL: ws://fjarr-server:8080/ws
+      FJARR_ROBOT_ID: x11-robot-01
+      FJARR_DEV_DEVICE_TOKEN: ${FJARR_DEV_DEVICE_TOKEN:-dev-only-device-token}
+      FJARR_AGENT_ALLOW_UNSUPERVISED: "1"
+      FJARR_MEDIA_ENCODER: software
+      FJARR_LOG_LEVEL: ${FJARR_LOG_LEVEL:-info}
+      FJARR_INTROSPECT_BIND: "0.0.0.0"
+      FJARR_INTROSPECT_TOKEN: ${FJARR_INTROSPECT_TOKEN:-dev-only-introspect-token}
+    command: >
+      bash -c "test -x ./build/release/agent/daemon/fjarr-agent && test -f ./build/release/agent/desktop-modules/libfjarr-desktop-x11.so
+      || { echo 'the agent or backend module A is not built yet: make agent-build'; sleep infinity; };
+      exec ./build/release/agent/daemon/fjarr-agent --config docker/robot-sim/agent-x11.toml"
+
   robot-sim:
     build: docker/robot-sim
     image: fjarr-robot-sim
@@ -419,6 +461,7 @@ services:
       - "49160-49200:49160-49200/udp"
 
 volumes:
+  x11-fixture-sock:
   # The session helper's socket between desktop-fixture and desktop-robot: a tmpfs both mount, open to
   # the agent's user for creating it (the socket itself is 0660; M3 3.1).
   desktop-socket:

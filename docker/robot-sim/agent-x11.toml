@@ -1,0 +1,6 @@
+# The X11 fixture's agent (make x11-e2e; docs/15#the-desktop-test-lab, M3 3.7). Identity, server and
+# token come from the environment, as for the other robots; this file picks backend A and its display.
+[capabilities."fjarr.desktop"]
+backend = "x11"
+module_dir = "/workspace/build/release/agent/desktop-modules"
+display = ":99"

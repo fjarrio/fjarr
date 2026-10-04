@@ -12,8 +12,21 @@ set -u
 rm -f "/tmp/.X11-unix/X${DISPLAY#:}" "/tmp/.X${DISPLAY#:}-lock" 2>/dev/null || true
 mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 
+if [ "${SIM_FIXTURE:-0}" = 1 ]; then
+  # The X11 fixture (docs/15#the-desktop-test-lab, M3 3.7): access control on, a root wide enough to
+  # carve a second monitor from (Xvfb's root cannot grow), and the agent's account granted the way a
+  # kiosk session grants it (`xhost +si:localuser:fjarr`, docs/23#desktop-x11).
+  SIM_RESOLUTION=3840x1080x24
+  mkdir -p /run/fixture/oracle && : > /run/fixture/oracle/testwin.log
+  xauth -f /run/fixture/xauth add "${DISPLAY}" . "$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  # -noreset: Xvfb regenerates when its last client leaves, which wiped the grant and the carved
+  # monitor before openbox connected (a real kiosk session always holds clients).
+  AUTH=(-auth /run/fixture/xauth -noreset)
+  export XAUTHORITY=/run/fixture/xauth
+fi
+
 echo "robot-sim: starting Xvfb ${DISPLAY} at ${SIM_RESOLUTION}"
-Xvfb "${DISPLAY}" -screen 0 "${SIM_RESOLUTION}" -nolisten tcp &
+Xvfb "${DISPLAY}" -screen 0 "${SIM_RESOLUTION}" -nolisten tcp ${AUTH[@]+"${AUTH[@]}"} &
 XVFB_PID=$!
 
 # Wait for the X server to accept connections.
@@ -21,6 +34,20 @@ for _ in $(seq 1 50); do
   if xdpyinfo -display "${DISPLAY}" >/dev/null 2>&1; then break; fi
   sleep 0.2
 done
+
+if [ "${SIM_FIXTURE:-0}" = 1 ]; then
+  xrandr --setmonitor LEFT 1920/500x1080/280+0+0 screen
+  xhost +si:localuser:fjarr
+  openbox &
+  sleep 0.5
+  testwin_x11.py >/run/fixture/testwin.err 2>&1 &
+  python3 -m http.server 8090 --bind 0.0.0.0 --directory /run/fixture/oracle >/dev/null 2>&1 &
+  plugd_x11.py &
+  touch /run/fixture/ready
+  echo "robot-sim: X11 fixture ready (3840x1080 root, monitor LEFT, oracle :8090, plugd :8091)"
+  wait "${XVFB_PID}"
+  exit
+fi
 
 openbox &
 # Moving content so captured video is never a static frame:

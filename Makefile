@@ -508,6 +508,17 @@ desktop-e2e: ## M3: the fixture's desktop end to end — see it (frames, a still
 	  [ $$rc -eq 0 ] || docker compose --profile desktop logs --no-color --tail 40 desktop-robot desktop-fixture; \
 	  docker compose --profile desktop stop desktop-robot desktop-fixture >/dev/null 2>&1; exit $$rc
 
+x11-e2e: ## M3 3.7: an X11 kiosk end to end — robot-sim in fixture mode, backend A in the agent's own process (xhost-granted), opsim: see, drive, hot-plug, the local cursor (host-run; make agent-build first)
+	docker compose --profile x11 --profile stack up -d --build --wait x11-fixture fjarr-server
+	docker compose --profile x11 --profile stack up -d --no-deps --force-recreate x11-robot
+	@for i in $$(seq 30); do docker compose --profile x11 logs --no-color x11-robot 2>/dev/null | grep -q "capture of .* ready" && break; sleep 1; done
+	@rc=0; for s in desktop-see desktop-control desktop-hotplug desktop-cursor; do \
+	  $(MAKE) --no-print-directory opsim OPSIM_ROBOT=x11-robot-01 OPSIM_SCENARIO=$$s OPSIM_INTROSPECT=http://x11-robot:7381 \
+	    OPSIM_EXTRA="--introspect-token $(INTROSPECT_TOKEN) --desktop-oracle http://x11-fixture:8090/testwin.log --desktop-plug http://x11-fixture:8091" || rc=1; \
+	done; \
+	  [ $$rc -eq 0 ] || docker compose --profile x11 logs --no-color --tail 60 x11-robot x11-fixture; \
+	  docker compose --profile x11 stop x11-robot x11-fixture >/dev/null 2>&1; exit $$rc
+
 .PHONY: lab-test lab-runner-install
 ci-test: ## tools/ci's own tests: the change classifier and the CI images' content hash (docs/30)
 	@tools/ci/test.sh

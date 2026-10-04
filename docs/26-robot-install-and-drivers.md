@@ -655,8 +655,10 @@ check of its files (corrected 2026-09-28 from a `--check --health` that was
 never built). The helper checks
 the agent's uid (ADR-0028), so user-namespace remapping (rootless Docker,
 `userns-remap`) is either off or its mapped uid is configured. On an X11
-kiosk, `/tmp/.X11-unix` is bind-mounted, and the package creates a host account
-with the image's uid so the `xhost` grant can name it.
+kiosk, `/tmp/.X11-unix` is bind-mounted, the container shares the host's IPC
+namespace (`ipc: host`: `ximagesrc` reads through MIT-SHM and captures stale
+frames without it), and the package creates a host account with the image's
+uid so the `xhost` grant can name it.
 
 ## Repository, versions and releases {#releases}
 

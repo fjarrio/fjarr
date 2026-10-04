@@ -116,7 +116,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: CI images by content hash (docs/30#ci-images)
-        run: python3 tools/ci/image.py compose dev robot-sim fjarr-server desktop-fixture robot-services
+        run: python3 tools/ci/image.py compose dev robot-sim fjarr-server desktop-fixture robot-services x11-fixture
       - uses: actions/cache/restore@v4
         with:
           path: build/ccache-dev
@@ -170,6 +170,10 @@ jobs:
         # is why these three tests had been skipping in every run until 2026-10-02 (docs/30). The target
         # fails when any of them skips.
         run: make desktop-browser
+      - name: an X11 kiosk robot (M3 3.7, docs/15#the-desktop-test-lab)
+        # robot-sim in fixture mode (access control on, the agent's account granted, a wide root carved
+        # into RandR monitors) → backend A in the agent's own process → opsim: see, drive, hot-plug, cursor.
+        run: make x11-e2e
       - name: "20-cycle soak (docs/15: the census returns to baseline every commit; 200 nightly)"
         run: make opsim-soak OPSIM_CYCLES=20
       - name: "the robot logged no criticals (docs/15; the gate's selftest proves it can fire)"
