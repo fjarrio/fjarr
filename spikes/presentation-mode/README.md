@@ -28,15 +28,25 @@ WebRTC stream: a loopback `RTCPeerConnection` pair carrying a 30 fps canvas trac
   per window. And in headless, a second popup after closing the first sometimes rendered nothing:
   a headless artifact (no compositor for it), not something a visible window shows.
 
-## On a real two-screen Chrome (to measure with Erik)
+## On a real two-screen Chrome (Erik's laptop + a Dell, Chrome on X11, 2026-10-04)
 
-`page.html` here, served at `https://demo.fjarr.io/spike/presentation.html` (behind Access):
-grant Window Management, one click opens a window per screen showing the opener's stream, fullscreen
-on its screen, then Alt+Tab and closing.
+`page.html` here, served at `https://demo.fjarr.io/spike/presentation.html` (behind Access).
 
-## Recommendation so far
+| Check | Result |
+|---|---|
+| Window Management granted | both screens listed, with labels and positions |
+| Several popups from one click with the permission | **no**: the second `window.open` was blocked, permission or not |
+| The **fullscreen companion window**: this window fullscreen on its screen, and one popup opened on the other, from the same click | **yes** |
+| Fullscreen of a popup from the opener's click | **no** (`TypeError`: the opener's `ScreenDetailed` is another realm's, and the popup has no activation); a click in the popup works |
+| Keyboard Lock per fullscreen window | Alt, Tab, Super (Meta) and Ctrl all reached the page, in both windows |
+| Closing the opener's tab | closes the companion (`pagehide`) |
+| Frame rate, two fullscreen windows on two screens | **~13–19 fps each** from a steady 30 fps source; one window alone: 24–29. A clone of the track per window changes nothing, and the two windows' rates sometimes sum above the source, so the frames are not split: it is the cost of presenting two windows on two screens at once on this machine (X11, whose compositor paces to one output). It applies to a session per window equally. To be measured again on Wayland and another GPU. |
 
-The portal, as docs/22 already says: one session, one grant, one lease, and no cross-window input
-proxy, and it survives the host's COOP. Presentation mode asks for Window Management on Chromium to
-open every window from one click and place each fullscreen on its screen; without it (Firefox,
-or a refused permission) each window is opened by a click and placed by hand.
+## Conclusion (closes open question #19)
+
+**The portal, one session.** It works under every COOP a host sets, where a page per popup does not;
+it keeps one grant, one lease and no cross-window input proxy. A session per window is not built:
+no browser needed it. For **two screens**, one click: the dashboard window itself goes fullscreen as
+one robot monitor, and the same gesture opens the companion window for the other. Each further
+screen is a click in the presentation toolbar. A popup's fullscreen is a click in that window, unless
+`popup,fullscreen` (Chrome >= 123, untested here) opens it fullscreen.

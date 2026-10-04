@@ -130,7 +130,8 @@ Management API:
 |---|---|---|
 | "Is spanning even relevant?" | `screen.isExtended` | none — gates the toolbar button |
 | Local screens with position/size/scale/`isPrimary`/label, plus `screenschange` | `window.getScreenDetails()` | `window-management` (prompt from a gesture, remembered per origin) |
-| Place a popup on another screen; open several popups from one click | `window.open(url, name, "left=,top=,width=,height=")` | `window-management` (without it: clamped to the current screen, one popup per gesture) |
+| Place a popup on another screen | `window.open(url, name, "left=,top=,width=,height=")` | `window-management` (without it: clamped to the current screen). **One popup per gesture even with it** (measured, Chrome on Linux, 2026-10-04) |
+| Fullscreen this window on one screen and open one popup on another, from one gesture (the *fullscreen companion window*) | `element.requestFullscreen({ screen })`, then `window.open(...)` in the same gesture | `window-management` (measured working) |
 | Open straight into fullscreen on that screen | `popup,fullscreen` window feature (Chrome ≥ 123) | `window-management` |
 | Fullscreen from inside an existing popup | `element.requestFullscreen({ screen })` (needs a gesture *in that window*; fullscreen capability delegation via `postMessage` bridges the opener's click) | `window-management` |
 | Lock Esc/Alt+Tab/Super per window | `navigator.keyboard.lock()` — per window, fullscreen only | none |
@@ -142,16 +143,22 @@ clicks the view's own fullscreen button (`enterFullscreen()` above). Same
 components, no extra code path — only the automation is missing. The
 toolbar copy says so ("drag this window to the screen, then fullscreen").
 
-**Design (primary): one session, portaled views.** The dashboard page keeps
-the one session, the one grant and the one docs/10 `desktop` claim; each
-popup document is just a rendering surface. `usePresentation(session)`:
+**Design: one session, portaled views** (the M3 spike settled it,
+[spikes/presentation-mode](../spikes/presentation-mode/README.md), closing
+open question #19). The dashboard page keeps the one session, the one grant
+and the one docs/10 `desktop` claim; each popup document is just a
+rendering surface. `usePresentation(session)`:
 
 1. On the operator's click, requests `window-management` if needed, reads
    `getScreenDetails()`, and computes the **screen mapping** (below).
-2. Opens one same-origin popup per mapped monitor, positioned on its local
-   screen, `popup,fullscreen` where supported. Popups are opened from the
-   *same* gesture — allowed with the permission; a browser that still
-   blocks the second one gets a per-window "click to open" fallback.
+2. The **dashboard window itself** goes fullscreen on its screen, showing
+   one mapped monitor, and the same gesture opens **one companion popup**
+   on the next mapped screen: two screens, one click. Each further mapped
+   screen is a "next screen" button in the presentation toolbar, a click
+   each (Chrome opens one popup per gesture, permission or not). A popup
+   opens with `popup,fullscreen` where that works, otherwise it shows a
+   "fullscreen here" button: the opener cannot make another window
+   fullscreen (measured: a `TypeError`, and no activation in the popup).
 3. Renders a `<DesktopView monitorId=… presentation>` into each popup's
    `document.body` through a React portal. The React tree, the session, the
    track handles and the focus registry all stay in the opener; the
@@ -175,7 +182,10 @@ popup document is just a rendering surface. `usePresentation(session)`:
 Every `<DesktopView>` remains usable inline too — presentation mode is a
 layout choice, never a different component.
 
-**Fallback: one session per window.** If the portal approach fails a
+**Not built: one session per window.** No browser needed it (the portal
+works under every COOP, and an empty popup stays in the opener's browsing
+context group, where a popup that loads its own page does not). Kept here
+in case a browser ever does. If the portal approach fails a
 browser (`Cross-Origin-Opener-Policy: same-origin` host apps, `noopener`,
 or a future process-isolation change that breaks cross-document
 `srcObject`), each popup is a plain route (the host app provides it —
@@ -185,9 +195,13 @@ duplicated video and FrameHub means no extra encode; the cost is N
 signaling/ICE/DTLS setups and N grants. Input from the extra windows is
 legitimate because a docs/10 control claim is keyed on the **operator identity in
 the grant**, not the session — the same operator's windows share one
-claim. `usePresentation({ mode: "portal" | "route" })` selects; the demo
-dashboard exercises both, and the **M3 spike** decides the default per
-browser (open question #19).
+claim. It would be `usePresentation({ mode: "route" })`.
+
+**Measured limit.** Two fullscreen windows on two screens rendered ~15 fps
+each from a 30 fps stream on Chrome under X11 (one window alone: ~28),
+whatever the track sharing; a session per window would pay it too. It is
+the desktop's presentation cost, to be measured again on Wayland and
+another GPU, not the design's.
 
 **Screen mapping.** Local screens rarely match robot monitors 1:1:
 
