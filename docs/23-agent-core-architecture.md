@@ -742,13 +742,19 @@ descriptor is watched there, and no Xlib call is made from another thread.
 - **Not offered.** Virtual monitors (`RecordVirtual` is mutter's) and the
   sharing stop (GNOME's indicator): `Features` says so and the capability
   refuses `add-monitor` as `unavailable`.
-- **Clipboard (slice 3.7c).** X selections on `CLIPBOARD`, through a window
-  the module owns: owner changes from `XFixesSelectSelectionInput`; the
-  offered types from `TARGETS` (mapped by the shared `clipboard_types`);
-  reads by `XConvertSelection` into a property, writes by owning the
-  selection and answering `SelectionRequest` for `TARGETS`, every text name
-  and `image/png`. Contents above the server's request size travel with the
-  `INCR` protocol in both directions (a PNG of several MiB is).
+- **Clipboard (slice 3.7c).** X selections on `CLIPBOARD`, through an
+  unmapped window the module owns: owner changes from
+  `XFixesSelectSelectionInput` (the module's own ownership is not a robot
+  copy and is not reported); the offered types from `TARGETS` (mapped by the
+  shared `clipboard_types`); reads by `XConvertSelection` into a property,
+  one at a time, each step and each chunk answered within 5 s or failed;
+  writes by owning the selection with a server timestamp and answering
+  `SelectionRequest` for `TARGETS`, `TIMESTAMP`, every text name and
+  `image/png` (`MULTIPLE` is refused). Contents above 256 KiB travel with
+  the `INCR` protocol in both directions, in 256 KiB chunks; a fixed
+  threshold rather than the server's request size, which BIG-REQUESTS
+  raises to 16 MiB and would leave the path untested under the 8 MiB limit.
+  A paste that stops taking chunks for 10 s is dropped.
 
 **`fjarr-x11-session`** is the session side, started by the kiosk
 session's XDG autostart entry, as the session's user. It grants the agent's

@@ -2584,8 +2584,12 @@ void scenario_desktop_clipboard(Operator& op) {
         const auto f = fjarr::blob::encode_chunk(png_id, off, op_png.size(), std::span<const std::byte>(reinterpret_cast<const std::byte*>(op_png.data() + off), n));
         png_sent = op.peer()->send_binary(label, std::string(reinterpret_cast<const char*>(f.data()), f.size()));
     }
-    auto wrote_png = op.request("fjarr.desktop", "clipboard-write", json{{"type", "image/png"}, {"blob", {{"blob", png_id}, {"len", op_png.size()}, {"type", "image/png"}}}});
-    r.check("clipboard-write-image", png_sent && wrote_png && wrote_png->payload.value("ok", false), wrote_png ? wrote_png->payload.dump() : "no answer to clipboard-write");
+    // Longer than the agent's 10 s for bytes that never complete, so a failure carries its reason.
+    const auto png_t0 = std::chrono::steady_clock::now();
+    auto wrote_png = op.request("fjarr.desktop", "clipboard-write", json{{"type", "image/png"}, {"blob", {{"blob", png_id}, {"len", op_png.size()}, {"type", "image/png"}}}}, 15000);
+    const auto png_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - png_t0).count();
+    r.check("clipboard-write-image", png_sent && wrote_png && wrote_png->payload.value("ok", false),
+            (wrote_png ? wrote_png->payload.dump() : "no answer to clipboard-write") + " after " + std::to_string(png_ms) + " ms");
     auto pasted_png = op.http_get_url(op.desktop_plug() + "/paste-image");
     r.check("clipboard-robot-paste-image", pasted_png.status == 200 && pasted_png.body == digest(op_png),
             "pasted on the robot: " + pasted_png.body + ", sent " + digest(op_png) + (pasted_png.error.empty() ? "" : " " + pasted_png.error));
@@ -2612,6 +2616,44 @@ void scenario_desktop_clipboard(Operator& op) {
     }
     r.check("clipboard-read-image", !got_png.empty() && copied_png.status == 200 && digest(got_png) == copied_png.body,
             "read " + (got_png.empty() ? std::string("nothing") : digest(got_png)) + ", the robot copied " + copied_png.body);
+
+    // 4. Failure modes, where the fixture can stage them (the X11 one, M3 3.7c; docs/15): an owner
+    //    that offers text but never hands it over fails the read in about 5 s and leaves the clipboard
+    //    usable; text over the 1 MiB limit is refused, not truncated.
+    mark = op.inbox_mark();
+    auto stalled = op.http_get_url(op.desktop_plug() + "/copy-stall");
+    if (stalled.status == 404) {
+        std::printf("note: this fixture stages no clipboard failure modes (/copy-stall is the X11 fixture's)\n");
+        return;
+    }
+    auto read_text = [&](const std::string& why) -> std::pair<json, double> {
+        auto o = op.wait_envelope(mark, "fjarr.desktop", "clipboard-offer", "event", 5000);
+        if (!o) return {json{{"error", "no clipboard-offer after " + why}}, 0};
+        const auto t0 = std::chrono::steady_clock::now();
+        auto a = op.request("fjarr.desktop", "clipboard-read", json{{"offer_id", o->payload.value("offer_id", std::string())}, {"type", "text/plain"}}, 10000);
+        const double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        return {a ? a->payload : json{{"error", "no answer to clipboard-read"}}, s};
+    };
+    {
+        auto [answer, secs] = read_text("the stalled owner took the clipboard");
+        const std::string msg = answer.dump();
+        r.check("clipboard-owner-stalls", !answer.value("ok", true) && msg.find("did not answer") != std::string::npos && secs < 8,
+                "after " + std::to_string(secs).substr(0, 4) + " s: " + msg);
+    }
+    mark = op.inbox_mark();
+    op.http_get_url(op.desktop_plug() + "/copy?text=" + escape(robot_text));
+    {
+        auto o = op.wait_envelope(mark, "fjarr.desktop", "clipboard-offer", "event", 5000);
+        auto a = o ? op.request("fjarr.desktop", "clipboard-read", json{{"offer_id", o->payload.value("offer_id", std::string())}, {"type", "text/plain"}}) : std::nullopt;
+        r.check("clipboard-after-stall", a && a->payload.value("ok", false), a ? "the next copy reads again: " + a->payload.dump() : "no offer or answer after the stall");
+    }
+    mark = op.inbox_mark();
+    op.http_get_url(op.desktop_plug() + "/copy-big");
+    {
+        auto [answer, secs] = read_text("1 MiB + 1 of text was copied");
+        const std::string msg = answer.dump();
+        r.check("clipboard-over-limit", !answer.value("ok", true) && msg.find("larger than") != std::string::npos, msg);
+    }
 }
 
 /// The local cursor (M3 3.5; docs/08 `cursor`, `cursor-position`): mutter's cursor metadata through

@@ -487,6 +487,27 @@ test opens a window, streams, clicks into the robot from it, goes fullscreen
 on its button and closes with the dashboard; verified by the user on two
 screens with the Mini PC on demo.fjarr.io, and in Firefox. 3.6 is done.
 
+**3.7, the X11 kiosk (2026-10-05).** Backend A runs in the agent's own
+process ([docs/23](23-agent-core-architecture.md#desktop-x11)), with
+robot-sim in fixture mode as its CI fixture (`make x11-e2e`: see, drive,
+hot-plug, clipboard, cursor). The fixture found four things: Xvfb's root
+cannot grow, so it starts 3840 wide and carves monitors out of it; it sends
+no RandR event for those monitors, so the module re-reads them every 500 ms
+(a 2 s timer missed the 2 s hot-plug budget); it resets when its last client
+leaves, which dropped the grant (`-noreset`); and `ximagesrc` needs the X
+server's IPC namespace or captures stale frames. The package
+`fjarr-desktop-x11` carries `fjarr-x11-session` (the grant and the output
+layout, from the kiosk session's autostart entry), and `setup desktop --x11`
+links that entry and points the agent at the display, leaving the display
+manager to the operator; the install test runs both and the undo. The
+clipboard (3.7c) uses X selections with INCR above 256 KiB; its first runs
+stalled transfers until their timeout, because events that a round trip
+outside the event handler had read sat in Xlib's queue, where a descriptor
+watch never sees them; the module's event source now checks that queue too.
+The fixture also stages an owner that never answers and text over the limit.
+Left for 3.7: an X11 kiosk from the package on real hardware (LightDM with
+an automatic login, per ADR-0006).
+
 ## M3.5 — Hear the robot {#m35}
 
 **`fjarr.audio`** (robot microphone downlink, push-to-talk uplink through the

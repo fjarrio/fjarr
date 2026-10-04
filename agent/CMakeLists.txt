@@ -114,8 +114,8 @@ set_target_properties(fjarr-desktop-mutter PROPERTIES
 # RandR monitor, XTest input, the XFixes cursor (docs/23#desktop-x11). Its X libraries are the
 # module's, shipped in fjarr-desktop-x11, never libfjarr's.
 pkg_check_modules(X11LIBS REQUIRED IMPORTED_TARGET x11 xtst xfixes xrandr)
-add_library(fjarr-desktop-x11 MODULE modules/desktop-x11/backend.cpp src/desktop/edid.cpp
-  src/desktop/monitor_identity.cpp src/desktop/keymap.cpp src/desktop/cursor_image.cpp)
+add_library(fjarr-desktop-x11 MODULE modules/desktop-x11/backend.cpp modules/desktop-x11/clipboard.cpp src/desktop/edid.cpp
+  src/desktop/monitor_identity.cpp src/desktop/keymap.cpp src/desktop/cursor_image.cpp src/desktop/clipboard_types.cpp)
 target_include_directories(fjarr-desktop-x11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(fjarr-desktop-x11 PRIVATE PkgConfig::GST PkgConfig::X11LIBS PkgConfig::XKBCOMMON nlohmann_json::nlohmann_json)
 set_target_properties(fjarr-desktop-x11 PROPERTIES

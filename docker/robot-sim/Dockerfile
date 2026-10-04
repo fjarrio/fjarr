@@ -7,7 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     xvfb openbox x11vnc novnc websockify \
     xterm x11-apps mesa-utils x11-utils \
-    x11-xserver-utils xauth python3-xlib \
+    x11-xserver-utils xauth python3-xlib xclip \
     && rm -rf /var/lib/apt/lists/*
 
 # The X11 fixture (SIM_FIXTURE=1, M3 3.7): the agent's account, so `xhost +si:localuser:fjarr` names
