@@ -677,6 +677,19 @@ describe("<DesktopView> clipboard (M3 3.5)", () => {
     expect(sent()[2][1]).toEqual({ codes: ["ControlLeft", "KeyV"] });
   });
 
+  it("a pasted image goes to the robot as image/png, in preference to text beside it, before Ctrl+V", async () => {
+    const { editor, sent } = await mount();
+    fireEvent.keyDown(editor, { code: "KeyV", key: "v", ctrlKey: true });
+    const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "image.png", { type: "image/png" });
+    fireEvent.paste(editor, {
+      clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => file }], getData: (t: string) => (t === "text/plain" ? "a caption" : "") },
+    });
+    await tick(12);
+    const writes = sent().filter(([t]) => t === "clipboard-write");
+    expect(writes.map(([, p]) => (p as { type: string }).type)).toEqual(["image/png"]);
+    expect(sent().map(([t]) => t)).toEqual(["clipboard-write", "key-combo"]);
+  });
+
   it("a paste chord with no paste event (nothing textual to paste) still reaches the robot after 300 ms", async () => {
     const { editor, sent } = await mount();
     fireEvent.keyDown(editor, { code: "KeyV", key: "v", ctrlKey: true });

@@ -2556,6 +2556,62 @@ void scenario_desktop_clipboard(Operator& op) {
     // Our own write is never offered back to us (docs/08 clipboard-offer).
     auto echo = op.wait_envelope(mark, "fjarr.desktop", "clipboard-offer", "event", 1000);
     r.check("clipboard-no-echo", !echo, echo ? "our own write came back as an offer" : "our write was not offered back");
+
+    // 3. Images (docs/08: image/png up to 8 MiB). Above the 1 MiB text limit and several chunks
+    // long, so the per-type limit and the chunking are what is tested. Compared as "<length> <sha256>".
+    auto digest = [](const std::string& bytes) {
+        gchar* hex = g_compute_checksum_for_data(G_CHECKSUM_SHA256, reinterpret_cast<const guchar*>(bytes.data()), bytes.size());
+        std::string out = std::to_string(bytes.size()) + " " + hex;
+        g_free(hex);
+        return out;
+    };
+    auto new_id = [] {
+        std::array<std::uint8_t, 16> b{};
+        for (auto& x : b) x = static_cast<std::uint8_t>(g_random_int());
+        b[6] = static_cast<std::uint8_t>((b[6] & 0x0F) | 0x40);
+        b[8] = static_cast<std::uint8_t>((b[8] & 0x3F) | 0x80);
+        return fjarr::blob::uuid_text(b);
+    };
+    //   Operator → robot: a pasted image, then what an application asking for image/png gets.
+    std::string op_png = std::string("\x89PNG\r\n\x1a\n", 8);
+    for (int i = 0; i < 1200 * 1024; i++) op_png.push_back(static_cast<char>(g_random_int() & 0xFF));
+    const std::string png_id = new_id();
+    bool png_sent = true;
+    // Chunks well under the SCTP message size (header included), as the core's pump sends them.
+    constexpr std::size_t CHUNK = 16 * 1024;
+    for (std::size_t off = 0; off < op_png.size() && png_sent; off += CHUNK) {
+        const std::size_t n = std::min<std::size_t>(CHUNK, op_png.size() - off);
+        const auto f = fjarr::blob::encode_chunk(png_id, off, op_png.size(), std::span<const std::byte>(reinterpret_cast<const std::byte*>(op_png.data() + off), n));
+        png_sent = op.peer()->send_binary(label, std::string(reinterpret_cast<const char*>(f.data()), f.size()));
+    }
+    auto wrote_png = op.request("fjarr.desktop", "clipboard-write", json{{"type", "image/png"}, {"blob", {{"blob", png_id}, {"len", op_png.size()}, {"type", "image/png"}}}});
+    r.check("clipboard-write-image", png_sent && wrote_png && wrote_png->payload.value("ok", false), wrote_png ? wrote_png->payload.dump() : "no answer to clipboard-write");
+    auto pasted_png = op.http_get_url(op.desktop_plug() + "/paste-image");
+    r.check("clipboard-robot-paste-image", pasted_png.status == 200 && pasted_png.body == digest(op_png),
+            "pasted on the robot: " + pasted_png.body + ", sent " + digest(op_png) + (pasted_png.error.empty() ? "" : " " + pasted_png.error));
+    //   Robot → operator: an image copied on the robot is offered as image/png and read whole.
+    mark = op.inbox_mark();
+    auto copied_png = op.http_get_url(op.desktop_plug() + "/copy-image");
+    auto img_offer = op.wait_envelope(mark, "fjarr.desktop", "clipboard-offer", "event", 5000);
+    const json img_types = img_offer ? img_offer->payload.value("types", json::array()) : json::array();
+    const bool has_png = std::find(img_types.begin(), img_types.end(), json("image/png")) != img_types.end();
+    r.check("clipboard-offer-image", has_png, img_offer ? "offered " + img_types.dump() : "no clipboard-offer after the robot copied an image");
+    std::string got_png;
+    if (has_png) {
+        auto read_png = op.request("fjarr.desktop", "clipboard-read", json{{"offer_id", img_offer->payload.value("offer_id", std::string())}, {"type", "image/png"}});
+        const json pref = read_png && read_png->payload.value("ok", false) ? read_png->payload.value("blob", json::object()) : json::object();
+        for (int i = 0; i < 200 && got_png.empty() && pref.contains("blob"); i++) {
+            {
+                std::lock_guard<std::mutex> lk(mu);
+                auto it = blobs.find(pref.value("blob", std::string()));
+                if (it != blobs.end()) got_png = it->second;
+            }
+            if (got_png.empty()) std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        if (!pref.contains("blob")) got_png.clear();
+    }
+    r.check("clipboard-read-image", !got_png.empty() && copied_png.status == 200 && digest(got_png) == copied_png.body,
+            "read " + (got_png.empty() ? std::string("nothing") : digest(got_png)) + ", the robot copied " + copied_png.body);
 }
 
 /// The local cursor (M3 3.5; docs/08 `cursor`, `cursor-position`): mutter's cursor metadata through

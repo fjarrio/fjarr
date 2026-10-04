@@ -262,7 +262,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
     }
 
     void write(const std::string& type, std::string bytes, std::function<void(bool, std::string)> done) override {
-        if (type != desktop::clipboard::TEXT) return done(false, "only text/plain is supported");
+        if (desktop::clipboard::max_bytes(type) == 0) return done(false, "only text/plain and image/png are supported");
         if (conn_ < 0 || !welcomed_) return done(false, "no desktop session");
         // The bytes travel as a memfd beside the message (one datagram is at most 64 KiB).
         const int fd = ::memfd_create("fjarr-clipboard", MFD_CLOEXEC | MFD_ALLOW_SEALING);
@@ -281,7 +281,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         const int id = next_clip_id_++;
         writes_[id] = std::move(done);
         std::string err;
-        if (!desktop::proto::send(conn_, {{"type", "clipboard-set"}, {"id", id}, {"types", json::array({desktop::clipboard::TEXT})}}, {fd}, &err)) {
+        if (!desktop::proto::send(conn_, {{"type", "clipboard-set"}, {"id", id}, {"types", json::array({type})}}, {fd}, &err)) {
             auto cb = std::move(writes_[id]);
             writes_.erase(id);
             cb(false, "to the helper: " + err);

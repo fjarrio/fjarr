@@ -148,7 +148,7 @@ test("a monitor plugged into the robot appears in the Desktop panel's layout, an
   await expect(page.locator("[data-fjarr-desktop] [data-fjarr-track^='desk-']")).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
 });
 
-test("the Desktop panel's clipboard: a copy on the robot reaches the browser, and a paste in the browser pastes on the robot (M3 3.5)", async ({ dashboard, stack, page }) => {
+test("the Desktop panel's clipboard: a copy on the robot reaches the browser, and a paste in the browser pastes on the robot, text and images (M3 3.5)", async ({ dashboard, stack, page }) => {
   await stack.requireServer();
   needs(await stack.dashboardReachable(), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
   const plugd = process.env.E2E_DESKTOP_PLUG ?? "http://desktop-fixture:8091";
@@ -178,6 +178,37 @@ test("the Desktop panel's clipboard: a copy on the robot reaches the browser, an
   await surface.click({ position: { x: 40, y: 40 } });
   await page.keyboard.press("Control+V");
   await expect.poll(() => call("paste"), { timeout: 5000, message: "the robot's clipboard after the operator's Ctrl+V" }).toBe(operatorText);
+
+  // 3. Images (docs/22#clipboard). Chrome re-encodes images on its clipboard, so they are compared
+  //    by size. Robot → browser: the fixture's 700x600 PNG lands on this browser's clipboard.
+  expect(await call("copy-image")).toMatch(/^\d+ [0-9a-f]{64}$/);
+  const robotImage = () =>
+    page.evaluate(async () => {
+      for (const item of await navigator.clipboard.read().catch(() => [])) {
+        if (!item.types.includes("image/png")) continue;
+        const bitmap = await createImageBitmap(await item.getType("image/png"));
+        return `${bitmap.width}x${bitmap.height}`;
+      }
+      return "no image";
+    });
+  await expect.poll(async () => {
+    if ((await page.locator("[data-demo-clipboard]").getAttribute("data-demo-clipboard")) === "needs-gesture") await page.getByRole("button", { name: "Copy from robot" }).click();
+    return robotImage();
+  }, { timeout: 10_000, message: "the browser's clipboard after the robot copied an image" }).toBe("700x600");
+  //    Browser → robot: an image drawn here, Ctrl+V in the view, and the robot pastes a 320x200 PNG.
+  await page.evaluate(async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 320;
+    canvas.height = 200;
+    const g = canvas.getContext("2d")!;
+    g.fillStyle = "#2f81f7";
+    g.fillRect(0, 0, 320, 200);
+    const blob = await new Promise<Blob>((ok) => canvas.toBlob((b) => ok(b!), "image/png"));
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+  });
+  await surface.click({ position: { x: 40, y: 40 } });
+  await page.keyboard.press("Control+V");
+  await expect.poll(() => call("paste-image?size=1"), { timeout: 10_000, message: "the robot's clipboard after the operator pasted an image" }).toBe("320x200");
 });
 
 test("the Desktop panel shows the robot's own cursor: under the operator's pointer, and where the robot's pointer is (M3 3.5)", async ({ dashboard, stack, page }) => {

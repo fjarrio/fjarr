@@ -420,3 +420,86 @@ describe("DesktopSharing", () => {
     expect(acquireDesktopSharing(session).sharing).not.toBe(a.sharing); // the last release disposed it
   });
 });
+
+/**
+ * Images on the clipboard (docs/08 image/png, docs/22#clipboard): read in preference to text when
+ * offered, handed to the browser as a PNG blob, and a pasted PNG written to the robot.
+ */
+describe("DesktopClipboard images", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+  const BLOB = "01930000-0000-7000-8000-0000000c0a01";
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 1, 2, 3]);
+
+  async function imageRig() {
+    let agent!: MockAgent;
+    agent = new MockAgent({
+      now: () => Date.now(),
+      bulkCaps: ["fjarr.desktop"],
+      onRequest: (env) => {
+        if (env.type === "clipboard-write") return { ok: true };
+        if (env.type !== "clipboard-read") return undefined;
+        queueMicrotask(() => agent.sendBulk("fjarr.desktop", encodeBlobChunk(BLOB, 0, png.length, png)));
+        return { ok: true, blob: { blob: BLOB, len: png.length, type: "image/png" } };
+      },
+    });
+    const client = createFjarrClient({
+      serverUrl: "wss://fjarr.test/ws",
+      grant: async () => "jwt",
+      socketFactory: agent.socketFactory,
+      peerConnectionFactory: agent.peerConnectionFactory,
+      createMediaStream: fakeMediaStreamFactory,
+      now: () => Date.now(),
+      random: () => 0.5,
+    });
+    const session: Session = client.sessions.open("robot-1");
+    await tick();
+    return { agent, session };
+  }
+
+  it("an image the robot copied is read as image/png, in preference to text, and handed to the browser", async () => {
+    const { agent, session } = await imageRig();
+    const images: Uint8Array[] = [];
+    const texts: string[] = [];
+    const { clipboard, release } = acquireDesktopClipboard(session, {
+      writeText: async (t) => void texts.push(t),
+      writeImage: async (b) => void images.push(new Uint8Array(await b.arrayBuffer())),
+    });
+    agent.sendEvent("fjarr.desktop", "clipboard-offer", { offer_id: "offer-1", types: ["text/plain", "image/png"] });
+    await tick(12);
+    expect(agent.received.filter((e) => e.type === "clipboard-read").map((e) => e.payload)).toEqual([{ offer_id: "offer-1", type: "image/png" }]);
+    expect(images).toEqual([png]);
+    expect(texts).toEqual([]);
+    expect(clipboard.snapshot.sync).toBe("synced");
+    release();
+  });
+
+  it("a browser that wants a click first keeps the image for Copy from robot", async () => {
+    const { agent, session } = await imageRig();
+    let allowed = false;
+    const images: number[] = [];
+    const { clipboard, release } = acquireDesktopClipboard(session, {
+      writeImage: async (b) => {
+        if (!allowed) throw new Error("NotAllowedError");
+        images.push(b.size);
+      },
+    });
+    agent.sendEvent("fjarr.desktop", "clipboard-offer", { offer_id: "offer-1", types: ["image/png"] });
+    await tick(12);
+    expect(clipboard.snapshot.sync).toBe("needs-gesture");
+    allowed = true;
+    await clipboard.copyFromRobot();
+    expect(images).toEqual([png.length]);
+    expect(agent.received.filter((e) => e.type === "clipboard-read")).toHaveLength(1); // not read again
+    release();
+  });
+
+  it("a pasted PNG goes to the robot as image/png bytes", async () => {
+    const { agent, session } = await imageRig();
+    const { clipboard, release } = acquireDesktopClipboard(session);
+    await clipboard.writeImage(png);
+    const req = agent.received.find((e) => e.type === "clipboard-write");
+    expect(req?.payload).toMatchObject({ type: "image/png", blob: { len: png.length, type: "image/png" } });
+    release();
+  });
+});

@@ -15,7 +15,6 @@ add_executable(fjarr-tests
   ${CMAKE_SOURCE_DIR}/agent/src/desktop/monitor_identity.cpp
   ${CMAKE_SOURCE_DIR}/agent/src/desktop/keymap.cpp
   ${CMAKE_SOURCE_DIR}/agent/src/desktop/helper_protocol.cpp
-  ${CMAKE_SOURCE_DIR}/agent/src/desktop/clipboard_types.cpp
   ${CMAKE_SOURCE_DIR}/agent/src/desktop/cursor_image.cpp
   test_frame_hub.cpp
   test_channels.cpp

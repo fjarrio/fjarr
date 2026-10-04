@@ -189,11 +189,16 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
   // A paste chord waiting for the browser's `paste` event (docs/22#clipboard): the robot gets Ctrl+V
   // only once its clipboard holds what the operator pasted, or after 300 ms with no paste at all.
   const pasteWait = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const finishPaste = async (text: string | null) => {
+  // What a paste carries: an image (docs/22: in preference to text beside it), text, or nothing.
+  const finishPaste = async (content: { text: string } | { png: Blob } | null) => {
     if (pasteWait.current) clearTimeout(pasteWait.current);
     pasteWait.current = null;
     if (!input) return;
-    if (text && clip.clipboard) await clip.clipboard.write(text).catch(() => undefined);
+    if (content && clip.clipboard) {
+      const c = clip.clipboard;
+      const write = "png" in content ? content.png.arrayBuffer().then((b) => c.writeImage(new Uint8Array(b))) : c.write(content.text);
+      await write.catch(() => undefined);
+    }
     // Cmd+V on a Mac: the robot's Super must not be down for the robot's Ctrl+V.
     for (const meta of ["MetaLeft", "MetaRight"]) if (input.held.keys.has(meta)) input.keyUp({ code: meta, repeat: false });
     await input.keyCombo(["ControlLeft", "KeyV"]).catch(() => undefined);
@@ -377,7 +382,9 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
         onPaste={(e) => {
           e.preventDefault(); // nothing lands in the hidden editable
           if (!focused || !mayInput || !clipboardOn) return;
-          void finishPaste(e.clipboardData.getData("text/plain") || null);
+          const image = Array.from(e.clipboardData.items ?? []).find((i) => i.kind === "file" && i.type === "image/png")?.getAsFile();
+          const text = e.clipboardData.getData("text/plain");
+          void finishPaste(image ? { png: image } : text ? { text } : null);
         }}
         onKeyUp={(e) => {
           if (input.keyUp(e.nativeEvent)) e.preventDefault();

@@ -69,6 +69,7 @@ add_library(fjarr STATIC
   src/capabilities/desktop_capability.cpp
   src/desktop/module_loader.cpp
   src/desktop/keycodes.cpp
+  src/desktop/clipboard_types.cpp
 )
 add_library(fjarr::fjarr ALIAS fjarr)
 target_include_directories(fjarr

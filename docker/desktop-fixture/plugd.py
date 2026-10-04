@@ -83,6 +83,48 @@ def paste():
     return ("200 " if r.returncode == 0 else "500 ") + (r.stdout if r.returncode == 0 else r.stderr).decode(errors="replace")
 
 
+def test_png():
+    # A real PNG of ~1.2 MiB: noise does not compress, so it is above the 1 MiB text limit and
+    # several blob chunks long (docs/08: images up to 8 MiB). Seeded, so every run is the same.
+    import random, struct, zlib
+    w, h = 700, 600
+    rnd = random.Random(42)
+    raw = b"".join(b"\x00" + rnd.randbytes(w * 3) for _ in range(h))
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw, 1)) + chunk(b"IEND", b"")
+
+
+def digest(data):
+    import hashlib
+    return f"{len(data)} {hashlib.sha256(data).hexdigest()}"
+
+
+def copy_image():
+    # The robot copies an image as image/png only, as an image viewer does.
+    data = test_png()
+    path = "/run/desktop/test.png"
+    with open(path, "wb") as f:
+        f.write(data)
+    subprocess.Popen(["wl-copy", "--type", "image/png"], stdin=open(path, "rb"), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    return "200 " + digest(data)
+
+
+def paste_image(size=False):
+    # The robot pastes an image: what an application asking for image/png gets, as "<length> <sha256>",
+    # or with size=1 as "<width>x<height>" from its PNG header (a browser re-encodes what it pastes).
+    import struct
+    r = subprocess.run(["wl-paste", "--type", "image/png"], capture_output=True, timeout=10)
+    if r.returncode != 0:
+        return "500 " + r.stderr.decode(errors="replace")
+    if size:
+        if r.stdout[:8] != b"\x89PNG\r\n\x1a\n" or len(r.stdout) < 24:
+            return "200 not a png"
+        w, h = struct.unpack(">II", r.stdout[16:24])
+        return f"200 {w}x{h}"
+    return "200 " + digest(r.stdout)
+
+
 def on_request(server, _cond):
     conn, _ = server.accept()
     try:
@@ -97,8 +139,12 @@ def on_request(server, _cond):
             result = copy(urllib.parse.parse_qs(query).get("text", [""])[0])
         elif path == "/paste":
             result = paste()
+        elif path == "/copy-image":
+            result = copy_image()
+        elif path == "/paste-image":
+            result = paste_image(urllib.parse.parse_qs(query).get("size", ["0"])[0] == "1")
         else:
-            result = "404 /plug, /unplug, /copy?text= or /paste"
+            result = "404 /plug, /unplug, /copy?text=, /paste, /copy-image or /paste-image"
         code, body = result.split(" ", 1)
         data = body.encode()
         conn.sendall(f"HTTP/1.0 {code} X\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {len(data)}\r\n\r\n".encode() + data)
@@ -112,5 +158,5 @@ server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server.bind(("0.0.0.0", PORT))
 server.listen(4)
 GLib.io_add_watch(server.fileno(), GLib.IO_IN, lambda *_: on_request(server, None))
-print(f"plugd: monitor hot-plug and the clipboard on :{PORT} (/plug, /unplug, /copy?text=, /paste)", flush=True)
+print(f"plugd: monitor hot-plug and the clipboard on :{PORT} (/plug, /unplug, /copy?text=, /paste, /copy-image, /paste-image)", flush=True)
 GLib.MainLoop().run()

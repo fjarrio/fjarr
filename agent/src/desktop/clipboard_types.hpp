@@ -8,14 +8,20 @@
 namespace fjarr::desktop::clipboard {
 
 inline constexpr const char* TEXT = "text/plain";
-inline constexpr std::size_t MAX_BYTES = 1024 * 1024; // docs/08: 1 MiB in either direction
+inline constexpr const char* PNG = "image/png";
+/// The largest of the limits below: what the helper accepts in a clipboard-set at all.
+inline constexpr std::size_t MAX_BYTES = 8 * 1024 * 1024;
+/// docs/08: 1 MiB of text, 8 MiB of PNG, in either direction; 0 for a type Fjarr does not carry.
+std::size_t max_bytes(const std::string& fjarr_type);
+/// The compositor names to offer `fjarr_type` under when the agent sets the clipboard.
+std::vector<std::string> compositor_names(const std::string& fjarr_type);
 
 /// Every name an application may ask text for. Offering fewer, `wl-paste --type text/plain` found
 /// nothing (spike 2026-10-03).
 const std::vector<std::string>& text_aliases();
 
-/// What the compositor's types can be read as, in Fjarr's names: {"text/plain"} when any text type
-/// is there, else empty (images come later).
+/// What the compositor's types can be read as, in Fjarr's names: "text/plain" when any text type
+/// is there, "image/png" when image/png is. Files (text/uri-list) wait for fjarr.files (M4).
 std::vector<std::string> fjarr_types(const std::vector<std::string>& compositor_types);
 
 /// The compositor type to read `fjarr_type` as, from what was offered: UTF-8 first. Empty when none fits.

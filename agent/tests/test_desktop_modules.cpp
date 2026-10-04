@@ -400,6 +400,43 @@ TEST(DesktopClipboard, aPasteLargerThanAMebibyteIsRefusedWithTheLimit) {
     EXPECT_TRUE(r.calls().empty());
 }
 
+TEST(DesktopClipboard, anImageCopiedOnTheRobotIsOfferedAsPngAndReadWholeAsABlob) {
+    // docs/08: image/png, up to 8 MiB (M3 3.5). Binary bytes, NULs included.
+    InputRig r;
+    void* so = ::dlopen((std::string(FJARR_STUB_MODULE_DIR) + "/libfjarr-desktop-stub.so").c_str(), RTLD_NOW | RTLD_NOLOAD);
+    auto copy_as = reinterpret_cast<void (*)(const char*, const char*, unsigned long)>(::dlsym(so, "fjarr_stub_copy_as"));
+    ASSERT_NE(copy_as, nullptr);
+    std::string png = std::string("\x89PNG\r\n\x1a\n", 8) + std::string(3 * 1024 * 1024, '\0'); // above text's 1 MiB
+    copy_as("image/png", png.data(), png.size());
+    const auto* offer = last(r.a, "clipboard-offer");
+    ASSERT_NE(offer, nullptr);
+    EXPECT_EQ(offer->payload["types"], nlohmann::json::array({"image/png"}));
+    const std::string id = offer->payload["offer_id"];
+    r.send(r.a, "clipboard-read", {{"offer_id", id}, {"type", "image/png"}}, "request");
+    ASSERT_EQ(r.a.blobs.size(), 1u);
+    EXPECT_EQ(r.a.blobs[0].bytes, png);
+    EXPECT_TRUE(r.a.sent.back().payload["ok"].get<bool>()) << r.a.sent.back().payload.dump();
+    // Text is not what it offered.
+    r.send(r.a, "clipboard-read", {{"offer_id", id}, {"type", "text/plain"}}, "request");
+    EXPECT_EQ(r.a.sent.back().payload["error"]["code"], "payload-invalid");
+}
+
+TEST(DesktopClipboard, aPastedPngReachesTheRobotUpToEightMebibytesAndOtherTypesAreRefused) {
+    InputRig r;
+    const std::string png(3 * 1024 * 1024, 'p');
+    const std::string id = "01930000-0000-7000-8000-000000000011";
+    r.cap.on_blob_chunk(r.a, chunk(id, 0, png.size(), png));
+    r.send(r.a, "clipboard-write", {{"type", "image/png"}, {"blob", {{"blob", id}, {"len", png.size()}, {"type", "image/png"}}}}, "request");
+    ASSERT_FALSE(r.a.sent.empty());
+    EXPECT_TRUE(r.a.sent.back().payload.value("ok", false)) << r.a.sent.back().payload.dump();
+    EXPECT_EQ(r.calls(), std::vector<std::string>{"clipboard image/png 3145728 bytes"});
+    r.send(r.a, "clipboard-write", {{"type", "image/png"}, {"blob", {{"blob", "01930000-0000-7000-8000-000000000012"}, {"len", std::uint64_t{9 * 1024 * 1024}}, {"type", "image/png"}}}}, "request");
+    EXPECT_EQ(r.a.sent.back().payload["error"]["data"]["reason"], "too-large");
+    EXPECT_EQ(r.a.sent.back().payload["error"]["data"]["limit"], 8 * 1024 * 1024);
+    r.send(r.a, "clipboard-write", {{"type", "image/jpeg"}, {"blob", {{"blob", "01930000-0000-7000-8000-000000000013"}, {"len", std::uint64_t{3}}, {"type", "image/jpeg"}}}}, "request");
+    EXPECT_EQ(r.a.sent.back().payload["error"]["code"], "payload-invalid");
+}
+
 TEST(DesktopClipboard, aWriteIsDesktopInputAndAReadIsNot) {
     // The core lets control_inputs through only for the domain's holder and never for a view-only
     // grant (docs/10): clipboard-write must be one, clipboard-read must not.

@@ -316,7 +316,12 @@ class Helper {
         const int id = m.body.value("id", 0);
         auto failed = [&](const std::string& why) { send({{"type", "clipboard-failed"}, {"id", id}, {"reason", why}}); };
         if (m.fds.empty()) return failed("no content came with clipboard-set");
-        // The content is a memfd the agent filled; read it whole, at most 1 MiB (docs/08).
+        // What it is, in Fjarr's names (docs/23): text is offered under every text name, a PNG as image/png.
+        const auto types = m.body.value("types", std::vector<std::string>{clipboard::TEXT});
+        const std::string type = types.empty() ? std::string(clipboard::TEXT) : types.front();
+        const std::size_t limit = clipboard::max_bytes(type);
+        if (limit == 0) return failed("the clipboard takes text/plain or image/png, not " + type);
+        // The content is a memfd the agent filled; read it whole, at most the type's limit (docs/08).
         std::string bytes;
         char buf[65536];
         ::lseek(m.fds[0].get(), 0, SEEK_SET);
@@ -326,11 +331,11 @@ class Helper {
             if (n < 0) return failed(std::string("reading the content: ") + std::strerror(errno));
             if (n == 0) break;
             bytes.append(buf, static_cast<std::size_t>(n));
-            if (bytes.size() > clipboard::MAX_BYTES) return failed("larger than 1 MiB");
+            if (bytes.size() > limit) return failed("larger than " + std::to_string(limit) + " bytes");
         }
         std::string err;
-        if (!input().set_selection(clipboard::text_aliases(), &err)) return failed(err);
-        say("the agent set the clipboard: " + std::to_string(bytes.size()) + " bytes");
+        if (!input().set_selection(clipboard::compositor_names(type), &err)) return failed(err);
+        say("the agent set the clipboard: " + std::to_string(bytes.size()) + " bytes of " + type);
         clipboard_ = std::make_unique<std::string>(std::move(bytes));
         send({{"type", "clipboard-set-done"}, {"id", id}});
     }

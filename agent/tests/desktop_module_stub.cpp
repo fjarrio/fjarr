@@ -50,6 +50,7 @@ std::function<void(const CursorShape&)> g_shape_cb;
 std::function<void(MonitorId, double, double)> g_position_cb;
 /// The robot's clipboard, which the test fills through fjarr_stub_copy (below).
 std::string g_clipboard;
+std::string g_clipboard_type = "text/plain"; // what g_clipboard is, in Fjarr's names
 std::function<void(std::vector<std::string>)> g_clipboard_cb;
 
 class StubBackend final : public DesktopBackend, public ClipboardHandle {
@@ -131,12 +132,12 @@ class StubBackend final : public DesktopBackend, public ClipboardHandle {
     // The clipboard: reads answer what fjarr_stub_copy put there; writes are recorded.
     void on_changed(std::function<void(std::vector<std::string>)> cb) override { g_clipboard_cb = std::move(cb); }
     void read(const std::string& type, std::size_t max_bytes, std::function<void(std::optional<std::string>, std::string)> done) override {
-        if (type != "text/plain") return done(std::nullopt, "no " + type);
+        if (type != g_clipboard_type) return done(std::nullopt, "no " + type);
         if (g_clipboard.size() > max_bytes) return done(std::nullopt, "too-large");
         done(g_clipboard, {});
     }
     void write(const std::string& type, std::string bytes, std::function<void(bool, std::string)> done) override {
-        record("clipboard " + type + " " + bytes);
+        record("clipboard " + type + " " + (type == "text/plain" ? bytes : std::to_string(bytes.size()) + " bytes"));
         done(true, {});
     }
 };
@@ -199,7 +200,15 @@ extern "C" void fjarr_stub_lose(unsigned monitor) {
 }
 
 /// The test's hand on the robot's clipboard: the robot copies `text` ("" clears it: no types).
+/// The robot copies `len` bytes as `type` (an image: "image/png").
+extern "C" void fjarr_stub_copy_as(const char* type, const char* bytes, unsigned long len) {
+    g_clipboard_type = type;
+    g_clipboard.assign(bytes, len);
+    if (g_clipboard_cb) g_clipboard_cb({g_clipboard_type});
+}
+
 extern "C" void fjarr_stub_copy(const char* text) {
+    g_clipboard_type = "text/plain";
     g_clipboard = text ? text : "";
     if (g_clipboard_cb) g_clipboard_cb(g_clipboard.empty() ? std::vector<std::string>{} : std::vector<std::string>{"text/plain"});
 }

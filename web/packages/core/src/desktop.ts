@@ -252,7 +252,13 @@ export interface DesktopClipboardOptions {
   autoSync?: boolean;
   /** The browser's clipboard; `navigator.clipboard.writeText` by default. */
   writeText?: (text: string) => Promise<void>;
+  /** The browser's clipboard for a PNG; `navigator.clipboard.write` with a `ClipboardItem` by default. */
+  writeImage?: (png: Blob) => Promise<void>;
 }
+
+/** What the robot copied, read and held for the browser's clipboard. */
+type RobotContent = { kind: "text"; text: string } | { kind: "image"; png: Blob };
+const PNG = "image/png";
 
 interface ClipboardOffer {
   offer_id: string;
@@ -269,7 +275,7 @@ interface ClipboardOffer {
 export class DesktopClipboard {
   private state: DesktopClipboardState = { sync: "idle" };
   private offer: ClipboardOffer | null = null;
-  private held: string | null = null; // the robot's text the browser would not take yet
+  private held: RobotContent | null = null; // what the robot copied that the browser would not take yet
   private readonly listeners = new Set<() => void>();
   private readonly off: () => void;
   // Taken now, not per read: the channel keeps a blob's chunks only for a receiver that exists, and
@@ -302,8 +308,20 @@ export class DesktopClipboard {
   private async onOffer(offer: ClipboardOffer): Promise<void> {
     this.offer = offer;
     this.held = null;
-    if (!offer.types?.includes("text/plain")) return this.set({ sync: "idle" });
+    if (!offer.types?.includes("text/plain") && !offer.types?.includes(PNG)) return this.set({ sync: "idle" });
     if (this.options.autoSync ?? true) await this.pull();
+  }
+
+  /** The robot's current copy: its image when it offers one (docs/22: in preference to text), else its text. */
+  private async readContent(): Promise<RobotContent | null> {
+    const offer = this.offer;
+    if (offer?.types?.includes(PNG)) {
+      const res = await this.session.request<ResultPayload & { blob: BlobRef }>(CAP, "clipboard-read", { offer_id: offer.offer_id, type: PNG });
+      const bytes = await this.bulk.receive(res.blob);
+      return { kind: "image", png: new Blob([bytes as BlobPart], { type: PNG }) };
+    }
+    const text = await this.readRobot();
+    return text === null ? null : { kind: "text", text };
   }
 
   /** The robot's current text, read on demand (docs/08 clipboard-read); null when it holds none. */
@@ -316,31 +334,37 @@ export class DesktopClipboard {
   }
 
   private async pull(): Promise<void> {
-    let text: string | null;
+    let content: RobotContent | null;
     try {
-      text = await this.readRobot();
+      content = await this.readContent();
     } catch (e) {
       return this.set({ sync: "failed", error: (e as Error).message });
     }
-    if (text === null) return;
+    if (content === null) return;
     try {
-      await this.writeText(text);
+      await this.toBrowser(content);
       this.held = null;
       this.set({ sync: "synced" });
     } catch {
-      // The browser wants a user gesture first (docs/22): keep the text for copyFromRobot().
-      this.held = text;
+      // The browser wants a user gesture first (docs/22): keep it for copyFromRobot().
+      this.held = content;
       this.set({ sync: "needs-gesture" });
     }
   }
 
   /** From a click: the robot's latest copy onto the browser's clipboard. */
   async copyFromRobot(): Promise<void> {
-    const text = this.held ?? (await this.readRobot());
-    if (text === null) return;
-    await this.writeText(text);
+    const content = this.held ?? (await this.readContent());
+    if (content === null) return;
+    await this.toBrowser(content);
     this.held = null;
     this.set({ sync: "synced" });
+  }
+
+  private toBrowser(content: RobotContent): Promise<void> {
+    if (content.kind === "text") return this.writeText(content.text);
+    const write = this.options.writeImage ?? ((png: Blob) => navigator.clipboard.write([new ClipboardItem({ [PNG]: png })]));
+    return write(content.png);
   }
 
   /**
@@ -351,6 +375,12 @@ export class DesktopClipboard {
   async write(text: string): Promise<void> {
     const { ref, done } = this.bulk.sendBlob(new TextEncoder().encode(text), "text/plain");
     await Promise.all([this.session.request(CAP, "clipboard-write", { type: "text/plain", blob: ref }), done]);
+  }
+
+  /** A pasted PNG onto the robot's clipboard (docs/08 clipboard-write, at most 8 MiB); input, like `write`. */
+  async writeImage(png: Uint8Array): Promise<void> {
+    const { ref, done } = this.bulk.sendBlob(png, PNG);
+    await Promise.all([this.session.request(CAP, "clipboard-write", { type: PNG, blob: ref }), done]);
   }
 
   private writeText(text: string): Promise<void> {

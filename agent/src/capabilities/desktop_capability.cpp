@@ -16,6 +16,7 @@
 
 #include "core/log.hpp"
 #include "core/protocol.hpp"
+#include "desktop/clipboard_types.hpp"
 #include "desktop/keycodes.hpp"
 #include "desktop/module_loader.hpp"
 #include "media/sources.hpp"
@@ -25,7 +26,6 @@ namespace {
 /// Where packages install their modules (ADR-0021). Overridable so the dev stack and the tests
 /// can point somewhere writable without pretending to be an installed system.
 constexpr const char* DEFAULT_MODULE_DIR = "/usr/lib/fjarr/desktop";
-constexpr std::size_t CLIPBOARD_MAX = 1024 * 1024; // docs/08: 1 MiB in either direction
 
 std::string random_uuid() {
     static std::mt19937_64 rng{std::random_device{}()};
@@ -521,12 +521,13 @@ void DesktopCapability::on_message(SessionContext& ctx, const Envelope& msg) {
             return refuse(error_codes::payload_invalid, "the offer has no '" + type + "'");
         const SessionId sid = ctx.id();
         const Envelope req = msg;
-        clip->read(type, CLIPBOARD_MAX, [this, sid, req, type](std::optional<std::string> bytes, std::string error) {
+        const std::size_t limit = desktop::clipboard::max_bytes(type); // docs/08: 1 MiB of text, 8 MiB of PNG
+        clip->read(type, limit, [this, sid, req, type, limit](std::optional<std::string> bytes, std::string error) {
             auto s = impl_->sessions.find(sid);
             if (s == impl_->sessions.end()) return;
             SessionContext& c = *s->second;
             if (!bytes) {
-                if (error == "too-large") return c.fail(req, error_codes::unavailable, "larger than 1 MiB", {{"reason", "too-large"}, {"limit", CLIPBOARD_MAX}});
+                if (error == "too-large") return c.fail(req, error_codes::unavailable, "larger than the clipboard's " + std::to_string(limit) + " bytes", {{"reason", "too-large"}, {"limit", limit}});
                 return c.fail(req, error_codes::unavailable, "the robot's clipboard could not be read: " + error);
             }
             const auto ref = c.send_blob(std::move(*bytes), type);
@@ -586,10 +587,11 @@ void DesktopCapability::on_message(SessionContext& ctx, const Envelope& msg) {
         // Input in the desktop domain (control_inputs): the core let it through only for the holder.
         if (!d.clipboard()) return refuse(error_codes::unavailable, "this robot's desktop has no clipboard");
         const std::string type = p.value("type", std::string{});
-        if (type != "text/plain") return refuse(error_codes::payload_invalid, "the clipboard takes text/plain");
+        const std::size_t limit = desktop::clipboard::max_bytes(type); // docs/08: text/plain or image/png
+        if (limit == 0) return refuse(error_codes::payload_invalid, "the clipboard takes text/plain or image/png");
         const auto ref = blob::BlobRef::from_json(p.value("blob", nlohmann::json{}));
         if (!ref) return refuse(error_codes::payload_invalid, "clipboard-write needs a blob reference");
-        if (ref->len > CLIPBOARD_MAX) return ctx.fail(msg, error_codes::unavailable, "larger than 1 MiB", {{"reason", "too-large"}, {"limit", CLIPBOARD_MAX}});
+        if (ref->len > limit) return ctx.fail(msg, error_codes::unavailable, "larger than the clipboard's " + std::to_string(limit) + " bytes", {{"reason", "too-large"}, {"limit", limit}});
         impl_->expire_incoming();
         auto& in = impl_->incoming[ref->id];
         if (!in.session.empty() && in.session != ctx.id()) return refuse(error_codes::payload_invalid, "that blob belongs to another session");
@@ -657,7 +659,7 @@ void DesktopCapability::on_message(SessionContext& ctx, const Envelope& msg) {
 
 void DesktopCapability::on_blob_chunk(SessionContext& ctx, const BlobChunk& chunk) {
     // spec: docs/08 clipboard-write — the only blobs fjarr.desktop receives.
-    if (chunk.blob_len > CLIPBOARD_MAX) return; // refused when its request arrives
+    if (chunk.blob_len > desktop::clipboard::MAX_BYTES) return; // refused when its request arrives (by its type's limit)
     impl_->expire_incoming();
     auto& in = impl_->incoming[chunk.blob_id];
     if (!in.session.empty() && in.session != ctx.id()) return;
