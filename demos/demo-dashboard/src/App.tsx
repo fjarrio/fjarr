@@ -33,6 +33,7 @@ import {
   useControl,
   useDesktopClipboard,
   useDesktopSharing,
+  useDesktopState,
   useFjarrClient,
   useMonitors,
   usePublisher,
@@ -218,6 +219,7 @@ function RemoteView() {
   const motion = useControl(session, "motion");
   const monitors = useMonitors(session);
   const sharing = useDesktopSharing(session);
+  const desktopState = useDesktopState(session); // "unknown": this robot has no desktop
   const [driveEpoch, setDriveEpoch] = useState(0);
   const wasDriving = useRef(false);
   useEffect(() => {
@@ -229,8 +231,9 @@ function RemoteView() {
       <Panel title="Robot status (host-owned, built on useTelemetry)">
         <code style={{ fontSize: 12, overflowWrap: "anywhere" }}>{JSON.stringify(status)}</code>
       </Panel>
-      {/* Stopped on the robot, it has no monitors to offer: the panel stays, to say so and resume (docs/22). */}
-      {(monitors.length > 0 || sharing.state === "stopped") && (
+      {/* The panel stays whenever the robot has a desktop, and the view says why there is no picture
+          (docs/22#when-there-is-nothing-to-show): no display, desktop restarting, sharing stopped. */}
+      {(desktopState !== "unknown" || monitors.length > 0 || sharing.state === "stopped") && (
         <Panel title="Desktop (fjarr.desktop — click to type into the robot's screen, Esc to give the keyboard back; one operator at a time)">
           <DesktopPanel session={session} />
         </Panel>

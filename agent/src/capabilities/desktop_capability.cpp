@@ -62,6 +62,8 @@ struct DesktopCapability::Impl {
     // docs/23#desktop-sharing-stopped: the robot ended these captures (GNOME's stop button); they
     // stay stopped until a session sends resume-sharing.
     std::set<std::string> stopped; // wire ids
+    // docs/08 `desktop`: whether the desktop session is there (docs/23#desktop-presence).
+    bool desktop_running = true;
     // Input (M3 3.2). The core lets only the desktop domain's holder through (docs/10); this is
     // the session whose input is on the desktop now, so only its end releases what it holds.
     std::optional<SessionId> input_session;
@@ -313,6 +315,13 @@ struct DesktopCapability::Impl {
         }
         return source;
     }
+    void tell_desktop(SessionContext& ctx) { ctx.event("desktop", {{"state", desktop_running ? "running" : "absent"}}); }
+    void on_session_changed(bool running) {
+        if (running == desktop_running) return;
+        desktop_running = running;
+        log::info("desktop", running ? "the desktop session is there" : "the desktop session is gone");
+        for (auto& [_, ctx] : sessions) tell_desktop(*ctx);
+    }
     void tell_sharing(SessionContext& ctx) { ctx.event("sharing", {{"state", stopped.empty() ? "on" : "stopped"}}); }
     /// docs/08 `sharing`: someone at the robot stopped it. A lost capture alone is not that: an
     /// unplugged monitor's ends before the layout says so (docs/23#desktop-sharing-stopped).
@@ -463,6 +472,8 @@ void DesktopCapability::configure(const nlohmann::json& config, const SourceFact
     }
     impl_->driver->on_monitors_changed([this](std::vector<Monitor> monitors) { impl_->on_monitors(monitors); });
     impl_->driver->on_capture_lost([this](MonitorId m, CaptureLost why) { impl_->on_capture_lost(m, why); });
+    impl_->desktop_running = impl_->driver->session_running();
+    impl_->driver->on_session_changed([this](bool running) { impl_->on_session_changed(running); });
     if (auto* clip = impl_->driver->clipboard()) clip->on_changed([this](std::vector<std::string> types) { impl_->on_clipboard_changed(std::move(types)); });
     impl_->driver->on_cursor_shape([this](const CursorShape& shape) { impl_->on_cursor_shape(shape); });
     impl_->driver->on_cursor_position([this](MonitorId m, double x, double y) { impl_->on_cursor_position(m, x, y); });
@@ -473,6 +484,7 @@ void DesktopCapability::session_attached(SessionContext& ctx, const nlohmann::js
     for (auto& spec : impl_->specs()) ctx.add_track(std::move(spec)); // unavailable until the helper hands it over: held back by the core
     if (!impl_->offer_id.empty()) impl_->offer(ctx); // what the robot holds now, so a late viewer can paste it too
     impl_->send_shape(ctx);                          // the cursor as it is now (docs/08 `cursor`)
+    if (impl_->driver) impl_->tell_desktop(ctx);            // docs/08 `desktop`: at every session's start
     if (!impl_->stopped.empty()) impl_->tell_sharing(ctx); // docs/08 `sharing`: at the start while stopped
 }
 

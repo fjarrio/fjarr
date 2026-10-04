@@ -117,6 +117,12 @@ class DesktopBackend {
     /// A capture ended without being asked to. The backend detects silent ends itself.
     virtual void on_capture_lost(std::function<void(MonitorId, CaptureLost)> callback) = 0;
 
+    /// Whether the desktop session is there (docs/08 `desktop`): a backend that reaches it through a
+    /// per-session helper reports the helper coming and going. Default: always there.
+    /// spec: docs/23-agent-core-architecture.md#desktop-presence
+    virtual bool session_running() { return true; }
+    virtual void on_session_changed(std::function<void(bool running)> /*callback*/) {}
+
     /// Returns at once and never waits for a first frame: capture may be variable-rate, and a
     /// still screen produces no frames at all. The backend provokes a first frame where it can;
     /// the media plane repeats the last frame to the encoder.

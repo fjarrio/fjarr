@@ -169,6 +169,10 @@ struct InputRig {
         b.sid = "session-b";
         cap.session_attached(a, nlohmann::json::object());
         cap.session_attached(b, nlohmann::json::object());
+        // What a session is told at its start (docs/08 `desktop`, the cursor) is tested on its own:
+        // the input tests count what their messages produced.
+        a.sent.clear();
+        b.sent.clear();
     }
     void send(fjarr::testing::RecordingContext& ctx, const std::string& type, nlohmann::json payload, const std::string& kind = "event") {
         cap.on_message(ctx, fjarr::Envelope{"fjarr.desktop", type, "e-" + type, kind, std::move(payload)});
@@ -194,8 +198,9 @@ TEST(DesktopInput, eachMessageReachesTheBackendAsItsEvdevCall) {
     EXPECT_EQ(r.calls(), (std::vector<std::string>{"pointer 7 0.500000 0.250000", "button 2 down", "button 2 up", "wheel 0.000000 48.000000",
                                                   "key 30 down", "key 30 up", "key 29 down", "key 56 down", "key 111 down", "key 111 up",
                                                   "key 56 up", "key 29 up"}));
-    ASSERT_EQ(r.a.sent.size(), 1u);
-    EXPECT_TRUE(r.a.sent[0].payload["ok"].get<bool>()) << "key-combo is answered";
+    const auto combo = std::find_if(r.a.sent.begin(), r.a.sent.end(), [](const auto& e) { return e.type == "key-combo"; });
+    ASSERT_NE(combo, r.a.sent.end()) << "key-combo is answered";
+    EXPECT_TRUE(combo->payload["ok"].get<bool>());
 }
 
 TEST(DesktopInput, staleOrOffScreenPointerMotionIsDropped) {
@@ -706,4 +711,31 @@ TEST(DesktopCursor, aSessionWhoseRealtimeChannelIsNotOpenYetIsSkippedNotACrash) 
     EXPECT_NO_THROW(cursor("", 0.25, 0.5));
     EXPECT_EQ(r.a.realtime_sender.envelopes.size(), 1u) << "the connected sessions still get it";
     EXPECT_TRUE(connecting.realtime_sender.envelopes.empty());
+}
+
+// --- whether the desktop is there (M3 3.5) ---------------------------------------------------------------
+// spec: docs/08 `desktop` · docs/23#desktop-presence
+
+TEST(DesktopPresence, everySessionHearsWhetherTheDesktopIsThereAtItsStartAndOnEachChange) {
+    InputRig r;
+    void* so = ::dlopen((std::string(FJARR_STUB_MODULE_DIR) + "/libfjarr-desktop-stub.so").c_str(), RTLD_NOW | RTLD_NOLOAD);
+    auto session = reinterpret_cast<void (*)(int)>(::dlsym(so, "fjarr_stub_session"));
+    ASSERT_NE(session, nullptr);
+    fjarr::testing::RecordingContext fresh;
+    fresh.sid = "session-fresh";
+    r.cap.session_attached(fresh, nlohmann::json::object());
+    ASSERT_NE(last(fresh, "desktop"), nullptr) << "said at the session's start";
+    EXPECT_EQ(last(fresh, "desktop")->payload, (nlohmann::json{{"state", "running"}}));
+    session(0); // GNOME Shell crashed: the helper left
+    for (auto* ctx : {&r.a, &r.b}) EXPECT_EQ(last(*ctx, "desktop")->payload["state"], "absent");
+    fjarr::testing::RecordingContext late;
+    late.sid = "session-late";
+    r.cap.session_attached(late, nlohmann::json::object());
+    ASSERT_NE(last(late, "desktop"), nullptr);
+    EXPECT_EQ(last(late, "desktop")->payload["state"], "absent");
+    session(1); // it came back
+    EXPECT_EQ(last(r.a, "desktop")->payload["state"], "running");
+    const auto count = std::count_if(r.a.sent.begin(), r.a.sent.end(), [](const auto& e) { return e.type == "desktop"; });
+    session(1); // no change, nothing said
+    EXPECT_EQ(std::count_if(r.a.sent.begin(), r.a.sent.end(), [](const auto& e) { return e.type == "desktop"; }), count);
 }

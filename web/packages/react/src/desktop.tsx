@@ -14,6 +14,7 @@ import {
   acquireDesktopClipboard,
   acquireDesktopCursor,
   acquireDesktopSharing,
+  acquireDesktopState,
   contentBox,
   cursorDataUrl,
   DesktopInput,
@@ -22,8 +23,10 @@ import {
   type DesktopClipboardState,
   type DesktopCursor,
   type DesktopCursorState,
+  type DesktopPresence,
   type DesktopSharing,
   type DesktopSharingState,
+  type DesktopState,
   type MonitorInfo,
   type ResultPayload,
   type Session,
@@ -93,6 +96,25 @@ export function useDesktopSharing(session?: Session): { state: DesktopSharingSta
     () => "on" as const,
   );
   return { state, resume: () => sharing?.resume() ?? Promise.resolve() };
+}
+
+/**
+ * Whether the robot's desktop session is there (docs/22#when-there-is-nothing-to-show):
+ * "unknown" until the robot says, which a robot without a desktop never does.
+ */
+export function useDesktopState(session?: Session): DesktopPresence {
+  const s = useSession(session);
+  const [state, setState] = useState<DesktopState | null>(null);
+  useEffect(() => {
+    const { state: st, release } = acquireDesktopState(s);
+    setState(st);
+    return release;
+  }, [s]);
+  return useSyncExternalStore(
+    (l) => (state ? state.subscribe(l) : () => undefined),
+    () => state?.snapshot ?? "unknown",
+    () => "unknown" as const,
+  );
 }
 
 /** What a host's toolbar drives (docs/22: special keys, fullscreen with Keyboard Lock). */
@@ -175,6 +197,7 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
   mayInputRef.current = mayInput;
   const clip = useDesktopClipboard(s);
   const sharing = useDesktopSharing(s);
+  const presence = useDesktopState(s);
   const [resumeError, setResumeError] = useState<string | null>(null);
   const resume = () => {
     setResumeError(null);
@@ -257,6 +280,17 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
   );
 
   const frame: CSSProperties = { position: "relative", background: "#000", aspectRatio: monitor ? `${monitor.w} / ${monitor.h}` : "16 / 9", ...style };
+  if (presence === "absent") {
+    // docs/22: the desktop session is gone (logged out, not started, or restarting); it comes back by itself.
+    return (
+      <div data-fjarr-desktop data-fjarr-status="desktop-absent" className={className} style={frame}>
+        <div data-fjarr-placeholder style={{ ...placeholderStyle, textAlign: "center", padding: 16 }}>
+          The robot's desktop is not running. It may be restarting; this view comes back by itself.
+        </div>
+        {children}
+      </div>
+    );
+  }
   if (sharing.state === "stopped") {
     // The robot's tracks are gone until a resume: say why, rather than "no display".
     return (
@@ -279,7 +313,7 @@ export function DesktopView({ session, monitorId, policy = "primary", viewOnly =
     return (
       <div data-fjarr-desktop data-fjarr-status={monitorId ? "monitor-disconnected" : "no-display"} className={className} style={frame}>
         <div data-fjarr-placeholder style={placeholderStyle}>
-          {monitorId ? "monitor disconnected" : "no display connected"}
+          {monitorId ? "This monitor was disconnected from the robot. It comes back here when it is plugged in again." : "No display is connected to the robot."}
         </div>
         {children}
       </div>
@@ -431,16 +465,17 @@ export function DesktopLayout({ session, showMirrors = false, gap = 4, viewOnly,
   const s = useSession(session);
   const all = useMonitors(s);
   const sharing = useDesktopSharing(s);
+  const presence = useDesktopState(s);
   const monitors = showMirrors
     ? all
     : all.filter((m, i) => !all.some((o, j) => j < i && o.x === m.x && o.y === m.y && o.w === m.w && o.h === m.h));
-  // Stopped on the robot: its monitors' tracks are gone, and one view says why (docs/22).
-  if (sharing.state === "stopped" && monitors.length === 0) return <DesktopView session={s} viewOnly={viewOnly} onRobotStop={onRobotStop} className={className} style={style} />;
+  // Stopped on the robot, or no desktop at all: its monitors' tracks are gone, and one view says why (docs/22).
+  if ((sharing.state === "stopped" || presence === "absent") && monitors.length === 0) return <DesktopView session={s} viewOnly={viewOnly} onRobotStop={onRobotStop} className={className} style={style} />;
   if (monitors.length === 0) {
     return (
       <div data-fjarr-desktop-layout data-fjarr-status="no-display" className={className} style={{ position: "relative", aspectRatio: "16 / 9", background: "#000", ...style }}>
         <div data-fjarr-placeholder style={placeholderStyle}>
-          no display connected
+          No display is connected to the robot.
         </div>
       </div>
     );

@@ -4,7 +4,7 @@
  * spec: docs/22-remote-desktop-client.md#input-pipeline · #testing-docs15 · docs/08#input-events-fjarrdesktop
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { acquireDesktopClipboard, acquireDesktopCursor, acquireDesktopSharing, addDesktopMonitor, contentBox, createFjarrClient, cursorDataUrl, DesktopInput, encodePng, FjarrError, isPasteChord, normalizedPoint, removeDesktopMonitor, type Session } from "../src/index.js";
+import { acquireDesktopClipboard, acquireDesktopCursor, acquireDesktopSharing, acquireDesktopState, addDesktopMonitor, contentBox, createFjarrClient, cursorDataUrl, DesktopInput, encodePng, FjarrError, isPasteChord, normalizedPoint, removeDesktopMonitor, type Session } from "../src/index.js";
 import { encodeBlobChunk } from "../src/blob.js";
 import { fakeMediaStreamFactory, MockAgent, type MockAgentOptions } from "../src/testing/index.js";
 
@@ -501,5 +501,27 @@ describe("DesktopClipboard images", () => {
     const req = agent.received.find((e) => e.type === "clipboard-write");
     expect(req?.payload).toMatchObject({ type: "image/png", blob: { len: png.length, type: "image/png" } });
     release();
+  });
+});
+
+/** docs/08 `desktop`, docs/22#when-there-is-nothing-to-show: "no display" told apart from "no desktop". */
+describe("DesktopState", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("unknown until the robot says, then each change; a state made later reads what was said", async () => {
+    const { agent, session } = await rig();
+    const first = acquireDesktopState(session);
+    expect(first.state.snapshot).toBe("unknown"); // a robot without a desktop never says
+    agent.sendEvent("fjarr.desktop", "desktop", { state: "running" });
+    await tick();
+    expect(first.state.snapshot).toBe("running");
+    agent.sendEvent("fjarr.desktop", "desktop", { state: "absent" }); // GNOME Shell crashed
+    await tick();
+    expect(first.state.snapshot).toBe("absent");
+    first.release();
+    const later = acquireDesktopState(session); // a new one, after the last release
+    expect(later.state.snapshot).toBe("absent");
+    later.release();
   });
 });

@@ -466,7 +466,7 @@ describe("<DesktopView> (M3 3.1: video only)", () => {
     expect(demand()).toBe(true);
   });
 
-  it("no monitors: \"no display connected\", and no demand", async () => {
+  it("no monitors: \"No display is connected to the robot.\", and no demand", async () => {
     const { agent, client } = setup({ tracks: [] });
     const session = client.sessions.open("robot-1");
     await tick();
@@ -476,7 +476,7 @@ describe("<DesktopView> (M3 3.1: video only)", () => {
       </FjarrProvider>,
     );
     await act(() => vi.advanceTimersByTimeAsync(50));
-    expect(view.container.textContent).toContain("no display connected");
+    expect(view.container.textContent).toContain("No display is connected to the robot.");
     expect(agent.received.filter((e) => e.type === "select-tracks")).toEqual([]);
   });
 });
@@ -624,7 +624,7 @@ describe("<DesktopLayout> (M3 3.4)", () => {
     expect(placed().map(([id]) => id)).toEqual(["virtual-1"]);
     act(() => agent.sendMonitors([]));
     await act(() => vi.advanceTimersByTimeAsync(50));
-    expect(view.container.textContent).toContain("no display connected");
+    expect(view.container.textContent).toContain("No display is connected to the robot.");
   });
 });
 
@@ -744,6 +744,18 @@ describe("<DesktopView> when the robot stops sharing (M3 3.5)", () => {
     fireEvent.click(view.container.querySelector("[data-fjarr-resume-sharing]")!);
     await act(() => vi.advanceTimersByTimeAsync(10));
     expect(resumes()).toBe(1);
+  });
+
+  it("a robot whose desktop session is gone says so, and the view returns when it is back (docs/22)", async () => {
+    const { view, agent } = await mount();
+    agent.sendEvent("fjarr.desktop", "desktop", { state: "absent" });
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    const el = view.container.querySelector("[data-fjarr-desktop]")!;
+    expect(el.getAttribute("data-fjarr-status")).toBe("desktop-absent");
+    expect(el.textContent).toContain("The robot's desktop is not running");
+    agent.sendEvent("fjarr.desktop", "desktop", { state: "running" });
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    expect(view.container.querySelector("[data-fjarr-desktop]")!.getAttribute("data-fjarr-status")).not.toBe("desktop-absent");
   });
 
   it("resume: each stop is resumed at once, with no button", async () => {

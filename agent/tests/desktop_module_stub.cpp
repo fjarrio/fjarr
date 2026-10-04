@@ -41,6 +41,9 @@ class StubSource final : public VideoSource {
 /// Every capture started, by monitor, and who hears that one ended.
 std::map<MonitorId, std::weak_ptr<StubSource>> g_sources;
 std::function<void(MonitorId, CaptureLost)> g_lost_cb;
+/// The desktop session, which the test ends and starts through fjarr_stub_session (below).
+bool g_session = true;
+std::function<void(bool)> g_session_cb;
 
 /// Monitors the test plugs and unplugs through fjarr_stub_plug (below).
 std::vector<Monitor> g_monitors;
@@ -77,6 +80,8 @@ class StubBackend final : public DesktopBackend, public ClipboardHandle {
     }
     void on_monitors_changed(std::function<void(std::vector<Monitor>)> cb) override { g_monitors_cb = std::move(cb); }
     void on_capture_lost(std::function<void(MonitorId, CaptureLost)> cb) override { g_lost_cb = std::move(cb); }
+    bool session_running() override { return g_session; }
+    void on_session_changed(std::function<void(bool)> cb) override { g_session_cb = std::move(cb); }
     std::shared_ptr<VideoSource> start_capture(MonitorId m, CaptureOptions) override {
         if (!std::getenv("FJARR_STUB_RECORD")) return nullptr;
         record("capture " + std::to_string(m));
@@ -182,6 +187,12 @@ extern "C" void fjarr_stub_cursor(const char* id, double x, double y) {
         g_shape_cb(c);
     }
     if (x >= 0 && g_position_cb) g_position_cb(7, x, y);
+}
+
+/// The test's hand on the desktop session: it ends (GNOME Shell crashed, logged out) or starts again.
+extern "C" void fjarr_stub_session(int running) {
+    g_session = running != 0;
+    if (g_session_cb) g_session_cb(g_session);
 }
 
 /// The test's hand on GNOME's stop button: every capture ends, as mutter ends them (docs/23#desktop-sharing-stopped).

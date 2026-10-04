@@ -125,6 +125,24 @@ def paste_image(size=False):
     return "200 " + digest(r.stdout)
 
 
+def session_end():
+    # The desktop session goes, as when GNOME Shell crashed on an unplug (mini-PC, 2026-10-04): to
+    # the agent, its helper leaves (docs/08 `desktop: absent`).
+    r = subprocess.run(["pkill", "-f", "fjarr-desktop-session"], capture_output=True)
+    return "200 ended" if r.returncode == 0 else "404 no helper was running"
+
+
+def session_start():
+    # It comes back: the helper starts again, as the user unit does in a new desktop session.
+    import os
+    if not os.path.isdir("/run/fjarr"):
+        return "404 no agent socket directory shared in"
+    log = open("/run/desktop/helper-live.log", "ab")
+    env = dict(os.environ, FJARR_DESKTOP_SOCK="/run/fjarr/desktop.sock")
+    subprocess.Popen(["fjarr-desktop-session"], env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+    return "200 started"
+
+
 def on_request(server, _cond):
     conn, _ = server.accept()
     try:
@@ -139,12 +157,16 @@ def on_request(server, _cond):
             result = copy(urllib.parse.parse_qs(query).get("text", [""])[0])
         elif path == "/paste":
             result = paste()
+        elif path == "/session-end":
+            result = session_end()
+        elif path == "/session-start":
+            result = session_start()
         elif path == "/copy-image":
             result = copy_image()
         elif path == "/paste-image":
             result = paste_image(urllib.parse.parse_qs(query).get("size", ["0"])[0] == "1")
         else:
-            result = "404 /plug, /unplug, /copy?text=, /paste, /copy-image or /paste-image"
+            result = "404 /plug, /unplug, /copy?text=, /paste, /copy-image, /paste-image, /session-end or /session-start"
         code, body = result.split(" ", 1)
         data = body.encode()
         conn.sendall(f"HTTP/1.0 {code} X\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {len(data)}\r\n\r\n".encode() + data)

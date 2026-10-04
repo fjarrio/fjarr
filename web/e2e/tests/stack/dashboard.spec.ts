@@ -327,3 +327,27 @@ test("the dashboard with its Desktop panel fills the window edge to edge and nev
       .toEqual({ margin: "0px", overflow: 0, sticking: [] });
   }
 });
+
+test("the Desktop panel stays when the robot's desktop session goes, says why, and streams again when it is back (mini-PC, 2026-10-04)", async ({ dashboard, stack, page }) => {
+  await stack.requireServer();
+  needs(await stack.dashboardReachable(), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
+  const plugd = process.env.E2E_DESKTOP_PLUG ?? "http://desktop-fixture:8091";
+  const call = (what: string) => fetch(`${plugd}/${what}`, { signal: AbortSignal.timeout(10_000) }).then((r) => r.text(), () => "");
+  needs(await fetch(`${plugd}/`, { signal: AbortSignal.timeout(2000) }).then(() => true, () => false), `the fixture's plugd is not reachable at ${plugd} — \`make desktop-e2e\` brings it up`);
+
+  await dashboard.goto();
+  await page.getByRole("button", { name: /Desktop Robot 01/ }).click();
+  await dashboard.connect("desktop-robot-01");
+  await dashboard.waitForState("desktop-robot-01", "connected");
+  const view = page.locator("[data-fjarr-desktop]").first();
+  await expect(view.locator("[data-fjarr-track^='desk-']")).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
+
+  try {
+    expect(await call("session-end")).toBe("ended"); // GNOME Shell crashed, say
+    await expect(view).toHaveAttribute("data-fjarr-status", "desktop-absent", { timeout: 10_000 });
+    await expect(view).toContainText("The robot's desktop is not running");
+  } finally {
+    expect(await call("session-start")).toBe("started");
+  }
+  await expect(view.locator("[data-fjarr-track^='desk-']")).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
+});

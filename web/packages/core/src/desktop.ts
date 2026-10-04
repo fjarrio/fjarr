@@ -728,3 +728,72 @@ export function acquireDesktopSharing(session: Session): { sharing: DesktopShari
     },
   };
 }
+
+/** Whether the robot's desktop session is there (docs/08 `desktop`); "unknown" until the robot says. */
+export type DesktopPresence = "running" | "absent" | "unknown";
+
+/**
+ * docs/22#when-there-is-nothing-to-show: tells "no display" from "no desktop". A robot without a
+ * desktop never says, so "unknown" also means "this robot has no desktop". One per session: take it
+ * with `acquireDesktopState`.
+ */
+export class DesktopState {
+  private state: DesktopPresence;
+  private readonly listeners = new Set<() => void>();
+  private readonly off: () => void;
+
+  constructor(session: Session) {
+    // Said at the session's start: a state made later reads what the session kept.
+    this.state = DesktopState.parse(session.latest(CAP, "desktop").current?.payload);
+    this.off = session.on(CAP, "desktop", (env) => this.set(DesktopState.parse(env.payload)));
+  }
+
+  private static parse(payload: unknown): DesktopPresence {
+    const s = (payload as { state?: string } | undefined)?.state;
+    return s === "running" || s === "absent" ? s : "unknown";
+  }
+
+  get snapshot(): DesktopPresence {
+    return this.state;
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private set(state: DesktopPresence): void {
+    if (state === this.state) return;
+    this.state = state;
+    for (const l of this.listeners) l();
+  }
+
+  dispose(): void {
+    this.off();
+    this.listeners.clear();
+  }
+}
+
+const desktopStates = new WeakMap<Session, { state: DesktopState; refs: number }>();
+
+/** The session's one `DesktopState`; `release()` when done, and the last release disposes it. */
+export function acquireDesktopState(session: Session): { state: DesktopState; release: () => void } {
+  let entry = desktopStates.get(session);
+  if (!entry) {
+    entry = { state: new DesktopState(session), refs: 0 };
+    desktopStates.set(session, entry);
+  }
+  entry.refs++;
+  const e = entry;
+  let released = false;
+  return {
+    state: e.state,
+    release: () => {
+      if (released) return;
+      released = true;
+      if (--e.refs > 0) return;
+      e.state.dispose();
+      desktopStates.delete(session);
+    },
+  };
+}

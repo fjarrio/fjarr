@@ -158,6 +158,9 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
     std::vector<Monitor> monitors() override { return monitors_; }
     void on_monitors_changed(std::function<void(std::vector<Monitor>)> cb) override { monitors_cb_ = std::move(cb); }
     void on_capture_lost(std::function<void(MonitorId, CaptureLost)> cb) override { lost_cb_ = std::move(cb); }
+    // docs/23#desktop-presence: the desktop session is there while its helper is welcomed.
+    bool session_running() override { return welcomed_; }
+    void on_session_changed(std::function<void(bool)> cb) override { session_cb_ = std::move(cb); }
 
     std::shared_ptr<VideoSource> start_capture(MonitorId monitor, CaptureOptions options) override {
         // A virtual monitor we made is captured by the stream that made it (docs/23, Virtual monitors).
@@ -474,6 +477,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
             welcomed_ = true;
             send({{"type", "welcome"}, {"protocol", desktop::proto::PROTOCOL}});
             say(1, "the desktop session's helper connected (" + m.body["session"].value("compositor", std::string{"?"}) + ")");
+            if (session_cb_) session_cb_(true);
         } else if (!welcomed_) {
             return;
         } else if (type == "monitors") {
@@ -602,6 +606,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
 
     void drop_helper(const std::string& why) {
         if (conn_ < 0) return;
+        const bool was_running = welcomed_;
         if (conn_watch_) g_source_destroy(conn_watch_), g_source_unref(conn_watch_);
         conn_watch_ = nullptr;
         ::close(conn_);
@@ -624,6 +629,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         virtual_by_connector_.clear();
         monitors_.clear();
         if (monitors_cb_) monitors_cb_(monitors_);
+        if (was_running && session_cb_) session_cb_(false); // after the monitors: they went with it
     }
 
     GMainContext* ctx_;
@@ -644,6 +650,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
     int next_id_ = 1;
     std::function<void(std::vector<Monitor>)> monitors_cb_;
     std::function<void(MonitorId, CaptureLost)> lost_cb_;
+    std::function<void(bool)> session_cb_;
     desktop::mutter::EisInput input_;
     bool input_requested_ = false;
     std::set<MonitorId> embedded_; // monitors whose capture fell back to the cursor in the video
