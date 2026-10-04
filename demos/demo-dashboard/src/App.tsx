@@ -74,7 +74,7 @@ interface Robot {
 const FAKE_ROBOTS: Robot[] = [
   { id: "demo-robot-01", name: "Demo Robot 01", site: "Lab" },
   { id: "demo-robot-02", name: "Demo Robot 02", site: "Warehouse" },
-  { id: "demo-robot-03", name: "Demo Robot 03", site: "Yard" },
+  { id: "demo-robot-03", name: "Mini PC", site: "Sturegatan 12" },
   { id: "desktop-robot-01", name: "Desktop Robot 01", site: "Office" },
 ];
 
