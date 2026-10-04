@@ -516,6 +516,18 @@ M4's gate**, `fjarr-connect` serves the robot's allowed paths as a WebDAV
 folder. *Its gate:* Nautilus, Finder and Explorer mount it, list a directory,
 open a file and save it back, and are refused outside the allow-lists.
 
+**Acting as another account** ([open question #42](18-open-questions.md)):
+the terminal and the files act as the agent's own unprivileged account today,
+which can barely do anything on a robot (mini-PC, 2026-10-04). M4 starts with
+a spike on the mini-PC and an ADR: a shell and file access as a configured
+account (`robot`) without making the agent privileged. The leading option is
+systemd's own path (`run0 --user=` or `machinectl shell`) allowed by a polkit
+rule the package ships, limited to the agent's account and the configured
+target; the spike settles whether polkit can restrict the target account.
+*Its gate:* the dashboard's terminal opens a login shell as `robot` on the
+mini-PC, `fjarr.files` reads and writes as `robot`, and the agent still runs
+as `fjarr` with no new privileges of its own.
+
 ## M4.5 — Direct access: the network tunnel
 
 `fjarr.net` per [docs/27](27-network-tunnel.md): the persistent tunnel

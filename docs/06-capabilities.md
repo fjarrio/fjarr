@@ -227,7 +227,8 @@ so it proves the extension API generalizes beyond video.
   account, so naming one it is not running as reports `unavailable` **with
   that reason** rather than quietly starting a shell as the wrong user. To
   give operators a different account, run the agent as it. Switching users
-  needs a privileged helper, which is a separate decision and not M2's.
+  needs a privileged path, which is a separate decision: it is M4's, with
+  `fjarr.files` ([open question #42](18-open-questions.md)).
 - **A shell that refuses logins is no shell.** The agent's own account is a
   system account whose login shell is `nologin`; started as the terminal, it
   prints "This account is currently not available." and exits (mini-PC,
