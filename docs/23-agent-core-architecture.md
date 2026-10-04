@@ -607,19 +607,22 @@ its name is bumped with the module seam's.
   input. It sends `clipboard-changed {types}` when `SelectionOwnerChanged`
   says the robot owns the clipboard (`session-is-owner: false`), with
   mutter's mime types; an echo of our own selection is not sent. The module
-  maps them to Fjarr's (`text/plain` when any text type is there).
+  maps them to Fjarr's (`text/plain` when any text type is there,
+  `image/png` when `image/png` is).
   `clipboard-read {id, mime}` makes the helper call `SelectionRead` and
   reply `clipboard-data {id}` with **one descriptor**, the read end, or
-  `clipboard-failed {id, reason}`. The module reads at most 1 MiB from it.
+  `clipboard-failed {id, reason}`. The module reads at most the type's
+  limit from it (docs/08: 1 MiB of text, 8 MiB of PNG).
   The name is `mime`, never `type`, which names the message. The helper
   refuses a `mime` the robot's current owner does not offer: an application
   answers only the names it offers, so a wrong name reads nothing, and the
   test fixture's `wl-copy` answers any name, which hid exactly that
   (mini-PC, 2026-10-03).
   `clipboard-set {id, types}` arrives with **one descriptor**, a sealed memfd
-  holding the bytes. The helper calls `SetSelection` with every name an
-  application may ask text for (`text/plain;charset=utf-8`, `text/plain`,
-  `UTF8_STRING`, `STRING`, `TEXT`) and answers **every**
+  holding the bytes, and `types` naming them in Fjarr's names. For text the
+  helper calls `SetSelection` with every name an application may ask text
+  for (`text/plain;charset=utf-8`, `text/plain`, `UTF8_STRING`, `STRING`,
+  `TEXT`), for a PNG with `image/png`, and answers **every**
   `SelectionTransfer(mime, serial)` from the memfd (`SelectionWrite`, write,
   close, `SelectionWriteDone`), from a write that never blocks the helper on
   an application that reads slowly. It replies `clipboard-set-done {id}` once

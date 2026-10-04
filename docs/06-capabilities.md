@@ -118,7 +118,7 @@ detail is incorporated here).
   buttons/wheel reliable. Keyboard: physical `KeyboardEvent.code` →
   Linux keycodes, reliable channel; layout handling per backend
   ([docs/07](07-desktop-backends.md)).
-- Clipboard, both ways (text first; images and files later): the robot
+- Clipboard, both ways (text and PNG images; files with `fjarr.files`, M4): the robot
   *offers* what it copied and a client *reads* it on demand; a client
   *writes* what the operator pastes, before the paste keystroke reaches the
   robot ([docs/08](08-protocol.md#input-events-fjarrdesktop),

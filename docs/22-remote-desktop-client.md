@@ -368,8 +368,19 @@ Browser side of the docs/06 offer/request model:
   `paste` event follows within 300 ms (an empty or non-text clipboard), the
   held keys go to the robot as they were. Cmd+V on a Mac becomes Ctrl+V on
   the robot.
+- **Images** (M3 3.5): a PNG copied on the robot is read as `image/png`
+  when offered, in preference to text, and written with
+  `navigator.clipboard.write([new ClipboardItem({"image/png": blob})])`,
+  under the same gesture rule and "Copy from robot" fallback as text. A
+  pasted image arrives in the same `paste` event as a file of type
+  `image/png`; the client sends it as `clipboard-write` of `image/png`
+  before the Ctrl+V, in preference to any text beside it. The limit is
+  8 MiB (docs/08).
 - Files on the clipboard route through `fjarr.files` (M4+); drag-and-drop
-  onto the view uploads via the same capability.
+  onto the view uploads via the same capability. A browser cannot put files
+  on the operator's clipboard, so a copy of files on the robot can at most
+  be offered as a download; real file copy in that direction is the native
+  client's (ADR-0029).
 
 ## Ownership and view-only
 
