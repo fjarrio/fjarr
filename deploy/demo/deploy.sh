@@ -31,4 +31,7 @@ ssh_ 'set -e; cd /opt/fjarr
   fi
   [ -s certs/origin.pem ] && [ -s certs/origin.key ] || { echo "no origin certificate: deploy/demo/cloudflare.py origin-cert first"; exit 1; }
   docker compose up -d --remove-orphans 2>&1 | tail -6
+  # The backend runs its source from the copied directory and Caddy reads its file at start: neither
+  # sees a new copy until restarted (compose up only recreates what its own config changed).
+  docker compose restart demo-backend caddy 2>&1 | tail -2
   docker compose ps --format "{{.Service}}: {{.Status}}"'
