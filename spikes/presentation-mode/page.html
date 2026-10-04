@@ -34,7 +34,17 @@
 const log = (msg, cls) => { const s = document.createElement("span"); if (cls) s.className = cls; s.textContent = msg + "\n"; document.getElementById("log").append(s); };
 const c = document.getElementById("c"), g = c.getContext("2d");
 let n = 0, lastN = 0;
-setInterval(() => { log(`source: ${Math.round((n - lastN) / 2)} fps drawn in this window (timers slow down when it is covered)`); lastN = n; }, 2000);
+const meters = []; // {name, frames}: every shown <video>, counted continuously
+function meter(name, v) {
+  const m = { name, frames: 0 };
+  const step = () => { m.frames++; v.requestVideoFrameCallback(step); };
+  v.requestVideoFrameCallback(step);
+  meters.push(m);
+}
+setInterval(() => {
+  const shown = meters.map((m) => { const f = Math.round(m.frames / 2); m.frames = 0; return `${m.name} ${f}`; }).join(", ");
+  log(`fps: source ${Math.round((n - lastN) / 2)}${shown ? ", " + shown : ""}`); lastN = n;
+}, 2000);
 setInterval(() => {
   g.fillStyle = `hsl(${(n * 3) % 360},70%,45%)`; g.fillRect(0, 0, 640, 360);
   g.fillStyle = "#fff"; g.font = "48px system-ui"; g.fillText(`frame ${n++}`, 40, 200);
@@ -137,8 +147,11 @@ document.getElementById("present").onclick = async () => {
   v.srcObject = stream; await v.play().catch(() => {});
   wins.push({ w, i: 1, s: other });
   log(`companion window opened on ${other.label} from the same click`, "ok");
-  countFrames(v).then((f) => log(`companion: ${f} frames in 2 s`, f > 20 ? "ok" : "bad"));
-  countFrames(document.getElementById("mine")).then((f) => log(`this window: ${f} frames in 2 s`, f > 20 ? "ok" : "bad"));
+  meters.length = 0;
+  meter("this window", document.getElementById("mine"));
+  meter("companion", v);
+  w.document.addEventListener("fullscreenchange", () => log(`companion: ${w.document.fullscreenElement ? "fullscreen" : "left fullscreen"}`, "ok"));
+  w.addEventListener("keydown", (e) => { log(`companion got key ${e.code}${e.altKey ? " +Alt" : ""}${e.metaKey ? " +Meta" : ""}`); e.preventDefault(); });
 };
 window.addEventListener("keydown", (e) => { if (document.fullscreenElement) { log(`this window got key ${e.code}${e.altKey ? " +Alt" : ""}${e.metaKey ? " +Meta" : ""}`); e.preventDefault(); } });
 document.addEventListener("fullscreenchange", () => { if (document.fullscreenElement) navigator.keyboard?.lock?.(); });
