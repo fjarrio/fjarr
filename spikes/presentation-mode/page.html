@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Presentation spike</title>
+<!-- Throwaway spike (M3 3.6, open question #19; spikes/presentation-mode/README.md). One stream in
+     this window, shown in a window per screen as a portal: this window builds each <video>. -->
+<style>
+  :root { --bg: #fff; --fg: #1f2328; --muted: #656d76; --line: #d0d7de; --ok: #1a7f37; --bad: #cf222e; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --line: #30363d; --ok: #3fb950; --bad: #f85149; } }
+  :root[data-theme="dark"] { --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --line: #30363d; --ok: #3fb950; --bad: #f85149; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px system-ui, sans-serif; }
+  button { font: inherit; padding: 6px 10px; margin: 0 8px 8px 0; }
+  canvas { width: 240px; border: 1px solid var(--line); border-radius: 6px; display: block; margin: 8px 0; }
+  pre { white-space: pre-wrap; border: 1px solid var(--line); border-radius: 6px; padding: 8px; min-height: 120px; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } small { color: var(--muted); }
+</style>
+</head>
+<body>
+<h3 style="margin:0 0 8px">Presentation mode spike</h3>
+<small>One stream lives in this window. The buttons below open it on every screen, the way presentation mode would.</small>
+<canvas id="c" width="640" height="360"></canvas>
+<div>
+  <button id="perm">1. Allow window placement</button>
+  <button id="open">2. Open a window per screen</button>
+  <button id="fs">3. Fullscreen all</button>
+  <button id="close">Close the windows</button>
+</div>
+<pre id="log"></pre>
+<script>
+const log = (msg, cls) => { const s = document.createElement("span"); if (cls) s.className = cls; s.textContent = msg + "\n"; document.getElementById("log").append(s); };
+const c = document.getElementById("c"), g = c.getContext("2d");
+let n = 0;
+setInterval(() => {
+  g.fillStyle = `hsl(${(n * 3) % 360},70%,45%)`; g.fillRect(0, 0, 640, 360);
+  g.fillStyle = "#fff"; g.font = "48px system-ui"; g.fillText(`frame ${n++}`, 40, 200);
+}, 33);
+// A real WebRTC stream, as a session's track would be: a loopback pair carrying the canvas.
+const ready = (async () => {
+  const a = new RTCPeerConnection(), b = new RTCPeerConnection();
+  a.onicecandidate = (e) => e.candidate && b.addIceCandidate(e.candidate);
+  b.onicecandidate = (e) => e.candidate && a.addIceCandidate(e.candidate);
+  const got = new Promise((ok) => (b.ontrack = (e) => ok(e.streams[0] ?? new MediaStream([e.track]))));
+  const t = c.captureStream(30).getVideoTracks()[0];
+  a.addTrack(t, new MediaStream([t]));
+  await a.setLocalDescription(await a.createOffer()); await b.setRemoteDescription(a.localDescription);
+  await b.setLocalDescription(await b.createAnswer()); await a.setRemoteDescription(b.localDescription);
+  return got;
+})();
+let details = null; const wins = [];
+
+document.getElementById("perm").onclick = async () => {
+  if (!window.getScreenDetails) return log("getScreenDetails is not supported here (not Chromium?)", "bad");
+  try {
+    details = await window.getScreenDetails();
+    log(`permission granted: ${details.screens.length} screen(s)`, "ok");
+    details.screens.forEach((s, i) => log(`  screen ${i}: ${s.label || "?"} ${s.width}x${s.height} at ${s.availLeft},${s.availTop}${s.isPrimary ? " (primary)" : ""}`));
+  } catch (e) { log(`permission refused: ${e}`, "bad"); }
+};
+
+function countFrames(v) {
+  return new Promise((ok) => { let f = 0; const t0 = performance.now();
+    const step = () => { f++; if (performance.now() - t0 < 2000) v.requestVideoFrameCallback(step); else ok(f); };
+    v.requestVideoFrameCallback(step); setTimeout(() => ok(f), 4000); });
+}
+
+document.getElementById("open").onclick = async () => {
+  const stream = await ready;
+  const screens = details ? details.screens : [{ availLeft: 0, availTop: 0, availWidth: 800, availHeight: 600, label: "(no permission: one window)" }];
+  let opened = 0;
+  for (const [i, s] of screens.entries()) {
+    const w = window.open("", `fjarr-screen-${i}`, `left=${s.availLeft},top=${s.availTop},width=${Math.min(s.availWidth, 1200)},height=${Math.min(s.availHeight, 800)}`);
+    if (!w) { log(`window ${i} (${s.label || "screen " + i}): blocked by the popup blocker`, "bad"); continue; }
+    opened++;
+    w.document.title = `Robot monitor ${i}`;
+    w.document.body.style.cssText = "margin:0;background:#000;color:#fff;font:14px system-ui";
+    const v = w.document.createElement("video");
+    v.muted = true; v.autoplay = true; v.playsInline = true; v.style.cssText = "width:100vw;height:100vh;object-fit:contain;display:block";
+    const bar = w.document.createElement("div");
+    bar.style.cssText = "position:fixed;top:8px;left:8px;background:rgba(0,0,0,.6);padding:6px;border-radius:6px";
+    bar.innerHTML = `<b>screen ${i}</b> <button>Fullscreen here</button> <span></span>`;
+    const keys = bar.querySelector("span");
+    bar.querySelector("button").onclick = async () => {
+      try { await w.document.documentElement.requestFullscreen(); await w.navigator.keyboard?.lock?.(); keys.textContent = "fullscreen + keyboard lock"; }
+      catch (e) { keys.textContent = "fullscreen refused: " + e; }
+    };
+    w.addEventListener("keydown", (e) => { keys.textContent = `key: ${e.code}${e.altKey ? " (Alt)" : ""}${e.metaKey ? " (Meta)" : ""}`; e.preventDefault(); });
+    w.document.body.append(v, bar);
+    v.srcObject = stream;
+    await v.play().catch(() => {});
+    wins.push({ w, i, s });
+    countFrames(v).then((f) => log(`window ${i}: ${f} frames in 2 s${f > 20 ? "" : " (too few: not rendering?)"}`, f > 20 ? "ok" : "bad"));
+  }
+  log(`opened ${opened} of ${screens.length} window(s) from one click`, opened === screens.length ? "ok" : "bad");
+};
+
+document.getElementById("fs").onclick = async () => {
+  // From this one click: each window's document fullscreen on its own screen (Chrome needs Window
+  // Management for a screen other than this window's, and may need a gesture in each window).
+  for (const { w, i, s } of wins) {
+    try {
+      const target = details?.screens[i];
+      await w.document.documentElement.requestFullscreen(target ? { screen: target } : undefined);
+      log(`window ${i}: fullscreen from the main window's click`, "ok");
+    } catch (e) { log(`window ${i}: fullscreen refused from here (${e.name}); use its own button`, "bad"); }
+  }
+};
+
+const closeAll = () => { wins.splice(0).forEach(({ w }) => w.close()); };
+document.getElementById("close").onclick = closeAll;
+window.addEventListener("pagehide", closeAll); // closing this tab closes the windows
+</script>
+</body>
+</html>
