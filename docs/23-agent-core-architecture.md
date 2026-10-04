@@ -687,6 +687,75 @@ A capture costs little while nobody watches, because its producer starts on the
 first demand (above). Pointer input names its monitor by `track_id`, so it lands
 on that monitor whichever is primary.
 
+### Backend A, the X11 module (M3 slice 3.7) {#desktop-x11}
+
+`libfjarr-desktop-x11.so` (package `fjarr-desktop-x11`, ADR-0006 and
+ADR-0021) implements `DesktopBackend` against an X server **from the agent's
+own process**: no session helper ([ADR-0028](adr/0028-desktop-session-helper.md)).
+The kiosk session grants the agent's account with
+`xhost +si:localuser:fjarr` (done by `fjarr-x11-session`, below), and the
+module opens the display named by the capability's `display` key (default
+`:0`) with Xlib. Everything runs on the core loop: the connection's
+descriptor is watched there, and no Xlib call is made from another thread.
+
+- **Probe.** The module is usable when the display opens and has XTest,
+  RandR ≥ 1.5 and XFixes; otherwise `probe()` says which is missing.
+- **Monitors.** `RRGetMonitors` (it covers real outputs and RandR 1.5
+  monitors alike). Identity: the `EDID` property of a monitor's first
+  output, through the shared `monitor_identity` (vendor, model, serial), so
+  a monitor has the same wire id under X11 as under GNOME; a monitor with no
+  output or EDID (Xvfb's `--setmonitor`, a dummy plug) falls back to its
+  name. The set is re-read on RandR screen, output and CRTC events **and**
+  every 2 s, since a RandR 1.5 monitor change sent no event on Xvfb, and
+  reported only when it changed; the capability diffs it by wire id
+  ([below](#desktop-monitors)).
+- **Capture.** One `ximagesrc` per monitor, cropped to its rectangle
+  (`startx/starty/endx/endy`, inclusive), `show-pointer=false` (the cursor
+  travels beside the video, local-cursor mode, as on GNOME) and
+  `use-damage=false` (damage regions cost more than they save at 30 fps;
+  ADR-0006 measured 14 ms paint-to-capture p50). A monitor's capture is
+  available from the start; a vanished monitor's capture ends with it.
+  The root never moves a capture: a monitor that changes geometry is
+  restarted on its new rectangle.
+- **Input.** XTest. Pointer: a monitor's normalized point → the root's
+  `x + nx·w, y + ny·h`; buttons 1–3 and 8–9 (back, forward); the wheel as
+  button 4–7 clicks, one per 120 units accumulated. Keys: X keycode =
+  evdev code + 8 (Xorg's evdev rule). `type_text` uses the shared
+  `KeymapIndex` on the X server's own keymap (xkbcommon-x11), exactly as on
+  GNOME; characters no key produces are refused by name.
+  `release_all_input` releases every key and button XTest pressed.
+- **Cursor.** XFixes: `XFixesSelectCursorInput` for shape changes,
+  `XFixesGetCursorImage` for the pixels (premultiplied ARGB → the shared
+  straight RGBA and content-hashed `shape_id`); the position is read with
+  `XQueryPointer` at 30 Hz while it moves, and reported per monitor.
+- **Presence.** `session_running()` is true while the display is open.
+  When the connection drops (the X server restarted, the session logged
+  out), every capture ends (`SessionEnded`), the monitors become none,
+  `on_session_changed(false)` fires, and the module reopens the display
+  every 2 s until it is back ([docs/08](08-protocol.md) `desktop`).
+- **Not offered.** Virtual monitors (`RecordVirtual` is mutter's) and the
+  sharing stop (GNOME's indicator): `Features` says so and the capability
+  refuses `add-monitor` as `unavailable`.
+- **Clipboard (slice 3.7c).** X selections on `CLIPBOARD`, through a window
+  the module owns: owner changes from `XFixesSelectSelectionInput`; the
+  offered types from `TARGETS` (mapped by the shared `clipboard_types`);
+  reads by `XConvertSelection` into a property, writes by owning the
+  selection and answering `SelectionRequest` for `TARGETS`, every text name
+  and `image/png`. Contents above the server's request size travel with the
+  `INCR` protocol in both directions (a PNG of several MiB is).
+
+**`fjarr-x11-session`** is the session side, started by the kiosk
+session's XDG autostart entry, as the session's user. It grants the agent's
+account (`XAddHost` with the `localuser` server-interpreted family: the same
+grant as `xhost +si:localuser:fjarr`, with no authority file changing
+hands), lays out the outputs, and re-lays them on every RandR output or
+screen change: outputs that are disconnected but still hold a CRTC are
+switched off, connected ones are switched on at their preferred mode, left
+to right in connector order, each position set explicitly (shrinking the
+root moves windows). ADR-0006 found a bare X kiosk lays out nothing and
+never reacts to a hot-plug; an MST chain's middle monitor that does not
+come back after a hot-plug is a driver limit this does not fix.
+
 ### Whether the desktop is there (M3 slice 3.5) {#desktop-presence}
 
 Module E reports `session_running()` true from the helper's `hello` until

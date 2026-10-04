@@ -145,13 +145,16 @@ wins; latency differences under 20 ms p50 are noise.
 
 ## Simulating hot-plug
 
-robot-sim's Xvfb runs with the RandR extension; RandR 1.5 *virtual
-monitors* (`xrandr --setmonitor VIRT-2 1280/300x720/200+1920+0 none`,
-`xrandr --delmonitor VIRT-2`) add and remove monitor objects at runtime
-without real hardware, which is what X11 backends see on a hot-plug. The
-M2 spikes verify this works on Xvfb and it becomes the docs/15 hot-plug
-test fixture; the Wayland equivalent (a headless compositor with
-configurable outputs) is a spike question in its own right.
+robot-sim's Xvfb runs with the RandR extension; RandR 1.5 *monitors*
+(`xrandr --setmonitor`, `--delmonitor`) add and remove monitor objects at
+runtime without real hardware, the docs/15 hot-plug fixture for backend A.
+Measured 2026-10-04 (Xvfb on Ubuntu 26.04): **the root cannot grow** past
+the size Xvfb started with (`xrandr --fb` refuses, and a monitor placed
+outside the root is silently dropped), so the fixture starts with a wide
+root (3840×1080) and carves monitors out of it; and **no RandR event** was
+seen for these changes, so backend A re-reads the monitors on a 2 s timer as
+well as on events ([docs/23](23-agent-core-architecture.md#desktop-x11)).
+The Wayland equivalent is headless mutter's virtual monitors (slice 3.4).
 
 ## Decision (2026-09-27)
 

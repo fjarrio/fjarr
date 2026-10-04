@@ -258,7 +258,12 @@ GNOME Shell.
 | **The mini-PC** (`fjarr-lab`, labels `desktop` `gnome`) | nightly, in its CI window | the unattended-access test above; ghost screens ([ADR-0032](adr/0032-ghost-screens.md)) beside a real monitor and the 3-monitor DisplayPort chain; hot-plug on real connectors; input-to-photon against the docs/16 budgets on real hardware |
 
 Backend A (X11 kiosk, slice 3.7) uses robot-sim, the Xvfb service CI already
-runs, with scripted `xrandr` monitor changes.
+runs: a 3840×1080 root carved into RandR monitors (`xrandr --setmonitor`;
+the root cannot grow, [docs/07](07-desktop-backends.md#simulating-hot-plug)),
+a test window that logs what it receives, a service that plugs and unplugs
+monitors, and a separate agent account with the `xhost` grant. The same
+`fjarr-opsim` desktop scenarios and browser tests run against it
+(`make x11-e2e`, `make x11-browser`) on every push.
 
 Every lab job starts from a baseline: `setup --undo desktop`, install the build
 under test, then `setup desktop` with the job's own settings. The machine's
