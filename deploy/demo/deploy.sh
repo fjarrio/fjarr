@@ -18,7 +18,9 @@ tar -C deploy/demo -cf - compose.yml Caddyfile | ssh_ 'tar -C /opt/fjarr -xf -'
 ssh_ 'rm -rf /opt/fjarr/site.new /opt/fjarr/demo-backend.new && mkdir -p /opt/fjarr/site.new /opt/fjarr/demo-backend.new'
 tar -C demos/demo-dashboard/dist -cf - . | ssh_ 'tar -C /opt/fjarr/site.new -xf -'
 tar -C demos/demo-backend -cf - package.json src | ssh_ 'tar -C /opt/fjarr/demo-backend.new -xf -'
-ssh_ 'cd /opt/fjarr && rm -rf site demo-backend && mv site.new site && mv demo-backend.new demo-backend'
+# Contents replaced in place, never the directories: a running container's bind mount keeps the old,
+# deleted directory, and Caddy served an empty one after the second deploy (2026-10-04).
+ssh_ 'cd /opt/fjarr && for d in site demo-backend; do mkdir -p $d && find $d -mindepth 1 -delete && cp -a $d.new/. $d/ && rm -rf $d.new; done'
 
 echo "== secrets (first deploy only) and start"
 ssh_ 'set -e; cd /opt/fjarr
