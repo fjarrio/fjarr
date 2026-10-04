@@ -332,6 +332,26 @@ robot offers no monitors, so a dashboard that shows its desktop only while
 2026-10-03). The demo's Desktop panel has a "Resume when the robot stops
 sharing" checkbox.
 
+## When there is nothing to show
+
+`<DesktopView>` always says why it shows no picture, in its placeholder and
+in `data-fjarr-status`, and it never removes itself:
+
+| status | when | text |
+|---|---|---|
+| `desktop-absent` | `desktop: absent` (docs/08) | The robot's desktop is not running. It may be restarting; this view comes back by itself. |
+| `stopped-on-robot` | `sharing: stopped` | Sharing was stopped on the robot (and Resume, [above](#when-the-robot-stops-sharing)) |
+| `monitor-disconnected` | its `monitorId` left the layout | This monitor was disconnected from the robot. It comes back here when it is plugged in again. |
+| `no-display` | the desktop runs with no monitor | No display is connected to the robot. |
+
+`useDesktopState(session)` gives `"running" | "absent" | "unknown"`
+(`DesktopState` in `@fjarr/core`, one per session); `"unknown"` until the
+robot has said, which a robot without a desktop never does. A dashboard
+that shows a desktop panel only while there are monitors loses all of this:
+the demo keeps its Desktop panel whenever the robot has a desktop (its state
+is known), and lets the view explain (it removed the panel during a GNOME
+Shell restart, mini-PC 2026-10-04).
+
 ## Latency knobs (desktop-specific)
 
 - `RTCRtpReceiver.jitterBufferTarget = 0` on desktop tracks — trade

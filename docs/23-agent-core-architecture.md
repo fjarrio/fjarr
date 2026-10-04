@@ -687,6 +687,17 @@ A capture costs little while nobody watches, because its producer starts on the
 first demand (above). Pointer input names its monitor by `track_id`, so it lands
 on that monitor whichever is primary.
 
+### Whether the desktop is there (M3 slice 3.5) {#desktop-presence}
+
+Module E reports `session_running()` true from the helper's `hello` until
+its connection closes, and calls `on_session_changed` on each change. The
+capability sends docs/08 `desktop {state}` to every session at its start
+and on each change, so a dashboard can tell "no display" from "no desktop"
+(an empty monitor set alone says neither). The new virtuals change
+`DesktopBackend`'s vtable; like the rest of M3 they amend
+`fjarr_desktop_module_v1` in place, which `module.hpp` allows until the
+first M3 packages ship, and every change after that bumps the name.
+
 ### When the robot stops sharing (M3 slice 3.5) {#desktop-sharing-stopped}
 
 GNOME's screen-sharing indicator stops every capture and the input session

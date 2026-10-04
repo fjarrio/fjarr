@@ -181,6 +181,10 @@ public:
   // detect it, not just relay a signal. The capability then drops or rebuilds
   // that track.
   virtual void on_capture_lost(std::function<void(MonitorId, CaptureLost)>) = 0;
+  // Whether the desktop session is there (docs/08 `desktop`): a backend that reaches it through a
+  // per-session helper reports the helper coming and going. Default: always there.
+  virtual bool session_running() { return true; }
+  virtual void on_session_changed(std::function<void(bool running)>) {}
   // Returns immediately and never waits for a first frame. Capture may be
   // variable-rate: a still screen produces no frames, not even a first one.
   // The backend provokes a first frame where it can, and repeats the last one
