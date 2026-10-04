@@ -96,14 +96,16 @@ class X11Backend final : public DesktopBackend {
         disconnect();
     }
 
-    /// Open the display now, or keep trying every 2 s (docs/23: presence).
+    /// Open the display now, or keep trying every 2 s (docs/23: presence). The monitors are re-read
+    /// every 500 ms besides: a RandR 1.5 monitor change may send no event (docs/07, Xvfb), and the
+    /// re-read is what keeps such a change inside docs/06's 2 s hot-plug budget.
     void start() {
         connect();
-        tick_ = g_timeout_source_new_seconds(2);
+        tick_ = g_timeout_source_new(500);
         g_source_set_callback(tick_, [](gpointer d) -> gboolean {
             auto* self = static_cast<X11Backend*>(d);
-            if (!self->dpy_) self->connect();
-            else self->read_monitors(); // RandR 1.5 monitor changes may send no event (docs/07, Xvfb)
+            if (self->dpy_) self->read_monitors();
+            else if (++self->reconnect_ticks_ % 4 == 0) self->connect();
             return G_SOURCE_CONTINUE;
         }, this, nullptr);
         g_source_attach(tick_, host_.context);
@@ -524,6 +526,7 @@ class X11Backend final : public DesktopBackend {
     bool warned_ = false;
     GSource* watch_ = nullptr;
     GSource* tick_ = nullptr;
+    unsigned reconnect_ticks_ = 0; // the 500 ms ticks with no display: every fourth reconnects
     GSource* pointer_tick_ = nullptr;
     std::vector<Monitor> monitors_;
     std::map<std::string, MonitorId> ids_by_wire_; // a returning monitor keeps its id (docs/23#desktop-monitors)

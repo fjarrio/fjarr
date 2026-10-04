@@ -706,8 +706,9 @@ descriptor is watched there, and no Xlib call is made from another thread.
   a monitor has the same wire id under X11 as under GNOME; a monitor with no
   output or EDID (Xvfb's `--setmonitor`, a dummy plug) falls back to its
   name. The set is re-read on RandR screen, output and CRTC events **and**
-  every 2 s, since a RandR 1.5 monitor change sent no event on Xvfb, and
-  reported only when it changed; the capability diffs it by wire id
+  every 500 ms, since a RandR 1.5 monitor change sent no event on Xvfb and
+  the re-read must still meet the 2 s hot-plug budget
+  ([docs/06](06-capabilities.md)), and reported only when it changed; the capability diffs it by wire id
   ([below](#desktop-monitors)).
 - **Capture.** One `ximagesrc` per monitor, cropped to its rectangle
   (`startx/starty/endx/endy`, inclusive), `show-pointer=false` (the cursor

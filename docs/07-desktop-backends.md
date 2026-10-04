@@ -152,8 +152,8 @@ Measured 2026-10-04 (Xvfb on Ubuntu 26.04): **the root cannot grow** past
 the size Xvfb started with (`xrandr --fb` refuses, and a monitor placed
 outside the root is silently dropped), so the fixture starts with a wide
 root (3840×1080) and carves monitors out of it; and **no RandR event** was
-seen for these changes, so backend A re-reads the monitors on a 2 s timer as
-well as on events ([docs/23](23-agent-core-architecture.md#desktop-x11)).
+seen for these changes, so backend A re-reads the monitors every 500 ms as
+well as on events (a 2 s timer missed docs/06's 2 s hot-plug budget) ([docs/23](23-agent-core-architecture.md#desktop-x11)).
 The Wayland equivalent is headless mutter's virtual monitors (slice 3.4).
 
 ## Decision (2026-09-27)
