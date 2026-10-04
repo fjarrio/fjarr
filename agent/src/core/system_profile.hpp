@@ -54,6 +54,10 @@ struct System {
 std::vector<Row> check(const std::string& path, bool net_wanted, const System& system);
 /// As above, and `desktop` when `setup desktop` configured a desktop account (`helper.user`).
 std::vector<Row> check(const std::string& path, bool net_wanted, const std::optional<std::string>& desktop_account, const System& system);
+/// An X11 kiosk's rows (`[desktop-x11]`, when the configuration says backend = "x11"): the module and
+/// the kiosk session's autostart entry. Whether the session granted the agent shows in the agent's
+/// log and as `desktop: absent` (docs/23#desktop-x11).
+std::vector<Row> check_desktop_x11(const std::string& path, const System& system);
 
 /// True when no row failed.
 bool all_ok(const std::vector<Row>& rows);

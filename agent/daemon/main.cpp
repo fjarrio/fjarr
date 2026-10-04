@@ -164,7 +164,12 @@ int main(int argc, char** argv) {
                 if (d.is_object() && d.contains("helper") && d["helper"].is_object() && d["helper"].contains("user") && d["helper"]["user"].is_string())
                     desktop_account = d["helper"]["user"].get<std::string>();
             }
-            const auto rows = fjarr::profile::check(path, net_wanted, desktop_account, fjarr::profile::System::real());
+            auto rows = fjarr::profile::check(path, net_wanted, desktop_account, fjarr::profile::System::real());
+            if (config.capabilities.count("fjarr.desktop") && config.capabilities["fjarr.desktop"].is_object() &&
+                config.capabilities["fjarr.desktop"].value("backend", std::string{}) == "x11") {
+                const auto x11 = fjarr::profile::check_desktop_x11(path, fjarr::profile::System::real());
+                rows.insert(rows.end(), x11.begin(), x11.end());
+            }
             for (const auto& r : rows)
                 std::printf("profile %-7s %-28s %-8s %s%s\n", r.feature.c_str(), r.item.c_str(), r.ok ? "ok" : "MISSING", r.detail.c_str(),
                             r.fix.empty() ? "" : ("  → " + r.fix).c_str());

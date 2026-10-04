@@ -16,6 +16,16 @@ use crate::{config, system, ui, DesktopArgs, YesNo};
 
 pub const FEATURE: &str = "desktop";
 pub const PACKAGE: &str = "fjarr-desktop-wayland";
+/// Backend A, an X11 kiosk (docs/23#desktop-x11).
+pub const PACKAGE_X11: &str = "fjarr-desktop-x11";
+/// Where `setup desktop` links the kiosk session's autostart entry, and what it links to (docs/26).
+pub const X11_AUTOSTART: &str = "/etc/xdg/autostart/fjarr-x11-session.desktop";
+pub const X11_AUTOSTART_SOURCE: &str = "/usr/share/fjarr/fjarr-x11-session.desktop";
+
+/// An X11 kiosk when asked, or when its package is the only desktop package installed.
+pub fn x11_chosen(flag: bool, x11_installed: bool, wayland_installed: bool) -> bool {
+    flag || (x11_installed && !wayland_installed)
+}
 pub const GROUP: &str = "fjarr-desktop";
 pub const TABLE: &str = "fjarr.desktop";
 pub const DEFAULT_ACCOUNT: &str = "desktop";
@@ -270,6 +280,62 @@ fn create_owned_dirs(dir: &Path, uid: libc::uid_t, gid: libc::gid_t) -> Result<(
     Ok(())
 }
 
+/// An X11 kiosk (docs/26#fjarr-agent-setup-desktop): the session program's autostart entry, and the
+/// agent's backend and display. The display manager and the automatic login stay the robot maker's.
+async fn setup_x11(config_path: &Path, state: &Path, args: DesktopArgs) -> Result<i32> {
+    if !system::dpkg_installed(PACKAGE_X11) {
+        bail!("the X11 desktop package is not installed: sudo apt install {PACKAGE_X11}, then run this again");
+    }
+    let mut doc = config::load(config_path)?;
+    let mut record = Record::load(state)?;
+    let session = crate::detect::display_session();
+    log::info(format!(
+        "Session: {} → backend: X11 (A)",
+        session
+            .as_deref()
+            .unwrap_or("no graphical session right now")
+    ))?;
+
+    // 1. The kiosk session runs fjarr-x11-session: the agent's grant and the output layout.
+    let link = Path::new(X11_AUTOSTART);
+    if std::fs::symlink_metadata(link).is_err() {
+        std::fs::create_dir_all(link.parent().expect("a parent"))?;
+        symlink(X11_AUTOSTART_SOURCE, link)
+            .with_context(|| format!("linking {}", link.display()))?;
+        record.add(
+            FEATURE,
+            Change::Symlink {
+                path: link.to_path_buf(),
+                target: X11_AUTOSTART_SOURCE.into(),
+            },
+        );
+        record.save(state)?;
+    }
+    log::success(format!(
+        "{X11_AUTOSTART} → the kiosk session grants the agent's account and keeps its monitors laid out"
+    ))?;
+
+    // 2. The agent's side: backend A on that display.
+    let display = args.display.clone().unwrap_or_else(|| ":0".into());
+    set_value(&mut record, &mut doc, config_path, "backend", "x11");
+    set_value(&mut record, &mut doc, config_path, "display", &display);
+    config::save(config_path, &doc)?;
+    record.save(state)?;
+    log::success(format!("The agent opens the X display {display}"))?;
+    log::remark(
+        "The display manager and the automatic login are left as they are: the kiosk session is yours. \
+         LightDM with an automatic login is the easy X11 kiosk; under GDM the X session loses the screen \
+         to a Wayland greeter about 11 s after an automatic login (ADR-0006).",
+    )?;
+    if system::systemd_running() {
+        system::restart_agent_if_running()?;
+    }
+    cliclack::outro(format!(
+        "The kiosk session grants the agent at its next login (log out and in, or reboot) · fjarr-agent --check follows · undo: fjarr-agent setup --undo {FEATURE}"
+    ))?;
+    crate::agent_check(config_path)
+}
+
 pub async fn setup(config_path: &Path, state: &Path, args: DesktopArgs) -> Result<i32> {
     crate::require_root("setup desktop")?;
     cliclack::intro("fjarr setup desktop")?;
@@ -278,9 +344,16 @@ pub async fn setup(config_path: &Path, state: &Path, args: DesktopArgs) -> Resul
         cliclack::outro_cancel("nothing changed")?;
         return Ok(1);
     }
+    if x11_chosen(
+        args.x11,
+        system::dpkg_installed(PACKAGE_X11),
+        system::dpkg_installed(PACKAGE),
+    ) {
+        return setup_x11(config_path, state, args).await;
+    }
     if !system::dpkg_installed(PACKAGE) {
         bail!(
-            "the desktop package is not installed: sudo apt install {PACKAGE}, then run this again"
+            "the desktop package is not installed: sudo apt install {PACKAGE} (GNOME) or {PACKAGE_X11} (an X11 kiosk), then run this again"
         );
     }
     if !Path::new("/etc/gdm3").exists() && !system::unit_exists("gdm.service") {
@@ -536,6 +609,18 @@ mod tests {
         assert_eq!(
             dconf_profile(Some("user-db:user\nsystem-db:site")).unwrap(),
             "user-db:user\nsystem-db:site\nsystem-db:local\n"
+        );
+    }
+
+    #[test]
+    fn an_x11_kiosk_is_chosen_when_asked_or_when_only_its_package_is_installed() {
+        assert!(x11_chosen(true, false, true), "--x11 wins");
+        assert!(x11_chosen(false, true, false), "only fjarr-desktop-x11");
+        assert!(!x11_chosen(false, true, true), "both: GNOME unless --x11");
+        assert!(!x11_chosen(false, false, true));
+        assert!(
+            !x11_chosen(false, false, false),
+            "neither: the GNOME path says what to install"
         );
     }
 

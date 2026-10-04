@@ -54,3 +54,14 @@ Description: Fjarr remote desktop for GNOME on Wayland
  session and hands the agent a PipeWire connection narrowed to the screen and
  an input socket; the agent keeps its own account. Nothing is switched on at
  install: `fjarr-agent setup desktop` does that, and `--undo desktop` reverses it.
+
+Package: fjarr-desktop-x11
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, fjarr-agent (= ${binary:Version}), gstreamer1.0-x
+Description: Fjarr remote desktop for X11 kiosks
+ The robot's screen as a video track per monitor, and the operator's pointer
+ and keyboard on it, through the X server: ximagesrc, XTest and XFixes from
+ the agent's own process. fjarr-x11-session runs in the kiosk session, grants
+ the agent's account (xhost +si:localuser:fjarr) and keeps the outputs laid
+ out. Nothing is switched on at install: `fjarr-agent setup desktop` links the
+ session's autostart entry, and `--undo desktop` removes it.

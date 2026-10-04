@@ -12,12 +12,14 @@ add_executable(fjarr-tests
   test_keymap.cpp
   test_clipboard_types.cpp
   test_edid.cpp
+  test_x11_layout.cpp
   test_cursor_image.cpp
   ${CMAKE_SOURCE_DIR}/agent/src/desktop/monitor_identity.cpp
   ${CMAKE_SOURCE_DIR}/agent/src/desktop/keymap.cpp
   ${CMAKE_SOURCE_DIR}/agent/src/desktop/helper_protocol.cpp
   ${CMAKE_SOURCE_DIR}/agent/src/desktop/cursor_image.cpp
   ${CMAKE_SOURCE_DIR}/agent/src/desktop/edid.cpp
+  ${CMAKE_SOURCE_DIR}/agent/src/desktop/x11_layout.cpp
   test_frame_hub.cpp
   test_channels.cpp
   test_blob.cpp

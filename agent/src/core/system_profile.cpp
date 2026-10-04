@@ -228,6 +228,29 @@ void check_desktop(const toml::table& d, const std::string& account, const std::
 
 std::vector<Row> check(const std::string& path, bool net_wanted, const System& sys) { return check(path, net_wanted, std::nullopt, sys); }
 
+std::vector<Row> check_desktop_x11(const std::string& path, const System& sys) {
+    // spec: docs/26#fjarr-agent-setup-desktop — what `setup desktop` does on an X11 kiosk, verified.
+    std::vector<Row> rows;
+    toml::table tbl;
+    try {
+        tbl = toml::parse_file(path);
+    } catch (const std::exception&) {
+        return rows; // check() already reports a missing or broken profile
+    }
+    const auto* d = tbl["desktop-x11"].as_table();
+    if (!d) return rows;
+    if (auto module = (*d)["module"].value<std::string>()) {
+        const bool there = sys.stat(*module).has_value();
+        rows.push_back({"desktop", "module", there, there ? *module : "not installed", there ? "" : "sudo apt install fjarr-desktop-x11"});
+    }
+    if (auto autostart = (*d)["autostart"].value<std::string>()) {
+        const bool there = sys.stat(*autostart).has_value();
+        rows.push_back({"desktop", "kiosk session entry", there, there ? *autostart : "not linked: the kiosk session does not grant the agent",
+                        there ? "" : "sudo fjarr-agent setup desktop --x11"});
+    }
+    return rows;
+}
+
 std::vector<Row> check(const std::string& path, bool net_wanted, const std::optional<std::string>& desktop_account, const System& sys) {
     std::vector<Row> rows;
     std::ifstream in(path);

@@ -12,7 +12,7 @@ apt-get update -qq >/dev/null
 # that step is skipped and a /run/fjarr the package failed to create went unnoticed (0.1.2, found on
 # the mini-PC). The standalone build is the one a container without systemd can have.
 apt-get install -y -qq systemd-standalone-tmpfiles >/dev/null 2>&1 || fail "could not install systemd-standalone-tmpfiles"
-cp /debs/fjarr-agent_*.deb /debs/fjarr-tools_*.deb /debs/fjarr-desktop-wayland_*.deb /tmp/ && apt-get install -y -qq /tmp/*.deb >/tmp/apt.log 2>&1 || { tail -20 /tmp/apt.log; fail "apt could not install the packages"; }
+cp /debs/fjarr-agent_*.deb /debs/fjarr-tools_*.deb /debs/fjarr-desktop-wayland_*.deb /debs/fjarr-desktop-x11_*.deb /tmp/ && apt-get install -y -qq /tmp/*.deb >/tmp/apt.log 2>&1 || { tail -20 /tmp/apt.log; fail "apt could not install the packages"; }
 ok "apt installed: $(ls /tmp/*.deb | xargs -n1 basename | tr '\n' ' ')"
 # The package creates /run/fjarr for the agent at install (tmpfiles), which needs the fjarr user to
 # exist first (sysusers) — debhelper orders the two the other way round unless the postinst does it.
@@ -62,6 +62,15 @@ id -nG fjarr | tr ' ' '\n' | grep -qx fjarr-desktop || fail "the agent's account
 [ -f /usr/lib/systemd/system/fjarr-desktop-watchdog.timer ] || fail "no watchdog timer"
 [ ! -e /etc/systemd/system/timers.target.wants/fjarr-desktop-watchdog.timer ] || fail "the watchdog is enabled by the package; setup desktop enables it"
 ok "fjarr-desktop-wayland: module, helper, group with fjarr in it, user unit and watchdog installed, nothing enabled"
+
+# fjarr-desktop-x11 (docs/26#packages): the module and the session program, its autostart entry inert.
+[ -f /usr/lib/fjarr/desktop/libfjarr-desktop-x11.so ] || fail "no backend module A in /usr/lib/fjarr/desktop"
+# No X server here, so it exits 1 at once ("cannot open the display"); 127 would be a library it cannot load.
+rc=0; DISPLAY=:9 /usr/lib/fjarr/fjarr-x11-session >/tmp/x11s.log 2>&1 </dev/null || rc=$?
+grep -q 'cannot open the display' /tmp/x11s.log || fail "fjarr-x11-session does not run (exit $rc): $(cat /tmp/x11s.log)"
+[ -f /usr/share/fjarr/fjarr-x11-session.desktop ] || fail "no autostart entry for fjarr-x11-session under /usr/share/fjarr"
+[ ! -e /etc/xdg/autostart/fjarr-x11-session.desktop ] || fail "the kiosk session's autostart entry is enabled by the package; setup desktop links it"
+ok "fjarr-desktop-x11: module, session program and its inert autostart entry installed, nothing enabled"
 
 [ -f /usr/share/fjarr/viewer/index.html ] || fail "the viewer is missing"; ok "viewer installed"
 getcap /usr/bin/fjarr-connect | grep -q 'cap_net_admin=p' || fail "fjarr-connect lacks cap_net_admin: $(getcap /usr/bin/fjarr-connect)"
@@ -147,6 +156,17 @@ cmp -s /etc/gdm3/custom.conf /tmp/custom.conf.orig || { diff /tmp/custom.conf.or
 ! grep -q 'fjarr.desktop' /etc/fjarr/fjarr.toml || { cat /etc/fjarr/fjarr.toml; fail "--undo desktop left the desktop keys in the config"; }
 grep -q '^robot_id = "test-device"' /etc/fjarr/fjarr.toml || fail "--undo desktop touched setup's own keys"
 ok "setup --undo desktop removed the account, restored custom.conf, removed the dconf files and the config keys, kept the rest"
+# setup desktop --x11 (docs/26#fjarr-agent-setup-desktop): the kiosk session's autostart entry and
+# the agent's backend; the display manager and its automatic login stay the operator's.
+fjarr-agent setup desktop --yes --x11 --display :7 >/tmp/x11.log 2>&1 || { cat /tmp/x11.log; fail "setup desktop --x11 failed"; }
+[ "$(readlink /etc/xdg/autostart/fjarr-x11-session.desktop)" = /usr/share/fjarr/fjarr-x11-session.desktop ] || fail "setup desktop --x11 did not link the kiosk session's autostart entry"
+grep -q '^backend = "x11"' /etc/fjarr/fjarr.toml && grep -q '^display = ":7"' /etc/fjarr/fjarr.toml || { cat /etc/fjarr/fjarr.toml; fail "the agent's config does not name backend A on :7"; }
+cmp -s /etc/gdm3/custom.conf /tmp/custom.conf.orig || fail "setup desktop --x11 touched the display manager"
+grep -q '^check: OK' /tmp/x11.log || { cat /tmp/x11.log; fail "setup desktop --x11 did not end with a passing --check"; }
+fjarr-agent setup --undo desktop >/tmp/undo-x11.log 2>&1 || { cat /tmp/undo-x11.log; fail "setup --undo desktop (x11) failed"; }
+[ ! -e /etc/xdg/autostart/fjarr-x11-session.desktop ] || fail "--undo desktop left the autostart entry"
+! grep -q 'fjarr.desktop' /etc/fjarr/fjarr.toml || { cat /etc/fjarr/fjarr.toml; fail "--undo desktop left the x11 keys in the config"; }
+ok "setup desktop --x11: autostart entry linked, backend A on the display, display manager untouched, --check passed; --undo desktop removed both"
 fjarr-agent setup --undo >/tmp/undo.log 2>&1 || { cat /tmp/undo.log; fail "setup --undo failed"; }
 [ ! -e /etc/fjarr/fjarr.toml ] || fail "--undo left the config in place"
 grep -q '"changes": \[\]' /var/lib/fjarr/setup-changes.json || fail "--undo left changes recorded: $(cat /var/lib/fjarr/setup-changes.json)"

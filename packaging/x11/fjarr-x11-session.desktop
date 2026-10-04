@@ -1,0 +1,10 @@
+[Desktop Entry]
+# The X11 kiosk session's side of Fjarr (docs/23#desktop-x11): grants the agent's account and lays out
+# the outputs. Installed inert under /usr/share/fjarr/; `fjarr-agent setup desktop` links it into
+# /etc/xdg/autostart/ (docs/26).
+Type=Application
+Name=Fjarr kiosk session
+Comment=Lets the Fjarr agent reach this X session, and keeps its monitors laid out
+Exec=/usr/lib/fjarr/fjarr-x11-session
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

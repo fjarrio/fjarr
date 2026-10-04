@@ -25,3 +25,7 @@ group  = "fjarr-desktop"                          # the helper's socket: the age
 gdm    = "/etc/gdm3/custom.conf"                  # the automatic login
 units  = ["fjarr-desktop-watchdog.timer"]         # restores the automatic login if the session dies (ADR-0006)
 ghosts = "/etc/default/grub.d/fjarr-ghosts.cfg"   # ghost screens (docs/26#ghost-screens)
+
+[desktop-x11]                                     # an X11 kiosk, when `setup desktop` configured backend A (docs/23#desktop-x11)
+module    = "/usr/lib/fjarr/desktop/libfjarr-desktop-x11.so"      # fjarr-desktop-x11
+autostart = "/etc/xdg/autostart/fjarr-x11-session.desktop"       # the kiosk session's grant and layout, linked by setup

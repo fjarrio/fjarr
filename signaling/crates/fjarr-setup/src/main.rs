@@ -56,6 +56,9 @@ pub struct Cli {
 }
 
 #[derive(Subcommand, Debug)]
+// Parsed once at startup: the Setup variant's size costs nothing, and boxing it would stop the match
+// below from destructuring its arguments.
+#[allow(clippy::large_enum_variant)]
 pub enum Command {
     /// The first run: server, device id and token, cameras, terminal; writes the configuration
     /// and starts the agent. `--undo [<feature>]` reverses what was recorded.
@@ -116,6 +119,8 @@ pub struct DesktopArgs {
     pub account: Option<String>,
     pub reboot: Option<YesNo>,
     pub ghost_screens: Option<u32>,
+    pub x11: bool,
+    pub display: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -194,6 +199,12 @@ pub struct SetupArgs {
     /// For `setup desktop`: reboot at the end, so the account's group applies.
     #[arg(long, value_enum)]
     pub reboot: Option<YesNo>,
+    /// For `setup desktop`: an X11 kiosk (backend A, fjarr-desktop-x11), even when the Wayland package is installed too.
+    #[arg(long)]
+    pub x11: bool,
+    /// For `setup desktop` on an X11 kiosk: the X display the agent opens (default :0).
+    #[arg(long, value_name = "DISPLAY")]
+    pub display: Option<String>,
     /// How long to wait for the agent's STATUS=online, in seconds.
     #[arg(long, default_value_t = 30, value_name = "SECONDS")]
     pub timeout: u64,
@@ -299,6 +310,8 @@ async fn run(cli: Cli) -> Result<i32> {
                 account: args.account,
                 reboot: args.reboot,
                 ghost_screens: args.ghost_screens,
+                x11: args.x11,
+                display: args.display,
             };
             desktop::setup(&cli.config, &cli.state, d).await
         }

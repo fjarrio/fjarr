@@ -566,7 +566,7 @@ demo-deploy: ## The hosted demo (docs/31): build fjarr-server and the dashboard,
 	@deploy/demo/deploy.sh
 
 .PHONY: deb deb-install-test deb-embed-test install-script-test set-version
-deb: ## Build the .debs (fjarr-agent, fjarr-tools, fjarr-desktop-wayland, libfjarr-dev) for this host's architecture into dist/deb/<arch>/
+deb: ## Build the .debs (fjarr-agent, fjarr-tools, fjarr-desktop-wayland, fjarr-desktop-x11, libfjarr-dev) for this host's architecture into dist/deb/<arch>/
 	@if [ -f /.dockerenv ]; then echo "make deb runs on the host (it starts its own builder container)"; exit 1; fi
 	@$(DEB_BUILDER_IMAGE)
 	mkdir -p dist/deb/$(DEB_ARCH)

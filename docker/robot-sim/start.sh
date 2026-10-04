@@ -37,7 +37,13 @@ done
 
 if [ "${SIM_FIXTURE:-0}" = 1 ]; then
   xrandr --setmonitor LEFT 1920/500x1080/280+0+0 screen
-  xhost +si:localuser:fjarr
+  # The package's session program grants the agent's account and keeps the outputs laid out, as the
+  # kiosk session's autostart entry runs it (docs/23#desktop-x11); built in /workspace (make agent-build).
+  SESSION=/workspace/build/release/agent/fjarr-x11-session
+  [ -x "$SESSION" ] || { echo "robot-sim: $SESSION is not built: make agent-build"; exit 1; }
+  "$SESSION" --account fjarr >/run/fixture/session.log 2>&1 &
+  for _ in $(seq 1 50); do grep -q "granted" /run/fixture/session.log 2>/dev/null && break; sleep 0.1; done
+  cat /run/fixture/session.log
   openbox &
   sleep 0.5
   testwin_x11.py >/run/fixture/testwin.err 2>&1 &

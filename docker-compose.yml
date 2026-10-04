@@ -116,6 +116,7 @@ services:
     ipc: shareable
     volumes:
       - x11-fixture-sock:/tmp/.X11-unix
+      - .:/workspace:ro # fjarr-x11-session, as built (make agent-build)
 
   # Backend A's robot: the agent as uid 10003, which the fixture's `xhost +si:localuser:fjarr` names.
   x11-robot:

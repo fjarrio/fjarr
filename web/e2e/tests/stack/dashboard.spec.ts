@@ -298,6 +298,16 @@ test("the Desktop panel in fullscreen: the pointer lands where it does in the pa
 
   await page.getByRole("button", { name: "Fullscreen" }).click();
   await expect.poll(() => page.evaluate(() => document.fullscreenElement !== null)).toBe(true);
+  // The layout settles after the fullscreen change: aim only once the video's box has held still for
+  // 200 ms (CI once aimed at the box from before the resize and landed 39 px off, 2026-10-04).
+  const box = () => view.locator("video").evaluate((v) => JSON.stringify(v.getBoundingClientRect()));
+  await expect
+    .poll(async () => {
+      const a = await box();
+      await page.waitForTimeout(200);
+      return a === (await box());
+    }, { timeout: 5000 })
+    .toBe(true);
   const inFullscreen = await clickAt(0.25, 0.25);
   await page.screenshot({ path: dashboard.out.path("desktop-fullscreen.png") });
   // The same robot pixel, give or take the rounding of two different scales.
@@ -365,9 +375,12 @@ test("the Desktop panel opens a robot monitor in a separate window: it streams, 
   await dashboard.waitForState("desktop-robot-01", "connected");
   await expect(page.locator("[data-fjarr-desktop] [data-fjarr-track^='desk-']").first()).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
 
-  // One click: the monitor in a window of its own, a portal on this page's session.
-  const opened = page.context().waitForEvent("page", { timeout: 5000 });
-  await page.locator("[data-demo-separate-window]").click();
+  // One click: the monitor in a window of its own, a portal on this page's session. The button is
+  // waited for first, so the window's clock times the window and not a loaded machine's click.
+  const button = page.locator("[data-demo-separate-window]");
+  await expect(button).toBeVisible();
+  const opened = page.context().waitForEvent("page", { timeout: 10_000 });
+  await button.click();
   const win = await opened;
   const inWin = win.locator("[data-fjarr-separate-window]");
   await expect(inWin.locator("[data-fjarr-track^='desk-']")).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });

@@ -33,6 +33,10 @@ group  = "fjarr-desktop"
 gdm    = "/etc/gdm3/custom.conf"
 units  = ["fjarr-desktop-watchdog.timer"]
 ghosts = "/etc/default/grub.d/fjarr-ghosts.cfg"
+
+[desktop-x11]
+module    = "/usr/lib/fjarr/desktop/libfjarr-desktop-x11.so"
+autostart = "/etc/xdg/autostart/fjarr-x11-session.desktop"
 )";
 
 struct Fake {
@@ -260,4 +264,20 @@ TEST(SystemProfile, aRealMonitorOnAGhostConnectorIsAFailureFoundOverDdc) {
     sys.ddc_monitor = [](const std::string&) -> std::optional<std::string> { return std::nullopt; }; // nothing answers
     rows = check(profile_file(), false, std::optional<std::string>("desktop"), sys);
     EXPECT_TRUE(find(rows, "ghost HDMI-A-1")->ok);
+}
+
+TEST(SystemProfile, anX11KioskNeedsItsModuleAndTheSessionEntryEachWithItsFix) {
+    // docs/26#fjarr-agent-setup-desktop: the X11 branch links the kiosk session's autostart entry.
+    Fake f;
+    auto rows = fjarr::profile::check_desktop_x11(profile_file(), f.system());
+    ASSERT_NE(find(rows, "module"), nullptr);
+    EXPECT_FALSE(find(rows, "module")->ok);
+    EXPECT_EQ(find(rows, "module")->fix, "sudo apt install fjarr-desktop-x11");
+    ASSERT_NE(find(rows, "kiosk session entry"), nullptr);
+    EXPECT_EQ(find(rows, "kiosk session entry")->fix, "sudo fjarr-agent setup desktop --x11");
+    f.files["/usr/lib/fjarr/desktop/libfjarr-desktop-x11.so"] = {0, 0644, false};
+    f.files["/etc/xdg/autostart/fjarr-x11-session.desktop"] = {0, 0644, false};
+    rows = fjarr::profile::check_desktop_x11(profile_file(), f.system());
+    EXPECT_TRUE(fjarr::profile::all_ok(rows));
+    EXPECT_EQ(rows.size(), 2u);
 }

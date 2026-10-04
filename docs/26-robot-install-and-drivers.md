@@ -472,8 +472,10 @@ the display manager or the automatic login: the kiosk session is the robot
 maker's. Advice, from ADR-0006's spikes: LightDM with an automatic login is
 the easy X11 kiosk; under GDM the X session loses the screen to a Wayland
 greeter about 11 s after an automatic login, and needs a boot-time
-`loginctl activate`. `--check` reports a session that has not granted the
-agent's account (the display cannot be opened as `fjarr`). With no monitor, or with `--ghost-screens N`, it offers
+`loginctl activate`. `--check` adds rows for the X11 module and the kiosk
+session's autostart entry (`[desktop-x11]` in the profile); a session that
+did not grant the agent shows in the agent's log ("cannot open X display")
+and to every operator as `desktop: absent` (docs/08). With no monitor, or with `--ghost-screens N`, it offers
 [ghost screens](#ghost-screens) on the free connectors, and says a reboot is
 needed.
 
