@@ -26,12 +26,15 @@
   <button id="open">2. Open a window per screen</button>
   <button id="fs">3. Fullscreen all</button>
   <button id="close">Close the windows</button>
+  <br><button id="present">4. Present: this window fullscreen here + a companion window on the other screen (one click)</button>
 </div>
 <pre id="log"></pre>
+<video id="mine" muted autoplay playsinline style="display:none;width:100vw;height:100vh;object-fit:contain;background:#000"></video>
 <script>
 const log = (msg, cls) => { const s = document.createElement("span"); if (cls) s.className = cls; s.textContent = msg + "\n"; document.getElementById("log").append(s); };
 const c = document.getElementById("c"), g = c.getContext("2d");
-let n = 0;
+let n = 0, lastN = 0;
+setInterval(() => { log(`source: ${Math.round((n - lastN) / 2)} fps drawn in this window (timers slow down when it is covered)`); lastN = n; }, 2000);
 setInterval(() => {
   g.fillStyle = `hsl(${(n * 3) % 360},70%,45%)`; g.fillRect(0, 0, 640, 360);
   g.fillStyle = "#fff"; g.font = "48px system-ui"; g.fillText(`frame ${n++}`, 40, 200);
@@ -106,6 +109,39 @@ document.getElementById("fs").onclick = async () => {
     } catch (e) { log(`window ${i}: fullscreen refused from here (${e.name}); use its own button`, "bad"); }
   }
 };
+
+document.getElementById("present").onclick = async () => {
+  // Chrome's fullscreen companion window: with Window Management, the gesture that makes this window
+  // fullscreen on one screen may also open one popup on another. Two screens, one click.
+  if (!details) return log("click 1 first (window placement permission)", "bad");
+  const stream = await ready;
+  const here = details.currentScreen;
+  const other = details.screens.find((s) => s !== here);
+  if (!other) return log("only one screen", "bad");
+  try {
+    const mine = document.getElementById("mine");
+    mine.srcObject = stream; mine.style.display = "block";
+    await document.documentElement.requestFullscreen({ screen: here });
+    log(`this window: fullscreen on ${here.label}`, "ok");
+  } catch (e) { return log(`this window: fullscreen refused: ${e}`, "bad"); }
+  const w = window.open("", "fjarr-companion", `left=${other.availLeft},top=${other.availTop},width=${other.availWidth},height=${other.availHeight}`);
+  if (!w) return log("companion window: blocked by the popup blocker", "bad");
+  w.document.title = "Robot monitor 2";
+  w.document.body.style.cssText = "margin:0;background:#000";
+  const v = w.document.createElement("video");
+  v.muted = true; v.autoplay = true; v.playsInline = true; v.style.cssText = "width:100vw;height:100vh;object-fit:contain;display:block";
+  const b = w.document.createElement("button");
+  b.textContent = "Fullscreen here"; b.style.cssText = "position:fixed;top:8px;left:8px";
+  b.onclick = () => w.document.documentElement.requestFullscreen().then(() => { b.remove(); w.navigator.keyboard?.lock?.(); }, (e) => (b.textContent = "refused: " + e));
+  w.document.body.append(v, b);
+  v.srcObject = stream; await v.play().catch(() => {});
+  wins.push({ w, i: 1, s: other });
+  log(`companion window opened on ${other.label} from the same click`, "ok");
+  countFrames(v).then((f) => log(`companion: ${f} frames in 2 s`, f > 20 ? "ok" : "bad"));
+  countFrames(document.getElementById("mine")).then((f) => log(`this window: ${f} frames in 2 s`, f > 20 ? "ok" : "bad"));
+};
+window.addEventListener("keydown", (e) => { if (document.fullscreenElement) { log(`this window got key ${e.code}${e.altKey ? " +Alt" : ""}${e.metaKey ? " +Meta" : ""}`); e.preventDefault(); } });
+document.addEventListener("fullscreenchange", () => { if (document.fullscreenElement) navigator.keyboard?.lock?.(); });
 
 const closeAll = () => { wins.splice(0).forEach(({ w }) => w.close()); };
 document.getElementById("close").onclick = closeAll;
