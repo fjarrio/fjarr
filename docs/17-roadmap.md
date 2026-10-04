@@ -460,9 +460,16 @@ chooses to ask or resume at once (`onRobotStop`). Resuming found one more:
 a track returning to a live session reused its SSRC under a payloader
 that restarted its sequence numbers, and SRTP refused them as replays,
 which also hit a re-plugged monitor about half the time. Stop, resume and
-auto-resume verified on the mini-PC. Remaining in 3.5: real monitors (the
-mini-PC ran on its ghost connector) and whether they hit the embedded
-fallback.
+auto-resume verified on the mini-PC. **Real monitors (2026-10-04).** With the
+three Dells on the DisplayPort MST chain, two of them (DP-4, DP-8) streamed
+no frame in metadata mode and fell back to the cursor in their video, so the
+embedded fallback is needed on real hardware, not only for unpainted
+virtual monitors. Unplugging the chain crashed GNOME Shell itself (SIGSEGV
+after "Page flip failed: drmModeAtomicCommit: Invalid argument", an upstream
+mutter/KMS bug on this MST chain, as on X11 in 2b); the desktop session
+restarted, the helper reconnected after 54 s, and the dashboard showed the
+desktop again with no one at the robot. PNG images on the clipboard both
+ways came the same day. 3.5 is done.
 
 ## M3.5 — Hear the robot {#m35}
 
