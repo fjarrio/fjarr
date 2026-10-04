@@ -26,6 +26,7 @@
   <button id="open">2. Open a window per screen</button>
   <button id="fs">3. Fullscreen all</button>
   <button id="close">Close the windows</button>
+  <br><label><input type="checkbox" id="clone" checked> give each window its own clone of the track</label>
   <br><button id="present">4. Present: this window fullscreen here + a companion window on the other screen (one click)</button>
 </div>
 <pre id="log"></pre>
@@ -128,9 +129,13 @@ document.getElementById("present").onclick = async () => {
   const here = details.currentScreen;
   const other = details.screens.find((s) => s !== here);
   if (!other) return log("only one screen", "bad");
+  // Shared: both windows render the same MediaStream. Cloned: each its own track.clone().
+  const cloned = document.getElementById("clone").checked;
+  const own = () => (cloned ? new MediaStream(stream.getVideoTracks().map((t) => t.clone())) : stream);
+  log(`tracks: ${cloned ? "a clone per window" : "one stream shared by both windows"}`);
   try {
     const mine = document.getElementById("mine");
-    mine.srcObject = stream; mine.style.display = "block";
+    mine.srcObject = own(); mine.style.display = "block";
     await document.documentElement.requestFullscreen({ screen: here });
     log(`this window: fullscreen on ${here.label}`, "ok");
   } catch (e) { return log(`this window: fullscreen refused: ${e}`, "bad"); }
@@ -144,7 +149,7 @@ document.getElementById("present").onclick = async () => {
   b.textContent = "Fullscreen here"; b.style.cssText = "position:fixed;top:8px;left:8px";
   b.onclick = () => w.document.documentElement.requestFullscreen().then(() => { b.remove(); w.navigator.keyboard?.lock?.(); }, (e) => (b.textContent = "refused: " + e));
   w.document.body.append(v, b);
-  v.srcObject = stream; await v.play().catch(() => {});
+  v.srcObject = own(); await v.play().catch(() => {});
   wins.push({ w, i: 1, s: other });
   log(`companion window opened on ${other.label} from the same click`, "ok");
   meters.length = 0;
