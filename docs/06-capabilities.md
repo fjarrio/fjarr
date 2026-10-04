@@ -228,6 +228,13 @@ so it proves the extension API generalizes beyond video.
   that reason** rather than quietly starting a shell as the wrong user. To
   give operators a different account, run the agent as it. Switching users
   needs a privileged helper, which is a separate decision and not M2's.
+- **A shell that refuses logins is no shell.** The agent's own account is a
+  system account whose login shell is `nologin`; started as the terminal, it
+  prints "This account is currently not available." and exits (mini-PC,
+  2026-10-04). So a resolved shell named `nologin` or `false` reports
+  `unavailable` naming it and `shell` as the fix, and `fjarr-agent setup`
+  writes `shell = "/bin/bash"` (or `/bin/sh`) beside `user` when the account
+  it picks has such a login shell.
 
   ```toml
   [capabilities."fjarr.terminal"]

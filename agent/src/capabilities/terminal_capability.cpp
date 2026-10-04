@@ -64,7 +64,15 @@ struct TerminalCapability::Impl {
         if (user != running_as)
             return "configured for user '" + user + "' but the agent runs as '" + running_as +
                    "'; it cannot switch accounts (docs/10#terminal)";
+        // A login shell that refuses logins is no shell: it prints a line and exits (docs/06).
+        const std::string sh = resolved_shell();
+        const std::string base = sh.substr(sh.find_last_of('/') + 1);
+        if (base == "nologin" || base == "false")
+            return "the terminal's shell is " + sh + ", which refuses logins (" + user +
+                   " is a system account): set shell in capabilities.\"fjarr.terminal\", e.g. /bin/bash (docs/06)";
         return {};
+    }
+    std::string resolved_shell() const { return shell.empty() ? login_shell_of(user) : shell;
     }
 
     void pump(SessionContext& ctx, Pty& p);
@@ -191,7 +199,7 @@ void TerminalCapability::on_message(SessionContext& ctx, const Envelope& msg) {
         const auto cols = static_cast<unsigned short>(p.value("cols", 80));
         const auto rows = static_cast<unsigned short>(p.value("rows", 24));
         const std::string term = p.value("term", std::string{"xterm-256color"});
-        const std::string shell = impl_->shell.empty() ? login_shell_of(impl_->user) : impl_->shell;
+        const std::string shell = impl_->resolved_shell();
 
         struct winsize ws {};
         ws.ws_col = cols ? cols : 80;

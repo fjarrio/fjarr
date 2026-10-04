@@ -86,6 +86,24 @@ TEST(TerminalCapability, aUserTheAgentCannotBecomeIsUnavailableAndSaysWhy) {
     cap.shutdown();
 }
 
+TEST(TerminalCapability, aShellThatRefusesLoginsIsUnavailableAndNamesTheFix) {
+    // The agent's own account is a system account whose login shell is nologin: started, it printed
+    // "This account is currently not available." and exited (mini-PC, 2026-10-04). docs/06.
+    for (const char* sh : {"/usr/sbin/nologin", "/bin/false"}) {
+        TerminalCapability cap;
+        Sources sources;
+        cap.configure(nlohmann::json{{"enabled", true}, {"user", me()}, {"shell", sh}}, sources.reg);
+        fjarr::testing::RecordingContext ctx;
+        cap.session_attached(ctx, nlohmann::json::object());
+        cap.on_message(ctx, request("open"));
+        const auto& err = ctx.sent.back().payload["error"];
+        EXPECT_EQ(err.value("code", ""), "unavailable") << sh;
+        EXPECT_NE(err.value("message", "").find("refuses logins"), std::string::npos) << err.value("message", "");
+        EXPECT_TRUE(ctx.watched.empty()) << "no pty was started";
+        cap.shutdown();
+    }
+}
+
 TEST(TerminalCapability, opensOnePtyPerSessionAndRefusesASecond) {
     TerminalCapability cap;
     Sources sources;

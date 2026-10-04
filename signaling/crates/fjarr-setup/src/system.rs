@@ -254,6 +254,22 @@ pub fn tcp_reachable(host: &str, port: u16, timeout: std::time::Duration) -> Res
     }
 }
 
+/// `user`'s login shell from /etc/passwd, if the account is there.
+pub fn login_shell(user: &str) -> Option<String> {
+    std::fs::read_to_string("/etc/passwd")
+        .ok()?
+        .lines()
+        .find_map(|l| {
+            let f: Vec<&str> = l.split(':').collect();
+            (f.first() == Some(&user) && f.len() >= 7).then(|| f[6].to_string())
+        })
+}
+
+/// A login shell that refuses logins (`nologin`, `false`): no terminal (docs/06#fjarr.terminal).
+pub fn refuses_logins(shell: &str) -> bool {
+    matches!(shell.rsplit('/').next(), Some("nologin") | Some("false"))
+}
+
 pub fn uid_of(user: &str) -> Result<libc::uid_t> {
     let c = std::ffi::CString::new(user)?;
     // SAFETY: getpwnam takes a valid C string; the result is read before any other call touches it.

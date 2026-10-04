@@ -121,11 +121,15 @@ pub fn camera_track_ids(doc: &DocumentMut) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// `[capabilities."fjarr.terminal"]`: on, as `user` (docs/06: there is deliberately no default).
-pub fn set_terminal(doc: &mut DocumentMut, user: &str) {
+/// `[capabilities."fjarr.terminal"]`: on, as `user` (docs/06: there is deliberately no default),
+/// with `shell` when the account's own login shell refuses logins (a system account's `nologin`).
+pub fn set_terminal(doc: &mut DocumentMut, user: &str, shell: Option<&str>) {
     let term = table_at(doc, &["capabilities", "fjarr.terminal"]);
     replace_value(term, "enabled", Value::from(true));
     replace_value(term, "user", Value::from(user));
+    if let Some(sh) = shell {
+        replace_value(term, "shell", Value::from(sh));
+    }
 }
 
 /// The table at `path`, created on the way as header tables (implicit parents, so the file reads
@@ -396,7 +400,7 @@ viewer_dir = "/usr/share/fjarr/viewer"
             v4l2_source("usb-046d_C920-video-index0", Some(("mjpeg", 1280, 720, 30))),
         );
         set_camera_track(&mut doc, "rear", "Rear", v4l2_source("/dev/video2", None));
-        set_terminal(&mut doc, "operator");
+        set_terminal(&mut doc, "operator", None);
         let out = doc.to_string();
         assert!(out.contains("[agent]\nrobot_id = \"dev-024\"\nserver_url = \"wss://fleet.acme.com/ws\"\ndev_token = \"t0k3n\"\n"), "{out}");
         assert!(out.contains("[media]\nencoder = \"software\"\n"), "{out}");
@@ -429,6 +433,14 @@ viewer_dir = "/usr/share/fjarr/viewer"
         // What the agent parses: the same document, back through the parser.
         let again: DocumentMut = out.parse().unwrap();
         assert_eq!(again.to_string(), out);
+    }
+
+    #[test]
+    fn a_system_account_gets_a_shell_that_takes_logins() {
+        // docs/06: the agent's own account logs in with nologin, which is no terminal (mini-PC, 2026-10-04).
+        let mut doc = new_document();
+        set_terminal(&mut doc, "fjarr", Some("/bin/bash"));
+        assert!(doc.to_string().contains("[capabilities.\"fjarr.terminal\"]\nenabled = true\nuser = \"fjarr\"\nshell = \"/bin/bash\"\n"), "{doc}");
     }
 
     #[test]

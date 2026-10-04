@@ -370,7 +370,17 @@ pub async fn setup(
         config::set_camera_track(&mut doc, &id, &label, source);
     }
     if terminal != "none" {
-        config::set_terminal(&mut doc, &terminal);
+        // The agent's own account is a system account: its login shell (nologin) is no terminal.
+        let shell = system::login_shell(&terminal)
+            .filter(|s| system::refuses_logins(s))
+            .map(|_| {
+                if Path::new("/bin/bash").exists() {
+                    "/bin/bash"
+                } else {
+                    "/bin/sh"
+                }
+            });
+        config::set_terminal(&mut doc, &terminal, shell);
     }
     let mut record = Record::load(state)?;
     system::ensure_state_dir(Path::new(STATE_DIR), &account)?;
