@@ -1,0 +1,83 @@
+# The hosted demo (docs/31-hosted-demo.md): fjarr-server, coturn, the demo backend and dashboard on
+# one public server behind Cloudflare. Deployed to /opt/fjarr by `make demo-deploy`; secrets come from
+# /opt/fjarr/.env, generated on the server and never copied off it.
+name: fjarr-demo
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  caddy:
+    # TLS for the two proxied names with the Cloudflare Origin CA certificate, dispatch by Host (docs/31).
+    # On the host's network, so ufw's Cloudflare-only rule for 443 applies: a port Docker publishes
+    # bypasses ufw, and 443 would be open to anyone, past Access.
+    image: caddy:2-alpine
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./site:/srv/demo:ro
+      - ./certs:/certs:ro
+      - caddy-data:/data
+    depends_on: [fjarr-server, demo-backend]
+    <<: *logging
+
+  fjarr-server:
+    image: fjarr-server:demo
+    restart: unless-stopped
+    ports: ["127.0.0.1:8080:8080"] # Caddy's upstream; loopback only
+    environment:
+      FJARR_GRANT_HS256_SECRET: ${FJARR_GRANT_HS256_SECRET:?}
+      FJARR_DEV_DEVICE_TOKEN: ${FJARR_DEV_DEVICE_TOKEN:?}
+      FJARR_TURN_URLS: turn:turn.fjarr.io:3478?transport=udp,turn:turn.fjarr.io:3478?transport=tcp
+      FJARR_TURN_SECRET: ${TURN_SECRET:?}
+      FJARR_WEBHOOK_URL: http://demo-backend:9090/api/fjarr/webhook
+      FJARR_WEBHOOK_SECRET: ${FJARR_WEBHOOK_SECRET:?}
+    <<: *logging
+
+  demo-backend:
+    image: node:22-slim
+    restart: unless-stopped
+    working_dir: /app
+    volumes: ["./demo-backend:/app:ro"]
+    command: node --experimental-strip-types src/server.ts
+    ports: ["127.0.0.1:9090:9090"] # Caddy's upstream; loopback only
+    environment:
+      FJARR_SERVER_URL: http://fjarr-server:8080
+      PORT: "9090"
+      FJARR_GRANT_HS256_SECRET: ${FJARR_GRANT_HS256_SECRET:?}
+      FJARR_WEBHOOK_SECRET: ${FJARR_WEBHOOK_SECRET:?}
+    <<: *logging
+
+  coturn:
+    # The relay, on the host's network: UDP 3478 and a 41-port relay range need no Docker proxy.
+    # Ephemeral credentials only (use-auth-secret, docs/10#turn); it relays to the internet, never to
+    # this server or a private network.
+    image: coturn/coturn:4.6-alpine
+    restart: unless-stopped
+    network_mode: host
+    command: >
+      --listening-port=3478
+      --external-ip=${PUBLIC_IP:?}
+      --realm=fjarr.io
+      --use-auth-secret
+      --static-auth-secret=${TURN_SECRET:?}
+      --min-port=49160 --max-port=49200
+      --fingerprint
+      --no-cli
+      --no-tls --no-dtls
+      --no-multicast-peers
+      --denied-peer-ip=0.0.0.0-0.255.255.255
+      --denied-peer-ip=10.0.0.0-10.255.255.255
+      --denied-peer-ip=100.64.0.0-100.127.255.255
+      --denied-peer-ip=127.0.0.0-127.255.255.255
+      --denied-peer-ip=169.254.0.0-169.254.255.255
+      --denied-peer-ip=172.16.0.0-172.31.255.255
+      --denied-peer-ip=192.168.0.0-192.168.255.255
+      --denied-peer-ip=${PUBLIC_IP:?}
+    <<: *logging
+
+volumes:
+  caddy-data:

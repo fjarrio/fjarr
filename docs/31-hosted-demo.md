@@ -60,8 +60,15 @@ IPv4). Nothing is compiled on it: images are built elsewhere and copied over.
 - **Firewall** (ufw): 22/tcp; 443/tcp from Cloudflare's address ranges only,
   so nobody reaches Caddy, and past Access, by the server's address; 3478/udp,
   3478/tcp and 49160–49200/udp for coturn, from anywhere.
+  Caddy and coturn run on the host's network: a port Docker publishes
+  bypasses ufw, so a published 443 would be open to anyone, past Access.
+  `fjarr-server` and the demo backend publish on loopback only, as Caddy's
+  upstreams. coturn relays to the internet only, never to the server itself
+  or a private range (`denied-peer-ip`).
 - **Layout**: `/opt/fjarr` holds `compose.yml`, `Caddyfile`, the dashboard's
-  files, the origin certificate and `.env`.
+  files, the origin certificate and `.env`. One-time setup:
+  `deploy/demo/server-setup.sh` (Docker, the firewall) and
+  `deploy/demo/cloudflare.py` (the origin certificate, DNS, Access).
 
 ## Secrets
 

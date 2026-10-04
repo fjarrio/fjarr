@@ -550,6 +550,10 @@ desktop-fixture-test: ## M3: headless mutter proves capture and EIS input, then 
 compose-gate: ## M2.5 gate: the reference compose file runs a robot, tunnel included (host-run; needs make deb + the lab stack; docs/26#containerized-robots)
 	@BUILD_PRESET=$(BUILD_PRESET) DEB_ARCH=$(DEB_ARCH) packaging/compose/gate.sh
 
+.PHONY: demo-deploy
+demo-deploy: ## The hosted demo (docs/31): build fjarr-server and the dashboard, copy them to DEMO_HOST=root@<address>, start (host-run)
+	@deploy/demo/deploy.sh
+
 .PHONY: deb deb-install-test deb-embed-test install-script-test set-version
 deb: ## Build the .debs (fjarr-agent, fjarr-tools, fjarr-desktop-wayland, libfjarr-dev) for this host's architecture into dist/deb/<arch>/
 	@if [ -f /.dockerenv ]; then echo "make deb runs on the host (it starts its own builder container)"; exit 1; fi
