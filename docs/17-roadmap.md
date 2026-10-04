@@ -471,6 +471,22 @@ restarted, the helper reconnected after 54 s, and the dashboard showed the
 desktop again with no one at the robot. PNG images on the clipboard both
 ways came the same day. 3.5 is done.
 
+**3.6, separate windows (2026-10-04).** The spike
+([spikes/presentation-mode](../spikes/presentation-mode/README.md)) closed open
+question #19 for the portal: an empty popup stays in its opener's browsing
+context group under every COOP, where a popup loading its own page does not,
+and two windows render one stream. On a real two-screen Chrome it found one
+popup per click even with the Window Management permission, Keyboard Lock
+catching Alt+Tab and Super per fullscreen window, and ~15 fps per window with
+two fullscreen windows on two screens under X11 (a presentation cost, not the
+design's). The user then chose the simplest form: "Open in separate window",
+one click per window, fullscreen its own second click, no placement or
+permission. Built: `useSeparateWindows` and `<DesktopView>` using its own
+window ([docs/22](22-remote-desktop-client.md#presentation-mode)); a browser
+test opens a window, streams, clicks into the robot from it, goes fullscreen
+on its button and closes with the dashboard; verified by the user on two
+screens with the Mini PC on demo.fjarr.io. Remaining in 3.6: Firefox.
+
 ## M3.5 — Hear the robot {#m35}
 
 **`fjarr.audio`** (robot microphone downlink, push-to-talk uplink through the
