@@ -740,6 +740,10 @@ export class SessionImpl implements Session {
 
   private detachSocket(): void {
     this.generation++; // stale callbacks from the old socket/peer are ignored
+    // Offers are applied one at a time, per peer. A step the old peer left pending (a browser never
+    // settles an operation its closing peer connection aborted) must not hold the next peer's
+    // offers: every later session from the page went unanswered (mini-PC, 2026-10-05).
+    this.offerChain = Promise.resolve();
     const s = this.socket;
     this.socket = null;
     this.sessionId = null;

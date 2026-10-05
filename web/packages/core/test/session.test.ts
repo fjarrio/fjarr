@@ -94,6 +94,23 @@ describe("session state machine (docs/21)", () => {
     expect(got).toEqual(["battery"]);
   });
 
+  it("an offer that never settles stalls only its own peer: the next round answers and connects (mini-PC, 2026-10-05)", async () => {
+    // A dashboard left with a pending setRemoteDescription answered no offer again, in any later
+    // session, until the page was reloaded: every offer waited behind the stuck one.
+    const h = harness();
+    const s = await connected(h);
+    h.agent.pc.stallNextRemoteDescription = true;
+    const answersBefore = h.agent.signaling.filter((m) => m.type === "answer").length;
+    h.agent.renegotiate(DEFAULT_TRACKS, 2);
+    await tick();
+    expect(h.agent.signaling.filter((m) => m.type === "answer").length).toBe(answersBefore); // stuck, as in the browser
+    h.agent.dropSocket();
+    await vi.advanceTimersByTimeAsync(5000);
+    await tick();
+    expect(s.getState()).toBe("connected");
+    expect(h.agent.signaling.filter((m) => m.type === "answer").length).toBe(answersBefore + 1);
+  });
+
   it("fails on robot-offline with a typed error and retry() reconnects", async () => {
     const h = harness({ online: false });
     const s = h.client.sessions.open("robot-1");

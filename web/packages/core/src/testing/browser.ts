@@ -295,6 +295,14 @@ export class LoopbackAgent {
   silent = false;
   /** Behave like an agent without ICE restart: answer `ice-restart` with `session-close{retry:true}`. */
   iceRestartUnsupported = false;
+  /**
+   * Re-offer the moment the next answer is applied, as the real agent does with a change that
+   * came while its offer was out (docs/23): two offers back to back, the second 1 ms after the
+   * first's answer. The mini-PC's X11 replug (2026-10-05) wedged the dashboard on exactly this.
+   */
+  reofferOnNextAnswer = false;
+  /** Answers applied in this session (a test's proof that an offer was answered). */
+  answersApplied = 0;
   /** In-page mode: answer the next hello with grant-expired. */
   grantExpiredOnce = false;
   private peer: Peer | null = null;
@@ -482,7 +490,13 @@ export class LoopbackAgent {
         if (peer.pc.signalingState !== "have-local-offer") return; // stale/duplicate answer
         await peer.pc.setRemoteDescription({ type: "answer", sdp: msg.sdp });
         peer.remoteDescribed = true;
+        this.answersApplied++;
         for (const c of peer.iceQueue.splice(0)) await peer.pc.addIceCandidate(c).catch(() => undefined);
+        if (this.reofferOnNextAnswer && this.peer === peer) {
+          this.reofferOnNextAnswer = false;
+          this.manifestVersion++;
+          await this.offer(peer);
+        }
         break;
       case "ice": {
         if (msg.session_id !== peer.sessionId) return;

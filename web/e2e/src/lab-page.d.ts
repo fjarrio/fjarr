@@ -91,6 +91,10 @@ export interface LabApi {
     stats(): Promise<{ inboundAudioPackets: number; outbound: Record<string, { packetsSent: number; framesEncoded: number }> }>;
     received(): Array<{ cap: string; type: string; kind: string }>;
     sessionId(): string | null;
+    /** The next answer is followed at once by another offer, as the real agent sends a change that came while its offer was out. */
+    reofferOnNextAnswer(): void;
+    /** Answers the agent applied in this session. */
+    answersApplied(): number;
   };
   ptt: {
     start(): Promise<void>;

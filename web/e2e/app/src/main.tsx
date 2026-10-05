@@ -223,6 +223,10 @@ const lab: LabApi = {
     stats: () => agent!.stats(),
     received: () => agent!.received.map((e) => ({ cap: e.cap, type: e.type, kind: e.kind })),
     sessionId: () => agent!.sessionId,
+    reofferOnNextAnswer: () => {
+      agent!.reofferOnNextAnswer = true;
+    },
+    answersApplied: () => agent!.answersApplied,
   },
   ptt: {
     start: async () => {

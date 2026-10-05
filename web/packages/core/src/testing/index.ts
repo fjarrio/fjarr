@@ -230,7 +230,17 @@ export class FakePeerConnection implements PeerConnectionLike {
 
   constructor(readonly config: PeerConnectionConfig) {}
 
+  /**
+   * Fault: the next setRemoteDescription never settles, as a browser leaves an operation pending
+   * when its peer connection closes under it (W3C WebRTC "chain an operation").
+   */
+  stallNextRemoteDescription = false;
+
   async setRemoteDescription(d: { type: "offer" | "answer"; sdp: string }): Promise<void> {
+    if (this.stallNextRemoteDescription) {
+      this.stallNextRemoteDescription = false;
+      return new Promise<void>(() => undefined);
+    }
     this.remote = d;
     this.remoteDescriptions++;
     this.onRemoteDescription?.(this, d);

@@ -109,6 +109,29 @@ test.describe("components against the loopback agent (in-page signaling)", () =>
     wire.stop();
   });
 
+  test("two offers back to back: the second, sent the moment the first is answered, is answered too, and the page keeps working (mini-PC, 2026-10-05)", async ({ loopback }) => {
+    // The X11 replug: an unplug re-offered, a monitor that moved re-offered again 1 ms after that
+    // answer, the dashboard never answered, and every later session from the page timed out.
+    await loopback.setup();
+    await loopback.open();
+    await loopback.waitForState("connected");
+    await loopback.mount("grid");
+    await loopback.waitForStreaming("pattern-a");
+    const answered = await loopback.agent.answersApplied();
+    await loopback.agent.reofferOnNextAnswer();
+    await loopback.agent.removeTrack("pattern-b");
+    await expect.poll(() => loopback.agent.answersApplied(), { timeout: 5000, message: "the offer sent right after an answer was never answered" }).toBe(answered + 2);
+    await expect.poll(async () => (await loopback.tracks()).map((t) => t.track_id), { timeout: 5000 }).toEqual(["pattern-a"]);
+    // The page still renegotiates: a monitor plugged in afterwards streams.
+    await loopback.agent.addTrack({ track_id: "pattern-c", cap: "fjarr.test", label: "Pattern C" });
+    await loopback.waitForStreaming("pattern-c");
+    expect(await loopback.state()).toBe("connected");
+    // And a new session from the same page connects (the wedge outlived the session on the mini-PC).
+    await loopback.agent.sessionClose("agent-restart", true);
+    await loopback.waitForState("connected");
+    await loopback.waitForStreaming("pattern-a");
+  });
+
   test("push-to-talk moves microphone audio into the agent's pre-allocated uplink without renegotiation", async ({ loopback, context }) => {
     await context.grantPermissions(["microphone"]);
     await loopback.setup();

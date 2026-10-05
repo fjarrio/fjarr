@@ -133,6 +133,8 @@ export class Loopback {
     stats: () => this.lab((lab) => lab.agent.stats()),
     received: () => this.lab((lab) => lab.agent.received()),
     sessionId: () => this.lab((lab) => lab.agent.sessionId()),
+    reofferOnNextAnswer: () => this.lab((lab) => lab.agent.reofferOnNextAnswer()),
+    answersApplied: () => this.lab((lab) => lab.agent.answersApplied()),
   };
 
   readonly ptt = {
