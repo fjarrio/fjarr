@@ -2,7 +2,7 @@
 //! feature (docs/26#the-setup-tool).
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use cliclack::log;
 
 use crate::changes::{Change, Entry, Record};
@@ -23,7 +23,6 @@ pub async fn undo(config_path: &Path, state: &Path, feature: Option<&str>) -> Re
     let (mine, rest): (Vec<Entry>, Vec<Entry>) = all
         .into_iter()
         .partition(|e| feature.is_none_or(|f| e.feature == f));
-    record.changes = rest;
     if mine.is_empty() {
         cliclack::outro(format!(
             "nothing recorded for {what} in {}",
@@ -32,18 +31,25 @@ pub async fn undo(config_path: &Path, state: &Path, feature: Option<&str>) -> Re
         return Ok(0);
     }
     let mut flags = Flags::default();
-    let mut failed = Vec::new();
-    for entry in mine.into_iter().rev() {
+    let mut failed: Vec<Entry> = Vec::new();
+    let mut pending = mine;
+    // The record is saved after every change: an undo stopped half-way (Ctrl-C during
+    // update-grub, the mini-PC 2026-10-05) left the whole record in place, and the next --undo
+    // looked for backups the first had already restored and removed.
+    while let Some(entry) = pending.pop() {
         if let Err(e) = undo_one(&entry.change, &mut flags).await {
             log::warning(format!(
                 "{e:#} — kept in the record; `--undo` tries it again"
             ))?;
-            failed.push(entry);
+            failed.insert(0, entry);
         }
+        let mut now = rest.clone();
+        now.extend(pending.iter().cloned());
+        now.extend(failed.iter().cloned());
+        record.changes = now;
+        record.save(state)?;
     }
-    failed.reverse();
     let any_failed = !failed.is_empty();
-    record.changes.extend(failed);
     let (units_changed, dconf_changed, grub_changed) = (flags.units, flags.dconf, flags.grub);
     if grub_changed && Path::new("/usr/sbin/update-grub").exists() {
         // The kernel line the ghosts were on goes back on the next boot.
@@ -179,7 +185,15 @@ async fn undo_one(change: &Change, flags: &mut Flags) -> Result<()> {
         }
         Change::AccountCreated { user } => {
             // Its session first: userdel refuses an account with running processes.
-            end_session(&user);
+            if !end_session(&user) {
+                // A display manager's automatic login brings the session straight back (LightDM
+                // on the mini-PC's X11 kiosk, 2026-10-05): say so, rather than userdel's "in use".
+                bail!(
+                    "the account {user} that setup desktop created is still logged in (a display \
+                     manager's automatic login logs it straight back in): switch that off or log \
+                     {user} out, then `--undo` again"
+                );
+            }
             system::run("userdel", &["--remove", &user]).with_context(|| {
                 format!("removing the account {user} that setup desktop created")
             })?;
@@ -192,12 +206,14 @@ async fn undo_one(change: &Change, flags: &mut Flags) -> Result<()> {
 
 /// End the account's session and wait for its processes to go: userdel refuses an account that
 /// still runs anything, and a GNOME session takes seconds to exit.
-fn end_session(user: &str) {
+/// False when it still runs something after 20 s.
+fn end_session(user: &str) -> bool {
     let _ = system::run("loginctl", &["terminate-user", user]);
     for _ in 0..40 {
         if system::run("pgrep", &["-u", user]).is_err() {
-            return;
+            return true;
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
+    false
 }

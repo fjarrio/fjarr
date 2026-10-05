@@ -137,6 +137,11 @@ pub fn set_terminal(doc: &mut DocumentMut, user: &str, shell: Option<&str>) {
 fn table_at<'a>(doc: &'a mut DocumentMut, path: &[&str]) -> &'a mut Item {
     let mut item: &mut Item = doc.as_item_mut();
     for (i, key) in path.iter().enumerate() {
+        // A table written inline (`"fjarr.desktop" = {}`, found on the mini-PC 2026-10-05, or by
+        // hand) is a table too: made a regular one, keeping its keys, never a panic.
+        if let Some(inline) = item.as_inline_table().cloned() {
+            *item = Item::Table(inline.into_table());
+        }
         let t = item.as_table_mut().expect("a table on the path");
         let child = t.entry(key).or_insert(Item::Table(Table::new()));
         if i + 1 < path.len() {
@@ -250,13 +255,28 @@ pub fn restore_cap_value(
     let (last, parents) = parts.split_last().expect("a key");
     let mut path = vec!["capabilities", cap];
     path.extend(parents.iter().copied());
+    // How much of the path is still there: a key whose tables are gone has nothing to restore,
+    // but the part that remains may be an empty table left behind, and is pruned all the same.
+    let mut depth = 0;
     {
+        let mut item: &Item = doc.as_item();
+        for k in &path {
+            match item.get(k) {
+                Some(next) => {
+                    item = next;
+                    depth += 1;
+                }
+                None => break,
+            }
+        }
+    }
+    if depth == path.len() {
         let mut item: &mut Item = doc.as_item_mut();
         for k in &path {
-            match item.get_mut(k) {
-                Some(next) => item = next,
-                None => return Ok(()), // nothing left to restore
-            }
+            item = item.get_mut(k).expect("walked above");
+        }
+        if let Some(inline) = item.as_inline_table().cloned() {
+            *item = Item::Table(inline.into_table());
         }
         let Some(table) = item.as_table_mut() else {
             return Ok(());
@@ -276,7 +296,7 @@ pub fn restore_cap_value(
         }
     }
     // Prune the tables on the path that are left empty, deepest first.
-    for depth in (1..=path.len()).rev() {
+    for depth in (1..=depth).rev() {
         let (parents, name) = (&path[..depth - 1], path[depth - 1]);
         let mut parent: &mut Item = doc.as_item_mut();
         for k in parents {
@@ -288,11 +308,12 @@ pub fn restore_cap_value(
         let Some(pt) = parent.as_table_mut() else {
             return Ok(());
         };
-        if !pt
-            .get(name)
-            .and_then(Item::as_table)
-            .is_some_and(Table::is_empty)
-        {
+        let empty = match pt.get(name) {
+            Some(Item::Table(t)) => t.is_empty(),
+            Some(i) => i.as_inline_table().is_some_and(|t| t.is_empty()),
+            None => false,
+        };
+        if !empty {
             break;
         }
         pt.remove(name);
@@ -474,5 +495,75 @@ viewer_dir = "/usr/share/fjarr/viewer"
             .unwrap_err()
             .to_string();
         assert!(e.contains("fjarr-agent setup"), "{e}");
+    }
+
+    /// The mini-PC (2026-10-05): `setup desktop`, then `--x11`, then `--undo desktop` in the
+    /// record's order, left `"fjarr.desktop" = {}`, and the next `setup desktop` panicked on it.
+    #[test]
+    fn undoing_every_desktop_key_leaves_no_table_and_setup_runs_again() {
+        let mut doc: DocumentMut = EXAMPLE.parse().unwrap();
+        let user = set_cap_value(
+            &mut doc,
+            "fjarr.desktop",
+            "helper.user",
+            Value::from("desktop"),
+        );
+        let group = set_cap_value(
+            &mut doc,
+            "fjarr.desktop",
+            "helper.group",
+            Value::from("fjarr-desktop"),
+        );
+        let doc_text = doc.to_string();
+        let mut doc: DocumentMut = doc_text.parse().unwrap(); // as saved and loaded again
+        let backend = set_cap_value(&mut doc, "fjarr.desktop", "backend", Value::from("x11"));
+        let display = set_cap_value(&mut doc, "fjarr.desktop", "display", Value::from(":0"));
+        let mut doc: DocumentMut = doc.to_string().parse().unwrap();
+        for (key, prev) in [
+            ("display", display),
+            ("backend", backend),
+            ("helper.group", group),
+            ("helper.user", user),
+        ] {
+            restore_cap_value(&mut doc, "fjarr.desktop", key, prev.as_deref()).unwrap();
+            doc = doc.to_string().parse().unwrap(); // each undo step saves the file
+        }
+        assert!(
+            !doc.to_string().contains("fjarr.desktop"),
+            "left behind:\n{doc}"
+        );
+        // And setup writes the keys again into whatever the undo left.
+        set_cap_value(
+            &mut doc,
+            "fjarr.desktop",
+            "helper.user",
+            Value::from("desktop"),
+        );
+    }
+
+    /// A table written inline by hand (`"fjarr.desktop" = {}` or `{ backend = "x11" }`) is a table
+    /// to setup too: its keys are kept and setup adds beside them, never panics.
+    #[test]
+    fn an_inline_table_on_the_path_is_taken_as_a_table() {
+        let mut doc: DocumentMut = "[capabilities]\n\"fjarr.desktop\" = { backend = \"x11\" }\n"
+            .parse()
+            .unwrap();
+        set_cap_value(
+            &mut doc,
+            "fjarr.desktop",
+            "helper.user",
+            Value::from("desktop"),
+        );
+        let again: DocumentMut = doc.to_string().parse().unwrap();
+        let desk = &again["capabilities"]["fjarr.desktop"];
+        assert_eq!(desk["backend"].as_str(), Some("x11"));
+        assert_eq!(desk["helper"]["user"].as_str(), Some("desktop"));
+        // And an empty inline table left on the path is pruned by the undo, not kept.
+        let mut doc: DocumentMut = "[capabilities]\n\"fjarr.desktop\" = {}\n\n[capabilities.\"fjarr.net\"]\nenabled = true\n".parse().unwrap();
+        restore_cap_value(&mut doc, "fjarr.desktop", "helper.user", None).unwrap();
+        assert!(
+            !doc.to_string().contains("fjarr.desktop"),
+            "left behind:\n{doc}"
+        );
     }
 }

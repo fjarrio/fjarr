@@ -222,8 +222,14 @@ Rules for every command:
   `fjarr-agent setup --undo <feature>` reverses exactly those changes. Every
   change is attempted. One that cannot be reversed is reported and kept in the
   record for the next `--undo`, and the command exits non-zero, but the rest are
-  still reversed and the record is saved. An account `setup desktop` created
-  is removed only after its session has ended.
+  still reversed. The record is saved after each change, so an undo stopped
+  half-way (Ctrl-C) leaves only what is still to do. An account `setup
+  desktop` created is removed only after its session has ended; when it does
+  not end (a display manager's automatic login logs it straight back in), the
+  undo says so and keeps the account in the record.
+- **The configuration file stays the customer's.** Setup adds and removes only
+  its own keys, prunes the tables they leave empty, and takes a table written
+  inline (`"fjarr.desktop" = {}`) like any other.
 - **System changes are applied only on Ubuntu with apt.** Elsewhere the tool
   prints the options to set. It never replaces the ecosystem's package manager.
 - **Each command ends with `fjarr-agent --check`**, whose profile rows verify
