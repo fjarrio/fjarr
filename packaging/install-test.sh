@@ -12,7 +12,7 @@ apt-get update -qq >/dev/null
 # that step is skipped and a /run/fjarr the package failed to create went unnoticed (0.1.2, found on
 # the mini-PC). The standalone build is the one a container without systemd can have.
 apt-get install -y -qq systemd-standalone-tmpfiles >/dev/null 2>&1 || fail "could not install systemd-standalone-tmpfiles"
-cp /debs/fjarr-agent_*.deb /debs/fjarr-tools_*.deb /debs/fjarr-desktop-wayland_*.deb /debs/fjarr-desktop-x11_*.deb /tmp/ && apt-get install -y -qq /tmp/*.deb >/tmp/apt.log 2>&1 || { tail -20 /tmp/apt.log; fail "apt could not install the packages"; }
+cp /debs/fjarr-agent_*.deb /debs/fjarr-setup_*.deb /debs/fjarr-tools_*.deb /debs/fjarr-desktop-session_*.deb /debs/fjarr-desktop-wayland_*.deb /debs/fjarr-desktop-x11_*.deb /tmp/ && apt-get install -y -qq /tmp/*.deb >/tmp/apt.log 2>&1 || { tail -20 /tmp/apt.log; fail "apt could not install the packages"; }
 ok "apt installed: $(ls /tmp/*.deb | xargs -n1 basename | tr '\n' ' ')"
 # The package creates /run/fjarr for the agent at install (tmpfiles), which needs the fjarr user to
 # exist first (sysusers) — debhelper orders the two the other way round unless the postinst does it.
@@ -50,7 +50,8 @@ fjarr-agent net setup --yes --ros no 2>&1 | grep -q 'does not exist.*fjarr-agent
 ok "fjarr-agent hands setup/net/drivers/display to fjarr-setup"
 [ ! -e /etc/fjarr/fjarr.toml ] || fail "the package shipped /etc/fjarr/fjarr.toml; setup writes it"; ok "no config shipped (setup writes it)"
 
-# fjarr-desktop-wayland (docs/26#packages): installs, switches nothing on. setup desktop does that.
+# fjarr-desktop-wayland and fjarr-desktop-session (docs/26#packages): install, switch nothing on.
+# setup desktop does that.
 [ -f /usr/lib/fjarr/desktop/libfjarr-desktop-mutter.so ] || fail "no backend module E in /usr/lib/fjarr/desktop"
 # No session bus here, so it exits 1 at once ("no session bus"); 127 would be a library it cannot load.
 rc=0; /usr/lib/fjarr/fjarr-desktop-session >/tmp/helper.log 2>&1 </dev/null || rc=$?
@@ -61,7 +62,8 @@ id -nG fjarr | tr ' ' '\n' | grep -qx fjarr-desktop || fail "the agent's account
 [ -z "$(find /etc/systemd/user -name 'fjarr-desktop-session.service' 2>/dev/null)" ] || fail "the helper's user unit is enabled for every user; setup desktop enables it for one account"
 [ -f /usr/lib/systemd/system/fjarr-desktop-watchdog.timer ] || fail "no watchdog timer"
 [ ! -e /etc/systemd/system/timers.target.wants/fjarr-desktop-watchdog.timer ] || fail "the watchdog is enabled by the package; setup desktop enables it"
-ok "fjarr-desktop-wayland: module, helper, group with fjarr in it, user unit and watchdog installed, nothing enabled"
+[ -L /usr/bin/fjarr-setup ] && [ "$(readlink -f /usr/bin/fjarr-setup)" = /usr/lib/fjarr/fjarr-setup ] || fail "no fjarr-setup command (fjarr-setup package)"
+ok "fjarr-desktop-wayland + fjarr-desktop-session: module, helper, group with fjarr in it, user unit and watchdog installed, nothing enabled"
 
 # fjarr-desktop-x11 (docs/26#packages): the module and the session program, its autostart entry inert.
 [ -f /usr/lib/fjarr/desktop/libfjarr-desktop-x11.so ] || fail "no backend module A in /usr/lib/fjarr/desktop"

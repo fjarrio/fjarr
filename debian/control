@@ -15,9 +15,18 @@ Rules-Requires-Root: no
 # the builder image) and the prebuilt introspection viewer (web/apps/introspect-viewer/dist).
 # `make deb` provides both (docs/26#releases).
 
+Package: fjarr-setup
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Replaces: fjarr-agent (<< 0.1.3~)
+Description: Fjarr setup tool
+ What `fjarr-agent setup`, `net`, `drivers` and `display` run, and the
+ command fjarr-setup for a host with no agent: the desktop host of a robot
+ whose agent runs in a container (`fjarr-setup setup desktop --container`).
+
 Package: fjarr-agent
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends},
+Depends: ${shlibs:Depends}, ${misc:Depends}, fjarr-setup (= ${binary:Version}),
  gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad,
  gstreamer1.0-nice, gstreamer1.0-plugins-base-apps, glib-networking
 Recommends: mesa-va-drivers | intel-media-va-driver, fjarr-tools
@@ -44,16 +53,30 @@ Description: Fjarr operator tools: fjarr-connect
  (given cap_net_admin at install) and `fjarr-connect shell`, the robot's
  terminal in yours.
 
+Package: fjarr-desktop-session
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, fjarr-setup (= ${binary:Version})
+Recommends: gdm3, gnome-shell
+Replaces: fjarr-desktop-wayland (<< 0.1.3~)
+Description: Fjarr remote desktop, the GNOME session's side
+ fjarr-desktop-session runs in the desktop account's session and hands the
+ agent a PipeWire connection narrowed to the screen and an input socket; the
+ fjarr-desktop group and the GDM watchdog come with it. No agent: on a robot
+ fjarr-desktop-wayland brings this package, and on the host of a robot whose
+ agent runs in a container it is installed alone. Nothing is switched on at
+ install: `setup desktop` does that, and `--undo desktop` reverses it.
+
 Package: fjarr-desktop-wayland
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, fjarr-agent (= ${binary:Version})
-Recommends: gdm3, gnome-shell
+# libpipewire-0.3-modules: the client modules the package's own PipeWire configuration loads
+# (packaging/pipewire/fjarr-pipewire-client.conf), so neither pipewire-bin nor its client.conf is needed.
+Depends: ${shlibs:Depends}, ${misc:Depends}, fjarr-agent (= ${binary:Version}), libpipewire-0.3-modules
+Recommends: fjarr-desktop-session (= ${binary:Version})
 Description: Fjarr remote desktop for GNOME on Wayland
  The robot's screen as a video track, and the operator's pointer and keyboard
- on it, through mutter. fjarr-desktop-session runs in the desktop account's
- session and hands the agent a PipeWire connection narrowed to the screen and
- an input socket; the agent keeps its own account. Nothing is switched on at
- install: `fjarr-agent setup desktop` does that, and `--undo desktop` reverses it.
+ on it, through mutter, in the agent's own account. The session's side is
+ fjarr-desktop-session, which apt installs with this package. Nothing is
+ switched on at install: `fjarr-agent setup desktop` does that.
 
 Package: fjarr-desktop-x11
 Architecture: any

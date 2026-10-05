@@ -16,6 +16,11 @@ use crate::{config, system, ui, DesktopArgs, YesNo};
 
 pub const FEATURE: &str = "desktop";
 pub const PACKAGE: &str = "fjarr-desktop-wayland";
+/// The desktop's host side, with no agent (docs/26#packages).
+pub const PACKAGE_SESSION: &str = "fjarr-desktop-session";
+/// On a container host, `/run/fjarr` belongs to the container agent's fixed uid (docs/26).
+pub const CONTAINER_TMPFILES: &str = "/etc/tmpfiles.d/fjarr-container.conf";
+pub const CONTAINER_AGENT_UID: u32 = 10001;
 /// Backend A, an X11 kiosk (docs/23#desktop-x11).
 pub const PACKAGE_X11: &str = "fjarr-desktop-x11";
 /// Where `setup desktop` links the kiosk session's autostart entry, and what it links to (docs/26).
@@ -188,10 +193,13 @@ pub fn configured_account(doc: &toml_edit::DocumentMut) -> Option<String> {
 /// What `fjarr-desktop-watchdog.service` runs every 30 s. Plain lines, for the journal.
 pub fn watchdog(config_path: &Path) -> Result<()> {
     crate::require_root("desktop watchdog")?;
+    // The agent's configuration names the account; a container host has none, and GDM's automatic
+    // login says the same thing (docs/26#a-desktop-in-a-container).
     let Some(user) = config::load(config_path)
         .ok()
         .as_ref()
         .and_then(configured_account)
+        .or_else(|| gdm_autologin_user(&std::fs::read_to_string(GDM_CONF).unwrap_or_default()))
     else {
         println!("desktop watchdog: no desktop account configured (capabilities.\"{TABLE}\".helper.user); nothing to watch");
         return Ok(());
@@ -218,6 +226,57 @@ pub fn watchdog(config_path: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The account GDM logs in automatically, from its configuration's `[daemon]` section.
+pub fn gdm_autologin_user(conf: &str) -> Option<String> {
+    let mut daemon = false;
+    let mut enabled = false;
+    let mut user = None;
+    for line in conf.lines().map(str::trim) {
+        if line.starts_with('[') {
+            daemon = line == "[daemon]";
+            continue;
+        }
+        if !daemon || line.starts_with('#') {
+            continue;
+        }
+        match line.split_once('=').map(|(k, v)| (k.trim(), v.trim())) {
+            Some(("AutomaticLoginEnable", v)) => enabled = v.eq_ignore_ascii_case("true"),
+            Some(("AutomaticLogin", v)) if !v.is_empty() => user = Some(v.to_string()),
+            _ => {}
+        }
+    }
+    user.filter(|_| enabled)
+}
+
+/// Inside the agent's container: the host's desktop account and group, as numbers (the image has
+/// neither by name), into the agent's configuration (docs/26#a-desktop-in-a-container).
+fn setup_container_side(config_path: &Path, state: &Path, uid: u32, gid: u32) -> Result<i32> {
+    let mut doc = config::load(config_path)?;
+    let mut record = Record::load(state)?;
+    for (key, v) in [("helper.uid", uid), ("helper.gid", gid)] {
+        let previous =
+            config::set_cap_value(&mut doc, TABLE, key, toml_edit::Value::from(i64::from(v)));
+        record.add(
+            FEATURE,
+            Change::ConfigValue {
+                file: config_path.to_path_buf(),
+                table: TABLE.into(),
+                key: key.into(),
+                previous,
+            },
+        );
+    }
+    config::save(config_path, &doc)?;
+    record.save(state)?;
+    log::success(format!(
+        "The agent accepts the host's helper from uid {uid} and gives it its socket with gid {gid}"
+    ))?;
+    cliclack::outro(format!(
+        "Desktop set up for the container · fjarr-agent --check follows · undo: fjarr-agent setup --undo {FEATURE}"
+    ))?;
+    crate::agent_check(config_path)
 }
 
 /// What `setup desktop` would do, for a system it does not change (docs/26#the-setup-tool).
@@ -339,19 +398,29 @@ async fn setup_x11(config_path: &Path, state: &Path, args: DesktopArgs) -> Resul
 pub async fn setup(config_path: &Path, state: &Path, args: DesktopArgs) -> Result<i32> {
     crate::require_root("setup desktop")?;
     cliclack::intro("fjarr setup desktop")?;
+    if let (Some(uid), Some(gid)) = (args.helper_uid, args.helper_gid) {
+        return setup_container_side(config_path, state, uid, gid);
+    }
     if !system::ubuntu_with_apt() {
         print_options()?;
         cliclack::outro_cancel("nothing changed")?;
         return Ok(1);
     }
-    if x11_chosen(
-        args.x11,
-        system::dpkg_installed(PACKAGE_X11),
-        system::dpkg_installed(PACKAGE),
-    ) {
+    if !args.container
+        && x11_chosen(
+            args.x11,
+            system::dpkg_installed(PACKAGE_X11),
+            system::dpkg_installed(PACKAGE),
+        )
+    {
         return setup_x11(config_path, state, args).await;
     }
-    if !system::dpkg_installed(PACKAGE) {
+    if args.container && !system::dpkg_installed(PACKAGE_SESSION) {
+        bail!(
+            "the desktop's host package is not installed: sudo apt install {PACKAGE_SESSION}, then run this again"
+        );
+    }
+    if !args.container && !system::dpkg_installed(PACKAGE) {
         bail!(
             "the desktop package is not installed: sudo apt install {PACKAGE} (GNOME) or {PACKAGE_X11} (an X11 kiosk), then run this again"
         );
@@ -362,7 +431,12 @@ pub async fn setup(config_path: &Path, state: &Path, args: DesktopArgs) -> Resul
              an X11 kiosk comes with fjarr-desktop-x11"
         );
     }
-    let mut doc = config::load(config_path)?;
+    // A container host has no agent and so no agent configuration: the container keeps its own.
+    let mut doc = if args.container {
+        None
+    } else {
+        Some(config::load(config_path)?)
+    };
     let session = crate::detect::display_session();
     log::info(format!(
         "Session: {} → backend: mutter",
@@ -372,7 +446,7 @@ pub async fn setup(config_path: &Path, state: &Path, args: DesktopArgs) -> Resul
     ))?;
 
     // 1. The account the desktop runs as.
-    let configured = configured_account(&doc);
+    let configured = doc.as_ref().and_then(configured_account);
     let mut choices: Vec<(String, String, String)> = Vec::new();
     if system::passwd_entry(DEFAULT_ACCOUNT).is_none() {
         choices.push((
@@ -518,10 +592,27 @@ pub async fn setup(config_path: &Path, state: &Path, args: DesktopArgs) -> Resul
         }
     }
 
-    // 4. The agent's side: who the helper runs as, the socket's group.
-    set_value(&mut record, &mut doc, config_path, "helper.user", &account);
-    set_value(&mut record, &mut doc, config_path, "helper.group", GROUP);
-    config::save(config_path, &doc)?;
+    // 4. The agent's side: who the helper runs as, the socket's group. In a container that is the
+    //    container's configuration; the host makes /run/fjarr the container agent's instead.
+    if let Some(doc) = doc.as_mut() {
+        set_value(&mut record, doc, config_path, "helper.user", &account);
+        set_value(&mut record, doc, config_path, "helper.group", GROUP);
+        config::save(config_path, doc)?;
+    } else {
+        write_recorded(
+            &mut record,
+            Path::new(CONTAINER_TMPFILES),
+            &format!(
+                "# fjarr-setup setup desktop --container (docs/26#a-desktop-in-a-container): the helper's\n\
+                 # socket directory, bind-mounted into the agent's container, belongs to its uid.\n\
+                 d /run/fjarr 0755 {CONTAINER_AGENT_UID} {CONTAINER_AGENT_UID} -\n"
+            ),
+        )?;
+        let _ = system::run("systemd-tmpfiles", &["--create", CONTAINER_TMPFILES]);
+        log::success(format!(
+            "/run/fjarr belongs to the container's agent (uid {CONTAINER_AGENT_UID})"
+        ))?;
+    }
     record.save(state)?;
     // The watchdog last: its first check must already find the configured account.
     if system::systemd_running() {
@@ -536,7 +627,9 @@ pub async fn setup(config_path: &Path, state: &Path, args: DesktopArgs) -> Resul
         log::success(
             "GDM watchdog enabled: brings the automatic login back when no one holds the seat",
         )?;
-        system::restart_agent_if_running()?;
+        if !args.container {
+            system::restart_agent_if_running()?;
+        }
     }
 
     // 5. The group applies at the account's next login.
@@ -553,6 +646,23 @@ pub async fn setup(config_path: &Path, state: &Path, args: DesktopArgs) -> Resul
             ),
         ],
     )?;
+    if args.container {
+        let gid = system::group_gid(GROUP).with_context(|| format!("no {GROUP} group"))?;
+        // Plain lines, not a note box: the box wraps the command, and it is meant to be copied.
+        log::info(format!(
+            "For the agent's container: volume /run/fjarr:/run/fjarr, group_add \"{gid}\", then"
+        ))?;
+        log::info(format!(
+            "docker compose run --rm fjarr-agent setup desktop --helper-uid {uid} --helper-gid {gid}"
+        ))?;
+        cliclack::outro(format!(
+            "Host side set up: {account} is uid {uid}, {GROUP} is gid {gid} · undo: fjarr-setup setup --undo {FEATURE}"
+        ))?;
+        if reboot == YesNo::Yes && system::systemd_running() {
+            system::systemctl(&["reboot"])?;
+        }
+        return Ok(0);
+    }
     cliclack::outro(format!(
         "fjarr-agent --check follows · undo: fjarr-agent setup --undo {FEATURE}"
     ))?;
@@ -566,6 +676,28 @@ pub async fn setup(config_path: &Path, state: &Path, args: DesktopArgs) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A container host's watchdog names the account from GDM, as there is no agent configuration.
+    #[test]
+    fn the_automatic_login_account_is_read_from_gdms_daemon_section() {
+        let set = gdm_autologin(
+            "# GDM\n[daemon]\n#  AutomaticLogin = user1\n\n[security]\nAutomaticLogin=nobody\n",
+            "desktop",
+        );
+        assert_eq!(gdm_autologin_user(&set).as_deref(), Some("desktop"));
+        assert_eq!(
+            gdm_autologin_user(
+                "[daemon]\n#  AutomaticLoginEnable = true\n#  AutomaticLogin = user1\n"
+            ),
+            None,
+            "comments are not a setting"
+        );
+        assert_eq!(
+            gdm_autologin_user("[daemon]\nAutomaticLoginEnable=false\nAutomaticLogin=desktop\n"),
+            None,
+            "switched off"
+        );
+    }
 
     #[test]
     fn autologin_goes_into_daemon_and_keeps_every_other_line() {

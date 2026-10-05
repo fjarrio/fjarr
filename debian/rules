@@ -25,7 +25,7 @@ override_dh_installsystemd:
 	dh_installsystemd -p fjarr-agent --name=fjarr-net --no-enable --no-start
 	dh_installsystemd -p fjarr-agent fjarr-agent.service
 	@# The desktop watchdog ships disabled; `setup desktop` enables it (docs/26#fjarr-agent-setup-desktop).
-	dh_installsystemd -p fjarr-desktop-wayland --name=fjarr-desktop-watchdog --no-enable --no-start fjarr-desktop-watchdog.timer fjarr-desktop-watchdog.service
+	dh_installsystemd -p fjarr-desktop-session --name=fjarr-desktop-watchdog --no-enable --no-start fjarr-desktop-watchdog.timer fjarr-desktop-watchdog.service
 
 # The helper's user unit is enabled by `setup desktop` for the desktop account only; debhelper would
 # enable it globally, for every account that ever logs in (docs/26#fjarr-agent-setup-desktop).
@@ -46,9 +46,13 @@ override_dh_auto_install:
 	@# The driver catalog `setup` and `drivers` read (docs/26#the-driver-catalog).
 	install -D -m 0644 packaging/catalog.toml debian/fjarr-agent/usr/share/fjarr/catalog.toml
 	install -D -m 0755 signaling/target/release/fjarr-connect debian/fjarr-tools/usr/bin/fjarr-connect
-	@# The setup tool, handed `setup`, `net` and `drivers` by fjarr-agent (docs/26#the-setup-tool).
-	install -D -m 0755 signaling/target/release/fjarr-setup debian/fjarr-agent/usr/lib/fjarr/fjarr-setup
+	@# The setup tool, handed `setup`, `net` and `drivers` by fjarr-agent (docs/26#the-setup-tool), and a
+	@# command of its own for a host with no agent: a containerized robot's desktop host (docs/26#packages).
+	install -D -m 0755 signaling/target/release/fjarr-setup debian/fjarr-setup/usr/lib/fjarr/fjarr-setup
+	mkdir -p debian/fjarr-setup/usr/bin
+	ln -sf ../lib/fjarr/fjarr-setup debian/fjarr-setup/usr/bin/fjarr-setup
 	@# The helper's user unit, installed but enabled for no one: `setup desktop` enables it for the
 	@# desktop account only (dh_installsystemduser would enable it for every user).
-	install -D -m 0644 packaging/systemd/fjarr-desktop-session.service debian/fjarr-desktop-wayland/usr/lib/systemd/user/fjarr-desktop-session.service
-	install -D -m 0644 packaging/modules-load/fjarr-desktop-wayland.conf debian/fjarr-desktop-wayland/usr/lib/modules-load.d/fjarr-desktop-wayland.conf
+	install -D -m 0644 packaging/systemd/fjarr-desktop-session.service debian/fjarr-desktop-session/usr/lib/systemd/user/fjarr-desktop-session.service
+	install -D -m 0644 packaging/pipewire/fjarr-pipewire-client.conf debian/fjarr-desktop-wayland/usr/share/fjarr/pipewire-client.conf
+	install -D -m 0644 packaging/modules-load/fjarr-desktop-session.conf debian/fjarr-desktop-session/usr/lib/modules-load.d/fjarr-desktop-session.conf

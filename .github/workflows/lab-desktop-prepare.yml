@@ -76,6 +76,8 @@ jobs:
           path: |
             under-test/dist/deb/amd64/fjarr-agent_*.deb
             under-test/dist/deb/amd64/fjarr-tools_*.deb
+            under-test/dist/deb/amd64/fjarr-setup_*.deb
+            under-test/dist/deb/amd64/fjarr-desktop-session_*.deb
             under-test/dist/deb/amd64/fjarr-desktop-wayland_*.deb
             under-test/dist/lab/fjarr-server
             under-test/dist/lab/fjarr-opsim

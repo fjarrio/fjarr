@@ -13,7 +13,7 @@ ARG UBUNTU=ubuntu:26.04
 FROM ${UBUNTU} AS runtime
 ARG TARGETARCH
 ENV DEBIAN_FRONTEND=noninteractive
-COPY dist/deb/${TARGETARCH}/fjarr-agent_*.deb /tmp/debs/
+COPY dist/deb/${TARGETARCH}/fjarr-agent_*.deb dist/deb/${TARGETARCH}/fjarr-setup_*.deb /tmp/debs/
 # The image's user is created FIRST, with the published uid (docs/26#containerized-robots), so the
 # package's sysusers entry finds it and only adds video and render. On an apt robot the uid is dynamic.
 # systemd-standalone-sysusers satisfies the package's sysusers dependency without pulling systemd in.
@@ -22,7 +22,7 @@ RUN groupadd -r -g 10001 fjarr && useradd -r -u 10001 -g fjarr -d /var/lib/fjarr
     && apt-get update && apt-get install -y --no-install-recommends \
        systemd-standalone-sysusers ca-certificates curl gstreamer1.0-tools \
        mesa-va-drivers $([ "$TARGETARCH" = amd64 ] && echo intel-media-va-driver) \
-       /tmp/debs/fjarr-agent_*.deb \
+       /tmp/debs/fjarr-agent_*.deb /tmp/debs/fjarr-setup_*.deb \
     && rm -rf /var/lib/apt/lists/* /tmp/debs \
     && install -d -o fjarr -g fjarr -m 0700 /var/lib/fjarr \
     && install -d -o fjarr -g fjarr -m 0755 /run/fjarr \
@@ -46,6 +46,18 @@ ENTRYPOINT ["/usr/lib/fjarr/container-entrypoint"]
 # ------------------------------------------------------------ demo-build --
 # demo-robot is the "customer's robot software" (docs/02): built here the way an embedder builds, from
 # libfjarr-dev with find_package(fjarr) — the same thing make deb-embed-test proves.
+# The agent with the GNOME module (docs/26#a-desktop-in-a-container): the session's side stays on the
+# host (fjarr-desktop-session), so its recommendation is not installed here.
+FROM runtime AS desktop-wayland
+ARG TARGETARCH
+USER root
+COPY dist/deb/${TARGETARCH}/fjarr-desktop-wayland_*.deb /tmp/debs/
+RUN apt-get update && apt-get install -y --no-install-recommends /tmp/debs/fjarr-desktop-wayland_*.deb \
+    && rm -rf /var/lib/apt/lists/* /tmp/debs \
+    && test -f /usr/lib/fjarr/desktop/libfjarr-desktop-mutter.so \
+    && ! test -e /usr/lib/fjarr/fjarr-desktop-session
+USER fjarr
+
 FROM ${UBUNTU} AS demo-build
 ARG TARGETARCH
 ENV DEBIAN_FRONTEND=noninteractive

@@ -566,7 +566,7 @@ demo-deploy: ## The hosted demo (docs/31): build fjarr-server and the dashboard,
 	@deploy/demo/deploy.sh
 
 .PHONY: deb deb-install-test deb-embed-test install-script-test set-version
-deb: ## Build the .debs (fjarr-agent, fjarr-tools, fjarr-desktop-wayland, fjarr-desktop-x11, libfjarr-dev) for this host's architecture into dist/deb/<arch>/
+deb: ## Build the .debs (fjarr-agent, fjarr-setup, fjarr-tools, fjarr-desktop-session, fjarr-desktop-wayland, fjarr-desktop-x11, libfjarr-dev) for this host's architecture into dist/deb/<arch>/
 	@if [ -f /.dockerenv ]; then echo "make deb runs on the host (it starts its own builder container)"; exit 1; fi
 	@$(DEB_BUILDER_IMAGE)
 	mkdir -p dist/deb/$(DEB_ARCH)
@@ -590,6 +590,8 @@ lab-artifacts: ## fjarr-server and fjarr-opsim for a lab machine's nightly (Ubun
 deb-install-test: ## Install dist/deb/<arch>/*.deb on a clean Ubuntu 26.04 and check what they promise
 	@if [ -f /.dockerenv ]; then echo "make deb-install-test runs on the host"; exit 1; fi
 	docker run --rm -v "$(CURDIR)/dist/deb/$(DEB_ARCH)":/debs:ro -v "$(CURDIR)/packaging/install-test.sh":/install-test.sh:ro ubuntu:26.04 sh /install-test.sh
+	@# A containerized robot's desktop host: fjarr-desktop-session alone, no agent (docs/26#a-desktop-in-a-container).
+	docker run --rm -v "$(CURDIR)/dist/deb/$(DEB_ARCH)":/debs:ro -v "$(CURDIR)/packaging/install-test-host.sh":/install-test-host.sh:ro ubuntu:26.04 sh /install-test-host.sh
 
 set-version: ## Set one version everywhere it is declared (V=X.Y.Z), before tagging vX.Y.Z (docs/26#releases)
 	@docker compose exec -T dev bash packaging/set-version.sh $(V)

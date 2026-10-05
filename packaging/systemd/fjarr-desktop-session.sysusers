@@ -1,0 +1,4 @@
+# spec: docs/26#packages · docs/23#desktop-descriptor-handover — the helper's socket belongs to this
+# group; `setup desktop` adds the desktop account. The agent's account joins it from
+# fjarr-desktop-wayland (on a robot) or by its container's group_add (docs/26#a-desktop-in-a-container).
+g fjarr-desktop -

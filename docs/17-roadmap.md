@@ -523,6 +523,23 @@ server itself stalls ~4 s while the chain re-probes, a driver limit as in
 ADR-0006. Restoring GNOME found three `setup` bugs, fixed the same evening.
 **3.7 is done.**
 
+**3.8, a desktop with the agent in a container (2026-10-06).** Erik chose a
+host package: the desktop's host side moved into `fjarr-desktop-session`
+(helper, user unit, group, GDM watchdog; no agent), the setup tool into
+`fjarr-setup`, and `fjarr-desktop-wayland` keeps the module and recommends
+the session package, so a robot's `apt install` is unchanged. On the host,
+`fjarr-setup setup desktop --container` does the host's part and prints the
+desktop uid and group gid; in the container, `setup desktop --helper-uid
+--helper-gid` writes them ([docs/26](26-robot-install-and-drivers.md#a-desktop-in-a-container)).
+The image has a `desktop-wayland` stage. `make compose-gate` now ends with a
+desktop beside the reference file's agent: the host's helper connects through
+the bind-mounted socket and opsim's `desktop-see` passes. The gate found the
+module needed `pipewire-bin`'s `client.conf`, a package that brings GPL
+readline: the module now ships its own client configuration over
+`libpipewire-0.3-modules`. A second install test proves a container host
+(the session package alone). An X11 kiosk with the agent in a container is
+specified and not built. **3.8 is done**; every M3 slice is.
+
 ## M3.5 — Hear the robot {#m35}
 
 **`fjarr.audio`** (robot microphone downlink, push-to-talk uplink through the

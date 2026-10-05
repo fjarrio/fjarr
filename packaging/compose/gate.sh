@@ -11,6 +11,7 @@ cd "$(dirname "$0")/../.."
 
 ARCH=${DEB_ARCH:-$(dpkg --print-architecture 2>/dev/null || echo amd64)}
 export FJARR_GATE_IMAGE=${FJARR_GATE_IMAGE:-fjarr-agent:compose-gate}
+export FJARR_GATE_DESKTOP_IMAGE=${FJARR_GATE_DESKTOP_IMAGE:-fjarr-agent:compose-gate-desktop}
 SANDBOX=${FJARR_GATE_SANDBOX:-1}
 ID=${FJARR_GATE_DEVICE:-compose-robot-01}
 TOKEN=${FJARR_DEV_DEVICE_TOKEN:-dev-only-device-token}
@@ -36,6 +37,7 @@ fail() {
   exit 1
 }
 cleanup() {
+  dc -f packaging/compose/gate.desktop.yml --profile example down -v >/dev/null 2>&1 || true
   dc --profile example down -v >/dev/null 2>&1 || true
   docker/lab/tundev.sh down dev "$OP_DEV" >/dev/null 2>&1 || true
 }
@@ -100,4 +102,24 @@ docker compose exec -T -e FJARR_TUN_DEV="$OP_DEV" dev ./build/"${BUILD_PRESET:-r
   --robot "$ID" --grant-secret "${FJARR_GRANT_HS256_SECRET:-dev-only-grant-secret}" --timeout 60 --scenario tunnel \
   --introspect-token dev-only-introspect-token 2>&1 | tee /tmp/compose-gate-opsim.log | grep -E '^(PASS|FAIL|SUMMARY)'
 grep -q "0 failed" /tmp/compose-gate-opsim.log || fail "the tunnel scenario against the compose robot"
-say "PASS — the reference compose file runs a robot, tunnel included"
+say "tunnel ok"
+
+# 7. The desktop (M3 3.8, docs/26#a-desktop-in-a-container): the same device with the GNOME image,
+#    told the host's desktop uid and group by number, sees the desktop through the host's helper.
+say "image $FJARR_GATE_DESKTOP_IMAGE (desktop-wayland) from dist/deb/$ARCH"
+docker build -q -f docker/agent/Dockerfile --target desktop-wayland -t "$FJARR_GATE_DESKTOP_IMAGE" . >/dev/null
+docker image inspect fjarr-desktop-fixture >/dev/null 2>&1 || docker compose --profile desktop build -q desktop-fixture
+files+=(-f packaging/compose/gate.desktop.yml)
+out=$(dc run --rm -T fjarr-agent setup desktop --helper-uid 10002 --helper-gid 10777 2>&1) || fail "setup desktop in the image: $out"
+dc up -d --no-deps fjarr-agent >/dev/null
+dc up -d --no-deps desktop-host >/dev/null
+for _ in $(seq 60); do logs_have fjarr-agent "monitor present" && break; sleep 1; done
+logs_have fjarr-agent "monitor present" || { dc logs --no-color --tail 60 fjarr-agent desktop-host >&2; fail "the agent never got the host's desktop"; }
+docker compose exec -T dev ./build/"${BUILD_PRESET:-release}"/agent/tools/fjarr-opsim --server ws://fjarr-server:8080/ws \
+  --robot "$ID" --grant-secret "${FJARR_GRANT_HS256_SECRET:-dev-only-grant-secret}" --timeout 60 --scenario desktop-see \
+  --introspect-token dev-only-introspect-token 2>&1 | tee /tmp/compose-gate-desktop.log | grep -E '^(PASS|FAIL|SUMMARY)' || true
+if ! grep -q "0 failed" /tmp/compose-gate-desktop.log; then
+  dc logs --no-color --tail 60 fjarr-agent desktop-host >&2 || true
+  fail "desktop-see against the compose robot"
+fi
+say "PASS — the reference compose file runs a robot, tunnel and desktop included"

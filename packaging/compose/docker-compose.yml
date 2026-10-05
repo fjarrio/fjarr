@@ -27,6 +27,11 @@ services:
     volumes:
       - fjarr-config:/etc/fjarr # fjarr.toml, written by setup
       - fjarr-state:/var/lib/fjarr # the device key: keep it across image upgrades
+      # A GNOME desktop (docs/26#a-desktop-in-a-container): the image ...:<version>-desktop-wayland,
+      # the host set up with `sudo fjarr-setup setup desktop --container` (it prints the numbers),
+      # then `docker compose run --rm fjarr-agent setup desktop --helper-uid <uid> --helper-gid <gid>`.
+      # - /run/fjarr:/run/fjarr # where the agent listens for the host's session helper
+    # and add the host's fjarr-desktop gid to group_add: ["${RENDER_GID:-109}", "<gid>"]
     # The container runtime is the supervisor here (ADR-0019 wants one: outside systemd the agent
     # refuses to start unless told who restarts it).
     restart: unless-stopped

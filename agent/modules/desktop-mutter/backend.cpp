@@ -108,7 +108,9 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         else if (config.contains("user")) {
             if (const passwd* pw = ::getpwnam(config["user"].get<std::string>().c_str())) desktop_uid_ = static_cast<int>(pw->pw_uid);
         }
-        if (config.contains("group")) {
+        // A number in a container, whose image has no fjarr-desktop group (docs/26#a-desktop-in-a-container).
+        if (config.contains("gid")) socket_gid_ = config["gid"].get<int>();
+        else if (config.contains("group")) {
             if (const group* gr = ::getgrnam(config["group"].get<std::string>().c_str())) socket_gid_ = static_cast<int>(gr->gr_gid);
         }
     }

@@ -1,0 +1,19 @@
+# make compose-gate, step 7 (docs/26#a-desktop-in-a-container): the reference file's agent with the
+# GNOME image, and a desktop beside it standing in for the host. The fixture runs the session helper
+# as uid 10002 in group 10777, as `setup desktop --container` leaves a host's desktop account; the
+# agent shares that group (group_add) and /run/fjarr (a volume the agent mounts first, so it starts
+# as the image's /run/fjarr, uid 10001's, as the host's tmpfiles drop-in makes it).
+services:
+  fjarr-agent:
+    image: ${FJARR_GATE_DESKTOP_IMAGE:-fjarr-agent:compose-gate-desktop}
+    group_add: !override ["10777"]
+    volumes:
+      - gate-desktop-socket:/run/fjarr
+  desktop-host:
+    image: fjarr-desktop-fixture
+    group_add: ["10777"]
+    volumes:
+      - gate-desktop-socket:/run/fjarr
+    depends_on: [fjarr-agent]
+volumes:
+  gate-desktop-socket:

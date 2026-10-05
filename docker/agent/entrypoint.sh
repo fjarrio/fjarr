@@ -24,4 +24,6 @@ fi
 # fjarr's own groups (video, render from the package) and the ones compose added with group_add —
 # the host's render GID, which differs per host (docs/26). `--init-groups` alone would drop those.
 groups=$({ id -G fjarr; id -G; } | tr ' ' '\n' | grep -vx 0 | sort -un | paste -sd, -)
+# fjarr's own home, not root's: GLib (dconf) and PipeWire look there and complain loudly about /root.
+export HOME=/var/lib/fjarr
 exec setpriv --reuid=fjarr --regid=fjarr --groups="$groups" --inh-caps=-all --bounding-set=-all -- fjarr-agent "$@"

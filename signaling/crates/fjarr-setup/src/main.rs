@@ -121,6 +121,9 @@ pub struct DesktopArgs {
     pub ghost_screens: Option<u32>,
     pub x11: bool,
     pub display: Option<String>,
+    pub container: bool,
+    pub helper_uid: Option<u32>,
+    pub helper_gid: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -205,6 +208,17 @@ pub struct SetupArgs {
     /// For `setup desktop` on an X11 kiosk: the X display the agent opens (default :0).
     #[arg(long, value_name = "DISPLAY")]
     pub display: Option<String>,
+    /// For `setup desktop` on the host of a robot whose agent runs in a container: the host's side
+    /// only, no agent configuration (docs/26#a-desktop-in-a-container).
+    #[arg(long)]
+    pub container: bool,
+    /// For `setup desktop` inside the agent's container: the host's desktop account uid, which
+    /// `--container` printed on the host.
+    #[arg(long, value_name = "UID", requires = "helper_gid")]
+    pub helper_uid: Option<u32>,
+    /// For `setup desktop` inside the agent's container: the host's fjarr-desktop gid.
+    #[arg(long, value_name = "GID", requires = "helper_uid")]
+    pub helper_gid: Option<u32>,
     /// How long to wait for the agent's STATUS=online, in seconds.
     #[arg(long, default_value_t = 30, value_name = "SECONDS")]
     pub timeout: u64,
@@ -312,6 +326,9 @@ async fn run(cli: Cli) -> Result<i32> {
                 ghost_screens: args.ghost_screens,
                 x11: args.x11,
                 display: args.display,
+                container: args.container,
+                helper_uid: args.helper_uid,
+                helper_gid: args.helper_gid,
             };
             desktop::setup(&cli.config, &cli.state, d).await
         }

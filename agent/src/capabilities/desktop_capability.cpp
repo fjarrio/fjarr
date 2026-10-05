@@ -430,6 +430,7 @@ CapabilityManifest DesktopCapability::manifest() const {
               {"user", {{"type", "string"}}},
               {"uid", {{"type", "integer"}}},
               {"group", {{"type", "string"}}},
+              {"gid", {{"type", "integer"}}}, // a container's (docs/26#a-desktop-in-a-container)
               {"keepalive_ms", {{"type", "integer"}, {"minimum", 20}, {"maximum", 1000}}}}}}}}}};
     return m;
 }

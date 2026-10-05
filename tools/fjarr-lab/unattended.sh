@@ -51,8 +51,8 @@ prepare() {
   # The baseline: whatever the last run or a person set up for the desktop goes first.
   if command -v fjarr-agent >/dev/null; then fjarr-agent setup --undo desktop >/dev/null 2>&1 || true; fi
   local debs=()
-  for d in "$dir"/fjarr-agent_*.deb "$dir"/fjarr-tools_*.deb "$dir"/fjarr-desktop-wayland_*.deb; do [ -f "$d" ] && debs+=("$(readlink -f "$d")"); done
-  [ ${#debs[@]} -eq 3 ] || fail install "expected fjarr-agent, fjarr-tools and fjarr-desktop-wayland .debs in $dir"
+  for d in "$dir"/fjarr-agent_*.deb "$dir"/fjarr-setup_*.deb "$dir"/fjarr-tools_*.deb "$dir"/fjarr-desktop-session_*.deb "$dir"/fjarr-desktop-wayland_*.deb; do [ -f "$d" ] && debs+=("$(readlink -f "$d")"); done
+  [ ${#debs[@]} -eq 5 ] || fail install "expected fjarr-agent, fjarr-setup, fjarr-tools, fjarr-desktop-session and fjarr-desktop-wayland .debs in $dir"
   DEBIAN_FRONTEND=noninteractive apt-get install -y -q --reinstall --allow-downgrades "${debs[@]}" >"$STATE/apt.log" 2>&1 || { tail -20 "$STATE/apt.log"; fail install "apt could not install the build"; }
   install -m 0755 "$dir/fjarr-server" "$dir/fjarr-opsim" "$STATE/"
   install -m 0644 "$here/../../docker/desktop-fixture/testwin.py" "$STATE/testwin.py"

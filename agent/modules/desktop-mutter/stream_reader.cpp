@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <cstring>
+#include <unistd.h>
 #include <mutex>
 
 #include <gst/app/gstappsrc.h>
@@ -278,7 +279,12 @@ std::unique_ptr<StreamReader> StreamReader::start(GMainContext* ctx, int fd, std
     impl->position = std::move(position);
     impl->log = std::move(log);
     impl->thread = pw_thread_loop_new("fjarr-capture", nullptr);
-    impl->context = impl->thread ? pw_context_new(pw_thread_loop_get_loop(impl->thread), nullptr, 0) : nullptr;
+    // The package's own client configuration where it is installed, PipeWire's default otherwise
+    // (a development tree): see packaging/pipewire/fjarr-pipewire-client.conf for why.
+    static constexpr const char* OWN_CONF = "/usr/share/fjarr/pipewire-client.conf";
+    pw_properties* conf = ::access(OWN_CONF, R_OK) == 0 ? pw_properties_new(PW_KEY_CONFIG_NAME, OWN_CONF, nullptr) : nullptr;
+    impl->context = impl->thread ? pw_context_new(pw_thread_loop_get_loop(impl->thread), conf, 0) : nullptr;
+    if (!impl->thread && conf) pw_properties_free(conf);
     if (!impl->context || pw_thread_loop_start(impl->thread) < 0) {
         ::close(fd);
         impl->log(2, "the stream reader could not start a PipeWire loop");

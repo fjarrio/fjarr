@@ -485,6 +485,17 @@ pub fn passwd_entry(user: &str) -> Option<(PathBuf, libc::uid_t, libc::gid_t)> {
         })
 }
 
+/// A group's gid, from the group database.
+pub fn group_gid(group: &str) -> Option<libc::gid_t> {
+    std::fs::read_to_string("/etc/group")
+        .ok()?
+        .lines()
+        .find_map(|l| {
+            let f: Vec<&str> = l.split(':').collect();
+            (f.first() == Some(&group) && f.len() >= 3).then(|| f[2].parse().ok())?
+        })
+}
+
 /// Is `user` in `group` (the group database, not the running session's view)?
 pub fn in_group(user: &str, group: &str) -> bool {
     run("id", &["-nG", user])
