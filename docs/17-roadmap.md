@@ -505,8 +505,23 @@ stalled transfers until their timeout, because events that a round trip
 outside the event handler had read sat in Xlib's queue, where a descriptor
 watch never sees them; the module's event source now checks that queue too.
 The fixture also stages an owner that never answers and text over the limit.
-Left for 3.7: an X11 kiosk from the package on real hardware (LightDM with
-an automatic login, per ADR-0006).
+**On the mini-PC (2026-10-05)** with LightDM's automatic login into
+Openbox, from the packages and `setup desktop --x11`: the three Dells on the
+DisplayPort chain and the ghost laid out left to right, every monitor
+streaming with the same wire id it has under GNOME, input with åäö, the
+local cursor, the clipboard with text and images both ways, and an unplug
+and re-plug laid out again. It found five things, all fixed: an unplugged
+Dell reported as a nameless monitor for ~3 s (its output kept its CRTC
+without its EDID); Xorg making the ghost primary (`fjarr-x11-session` now
+applies docs/26's rule); the ghost, moved into the gap, restarting its
+capture and re-offering 1 ms after the previous answer (a same-size move now
+keeps its capture); the dashboard then answering no offer again until it was
+reloaded (one stuck offer held every later one; each new peer starts fresh);
+and the hosted demo's operators dropped every 2 min 5 s by Cloudflare's idle
+limit on a quiet signaling socket (the server pings every 30 s). The X
+server itself stalls ~4 s while the chain re-probes, a driver limit as in
+ADR-0006. Restoring GNOME found three `setup` bugs, fixed the same evening.
+**3.7 is done.**
 
 ## M3.5 — Hear the robot {#m35}
 
