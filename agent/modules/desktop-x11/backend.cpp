@@ -54,18 +54,37 @@ int on_error(Display*, XErrorEvent*) { return 0; } // a vanished output or windo
 /// A rectangle of the X root, captured by `ximagesrc` (docs/23#desktop-x11).
 class X11MonitorSource final : public VideoSource {
   public:
-    X11MonitorSource(std::string display, std::string label) : display_(std::move(display)), label_(std::move(label)) {}
+    X11MonitorSource(std::string display, std::string label) : display_(std::move(display)), label_(std::move(label)) { g_weak_ref_init(&element_, nullptr); }
+    ~X11MonitorSource() override { g_weak_ref_clear(&element_); }
     void set_rect(int x, int y, int w, int h) { x_ = x, y_ = y, w_ = w, h_ = h; }
+    /// A monitor that moved but kept its size: the running capture's crop follows it in place
+    /// (`ximagesrc` reads its origin on every frame), so its track is not offered again. False when
+    /// the size changed, which needs new caps and so a restarted capture (docs/23#desktop-x11).
+    bool move_to(int x, int y, int w, int h) {
+        if (w != w_ || h != h_) return false;
+        x_ = x, y_ = y;
+        if (auto* e = static_cast<GstElement*>(g_weak_ref_get(&element_))) {
+            g_object_set(e, "startx", static_cast<guint>(x), "starty", static_cast<guint>(y), "endx", static_cast<guint>(x + w - 1),
+                         "endy", static_cast<guint>(y + h - 1), nullptr);
+            gst_object_unref(e);
+        }
+        return true;
+    }
     SourceInfo describe() const override { return {"x11:" + label_, {{"src", TrackKind::Video, "video/x-raw"}}}; }
     GstBin* create_bin() override {
         // Inclusive end coordinates; no pointer in the picture (it travels beside it, docs/22#cursor-strategy).
-        const std::string desc = "ximagesrc display-name=" + display_ + " startx=" + std::to_string(x_) + " starty=" + std::to_string(y_) +
+        const std::string desc = "ximagesrc name=x11src display-name=" + display_ + " startx=" + std::to_string(x_) + " starty=" + std::to_string(y_) +
                                  " endx=" + std::to_string(x_ + w_ - 1) + " endy=" + std::to_string(y_ + h_ - 1) +
                                  " show-pointer=false use-damage=false ! video/x-raw,framerate=30/1 ! videoconvert";
         GError* err = nullptr;
         GstElement* bin = gst_parse_bin_from_description(desc.c_str(), TRUE, &err);
         if (err) g_error_free(err);
-        return bin ? GST_BIN(bin) : nullptr;
+        if (!bin) return nullptr;
+        if (GstElement* x = gst_bin_get_by_name(GST_BIN(bin), "x11src")) {
+            g_weak_ref_set(&element_, x); // the capture a move updates in place
+            gst_object_unref(x);
+        }
+        return GST_BIN(bin);
     }
     bool available() const override { return available_; }
     void on_availability_changed(std::function<void(bool)> cb) override { cb_ = std::move(cb); }
@@ -83,6 +102,7 @@ class X11MonitorSource final : public VideoSource {
     bool available_ = false;
     std::string reason_ = "not captured yet";
     std::function<void(bool)> cb_;
+    GWeakRef element_; // the live ximagesrc, while a pipeline holds one
 };
 
 class X11Backend;
@@ -451,7 +471,10 @@ class X11Backend final : public DesktopBackend {
             if (!now) continue;
             const Monitor* before = find(id);
             if (before && (before->x != now->x || before->y != now->y || before->width != now->width || before->height != now->height)) {
-                src->set_available(false, "the monitor changed geometry");
+                // Moved, same size: the crop follows in place, nothing is re-offered. On the mini-PC
+                // a restart here re-offered the moved ghost 1 ms after the unplug's answer (2026-10-05).
+                if (src->move_to(now->x, now->y, now->width, now->height)) continue;
+                src->set_available(false, "the monitor changed size");
                 src->set_rect(now->x, now->y, now->width, now->height);
                 src->set_available(true);
             }

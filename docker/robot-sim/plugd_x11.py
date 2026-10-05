@@ -117,11 +117,16 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/plug":
             r = xrandr("--setmonitor", NAME, "1280/340x720/190+1920+0", "none")
             code, body = (200, NAME) if r.returncode == 0 else (500, r.stderr)
+        elif self.path == "/move":
+            # Same size, new place, in one xrandr run: the layout shift a kiosk makes after an
+            # unplug (the mini-PC's ghost moved into the gap, 2026-10-05).
+            r = xrandr("--delmonitor", NAME, "--setmonitor", NAME, "1280/340x720/190+2560+0", "none")
+            code, body = (200, NAME) if r.returncode == 0 else (500, r.stderr)
         elif self.path == "/unplug":
             r = xrandr("--delmonitor", NAME)
             code, body = (200, NAME) if r.returncode == 0 else (404, r.stderr or "nothing plugged")
         elif self.path == "/":
-            code, body = 200, "plugd: /plug, /unplug, /copy?text=, /paste, /copy-image, /paste-image"
+            code, body = 200, "plugd: /plug, /move, /unplug, /copy?text=, /paste, /copy-image, /paste-image"
         else:
             code, body = 404, "/plug, /unplug, /copy?text=, /paste, /copy-image or /paste-image"
         self.reply(code, body.encode())

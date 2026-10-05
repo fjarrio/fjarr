@@ -721,8 +721,10 @@ descriptor is watched there, and no Xlib call is made from another thread.
   it does; a container needs `ipc: host` or the X server's namespace, or it
   silently captures stale frames (the fixture did, 2026-10-04). A monitor's capture is
   available from the start; a vanished monitor's capture ends with it.
-  The root never moves a capture: a monitor that changes geometry is
-  restarted on its new rectangle.
+  A monitor that moves but keeps its size keeps its capture: the crop
+  follows it in place (`ximagesrc` reads its origin on every frame), so
+  nothing is re-offered ([above](#desktop-monitors)). One that changes size
+  is restarted on its new rectangle, since its caps change.
 - **Input.** XTest. Pointer: a monitor's normalized point → the root's
   `x + nx·w, y + ny·h`; buttons 1–3 and 8–9 (back, forward); the wheel as
   button 4–7 clicks, one per 48 px accumulated (three of the client's

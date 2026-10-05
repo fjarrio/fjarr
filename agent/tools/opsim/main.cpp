@@ -2861,6 +2861,21 @@ void scenario_desktop_hotplug(Operator& op) {
     const std::int64_t gap = snap ? snap->max_gap_us : -1;
     r.check("desktop-others-uninterrupted", gap >= 0 && gap < 500'000, d0 + "'s longest gap across the plug and the renegotiation: " + ms_str(gap));
 
+    // 1b. A monitor that moves but keeps its size keeps its track and its capture (docs/23
+    //     #desktop-monitors): no restart, no gap. Where the fixture can move one (the X11 one).
+    op.watch_reset(d1);
+    mark = op.inbox_mark();
+    auto moved = op.http_get_url(op.desktop_plug() + "/move");
+    if (moved.status != 404) {
+        auto ev_move = monitors_event(mark, 2);
+        const std::string why = ev_move ? ev_move->payload.value("reason", std::string("?")) : "none";
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+        const auto msnap = op.track_snapshot(d1);
+        const std::int64_t mgap = msnap ? msnap->max_gap_us : -1;
+        r.check("desktop-move-in-place", moved.status == 200 && why == "mode-change" && mgap >= 0 && mgap < 500'000,
+                "moved (" + why + "); " + d1 + "'s longest gap across the move: " + ms_str(mgap));
+    }
+
     // 2. Unplug: the monitors event, the track leaves the offer, the first monitor flows on.
     mark = op.inbox_mark();
     smark = op.sig_mark();
