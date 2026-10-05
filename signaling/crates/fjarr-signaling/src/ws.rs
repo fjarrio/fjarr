@@ -38,7 +38,14 @@ enum Identity {
 }
 
 async fn handle(service: Arc<ServiceState>, socket: WebSocket) {
-    let (mut sink, mut stream) = socket.split();
+    let (mut sink, stream) = socket.split();
+    let heard = Arc::new(std::sync::atomic::AtomicU64::new(now_ms() as u64));
+    let dead = Arc::new(tokio::sync::Notify::new());
+    let mut stream = Inbound {
+        stream,
+        heard: heard.clone(),
+        dead: dead.clone(),
+    };
 
     // Writer task: everything outbound flows through one queue so state
     // lock sections never await (docs/02 marshaling discipline, in Rust).
@@ -48,6 +55,7 @@ async fn handle(service: Arc<ServiceState>, socket: WebSocket) {
     let mut keepalive = tokio::time::interval(service.config.ws_keepalive);
     keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     keepalive.reset(); // the first ping one interval from now, not at once
+    let silent_limit = 2 * service.config.ws_keepalive.as_millis() as u64;
     let writer = tokio::spawn(async move {
         loop {
             let frame = tokio::select! {
@@ -58,7 +66,17 @@ async fn handle(service: Arc<ServiceState>, socket: WebSocket) {
                     },
                     None => break,
                 },
-                _ = keepalive.tick() => WsMessage::Ping(Default::default()),
+                _ = keepalive.tick() => {
+                    // Nothing heard for two intervals, not even a pong: the peer is gone though
+                    // the socket is not (docs/08#transport-layers). The reader ends it.
+                    let quiet = (now_ms() as u64).saturating_sub(heard.load(std::sync::atomic::Ordering::Relaxed));
+                    if quiet > silent_limit {
+                        tracing::info!(quiet_ms = quiet, "no pong: the socket's peer is gone");
+                        dead.notify_one();
+                        break;
+                    }
+                    WsMessage::Ping(Default::default())
+                }
             };
             if sink.send(frame).await.is_err() {
                 break;
@@ -84,11 +102,7 @@ async fn handle(service: Arc<ServiceState>, socket: WebSocket) {
 
 /// The hello handshake. Sends an error and returns `None` on any failure so
 /// the caller falls straight through to cleanup.
-async fn handshake(
-    service: &Arc<ServiceState>,
-    tx: &Tx,
-    stream: &mut SplitStream<WebSocket>,
-) -> Option<Identity> {
+async fn handshake(service: &Arc<ServiceState>, tx: &Tx, stream: &mut Inbound) -> Option<Identity> {
     let msg = match tokio::time::timeout(HELLO_TIMEOUT, next_frame(stream)).await {
         Ok(Frame::Msg(msg)) => *msg,
         Ok(Frame::Unparseable) => {
@@ -150,9 +164,26 @@ fn reject_auth(tx: &Tx, error: AuthError, caused_by: String) {
     }
 }
 
-async fn next_frame(stream: &mut SplitStream<WebSocket>) -> Frame {
+/// A socket's inbound half: when anything last arrived (pongs included), and the writer's signal
+/// that the peer is gone (docs/08#transport-layers).
+struct Inbound {
+    stream: SplitStream<WebSocket>,
+    heard: Arc<std::sync::atomic::AtomicU64>,
+    dead: Arc<tokio::sync::Notify>,
+}
+
+async fn next_frame(inbound: &mut Inbound) -> Frame {
     loop {
-        match stream.next().await {
+        let next = tokio::select! {
+            next = inbound.stream.next() => next,
+            _ = inbound.dead.notified() => return Frame::Closed,
+        };
+        if matches!(next, Some(Ok(_))) {
+            inbound
+                .heard
+                .store(now_ms() as u64, std::sync::atomic::Ordering::Relaxed);
+        }
+        match next {
             Some(Ok(WsMessage::Text(text))) => match serde_json::from_str::<Message>(&text) {
                 Ok(msg) => return Frame::Msg(Box::new(msg)),
                 Err(error) => {
@@ -184,12 +215,7 @@ fn emit_session_ended(service: &ServiceState, session_id: &str, session: &Sessio
 
 // --------------------------------------------------------------- agent side
 
-async fn agent_loop(
-    service: &Arc<ServiceState>,
-    robot_id: &str,
-    tx: Tx,
-    stream: &mut SplitStream<WebSocket>,
-) {
+async fn agent_loop(service: &Arc<ServiceState>, robot_id: &str, tx: Tx, stream: &mut Inbound) {
     let replaced = service.shared.register_agent(robot_id, tx.clone());
     if replaced.is_none() {
         service
@@ -313,12 +339,7 @@ async fn agent_loop(
 
 // ------------------------------------------------------------ operator side
 
-async fn operator_loop(
-    service: &Arc<ServiceState>,
-    hello: Message,
-    tx: Tx,
-    stream: &mut SplitStream<WebSocket>,
-) {
+async fn operator_loop(service: &Arc<ServiceState>, hello: Message, tx: Tx, stream: &mut Inbound) {
     let Body::Hello { ref auth, .. } = hello.body else {
         return;
     };

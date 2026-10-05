@@ -431,3 +431,36 @@ async fn a_quiet_socket_is_pinged_every_keepalive() {
     }
     assert!(pings >= 5, "{pings} pings in 1 s at a 100 ms keepalive");
 }
+
+/// docs/08#transport-layers: a socket that answers no ping for two intervals is gone, though it is
+/// still open, and its sessions get peer-gone. Without it the pings kept such a socket alive.
+#[tokio::test]
+async fn a_socket_that_answers_no_ping_is_ended_and_its_peer_told() {
+    let addr = start_server_with(std::time::Duration::from_millis(100)).await;
+    let mut agent = connect(addr).await;
+    agent_hello(&mut agent, "robot-024").await;
+
+    let mut operator = connect(addr).await;
+    send(
+        &mut operator,
+        json!({
+            "type": "hello", "role": "operator",
+            "auth": { "jwt": grant("robot-024") }, "proto_versions": [1],
+        }),
+    )
+    .await;
+    assert_eq!(recv(&mut operator).await["type"], "hello-ack");
+    assert_eq!(recv(&mut agent).await["type"], "session-request");
+
+    // The agent's socket stays open but is never read again, so it answers no ping. The operator
+    // keeps reading (and so answering its pings) and is told the agent is gone.
+    let started = std::time::Instant::now();
+    let gone = recv(&mut operator).await;
+    assert_eq!(gone["type"], "peer-gone", "got {gone}");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(2),
+        "took {:?}",
+        started.elapsed()
+    );
+    drop(agent);
+}

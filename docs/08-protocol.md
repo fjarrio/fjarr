@@ -34,7 +34,11 @@ WebSockets (Cloudflare after 100 s; the hosted demo's operators were
 disconnected every 2 min 5 s, 2026-10-05), so **the server sends a
 WebSocket ping on every socket every 30 s** (`Config::ws_keepalive`). Peers
 answer with the protocol's pong, which browsers and libsoup do by
-themselves; no envelope changes.
+themselves; no envelope changes. A socket from which nothing at all (pong
+or message) has arrived for two intervals is **gone**: the server ends it
+as if it had dropped, so its sessions get `peer-gone`. Without that, the
+pings would keep alive a socket whose peer vanished without closing it,
+which the proxy's idle limit used to end.
 
 ### RTP feedback and repair {#rtp-feedback}
 
