@@ -458,6 +458,7 @@ let app = axum::Router::new()
         robot_registry: my_registry,        // impl RobotRegistry
         event_sink: my_sink,                // impl EventSink (webhooks/bus)
         turn: TurnConfig::hmac(secret, ttl),
+        ws_keepalive: Duration::from_secs(30), // a WebSocket ping per socket (docs/08#transport-layers)
     }));
 ```
 

@@ -13,7 +13,12 @@ const DEV_TOKEN: &str = "test-dev-token";
 const GRANT_SECRET: &str = "test-grant-secret";
 
 async fn start_server() -> std::net::SocketAddr {
+    start_server_with(std::time::Duration::from_secs(30)).await
+}
+
+async fn start_server_with(ws_keepalive: std::time::Duration) -> std::net::SocketAddr {
     let config = fjarr_signaling::Config {
+        ws_keepalive,
         grant_verifier: std::sync::Arc::new(fjarr_signaling::hooks::Hs256GrantVerifier::new(
             GRANT_SECRET.as_bytes(),
         )),
@@ -408,4 +413,21 @@ async fn healthz_serves_ok() {
         .await
         .unwrap();
     assert_eq!(body, "ok");
+}
+
+/// docs/08#transport-layers: a quiet socket is pinged, so a proxy's idle limit never ends a
+/// session (Cloudflare ended the hosted demo's operators every 2 min 5 s, 2026-10-05).
+#[tokio::test]
+async fn a_quiet_socket_is_pinged_every_keepalive() {
+    let addr = start_server_with(std::time::Duration::from_millis(100)).await;
+    let mut agent = connect(addr).await;
+    agent_hello(&mut agent, "robot-024").await;
+    let mut pings = 0;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(1000);
+    while let Ok(Some(Ok(frame))) = tokio::time::timeout_at(deadline, agent.next()).await {
+        if matches!(frame, WsMsg::Ping(_)) {
+            pings += 1;
+        }
+    }
+    assert!(pings >= 5, "{pings} pings in 1 s at a 100 ms keepalive");
 }

@@ -28,6 +28,14 @@ description: Normative wire specification — signaling messages, DataChannel to
 | WebRTC media tracks | camera/desktop video (RTP) |
 | WebRTC DataChannels | everything else, per the topology below |
 
+Once a session is up, its signaling socket can go quiet for minutes: the
+heartbeat travels on `fjarr:control`, not on the socket. Proxies end idle
+WebSockets (Cloudflare after 100 s; the hosted demo's operators were
+disconnected every 2 min 5 s, 2026-10-05), so **the server sends a
+WebSocket ping on every socket every 30 s** (`Config::ws_keepalive`). Peers
+answer with the protocol's pong, which browsers and libsoup do by
+themselves; no envelope changes.
+
 ### RTP feedback and repair {#rtp-feedback}
 
 Every video m-line the agent offers carries, and the agent honours:

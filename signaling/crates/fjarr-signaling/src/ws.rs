@@ -43,12 +43,24 @@ async fn handle(service: Arc<ServiceState>, socket: WebSocket) {
     // Writer task: everything outbound flows through one queue so state
     // lock sections never await (docs/02 marshaling discipline, in Rust).
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    // A ping every ws_keepalive besides: a session's socket goes quiet once the peers talk
+    // directly, and proxies end idle WebSockets (docs/08#transport-layers).
+    let mut keepalive = tokio::time::interval(service.config.ws_keepalive);
+    keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    keepalive.reset(); // the first ping one interval from now, not at once
     let writer = tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            let Ok(text) = serde_json::to_string(&msg) else {
-                continue;
+        loop {
+            let frame = tokio::select! {
+                msg = rx.recv() => match msg {
+                    Some(msg) => match serde_json::to_string(&msg) {
+                        Ok(text) => WsMessage::Text(text.into()),
+                        Err(_) => continue,
+                    },
+                    None => break,
+                },
+                _ = keepalive.tick() => WsMessage::Ping(Default::default()),
             };
-            if sink.send(WsMessage::Text(text.into())).await.is_err() {
+            if sink.send(frame).await.is_err() {
                 break;
             }
         }

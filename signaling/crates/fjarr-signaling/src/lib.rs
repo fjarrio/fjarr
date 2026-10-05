@@ -36,6 +36,9 @@ pub struct Config {
     pub robot_registry: Arc<dyn RobotRegistry>,
     pub event_sink: Arc<dyn EventSink>,
     pub turn: Option<TurnConfig>,
+    /// A WebSocket ping on every socket this often, so a proxy's idle limit never ends a quiet
+    /// session (docs/08#transport-layers: Cloudflare closes idle WebSockets after 100 s).
+    pub ws_keepalive: std::time::Duration,
 }
 
 impl Default for Config {
@@ -45,6 +48,7 @@ impl Default for Config {
             robot_registry: Arc::new(hooks::RejectAll("no robot registry configured")),
             event_sink: Arc::new(hooks::LogSink),
             turn: None,
+            ws_keepalive: std::time::Duration::from_secs(30),
         }
     }
 }
