@@ -46,3 +46,30 @@ TEST(X11Layout, noConnectedOutputIsAnEmptyPlanNotAnError) {
     EXPECT_TRUE(p.off.empty());
     EXPECT_FALSE(p.changes);
 }
+
+// docs/26#ghost-screens: a ghost is never primary while a real monitor is connected. On the mini-PC
+// (2026-10-05) Xorg made the ghost primary beside three Dells, and the dashboard opened on it.
+TEST(X11Layout, aGhostThatIsPrimaryHandsItToTheLeftmostRealMonitor) {
+    Output ghost{"HDMI-A-0", true, true, 0, 0, 1920, 1080, 1920, 1080, /*ghost=*/true, /*primary=*/true};
+    Output dell3{"DisplayPort-3", true, true, 0, 0, 1920, 1080, 1920, 1080};
+    Output dell5{"DisplayPort-5", true, true, 1920, 0, 1920, 1080, 1920, 1080};
+    ghost.x = 3840;
+    const auto p = plan({ghost, dell5, dell3});
+    EXPECT_EQ(p.primary, "DisplayPort-3");
+    EXPECT_FALSE(p.changes) << "the layout is right already: making a monitor primary moves no CRTC";
+}
+
+TEST(X11Layout, aRealPrimaryStaysAndOnlyGhostsKeepTheirs) {
+    Output dell5{"DisplayPort-5", true, true, 1920, 0, 1920, 1080, 1920, 1080, false, /*primary=*/true};
+    Output dell3{"DisplayPort-3", true, true, 0, 0, 1920, 1080, 1920, 1080};
+    EXPECT_EQ(plan({dell3, dell5}).primary, "") << "the operator's choice of a real monitor stands";
+    Output g1{"HDMI-A-0", true, true, 0, 0, 1920, 1080, 1920, 1080, true, true};
+    EXPECT_EQ(plan({g1}).primary, "") << "only ghosts: one of them is primary, as it must be";
+}
+
+TEST(X11Layout, noPrimaryOrAnUnpluggedOneGetsTheLeftmostRealMonitor) {
+    Output dell3{"DisplayPort-3", true, true, 0, 0, 1920, 1080, 1920, 1080};
+    Output gone{"DisplayPort-7", false, true, 1920, 0, 1920, 1080, 1920, 1080, false, true};
+    EXPECT_EQ(plan({dell3}).primary, "DisplayPort-3");
+    EXPECT_EQ(plan({dell3, gone}).primary, "DisplayPort-3");
+}

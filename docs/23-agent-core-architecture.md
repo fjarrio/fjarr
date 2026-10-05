@@ -705,7 +705,9 @@ descriptor is watched there, and no Xlib call is made from another thread.
   output, through the shared `monitor_identity` (vendor, model, serial), so
   a monitor has the same wire id under X11 as under GNOME; a monitor with no
   output or EDID (Xvfb's `--setmonitor`, a dummy plug) falls back to its
-  name. The set is re-read on RandR screen, output and CRTC events **and**
+  name. A monitor whose output RandR reports disconnected is gone at once,
+  though it keeps its CRTC until the kiosk session switches it off: its
+  EDID is gone with it, and reported it was a nameless phantom. The set is re-read on RandR screen, output and CRTC events **and**
   every 500 ms, since a RandR 1.5 monitor change sent no event on Xvfb and
   the re-read must still meet the 2 s hot-plug budget
   ([docs/06](06-capabilities.md)), and reported only when it changed; the capability diffs it by wire id
@@ -764,7 +766,10 @@ hands), lays out the outputs, and re-lays them on every RandR output or
 screen change: outputs that are disconnected but still hold a CRTC are
 switched off, connected ones are switched on at their preferred mode, left
 to right in connector order, each position set explicitly (shrinking the
-root moves windows). ADR-0006 found a bare X kiosk lays out nothing and
+root moves windows). It keeps a ghost from being primary while a real
+monitor is connected ([docs/26](26-robot-install-and-drivers.md#ghost-screens)):
+with no primary, or a ghost or unplugged one, the leftmost real monitor
+becomes primary; a real monitor already primary stays so. ADR-0006 found a bare X kiosk lays out nothing and
 never reacts to a hot-plug; an MST chain's middle monitor that does not
 come back after a hot-plug is a driver limit this does not fix.
 

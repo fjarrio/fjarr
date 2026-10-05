@@ -380,6 +380,7 @@ class X11Backend final : public DesktopBackend {
         struct Geo { int x, y, w, h; bool primary; std::string label; };
         std::vector<Geo> geos;
         const Atom edid_atom = XInternAtom(dpy_, "EDID", True);
+        XRRScreenResources* res = n > 0 ? XRRGetScreenResourcesCurrent(dpy_, root_) : nullptr;
         for (int i = 0; i < n; i++) {
             char* name = XGetAtomName(dpy_, info[i].name);
             std::string label = name ? name : "";
@@ -387,10 +388,16 @@ class X11Backend final : public DesktopBackend {
             desktop::MonitorKey k;
             k.connector = label;
             if (info[i].noutput > 0) {
-                if (XRROutputInfo* oi = XRRGetOutputInfo(dpy_, XRRGetScreenResourcesCurrent(dpy_, root_), info[i].outputs[0])) {
+                bool unplugged = false;
+                if (XRROutputInfo* oi = res ? XRRGetOutputInfo(dpy_, res, info[i].outputs[0]) : nullptr) {
                     k.connector = oi->name;
+                    unplugged = oi->connection == RR_Disconnected;
                     XRRFreeOutputInfo(oi);
                 }
+                // Unplugged, the output keeps its CRTC (and so its RandR monitor) until the kiosk
+                // session switches it off, but its EDID is gone: reported, it was a nameless phantom
+                // monitor for about 3 s (mini-PC, 2026-10-05). It is gone the moment it is unplugged.
+                if (unplugged) continue;
                 if (edid_atom != None) {
                     Atom type;
                     int format;
@@ -406,6 +413,7 @@ class X11Backend final : public DesktopBackend {
             geos.push_back({info[i].x, info[i].y, info[i].width, info[i].height, info[i].primary != 0, label});
         }
         if (info) XRRFreeMonitors(info);
+        if (res) XRRFreeScreenResources(res);
         const auto ids = desktop::wire_ids(keys);
         std::vector<Monitor> next;
         for (std::size_t i = 0; i < ids.size(); i++) {

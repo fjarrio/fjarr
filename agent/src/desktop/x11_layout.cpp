@@ -46,6 +46,15 @@ Plan plan(const std::vector<Output>& outputs) {
     }
     p.screen_w = x;
     if (!p.off.empty()) p.changes = true;
+    const Output* primary = nullptr;
+    for (const Output* o : on)
+        if (o->primary) primary = o;
+    if (!primary || primary->ghost)
+        for (const Output* o : on)
+            if (!o->ghost) {
+                p.primary = o->name; // leftmost: `on` is in layout order
+                break;
+            }
     return p;
 }
 

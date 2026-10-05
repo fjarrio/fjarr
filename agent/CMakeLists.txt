@@ -123,7 +123,7 @@ set_target_properties(fjarr-desktop-x11 PROPERTIES
 
 # fjarr-x11-session (docs/23#desktop-x11): the kiosk session's grant of the agent's account and its
 # output layout, started by the session's autostart entry. In fjarr-desktop-x11.
-add_executable(fjarr-x11-session desktop-session-x11/main.cpp src/desktop/x11_layout.cpp)
+add_executable(fjarr-x11-session desktop-session-x11/main.cpp src/desktop/x11_layout.cpp src/desktop/edid.cpp src/desktop/monitor_identity.cpp)
 target_include_directories(fjarr-x11-session PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(fjarr-x11-session PRIVATE PkgConfig::X11LIBS)
 

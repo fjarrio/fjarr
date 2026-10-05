@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "desktop/edid.hpp"
 #include "desktop/x11_layout.hpp"
 
 namespace {
@@ -53,8 +54,25 @@ struct Snapshot {
     std::map<std::string, RRMode> preferred;
 };
 
+/// A ghost screen's EDID says vendor FJR (docs/26#ghost-screens), as the GNOME helper checks it.
+bool is_ghost(Display* dpy, RROutput output, const std::string& name) {
+    const Atom edid = XInternAtom(dpy, "EDID", True);
+    if (edid == None) return false;
+    Atom type;
+    int format;
+    unsigned long items = 0, after = 0;
+    unsigned char* data = nullptr;
+    bool ghost = false;
+    if (XRRGetOutputProperty(dpy, output, edid, 0, 128, False, False, AnyPropertyType, &type, &format, &items, &after, &data) == Success && data) {
+        if (format == 8) ghost = fjarr::desktop::edid_key(data, items, name).vendor == "FJR";
+        XFree(data);
+    }
+    return ghost;
+}
+
 Snapshot read(Display* dpy, Window root, XRRScreenResources* res) {
     Snapshot s;
+    const RROutput primary = XRRGetOutputPrimary(dpy, root);
     std::map<RRMode, std::pair<int, int>> sizes;
     for (int i = 0; i < res->nmode; i++) sizes[res->modes[i].id] = {static_cast<int>(res->modes[i].width), static_cast<int>(res->modes[i].height)};
     for (int i = 0; i < res->noutput; i++) {
@@ -64,6 +82,8 @@ Snapshot read(Display* dpy, Window root, XRRScreenResources* res) {
         o.name = oi->name;
         o.connected = oi->connection == RR_Connected;
         o.has_crtc = oi->crtc != None;
+        o.primary = res->outputs[i] == primary;
+        o.ghost = o.connected && is_ghost(dpy, res->outputs[i], o.name);
         if (oi->crtc != None)
             if (XRRCrtcInfo* ci = XRRGetCrtcInfo(dpy, res, oi->crtc)) {
                 o.x = ci->x, o.y = ci->y, o.width = static_cast<int>(ci->width), o.height = static_cast<int>(ci->height);
@@ -80,7 +100,6 @@ Snapshot read(Display* dpy, Window root, XRRScreenResources* res) {
         s.outputs.push_back(o);
         XRRFreeOutputInfo(oi);
     }
-    (void)root;
     return s;
 }
 
@@ -90,6 +109,12 @@ void layout(Display* dpy, Window root) {
     if (!res) return;
     const Snapshot s = read(dpy, root, res);
     const auto plan = fjarr::desktop::x11::plan(s.outputs);
+    if (!plan.primary.empty()) {
+        // docs/26#ghost-screens: never a ghost while a real monitor is connected. No CRTC moves for it.
+        XRRSetOutputPrimary(dpy, root, s.ids.at(plan.primary));
+        XSync(dpy, False);
+        say("primary: " + plan.primary);
+    }
     if (!plan.changes) {
         XRRFreeScreenResources(res);
         return;
