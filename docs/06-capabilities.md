@@ -347,13 +347,12 @@ on either side (GStreamer `opusenc`/`opusdec`, browser `getUserMedia`).
   its offer so the browser attaches its mic via `replaceTrack()` without
   renegotiation. Played through a configured output device on the robot with
   a **hard volume cap** in agent config.
-- **Push-to-talk by default; open mic when the grant allows it**
-  (`params.open_mic = true`, open question #17 closed 2026-10-11). The agent
-  enforces it, not only the browser: it plays the operator's audio only
-  between the client's `audio-uplink` start and stop, which are audited
-  session events (docs/10 — a live microphone is as sensitive as a
-  terminal), and without `open_mic` it ends an uplink that has run 60 s
-  without a stop, as a stuck push-to-talk would.
+- **Push-to-talk by default, open mic as the operator's choice**: one
+  grant, `talk`, allows the uplink either way (open question #17 closed
+  2026-10-11; a separate grant for an open mic added complication for no
+  value). The agent plays the operator's audio only between the client's
+  `audio-uplink` start and stop, which are audited session events (docs/10 —
+  a live microphone is as sensitive as a terminal).
 - **Desktop audio** (what the robot's desktop plays) is not a microphone: it
   travels on `fjarr.desktop` and follows that grant, so whoever sees the
   screen hears it.
@@ -363,9 +362,9 @@ on either side (GStreamer `opusenc`/`opusdec`, browser `getUserMedia`).
 **Accepted when:** an operator hears the robot-sim's synthetic audio source
 within budget (docs/16); PTT delivers speech to the sim's sink with
 echo cancellation on; releasing PTT stops the uplink within 200 ms; audit
-events recorded; a session without `listen` is offered no microphone, one
-without `talk` gets no uplink, and one without `open_mic` loses an uplink
-left on for 60 s; the robot desktop's sound is heard with its screen. Milestone: **M3.5** ([roadmap](17-roadmap.md#m35)).
+events recorded; a session without `listen` is offered no microphone and one
+without `talk` gets no uplink; the robot desktop's sound is heard with its
+screen. Milestone: **M3.5** ([roadmap](17-roadmap.md#m35)).
 
 ## `fjarr.logs` — live log tailing (planned)
 

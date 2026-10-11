@@ -50,9 +50,9 @@ Security-relevant rules:
 - The agent re-checks capability names against its local config — a grant
   can never enable a capability the integrator didn't compile/configure in.
 - Microphones are granted, never implied: `fjarr.audio` needs
-  `params.listen` to hear the robot's microphones, `params.talk` to speak
-  through its speaker, and `params.open_mic` for an uplink that stays on;
-  the agent enforces each ([docs/06](06-capabilities.md#fjarraudio--two-way-audio-planned)).
+  `params.listen` to hear the robot's microphones and `params.talk` to speak
+  through its speaker (push-to-talk or open mic alike); the agent enforces
+  each ([docs/06](06-capabilities.md#fjarraudio--two-way-audio-planned)).
 - `session.started`/`ended` webhooks + agent-side audit log give the fleet
   admin the "who/what/when" view; terminal sessions additionally log
   start/end with operator identity from day one.
