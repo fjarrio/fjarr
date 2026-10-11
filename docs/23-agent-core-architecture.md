@@ -961,6 +961,37 @@ profiling shows payloading above 1 % per viewer.
 **Audio** fans out the same way: one Opus encoder per source, the ring
 holds encoded frames, each session gets its own `appsrc ! rtpopuspay`.
 
+### Audio: the robot's microphones (M3.5 slice 3.5.1) {#audio}
+
+`fjarr.audio` offers each configured microphone as a `kind: "audio"` track,
+and the media plane carries it as it carries video, with less:
+
+- **Where it comes from.** A microphone is read through **ALSA**
+  (`alsasrc device=…`, a USB or built-in device; the agent's account is in
+  `audio`): the agent is a system service, and a desktop user's PipeWire or
+  Pulse server is not its to open, nor there at all on a headless robot.
+  The desktop's own sound is different, and comes through the session helper
+  ([slice 3.5.2](17-roadmap.md#m35)). CI uses a test tone (`audiotestsrc`),
+  a source type like the camera's `test`. Config:
+  `[capabilities."fjarr.audio".mics.<id>]` with `label` and `source`.
+- **The producer**: `source ! audioconvert ! audioresample ! opusenc` at
+  48 kHz mono, 20 ms frames, 32 kbps (docs/16: 32–64 per track), in-band FEC
+  on; its encoded frames go into the source's ring as video's do. It starts
+  on the first demand and stops after the tier grace, as video producers do.
+  No keyframes, no tiers and no rate control: an Opus track's bitrate is
+  fixed and small next to video's.
+- **Per session**: `appsrc ! rtpopuspay ! webrtcbin`, an audio m-section in
+  the offer (`sendonly` from the agent), enabled and disabled by the same
+  `select-tracks` as video.
+- **Granted per session** (docs/10). `session_attached` adds the microphone
+  tracks only when the session's grant carries `listen: true`, so a session
+  without it is offered none, and the core refuses a `select-tracks` naming
+  a track that session was not offered (docs/08). Because a producer starts
+  on demand and is shared, a session without `listen` costs nothing: no
+  pipeline, no encoder, no bytes. No core change is needed: every capability
+  already chooses each session's tracks in `session_attached`, from that
+  session's grant.
+
 ### Rate control and tier switching {#rate-control-and-tier-switching}
 
 docs/16 demands adaptive bitrate; the fan-out demands that one encoder
