@@ -549,8 +549,19 @@ when the grant says `talk`, audited) and **desktop audio** on `fjarr.desktop`
 already: `usePushToTalk`, `useAudioTrack`, `<AudioSink>`, the audited
 `audio-uplink` event and the answer direction taken from the offer. What is left
 is the agent: the capability, the Opus pipeline, the recvonly transceiver and
-the output. Open questions #3 and #17 are settled before it starts. **Gate:** the
-`fjarr.audio` acceptance criteria ([docs/06](06-capabilities.md)).
+the output. Open questions #3 and #17 were settled on 2026-10-11 (Erik):
+hearing the robot's microphones needs `params.listen` in the grant, talking
+`params.talk`, and an open mic `params.open_mic`; push-to-talk is the default.
+**Gate:** the `fjarr.audio` acceptance criteria ([docs/06](06-capabilities.md)).
+
+M3.5 goes before M4 (Erik, 2026-10-11). Slices, planned the same day:
+
+| Slice | What | Done when |
+|---|---|---|
+| **3.5.1 Hear the robot** | `fjarr.audio`'s downlink: a configured microphone (a PipeWire or Pulse source; a test tone in CI), Opus, an audio track offered on demand, only to a session granted `listen` | the dashboard plays the fixture's sound within the docs/16 budget, in CI; a session without `listen` is offered none |
+| **3.5.2 Desktop audio** | the robot desktop's sound as a track on `fjarr.desktop`: on GNOME the session helper hands the agent the audio output's monitor, as it hands the screen; on X11 the Pulse monitor source | a sound played on the fixture's desktop is heard in the dashboard |
+| **3.5.3 Talk to the robot** | the agent's pre-allocated `recvonly` audio transceiver, decoded and played on a configured output with a hard volume cap; `talk` and `open_mic` enforced by the agent | push-to-talk reaches the fixture's sink; releasing it stops the audio within 200 ms; audit events recorded; an uplink left on 60 s without `open_mic` is ended |
+| **3.5.4 On the mini-PC** (with Erik) | the webcam's microphone, a speaker for push-to-talk, and the robot desktop's sound (the YouTube test of 2026-10-04) | each heard or played on the real machine |
 
 ## Vendor cameras and the design-partner demo {#vendor-cameras}
 
