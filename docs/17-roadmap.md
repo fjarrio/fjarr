@@ -560,7 +560,7 @@ M3.5 goes before M4 (Erik, 2026-10-11). Slices, planned the same day:
 | Slice | What | Done when |
 |---|---|---|
 | **3.5.1 Hear the robot** | `fjarr.audio`'s downlink: a configured microphone (an ALSA device, [docs/23](23-agent-core-architecture.md#audio); a test tone in CI), Opus, an audio track offered on demand, only to a session granted `listen` | the dashboard plays the fixture's sound within the docs/16 budget, in CI; a session without `listen` is offered none |
-| **3.5.2 Desktop audio** | the robot desktop's sound as a track on `fjarr.desktop` ([docs/23](23-agent-core-architecture.md#desktop-audio)): on GNOME the session helper hands the agent a PipeWire connection narrowed to the default output, as it hands the screen, and the capture runs only while someone listens; on X11 the kiosk's session program hands it over the same way ([ADR-0034](adr/0034-x11-sound-through-the-session-program.md)) | a sound played on the fixture's desktop is heard in the dashboard; a change of default output keeps it playing; it stops when sharing stops |
+| **3.5.2 Desktop audio** | the robot desktop's sound as a track on `fjarr.desktop` ([docs/23](23-agent-core-architecture.md#desktop-audio)): on GNOME the session helper hands the agent a PipeWire connection narrowed to the default output, as it hands the screen, and the capture runs only while someone listens; on X11 the kiosk's session program hands it over the same way ([ADR-0034](adr/0034-x11-sound-through-the-session-program.md)) | a sound played on the fixture's desktop is heard in the dashboard; a change of default output keeps it playing (the stop with the sharing: 3.5.4) |
 | **3.5.3 Talk to the robot** | the agent's pre-allocated `recvonly` audio transceiver, decoded and played on a configured output with a hard volume cap; `talk` enforced by the agent | push-to-talk reaches the fixture's sink; releasing it stops the audio within 200 ms; audit events recorded; a session without `talk` gets no uplink |
 | **3.5.4 On the mini-PC** (with Erik) | the webcam's microphone, a speaker for push-to-talk, and the robot desktop's sound (the YouTube test of 2026-10-04) | each heard or played on the real machine; the desktop's sound stops with GNOME's stop-sharing and returns on resume |
 
@@ -575,6 +575,24 @@ Listen is ticked; its lab browser test requires the audio clock to advance and
 the track to stop streaming when unticked. Not measured: audio latency, as
 [docs/16](16-performance-budgets.md) has no audio budget yet; 3.5.3's
 push-to-talk sets the first one (200 ms to silence). **3.5.1 is done.**
+
+**3.5.2, the desktop's sound (2026-10-12).** On GNOME the session helper
+watches the default output and hands the agent a PipeWire connection
+narrowed to it (a4a70c7 spec, 33fd7d5); measured first in
+`spikes/desktop-audio`, the connection hears the speakers and never the
+microphone, and `fixture-helper-check` keeps proving it. On an X11 kiosk the
+session program does the same, as the kiosk's own account
+([ADR-0034](adr/0034-x11-sound-through-the-session-program.md), Erik's choice
+over a shared PulseAudio socket; f63855b), and `setup desktop --x11` records
+that account. The capture runs only while the producer's pipeline runs. opsim's
+`desktop-audio` passes on both fixtures: silence, then the tone about 300 ms
+after it starts, still heard across a change of output, no capture before
+enable and none after the grace. The dashboard's Sound toggle plays it in the
+lab browser. Building the scenario found two defects in the tests themselves (a
+release check that could pass on a capture not yet open, and a helper check
+that could close the descriptor it tested), both fixed. The stop with GNOME's
+stop-sharing cannot be staged in the fixture (no GNOME Shell) and moves to
+3.5.4 on the mini-PC. **3.5.2 is done.**
 
 ## Vendor cameras and the design-partner demo {#vendor-cameras}
 

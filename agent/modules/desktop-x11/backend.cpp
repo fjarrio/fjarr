@@ -33,9 +33,9 @@
 
 #include "clipboard.hpp"
 #include "desktop/cursor_image.hpp"
-#include "desktop/desktop_sound.hpp"
+#include "common/desktop_sound.hpp"
 #include "desktop/edid.hpp"
-#include "desktop/helper_listener.hpp"
+#include "common/helper_listener.hpp"
 #include "desktop/keymap.hpp"
 #include "desktop/module.hpp"
 #include "desktop/monitor_identity.hpp"

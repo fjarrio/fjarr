@@ -104,9 +104,9 @@ target_link_libraries(fjarr-desktop-session PRIVATE PkgConfig::GIO PkgConfig::LI
 # dependencies, not libfjarr's.
 pkg_check_modules(LIBEI REQUIRED IMPORTED_TARGET libei-1.0)
 pkg_check_modules(XKBCOMMON REQUIRED IMPORTED_TARGET xkbcommon)
-add_library(fjarr-desktop-mutter MODULE modules/desktop-mutter/backend.cpp modules/desktop-mutter/eis_input.cpp modules/desktop-mutter/stream_reader.cpp src/desktop/audio_reader.cpp src/desktop/desktop_sound.cpp
+add_library(fjarr-desktop-mutter MODULE modules/desktop-mutter/backend.cpp modules/desktop-mutter/eis_input.cpp modules/desktop-mutter/stream_reader.cpp modules/common/audio_reader.cpp modules/common/desktop_sound.cpp
   src/desktop/helper_protocol.cpp src/desktop/monitor_identity.cpp src/desktop/keymap.cpp src/desktop/clipboard_types.cpp src/desktop/cursor_image.cpp)
-target_include_directories(fjarr-desktop-mutter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(fjarr-desktop-mutter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/modules)
 target_link_libraries(fjarr-desktop-mutter PRIVATE PkgConfig::GST PkgConfig::GIO PkgConfig::LIBEI PkgConfig::XKBCOMMON PkgConfig::LIBPIPEWIRE nlohmann_json::nlohmann_json)
 set_target_properties(fjarr-desktop-mutter PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/desktop-modules" PREFIX "lib" CXX_VISIBILITY_PRESET hidden)
@@ -118,8 +118,8 @@ set_target_properties(fjarr-desktop-mutter PROPERTIES
 pkg_check_modules(X11LIBS REQUIRED IMPORTED_TARGET x11 xtst xfixes xrandr)
 add_library(fjarr-desktop-x11 MODULE modules/desktop-x11/backend.cpp modules/desktop-x11/clipboard.cpp src/desktop/edid.cpp
   src/desktop/monitor_identity.cpp src/desktop/keymap.cpp src/desktop/cursor_image.cpp src/desktop/clipboard_types.cpp
-  src/desktop/helper_protocol.cpp src/desktop/helper_listener.cpp src/desktop/desktop_sound.cpp src/desktop/audio_reader.cpp)
-target_include_directories(fjarr-desktop-x11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  src/desktop/helper_protocol.cpp modules/common/helper_listener.cpp modules/common/desktop_sound.cpp modules/common/audio_reader.cpp)
+target_include_directories(fjarr-desktop-x11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/modules)
 target_link_libraries(fjarr-desktop-x11 PRIVATE PkgConfig::GST PkgConfig::GIO PkgConfig::X11LIBS PkgConfig::XKBCOMMON PkgConfig::LIBPIPEWIRE nlohmann_json::nlohmann_json)
 set_target_properties(fjarr-desktop-x11 PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/desktop-modules" PREFIX "lib" CXX_VISIBILITY_PRESET hidden)

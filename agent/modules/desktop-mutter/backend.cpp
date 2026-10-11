@@ -25,7 +25,7 @@
 #include <gst/gst.h>
 
 #include "desktop/clipboard_types.hpp"
-#include "desktop/desktop_sound.hpp"
+#include "common/desktop_sound.hpp"
 #include "desktop/helper_protocol.hpp"
 #include "desktop/module.hpp"
 #include "desktop/monitor_identity.hpp"

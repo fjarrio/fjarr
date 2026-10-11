@@ -1,5 +1,5 @@
 // spec: docs/23-agent-core-architecture.md#desktop-audio
-#include "desktop/audio_reader.hpp"
+#include "common/audio_reader.hpp"
 
 #include <algorithm>
 #include <mutex>

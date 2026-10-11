@@ -1,5 +1,5 @@
 // spec: docs/23-agent-core-architecture.md#desktop-helper-protocol · ADR-0034
-#include "desktop/helper_listener.hpp"
+#include "common/helper_listener.hpp"
 
 #include <cerrno>
 #include <cstdio>

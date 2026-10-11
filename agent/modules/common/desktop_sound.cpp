@@ -1,7 +1,7 @@
 // spec: docs/23-agent-core-architecture.md#desktop-audio · #desktop-helper-protocol (Sound)
-#include "desktop/desktop_sound.hpp"
+#include "common/desktop_sound.hpp"
 
-#include "desktop/audio_reader.hpp"
+#include "common/audio_reader.hpp"
 
 namespace fjarr::desktop {
 

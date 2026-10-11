@@ -2,7 +2,8 @@
 // The desktop's sound, the module's side (docs/23#desktop-audio): the `desktop-audio` track's source,
 // and the helper protocol's sound messages (`speakers`, `start-audio`, `audio-started`,
 // `audio-failed`). Shared by module E (whose session helper serves them) and module A (whose kiosk
-// session program does, ADR-0034). Everything runs on the core loop.
+// session program does, ADR-0034). Everything runs on the core loop. In modules/common/: module code,
+// compiled into each module (which do not link libfjarr's RAII kit), never into libfjarr.
 // spec: docs/23-agent-core-architecture.md#desktop-audio · #desktop-helper-protocol (Sound)
 #include <functional>
 #include <memory>
