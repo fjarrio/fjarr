@@ -47,6 +47,8 @@ class Producer {
     /// Passthrough: the camera's own encoded stream, parsed and packetized, never transcoded —
     /// its bitrate is the camera's, so rate control can only move a viewer between tiers.
     bool passthrough() const { return passthrough_; }
+    /// An audio track (docs/23#audio): one tier, Opus, no keyframes and no rate control.
+    bool audio() const { return audio_; }
     void stop_tier(const std::string& tier);
     bool has_tier(const std::string& tier) const { return tiers_.count(tier) > 0; }
     std::size_t tier_count() const { return tiers_.size(); }
@@ -101,6 +103,8 @@ class Producer {
     SourceRef source_;
     bool stamp_;
     bool passthrough_ = false; // the source's outputs are elementary streams (docs/06)
+    bool audio_ = false;       // the output carries audio (docs/23#audio)
+    glib::GstElementPtr resample_; // audio: to the encoder's rate
     ProducerConfig config_;
     FrameHub& hub_;
     GMainContext* bus_context_;

@@ -26,7 +26,7 @@ fjarr-agent --help 2>&1 | grep -q '^fjarr-agent \[' || fail "fjarr-agent does no
 fjarr-connect --help >/dev/null 2>&1 || fail "fjarr-connect does not run (exit $?; 126 = the file capability blocks exec)"; ok "fjarr-connect runs without CAP_NET_ADMIN in the bounding set"
 
 getent passwd fjarr >/dev/null || fail "no fjarr user (sysusers)"
-for g in video render; do id -nG fjarr | tr ' ' '\n' | grep -qx "$g" || fail "fjarr is not in $g"; done
+for g in video render audio; do id -nG fjarr | tr ' ' '\n' | grep -qx "$g" || fail "fjarr is not in $g"; done
 ok "user fjarr in: $(id -nG fjarr)"
 
 unit=$(ls /usr/lib/systemd/system/fjarr-agent.service /lib/systemd/system/fjarr-agent.service 2>/dev/null | head -1)

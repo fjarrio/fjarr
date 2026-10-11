@@ -19,7 +19,8 @@ class GstDescriptionSource final : public VideoSource {
   public:
     /// `passthrough`: the description ends in an elementary stream (`… ! h264parse`), so the core
     /// packetizes it as it is and builds no encoder for the track (docs/06).
-    explicit GstDescriptionSource(std::string description, std::string identity = "", bool passthrough = false);
+    /// `kind`: what its `src` carries; Audio for a microphone or a test tone (docs/23#audio).
+    explicit GstDescriptionSource(std::string description, std::string identity = "", bool passthrough = false, TrackKind kind = TrackKind::Video);
     SourceInfo describe() const override;
     GstBin* create_bin() override;
     bool available() const override;
@@ -33,6 +34,7 @@ class GstDescriptionSource final : public VideoSource {
     std::string description_;
     std::string identity_;
     bool passthrough_ = false;
+    TrackKind kind_ = TrackKind::Video;
     std::function<void(bool)> cb_;
     mutable std::string last_error_;
 };

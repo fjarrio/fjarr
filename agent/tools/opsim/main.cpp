@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <unistd.h>
 #include <cstdlib>
+#include <cmath>
 #include <cstring>
 #include <deque>
 #include <fstream>
@@ -90,6 +91,8 @@ struct Options {
     /// What the minted grant claims. The tunnel is off unless explicitly claimed (docs/10), so a
     /// scenario that needs it says so rather than every session carrying it.
     std::vector<std::string> capabilities{"fjarr.test"};
+    /// Grant params per capability (`fjarr.audio`: `listen`, docs/10).
+    std::map<std::string, json> capability_params;
     bool verbose = false;
 };
 
@@ -225,7 +228,8 @@ std::string b64url(const std::string& s) { return b64url(reinterpret_cast<const 
 
 /// HS256 session grant with the claims fjarr-server's Hs256GrantVerifier reads
 /// (hooks.rs GrantClaims; web/e2e/src/grant.ts is the TS twin).
-std::string mint_grant(const std::string& secret, const std::string& robot_id, const std::vector<std::string>& capabilities) {
+std::string mint_grant(const std::string& secret, const std::string& robot_id, const std::vector<std::string>& capabilities,
+                       const std::map<std::string, json>& params = {}) {
     const std::string header = b64url(json{{"alg", "HS256"}, {"typ", "JWT"}}.dump());
     const auto now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     json claims{{"iss", "fjarr-opsim"},
@@ -235,7 +239,11 @@ std::string mint_grant(const std::string& secret, const std::string& robot_id, c
                 {"robot_id", robot_id},
                 {"operator", {{"id", "opsim@fjarr.test"}, {"label", "opsim"}}},
                 {"capabilities", json::array()}};
-    for (const auto& c : capabilities) claims["capabilities"].push_back(json{{"name", c}});
+    for (const auto& c : capabilities) {
+        json cap{{"name", c}};
+        if (auto p = params.find(c); p != params.end()) cap["params"] = p->second;
+        claims["capabilities"].push_back(cap);
+    }
     const std::string body = b64url(claims.dump());
     const std::string input = header + "." + body;
     GHmac* h = g_hmac_new(G_CHECKSUM_SHA256, reinterpret_cast<const guchar*>(secret.data()), secret.size());
@@ -329,6 +337,9 @@ struct TrackRx {
     int centre_luma = -1;
     // The latest frame's luma at 96×54, for a failure to show what was on screen (M3 gate review).
     std::vector<std::uint8_t> thumb;
+    // Audio (docs/23#audio): decoded S16 samples and their RMS over the latest buffer.
+    std::uint64_t audio_samples = 0;
+    double audio_rms = 0;
 };
 
 constexpr int THUMB_W = 96, THUMB_H = 54;
@@ -913,6 +924,10 @@ class Peer {
         std::string encoding;
         if (caps)
             if (const gchar* en = gst_structure_get_string(gst_caps_get_structure(caps.get(), 0), "encoding-name")) encoding = en;
+        if (encoding == "OPUS") {
+            add_audio_branch(pad, pname, mid, caps.get());
+            return;
+        }
         if (encoding != "H264") {
             logf("peer: track mid=%s has encoding %s, not decoded", mid.c_str(), encoding.c_str());
             return;
@@ -968,6 +983,73 @@ class Peer {
         // The elements are owned by the pipeline now; drop our census-counted refs.
         for (auto* p : {&q, &depay, &parse, &dec, &conv, &cf, &sink}) p->reset();
         tracks_.push_back(pname);
+    }
+
+    /// An Opus track (docs/23#audio): depayloaded, decoded to mono S16, and measured: buffers count as
+    /// frames, and the latest buffer's RMS says whether the robot's sound is there or silence.
+    void add_audio_branch(GstPad* pad, const std::string& pname, const std::string& mid, GstCaps* caps) {
+        int pt = 0;
+        if (caps) gst_structure_get_int(gst_caps_get_structure(caps, 0), "payload", &pt);
+        auto q = glib::make_element("queue", "rx-" + pname + "-queue");
+        auto depay = glib::make_element("rtpopusdepay", "rx-" + pname + "-depay");
+        auto dec = glib::make_element("opusdec", "rx-" + pname + "-dec");
+        auto conv = glib::make_element("audioconvert", "rx-" + pname + "-conv");
+        auto cf = glib::make_element("capsfilter", "rx-" + pname + "-caps");
+        auto sink = glib::make_element("fakesink", "rx-" + pname + "-sink");
+        if (!q || !depay || !dec || !conv || !cf || !sink) {
+            logf("peer: audio branch elements missing (rtpopusdepay/opusdec/audioconvert)");
+            return;
+        }
+        glib::GstCapsPtr s16(gst_caps_from_string("audio/x-raw,format=S16LE,channels=1"));
+        g_object_set(cf.get(), "caps", s16.get(), nullptr);
+        g_object_set(sink.get(), "sync", FALSE, "async", FALSE, nullptr);
+        GstElement* els[] = {q.get(), depay.get(), dec.get(), conv.get(), cf.get(), sink.get()};
+        for (GstElement* e : els) gst_bin_add(GST_BIN(pipeline_.get()), e);
+        gst_element_link_many(q.get(), depay.get(), dec.get(), conv.get(), cf.get(), sink.get(), nullptr);
+        TrackRx* rx = nullptr;
+        {
+            std::lock_guard<std::mutex> lk(sh_.mu);
+            rx = &sh_.tracks[pname];
+            rx->pad = pname;
+            rx->tr_mid = mid;
+            rx->pt = pt;
+        }
+        glib::GstPadPtr sink_pad = glib::adopt_pad(gst_element_get_static_pad(sink.get(), "sink"));
+        probes_.emplace_back(sink_pad.get(), GST_PAD_PROBE_TYPE_BUFFER, &Peer::on_audio, new std::pair<Peer*, TrackRx*>(this, rx),
+                             [](gpointer d) { delete static_cast<std::pair<Peer*, TrackRx*>*>(d); });
+        for (GstElement* e : els) gst_element_sync_state_with_parent(e);
+        glib::GstPadPtr qsink = glib::adopt_pad(gst_element_get_static_pad(q.get(), "sink"));
+        if (gst_pad_link(pad, qsink.get()) != GST_PAD_LINK_OK) logf("peer: linking %s failed", pname.c_str());
+        for (auto* p : {&q, &depay, &dec, &conv, &cf, &sink}) p->reset();
+        tracks_.push_back(pname);
+    }
+
+    static GstPadProbeReturn on_audio(GstPad*, GstPadProbeInfo* info, gpointer user) {
+        auto* p = static_cast<std::pair<Peer*, TrackRx*>*>(user);
+        GstBuffer* buf = GST_PAD_PROBE_INFO_BUFFER(info);
+        if (!buf) return GST_PAD_PROBE_OK;
+        GstMapInfo map;
+        double sum = 0;
+        std::size_t n = 0;
+        if (gst_buffer_map(buf, &map, GST_MAP_READ)) {
+            n = map.size / 2;
+            for (std::size_t i = 0; i < n; i++) {
+                std::int16_t v;
+                std::memcpy(&v, map.data + i * 2, 2);
+                sum += static_cast<double>(v) * v;
+            }
+            gst_buffer_unmap(buf, &map);
+        }
+        const std::int64_t now = g_get_monotonic_time();
+        std::lock_guard<std::mutex> lk(p->first->sh_.mu);
+        TrackRx* rx = p->second;
+        rx->frames++;
+        rx->audio_samples += n;
+        if (n) rx->audio_rms = std::sqrt(sum / static_cast<double>(n));
+        if (!rx->first_frame_us) rx->first_frame_us = now;
+        rx->last_frame_us = now;
+        p->first->sh_.notify();
+        return GST_PAD_PROBE_OK;
     }
 
     static GstPadProbeReturn on_encoded(GstPad*, GstPadProbeInfo* info, gpointer user) {
@@ -1184,7 +1266,7 @@ class Operator {
             throw Abort("websocket connect failed: " + locked<std::string>([this] { return sh_.ws_error; }));
         json hello = protocol::signaling_base("hello");
         hello["role"] = "operator";
-        hello["auth"] = {{"scheme", "grant"}, {"jwt", mint_grant(opts_.grant_secret, opts_.robot, opts_.capabilities)}};
+        hello["auth"] = {{"scheme", "grant"}, {"jwt", mint_grant(opts_.grant_secret, opts_.robot, opts_.capabilities, opts_.capability_params)}};
         hello["client_info"] = {{"client", "fjarr-opsim"}, {"scenario", opts_.scenario}};
         hello["proto_versions"] = {protocol::PROTO_VERSION};
         const std::size_t mark = sig_mark();
@@ -1659,6 +1741,18 @@ class Operator {
                 return first;
             }
             return first;
+        });
+    }
+    /// The latest offer's tracks as {track_id, kind} (docs/08 track manifest).
+    std::vector<std::pair<std::string, std::string>> offered_kinds() {
+        return locked<std::vector<std::pair<std::string, std::string>>>([this] {
+            std::vector<std::pair<std::string, std::string>> out;
+            for (auto it = sh_.sig_in.rbegin(); it != sh_.sig_in.rend(); ++it) {
+                if (it->value("type", "") != "offer") continue;
+                for (const auto& t : it->value("tracks", json::array())) out.emplace_back(t.value("track_id", std::string()), t.value("kind", std::string()));
+                break;
+            }
+            return out;
         });
     }
     /// Send an event on a data channel (input is events: docs/08#input-events-fjarrdesktop).
@@ -2322,6 +2416,39 @@ void scenario_rejected_track(Operator& op) {
 /// (make desktop-see): a desk-* track from the session helper and backend module E, frames that
 /// decode, and a still screen that keeps producing — mutter's stream is damage-driven, and the
 /// module's keepalive repeats the last frame (docs/23#desktop-helper-protocol).
+/// fjarr.audio (docs/23#audio, M3.5 3.5.1): granted `listen`, the robot's microphone is offered as an
+/// audio track, and once enabled its Opus decodes to the sound the robot hears (the demo robot's
+/// 440 Hz tone), not silence.
+void scenario_audio(Operator& op) {
+    Report& r = op.report();
+    connect_and_report(op);
+    std::string mic;
+    for (const auto& [id, kind] : op.offered_kinds())
+        if (kind == "audio") mic = id;
+    r.check("audio-track", !mic.empty(), mic.empty() ? "no audio track in the offer (is fjarr.audio configured?)" : "the offer carries " + mic + " (kind audio)");
+    if (mic.empty()) return;
+    const std::uint64_t f0 = op.frames(mic);
+    const bool flowing = op.select(mic, true, "active", 5000, "fjarr.audio") && op.wait_frames(mic, f0, 25, 8000); // 25 × 20 ms
+    const auto snap = op.track_snapshot(mic);
+    const double rms = snap ? snap->audio_rms : 0;
+    r.check("audio-heard", flowing && rms > 1000,
+            flowing ? std::to_string(snap ? snap->audio_samples : 0) + " samples decoded, RMS " + std::to_string(static_cast<int>(rms)) + " (silence is ~0)"
+                    : "no decoded audio within 8 s of enable");
+    // Off again: the track stops (the producer lingers for the tier grace, then stops).
+    const bool off = op.select(mic, false, "active", 5000, "fjarr.audio");
+    r.check("audio-off", off, off ? "disabled" : "select-tracks enabled=false was not accepted");
+}
+
+/// fjarr.audio without `listen` (docs/10): the session is offered no microphone at all.
+void scenario_audio_unlistened(Operator& op) {
+    Report& r = op.report();
+    connect_and_report(op);
+    std::string mic;
+    for (const auto& [id, kind] : op.offered_kinds())
+        if (kind == "audio") mic = id;
+    r.check("audio-not-offered", mic.empty(), mic.empty() ? "granted fjarr.audio without listen: no audio track offered" : "offered " + mic + " without listen");
+}
+
 void scenario_desktop_see(Operator& op) {
     Report& r = op.report();
     connect_and_report(op);
@@ -3577,6 +3704,7 @@ const std::map<std::string, ScenarioFn> kScenarios = {
     {"smoke", scenario_smoke},       {"toggle", scenario_toggle},   {"hotplug", scenario_hotplug},     {"silent-operator", scenario_silent_operator},
     {"no-answer", scenario_no_answer}, {"socket-drop", scenario_socket_drop}, {"ice-restart", scenario_ice_restart}, {"deadman", scenario_deadman},
     {"congested-viewer", scenario_congested_viewer}, {"rejected-track", scenario_rejected_track},
+    {"audio", scenario_audio}, {"audio-unlistened", scenario_audio_unlistened},
     {"desktop-see", scenario_desktop_see}, {"desktop-control", scenario_desktop_control}, {"desktop-hotplug", scenario_desktop_hotplug}, {"desktop-clipboard", scenario_desktop_clipboard}, {"desktop-cursor", scenario_desktop_cursor}, {"desktop-virtual", scenario_desktop_virtual},
     {"relay-only", scenario_relay_only}, {"tunnel", scenario_tunnel}, {"soak", scenario_soak},
     // netem-<profile>: one function, the profile is read from the scenario name (unknown profile → usage, exit 2).
@@ -3605,6 +3733,8 @@ int main(int argc, char** argv) {
     // only for the scenario that exercises it.
     if (opts.scenario == "tunnel") opts.capabilities.push_back("fjarr.net");
     if (opts.scenario.rfind("desktop-", 0) == 0) opts.capabilities.push_back("fjarr.desktop");
+    if (opts.scenario.rfind("audio", 0) == 0) opts.capabilities.push_back("fjarr.audio");
+    if (opts.scenario == "audio") opts.capability_params["fjarr.audio"] = json{{"listen", true}}; // audio-unlistened: granted without it
     gst_init(&argc, &argv);
 
     Shared sh;

@@ -196,6 +196,7 @@ int main(int argc, char** argv) {
     fjarr::Agent agent{config};
     if (config.capabilities["fjarr.test"].value("enabled", true)) agent.register_capability(std::make_unique<fjarr::TestCapability>());
     if (config.capabilities.count("fjarr.camera")) agent.register_capability(std::make_unique<fjarr::CameraCapability>()); // tracks from fjarr.toml (docs/06)
+    if (config.capabilities.count("fjarr.audio")) agent.register_capability(std::make_unique<fjarr::AudioCapability>()); // microphones from fjarr.toml (docs/23#audio)
     // Off unless the table exists AND names a user — there is deliberately no default account (docs/10#terminal).
     if (config.capabilities.count("fjarr.terminal")) agent.register_capability(std::make_unique<fjarr::TerminalCapability>());
     // Off unless the table exists AND sets enabled: granting `net` is granting network access to

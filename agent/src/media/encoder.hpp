@@ -36,5 +36,7 @@ GstElement* make_encode_bin(const EncoderChoice& enc, const TierProfile& tier, c
 /// Passthrough (docs/06): the same ghost pads and output caps, but only a parser — a camera's own
 /// H.264 is packetized as it is, so the track costs the robot no encoder at all.
 GstElement* make_passthrough_bin(const std::string& prefix);
+/// An audio track's one tier (docs/23#audio): Opus, 48 kHz mono, 20 ms frames, 32 kbps, in-band FEC.
+GstElement* make_opus_bin(const std::string& prefix);
 
 } // namespace fjarr::media

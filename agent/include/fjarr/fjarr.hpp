@@ -10,6 +10,7 @@
 #include <fjarr/net_capability.hpp>
 #include <fjarr/terminal_capability.hpp>
 #include <fjarr/test_capability.hpp>
+#include <fjarr/audio_capability.hpp>
 #include <fjarr/camera_capability.hpp>
 #include <fjarr/diagnostics.hpp>
 #include <fjarr/version.hpp>

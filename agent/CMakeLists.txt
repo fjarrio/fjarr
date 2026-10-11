@@ -62,6 +62,7 @@ add_library(fjarr STATIC
   src/introspect/server.cpp
   src/capabilities/test_capability.cpp
   src/capabilities/camera_capability.cpp
+  src/capabilities/audio_capability.cpp
   src/capabilities/introspect_capability.cpp
   src/capabilities/terminal_capability.cpp
   src/capabilities/net_capability.cpp

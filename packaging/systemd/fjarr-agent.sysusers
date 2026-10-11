@@ -2,3 +2,5 @@
 u fjarr - "Fjarr agent" /var/lib/fjarr
 m fjarr video
 m fjarr render
+# fjarr.audio's microphones through ALSA (docs/23#audio)
+m fjarr audio

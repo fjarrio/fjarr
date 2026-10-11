@@ -75,4 +75,17 @@ GstElement* make_passthrough_bin(const std::string& prefix) {
     return bin;
 }
 
+GstElement* make_opus_bin(const std::string& prefix) {
+    auto q = [](const std::string& v) { return "\"" + v + "\""; };
+    const std::string desc = "opusenc name=" + q(prefix + "/encoder") + " bitrate=32000 frame-size=20 inband-fec=true audio-type=voice";
+    GError* err = nullptr;
+    GstElement* bin = gst_parse_bin_from_description(desc.c_str(), TRUE, &err);
+    if (err) {
+        glib::GErrorPtr guard(err);
+        if (bin) [[maybe_unused]] auto released = glib::sink_element(bin);
+        throw FjarrError("media", std::string("opus branch failed: ") + err->message + " [" + desc + "]");
+    }
+    return bin;
+}
+
 } // namespace fjarr::media

@@ -178,6 +178,7 @@ SourceShape shape_of(const SourceRef& src) {
 bool MediaPlane::tier_possible(const std::string& track_id, const std::string& tier) const {
     auto it = tracks_.find(track_id);
     if (it == tracks_.end() || (tier != "active" && tier != "thumbnail")) return false;
+    if (it->second.reg.spec.kind == TrackKind::Audio) return tier == "active"; // one Opus stream (docs/23#audio)
     if (it->second.producer) return it->second.producer->tier_possible(tier);
     const SourceShape s = shape_of(it->second.reg.spec.source);
     return !s.elementary || tier == "active" || s.substream;
@@ -186,6 +187,7 @@ bool MediaPlane::tier_possible(const std::string& track_id, const std::string& t
 bool MediaPlane::adaptive(const std::string& track_id) const {
     auto it = tracks_.find(track_id);
     if (it == tracks_.end()) return true;
+    if (it->second.reg.spec.kind == TrackKind::Audio) return false; // a fixed Opus rate (docs/23#audio)
     const bool passthrough = it->second.producer ? it->second.producer->passthrough() : shape_of(it->second.reg.spec.source).elementary;
     return !passthrough || tier_possible(track_id, "thumbnail");
 }

@@ -264,6 +264,15 @@ ConsumerTrack* ConsumerPipeline::add_track(const TrackSpec& spec, const std::str
         // docs/08#rtp-feedback: the offer carries congestion feedback (transport-cc + the
         // transport-wide sequence extension), retransmission (nack; `do-nack` makes webrtcbin
         // add the rtx payload and rtprtxsend) and the keyframe requests (nack pli, ccm fir).
+        if (t->kind == TrackKind::Audio) {
+            // docs/23#audio: Opus (SDP's opus/48000/2, mono content), in-band FEC instead of
+            // retransmission, no keyframe feedback; transport-cc keeps the session's estimate whole.
+            glib::GstCapsPtr pref(gst_caps_new_simple("application/x-rtp", "media", G_TYPE_STRING, "audio", "encoding-name", G_TYPE_STRING, "OPUS",
+                                                      "payload", G_TYPE_INT, t->pt, "clock-rate", G_TYPE_INT, 48000, "encoding-params", G_TYPE_STRING, "2",
+                                                      "useinbandfec", G_TYPE_STRING, "1", "ssrc", G_TYPE_UINT, t->ssrc, "rtcp-fb-transport-cc", G_TYPE_BOOLEAN,
+                                                      TRUE, TWCC_EXTMAP_FIELD, G_TYPE_STRING, TWCC_EXTMAP_URI, nullptr));
+            g_object_set(trans, "codec-preferences", pref.get(), "direction", GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDONLY, nullptr);
+        } else {
         glib::GstCapsPtr pref(gst_caps_new_simple("application/x-rtp", "media", G_TYPE_STRING, "video", "encoding-name", G_TYPE_STRING,
                                                   "H264", "payload", G_TYPE_INT, t->pt, "clock-rate", G_TYPE_INT, 90000,
                                                   "packetization-mode", G_TYPE_STRING, "1", "ssrc", G_TYPE_UINT, t->ssrc,
@@ -271,6 +280,7 @@ ConsumerTrack* ConsumerPipeline::add_track(const TrackSpec& spec, const std::str
                                                   "rtcp-fb-nack-pli", G_TYPE_BOOLEAN, TRUE, "rtcp-fb-ccm-fir", G_TYPE_BOOLEAN, TRUE,
                                                   TWCC_EXTMAP_FIELD, G_TYPE_STRING, TWCC_EXTMAP_URI, nullptr));
         g_object_set(trans, "codec-preferences", pref.get(), "direction", GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDONLY, "do-nack", TRUE, nullptr);
+        }
     }
     if (!build_branch(*t)) return nullptr;
     ConsumerTrack* raw = t.get();
@@ -314,16 +324,20 @@ bool ConsumerPipeline::build_branch(ConsumerTrack& t) {
     t.appsrc = glib::make_element("appsrc", p + "/appsrc");
     g_object_set(t.appsrc.get(), "is-live", TRUE, "format", GST_FORMAT_TIME, "do-timestamp", FALSE, "block", FALSE,
                  "max-bytes", static_cast<guint64>(0), "min-latency", static_cast<gint64>(0), nullptr);
-    glib::GstCapsPtr caps(gst_caps_from_string("video/x-h264,stream-format=byte-stream,alignment=au"));
+    const bool audio = t.kind == TrackKind::Audio;
+    glib::GstCapsPtr caps(gst_caps_from_string(audio ? "audio/x-opus,rate=48000,channels=1,channel-mapping-family=0"
+                                                     : "video/x-h264,stream-format=byte-stream,alignment=au"));
     gst_app_src_set_caps(GST_APP_SRC(t.appsrc.get()), caps.get());
     t.queue = glib::make_element("queue", p + "/queue");
     g_object_set(t.queue.get(), "leaky", 2, "max-size-buffers", 0u, "max-size-bytes", 0u, "max-size-time",
                  static_cast<guint64>(gop_seconds_) * GST_SECOND /* one GOP (docs/23 constants) */, nullptr);
     t.valve = glib::make_element("valve", p + "/valve");
     g_object_set(t.valve.get(), "drop", TRUE, nullptr);
-    t.payloader = glib::make_element("rtph264pay", p + "/payloader");
-    g_object_set(t.payloader.get(), "pt", static_cast<guint>(t.pt), "ssrc", static_cast<guint>(t.ssrc), "config-interval", -1,
-                 "aggregate-mode", 1 /* zero-latency */, nullptr);
+    t.payloader = glib::make_element(audio ? "rtpopuspay" : "rtph264pay", p + "/payloader");
+    if (audio) g_object_set(t.payloader.get(), "pt", static_cast<guint>(t.pt), "ssrc", static_cast<guint>(t.ssrc), nullptr);
+    else
+        g_object_set(t.payloader.get(), "pt", static_cast<guint>(t.pt), "ssrc", static_cast<guint>(t.ssrc), "config-interval", -1,
+                     "aggregate-mode", 1 /* zero-latency */, nullptr);
     // On a reused transceiver the SSRC is the old one: continue its sequence (SRTP replay check).
     if (t.next_seqnum) g_object_set(t.payloader.get(), "seqnum-offset", static_cast<gint>(*t.next_seqnum), nullptr);
     gst_bin_add_many(GST_BIN(pipeline_.get()), t.appsrc.get(), t.queue.get(), t.valve.get(), t.payloader.get(), nullptr);
@@ -344,7 +358,8 @@ bool ConsumerPipeline::build_branch(ConsumerTrack& t) {
     // PLI/FIR from the peer arrive as upstream force-key-unit events; appsrc is the end of
     // this pipeline, so they must be relayed to the producer through the hub (docs/23 keyframe policy).
     // The probe is rebuilt with the branch, so the id it relays is always the current track's.
-    {
+    // Audio has no keyframes (docs/23#audio).
+    if (!audio) {
         struct KeyUnitContext {
             std::weak_ptr<bool> alive;
             std::function<void(std::function<void()>)> post;

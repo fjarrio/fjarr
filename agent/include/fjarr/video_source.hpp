@@ -50,12 +50,12 @@ class SourceFactory {
     virtual std::vector<std::string> types() const = 0;
 };
 
-/// The built-in types alone (gst, test, v4l2, rtsp) with no core loop behind them: for tools
+/// The built-in types alone (gst, test, v4l2, rtsp, alsa, tone) with no core loop behind them: for tools
 /// that validate config without running an agent (`fjarr-agent --check`, tests).
 std::unique_ptr<SourceFactory> builtin_source_factory();
 
 /// Registered source types: config `source = { type = "acme.stereo", … }`
-/// → factory(params validated against schema). Built-ins: gst, test, v4l2, rtsp.
+/// → factory(params validated against schema). Built-ins: gst, test, v4l2, rtsp; audio: alsa, tone (docs/23#audio).
 struct SourceType {
     std::string name; // reverse-DNS for third parties
     nlohmann::json params_schema;

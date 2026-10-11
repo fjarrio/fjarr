@@ -12,8 +12,8 @@ namespace fjarr::media {
 
 // ------------------------------------------------------ description
 
-GstDescriptionSource::GstDescriptionSource(std::string description, std::string identity, bool passthrough)
-    : description_(std::move(description)), identity_(identity.empty() ? description_ : std::move(identity)), passthrough_(passthrough) {}
+GstDescriptionSource::GstDescriptionSource(std::string description, std::string identity, bool passthrough, TrackKind kind)
+    : description_(std::move(description)), identity_(identity.empty() ? description_ : std::move(identity)), passthrough_(passthrough), kind_(kind) {}
 
 std::string GstDescriptionSource::first_factory(const std::string& description) {
     std::istringstream ss(description);
@@ -23,6 +23,7 @@ std::string GstDescriptionSource::first_factory(const std::string& description) 
 }
 
 SourceInfo GstDescriptionSource::describe() const {
+    if (kind_ == TrackKind::Audio) return SourceInfo{identity_, {SourceOutput{"src", TrackKind::Audio, "audio/x-raw"}}};
     return SourceInfo{identity_, {SourceOutput{"src", TrackKind::Video, passthrough_ ? "video/x-h264" : "video/x-raw"}}};
 }
 
@@ -364,6 +365,24 @@ SourceRegistry::SourceRegistry(GMainContext* ctx) : ctx_(ctx) {
                        vp.height = p.value("height", 0);
                        vp.fps = p.value("fps", 0);
                        return std::make_unique<V4l2Source>(vp, ctx);
+                   }});
+    // Audio (docs/23#audio): a microphone through ALSA (the agent is a system service: a desktop
+    // user's PipeWire is not its to open), and a test tone for CI.
+    add(SourceType{"alsa",
+                   nlohmann::json{{"type", "object"}, {"properties", {{"device", {{"type", "string"}, {"minLength", 1}}}}}, {"required", {"device"}}},
+                   [](const nlohmann::json& p) -> std::unique_ptr<VideoSource> {
+                       const std::string device = p.at("device").get<std::string>();
+                       gchar* quoted = g_shell_quote(device.c_str());
+                       auto src = std::make_unique<GstDescriptionSource>(std::string("alsasrc device=") + quoted, "alsa:" + device, false, TrackKind::Audio);
+                       g_free(quoted);
+                       return src;
+                   }});
+    add(SourceType{"tone",
+                   nlohmann::json{{"type", "object"}, {"properties", {{"freq", int_prop()}}}},
+                   [](const nlohmann::json& p) -> std::unique_ptr<VideoSource> {
+                       const int freq = p.value("freq", 440);
+                       return std::make_unique<GstDescriptionSource>("audiotestsrc is-live=true wave=sine freq=" + std::to_string(freq), "tone:" + std::to_string(freq), false,
+                                                                     TrackKind::Audio);
                    }});
     add(SourceType{"rtsp",
                    nlohmann::json{{"type", "object"},

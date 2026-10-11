@@ -308,7 +308,7 @@ public:
 };
 
 // Registered source types: config `source = { type = "acme.stereo", … }`
-// → factory(params validated against schema). Built-ins: gst, test, v4l2, rtsp.
+// → factory(params validated against schema). Built-ins: gst, test, v4l2, rtsp; audio: alsa, tone (docs/23#audio).
 struct SourceType {
   std::string name;                   // reverse-DNS for third parties
   nlohmann::json params_schema;
@@ -351,6 +351,7 @@ A JWT signed with a key registered in `fjarr-server` (per tenant):
   "capabilities": [
     {"name": "fjarr.camera"},
     {"name": "fjarr.desktop", "params": {"view_only": false}},
+    {"name": "fjarr.audio", "params": {"listen": true, "talk": false}},
     {"name": "fjarr.files", "params": {"read": true, "write": false}}
   ]
 }

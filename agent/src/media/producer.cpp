@@ -26,7 +26,10 @@ bool Producer::build() {
     // Passthrough (docs/06): an elementary output is parsed and packetized, never decoded — no
     // convert, no tee, no encoder; each tier is one of the source's own streams.
     for (const auto& o : source_.source->describe().outputs)
-        if (o.name == source_.output) passthrough_ = o.declared_caps.rfind("video/x-h26", 0) == 0;
+        if (o.name == source_.output) {
+            passthrough_ = o.declared_caps.rfind("video/x-h26", 0) == 0;
+            audio_ = o.kind == TrackKind::Audio;
+        }
     GstBin* bin = source_.source->create_bin();
     if (!bin) {
         error_ = "source bin failed to build";
@@ -66,13 +69,18 @@ bool Producer::build() {
         bus_watch_ = glib::SourceGuard::attached(pwatch);
         return true;
     }
-    convert_ = glib::make_element("videoconvert", name() + "/convert");
+    // Audio (docs/23#audio): converted and resampled to what Opus takes, 48 kHz mono.
+    convert_ = glib::make_element(audio_ ? "audioconvert" : "videoconvert", name() + "/convert");
     rawcaps_ = glib::make_element("capsfilter", name() + "/rawcaps");
-    glib::GstCapsPtr raw(gst_caps_from_string("video/x-raw,format=I420"));
+    glib::GstCapsPtr raw(gst_caps_from_string(audio_ ? "audio/x-raw,rate=48000,channels=1" : "video/x-raw,format=I420"));
     g_object_set(rawcaps_.get(), "caps", raw.get(), nullptr);
     tee_ = glib::make_element("tee", name() + "/tee");
     g_object_set(tee_.get(), "allow-not-linked", TRUE, nullptr);
     gst_bin_add_many(GST_BIN(pipeline_.get()), source_bin_.get(), convert_.get(), rawcaps_.get(), tee_.get(), nullptr);
+    if (audio_) {
+        resample_ = glib::make_element("audioresample", name() + "/resample");
+        gst_bin_add(GST_BIN(pipeline_.get()), resample_.get());
+    }
     const std::string pad_name = source_.output == "src" ? "src" : "src_" + source_.output;
     glib::GstPadPtr src_pad = glib::adopt_pad(gst_element_get_static_pad(source_bin_.get(), pad_name.c_str()));
     if (!src_pad) {
@@ -84,12 +92,14 @@ bool Producer::build() {
         error_ = "cannot link source to convert";
         return false;
     }
-    if (!gst_element_link_many(convert_.get(), rawcaps_.get(), tee_.get(), nullptr)) {
+    const bool linked = audio_ ? gst_element_link_many(convert_.get(), resample_.get(), rawcaps_.get(), tee_.get(), nullptr)
+                               : gst_element_link_many(convert_.get(), rawcaps_.get(), tee_.get(), nullptr);
+    if (!linked) {
         error_ = "cannot link convert ! rawcaps ! tee";
         return false;
     }
     source_pad_ = glib::adopt_pad(gst_element_get_static_pad(rawcaps_.get(), "src"));
-    if (stamp_) {
+    if (stamp_ && !audio_) {
         stamp_probe_ = glib::PadProbe(source_pad_.get(),
                                       static_cast<GstPadProbeType>(GST_PAD_PROBE_TYPE_BUFFER | GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM),
                                       StampPainter::probe, &painter_);
@@ -195,6 +205,7 @@ GstFlowReturn Producer::on_new_sample(GstAppSink* sink, gpointer user) {
 }
 
 bool Producer::tier_possible(const std::string& tier) const {
+    if (audio_) return tier == "active"; // one Opus stream for every listener (docs/23#audio)
     if (!passthrough_) return tier == "active" || tier == "thumbnail";
     if (tier == "active") return true;
     if (!source_.source) return false;
@@ -210,7 +221,7 @@ bool Producer::start_tier(const std::string& tier) {
         log::info("producer", "tier not available", {{"producer", name()}, {"tier", tier}, {"reason", "passthrough source without a substream (docs/06)"}});
         return true; // not an error: the track simply has one tier
     }
-    const TierProfile profile = profile_for(tier);
+    const TierProfile profile = audio_ ? TierProfile{} : profile_for(tier);
     const std::string prefix = name() + ":" + tier;
     auto t = std::make_unique<Tier>();
     t->key = HubKey{track_id_, tier};
@@ -220,8 +231,9 @@ bool Producer::start_tier(const std::string& tier) {
                  static_cast<guint64>(0), nullptr);
     try {
         // Passthrough: parse and hand over, byte-stream/au as every consumer's appsrc expects.
-        t->encode = passthrough_ ? glib::sink_element(make_passthrough_bin(prefix))
-                                 : glib::sink_element(make_encode_bin(config_.encoder, profile, prefix));
+        t->encode = audio_         ? glib::sink_element(make_opus_bin(prefix))
+                    : passthrough_ ? glib::sink_element(make_passthrough_bin(prefix))
+                                   : glib::sink_element(make_encode_bin(config_.encoder, profile, prefix));
     } catch (const std::exception& e) {
         error_ = e.what();
         return false;
@@ -264,7 +276,7 @@ bool Producer::start_tier(const std::string& tier) {
             return false;
         }
     }
-    t->kbps = passthrough_ ? 0 : profile.kbps; // passthrough: the camera sets the rate, not us
+    t->kbps = audio_ ? 32 : passthrough_ ? 0 : profile.kbps; // passthrough: the camera sets the rate, not us
     t->fps = profile.fps;
     t->max_fps = profile.fps;
     t->sharp = sharp_;
@@ -276,7 +288,9 @@ bool Producer::start_tier(const std::string& tier) {
         }
         playing_ = true;
     }
-    if (passthrough_)
+    if (audio_)
+        log::info("producer", "tier started", {{"producer", name()}, {"tier", tier}, {"audio", "opus 48 kHz mono 32 kbps"}});
+    else if (passthrough_)
         log::info("producer", "tier started", {{"producer", name()}, {"tier", tier}, {"passthrough", "yes"},
                                                {"stream", tier == "thumbnail" ? "the camera's substream" : "the camera's main stream"}});
     else
@@ -287,7 +301,7 @@ bool Producer::start_tier(const std::string& tier) {
 }
 
 bool Producer::set_bitrate(const std::string& tier, int kbps) {
-    if (passthrough_) return false; // the camera's bitrate is the camera's (docs/16)
+    if (passthrough_ || audio_) return false; // the camera's bitrate is the camera's (docs/16); Opus's is fixed (docs/23#audio)
     auto it = tiers_.find(tier);
     if (it == tiers_.end() || !it->second->encode || kbps <= 0) return false;
     Tier& t = *it->second;
@@ -321,7 +335,7 @@ int Producer::current_max_fps(const std::string& tier) const {
 
 // spec: docs/23-agent-core-architecture.md#rate-control-and-tier-switching (motion or sharpness)
 void Producer::apply_rate(const std::string& tier, Tier& t) {
-    if (passthrough_ || !t.encode) return;
+    if (passthrough_ || audio_ || !t.encode) return;
     int fps = t.fps;
     if (t.sharp && t.kbps > 0) {
         // Each frame keeps its bits: the rate follows the target down from the band's top, never below 5.
@@ -414,7 +428,7 @@ void Producer::stop_tier(const std::string& tier) {
 
 void Producer::request_keyframe(const std::string& tier) {
     auto it = tiers_.find(tier);
-    if (it == tiers_.end()) return;
+    if (it == tiers_.end() || audio_) return; // Opus has no keyframes: every frame starts a listener
     if (passthrough_) {
         // The camera decides its keyframes (docs/06): counted and dropped. A joining viewer still
         // starts at the keyframe the hub retained.
@@ -446,6 +460,7 @@ void Producer::stop() {
     source_pad_.reset();
     tee_.reset();
     rawcaps_.reset();
+    resample_.reset();
     convert_.reset();
     source_bin_.reset();
     pipeline_.reset();

@@ -43,7 +43,19 @@ TEST(SourceRegistry, resolvesEveryConfigFormAndValidatesParams) {
     EXPECT_EQ(reg.create({{"type", "acme.stereo"}, {"serial", "0123"}})->describe().identity, "acme:0123");
     EXPECT_THROW(reg.create({{"type", "acme.stereo"}}), FjarrError);
     // the public built-in factory
-    EXPECT_EQ(builtin_source_factory()->types().size(), 4u);
+    EXPECT_EQ(builtin_source_factory()->types().size(), 6u);
+}
+
+// docs/23#audio: a microphone through ALSA and a test tone are audio sources; ALSA needs a device.
+TEST(SourceRegistry, theAudioTypesDescribeAnAudioOutput) {
+    auto tone = builtin_source_factory()->create({{"type", "tone"}, {"freq", 440}});
+    ASSERT_EQ(tone->describe().outputs.size(), 1u);
+    EXPECT_EQ(tone->describe().outputs[0].kind, TrackKind::Audio);
+    EXPECT_EQ(tone->describe().identity, "tone:440");
+    auto alsa = builtin_source_factory()->create({{"type", "alsa"}, {"device", "hw:CARD=Webcam"}});
+    EXPECT_EQ(alsa->describe().outputs[0].kind, TrackKind::Audio);
+    EXPECT_EQ(alsa->describe().identity, "alsa:hw:CARD=Webcam");
+    EXPECT_THROW(builtin_source_factory()->create({{"type", "alsa"}}), FjarrError);
 }
 
 TEST(V4l2Source, buildsTheDescriptionAndReportsAMissingDeviceWithItsReason) {
