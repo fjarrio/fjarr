@@ -252,6 +252,62 @@ pub fn gdm_autologin_user(conf: &str) -> Option<String> {
     user.filter(|_| enabled)
 }
 
+/// LightDM's configuration, in the order it reads it: later files win (`lightdm --show-config`).
+pub const LIGHTDM_CONFS: &[&str] = &[
+    "/usr/share/lightdm/lightdm.conf.d",
+    "/etc/lightdm/lightdm.conf",
+    "/etc/lightdm/lightdm.conf.d",
+];
+
+/// The account LightDM logs in automatically, from one configuration file's seat sections
+/// (`[Seat:*]`, or the older `[SeatDefaults]`); None when this file does not set it.
+pub fn lightdm_autologin_user(conf: &str) -> Option<String> {
+    let mut seat = false;
+    let mut user = None;
+    for line in conf.lines().map(str::trim) {
+        if line.starts_with('[') {
+            seat = line == "[Seat:*]" || line == "[SeatDefaults]";
+            continue;
+        }
+        if !seat || line.starts_with('#') {
+            continue;
+        }
+        if let Some(("autologin-user", v)) = line.split_once('=').map(|(k, v)| (k.trim(), v.trim()))
+        {
+            user = Some(v.to_string());
+        }
+    }
+    user
+}
+
+/// The kiosk account LightDM logs in, across its configuration files (the last one that sets it wins;
+/// an empty value switches it off).
+fn lightdm_kiosk_account() -> Option<String> {
+    let mut files = Vec::new();
+    for path in LIGHTDM_CONFS.iter().map(Path::new) {
+        if path.is_dir() {
+            let mut confs: Vec<PathBuf> = std::fs::read_dir(path)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|x| x == "conf"))
+                .collect();
+            confs.sort();
+            files.extend(confs);
+        } else {
+            files.push(path.to_path_buf());
+        }
+    }
+    let mut user = None;
+    for f in files {
+        if let Some(u) = lightdm_autologin_user(&std::fs::read_to_string(&f).unwrap_or_default()) {
+            user = Some(u);
+        }
+    }
+    user.filter(|u| !u.is_empty())
+}
+
 /// Inside the agent's container: the host's desktop account and group, as numbers (the image has
 /// neither by name), into the agent's configuration (docs/26#a-desktop-in-a-container).
 fn setup_container_side(config_path: &Path, state: &Path, uid: u32, gid: u32) -> Result<i32> {
@@ -383,6 +439,37 @@ async fn setup_x11(config_path: &Path, state: &Path, args: DesktopArgs) -> Resul
     config::save(config_path, &doc)?;
     record.save(state)?;
     log::success(format!("The agent opens the X display {display}"))?;
+
+    // 3. The desktop's sound (ADR-0034): the kiosk account's session program hands it over the helper
+    //    socket, so the account joins the socket's group and the agent accepts only it.
+    match args.account.clone().or_else(lightdm_kiosk_account) {
+        Some(account) if system::passwd_entry(&account).is_some() => {
+            if !system::in_group(&account, GROUP) {
+                system::run("usermod", &["-aG", GROUP, &account])?;
+                record.add(
+                    FEATURE,
+                    Change::GroupMember {
+                        user: account.clone(),
+                        group: GROUP.into(),
+                    },
+                );
+                record.save(state)?;
+            }
+            set_value(&mut record, &mut doc, config_path, "helper.user", &account);
+            set_value(&mut record, &mut doc, config_path, "helper.group", GROUP);
+            config::save(config_path, &doc)?;
+            record.save(state)?;
+            log::success(format!(
+                "{account}'s session hands the agent the desktop's sound ({account} is in {GROUP} from its next login)"
+            ))?;
+        }
+        Some(account) => log::warning(format!(
+            "No account {account} on this machine: the desktop's sound stays off (--account <kiosk user>)"
+        ))?,
+        None => log::remark(
+            "The desktop's sound is off: no kiosk account was given (--account) and LightDM logs none in automatically",
+        )?,
+    }
     log::remark(
         "The display manager and the automatic login are left as they are: the kiosk session is yours. \
          LightDM with an automatic login is the easy X11 kiosk; under GDM the X session loses the screen \
@@ -705,6 +792,34 @@ mod tests {
             gdm_autologin_user("[daemon]\nAutomaticLoginEnable=false\nAutomaticLogin=desktop\n"),
             None,
             "switched off"
+        );
+    }
+
+    #[test]
+    fn the_kiosk_account_is_read_from_lightdms_seat_section() {
+        assert_eq!(
+            lightdm_autologin_user("[LightDM]\nautologin-user=nobody\n[Seat:*]\n#autologin-user=x\nautologin-user = kiosk\n").as_deref(),
+            Some("kiosk")
+        );
+        assert_eq!(
+            lightdm_autologin_user("[SeatDefaults]\nautologin-user=robot\n").as_deref(),
+            Some("robot"),
+            "the older section"
+        );
+        assert_eq!(
+            lightdm_autologin_user("[Seat:*]\n#autologin-user=kiosk\n"),
+            None,
+            "a comment is not a setting"
+        );
+        assert_eq!(
+            lightdm_autologin_user("[Seat:seat1]\nautologin-user=kiosk\n"),
+            None,
+            "another seat's"
+        );
+        assert_eq!(
+            lightdm_autologin_user("[Seat:*]\nautologin-user=\n").as_deref(),
+            Some(""),
+            "switched off: an empty value wins too"
         );
     }
 

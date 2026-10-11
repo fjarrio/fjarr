@@ -1,7 +1,8 @@
-// Backend A: an X11 kiosk's desktop from the agent's own process (ADR-0006, ADR-0028: no session
-// helper; the kiosk session grants the agent's account with `xhost +si:localuser:fjarr`). Capture is
-// `ximagesrc` cropped to each RandR monitor, input XTest, the cursor XFixes. Everything runs on the
-// core loop: the X connection's descriptor is watched there and no Xlib call leaves it.
+// Backend A: an X11 kiosk's desktop from the agent's own process (ADR-0006, ADR-0028: the kiosk
+// session grants the agent's account with `xhost +si:localuser:fjarr`). Capture is `ximagesrc`
+// cropped to each RandR monitor, input XTest, the cursor XFixes. The desktop's sound alone comes
+// through a helper, the kiosk's session program (ADR-0034). Everything runs on the core loop: the X
+// connection's descriptor is watched there and no Xlib call leaves it.
 // spec: docs/23-agent-core-architecture.md#desktop-x11 · docs/adr/0006-desktop-backend-selection.md
 #include <X11/XKBlib.h>
 #include <X11/Xatom.h>
@@ -32,7 +33,9 @@
 
 #include "clipboard.hpp"
 #include "desktop/cursor_image.hpp"
+#include "desktop/desktop_sound.hpp"
 #include "desktop/edid.hpp"
+#include "desktop/helper_listener.hpp"
 #include "desktop/keymap.hpp"
 #include "desktop/module.hpp"
 #include "desktop/monitor_identity.hpp"
@@ -120,6 +123,15 @@ class X11Backend final : public DesktopBackend {
         : host_(host), display_name_(config.value("display", std::string{})),
           clipboard_(host.context, [this](int level, const std::string& msg) { say(level, msg); }) {
         if (display_name_.empty()) display_name_ = std::getenv("DISPLAY") && *std::getenv("DISPLAY") ? std::getenv("DISPLAY") : ":0";
+        // The sound, when a kiosk account is configured: its session program connects as a helper
+        // for the sound only (ADR-0034, docs/23#desktop-audio).
+        const int uid = desktop::helper_uid(config);
+        if (uid < 0) return;
+        auto log = [this](int level, const std::string& msg) { say(level, msg); };
+        sound_ = std::make_unique<desktop::DesktopSound>(host.context, [this](const json& m) { if (listener_) listener_->send(m); }, log);
+        listener_ = std::make_unique<desktop::HelperListener>(
+            host.context, config.value("socket", std::string{"/run/fjarr/desktop.sock"}), uid, desktop::helper_gid(config), log,
+            [this](desktop::proto::Message& m) { sound_->handle(m); }, [this](bool welcomed) { sound_->helper(welcomed); });
     }
     ~X11Backend() override {
         if (tick_) g_source_destroy(tick_), g_source_unref(tick_);
@@ -132,6 +144,7 @@ class X11Backend final : public DesktopBackend {
     /// every 500 ms besides: a RandR 1.5 monitor change may send no event (docs/07, Xvfb), and the
     /// re-read is what keeps such a change inside docs/06's 2 s hot-plug budget.
     void start() {
+        if (listener_ && !listener_->listen()) listener_.reset(); // logged: no sound, the rest works
         connect();
         tick_ = g_timeout_source_new(500);
         g_source_set_callback(tick_, [](gpointer d) -> gboolean {
@@ -148,6 +161,7 @@ class X11Backend final : public DesktopBackend {
         Features f;
         f.local_cursor = true;
         f.clipboard = true;
+        f.desktop_audio = listener_ != nullptr; // through the kiosk's session program (ADR-0034)
         return f; // no virtual monitors (mutter's RecordVirtual)
     }
     std::vector<Monitor> monitors() override { return monitors_; }
@@ -187,7 +201,7 @@ class X11Backend final : public DesktopBackend {
     }
     MonitorId create_virtual_monitor(int, int) override { return INVALID_MONITOR; }
     void destroy_virtual_monitor(MonitorId) override {}
-    std::shared_ptr<VideoSource> start_audio_capture() override { return nullptr; }
+    std::shared_ptr<VideoSource> start_audio_capture() override { return listener_ ? sound_->source() : nullptr; }
     void stop_audio_capture() override {}
 
     void on_cursor_shape(std::function<void(const CursorShape&)> cb) override {
@@ -610,6 +624,8 @@ class X11Backend final : public DesktopBackend {
     std::function<void(bool)> session_cb_;
     std::function<void(const CursorShape&)> shape_cb_;
     std::function<void(MonitorId, double, double)> position_cb_;
+    std::unique_ptr<desktop::DesktopSound> sound_;       // the desktop's sound (docs/23#desktop-audio)
+    std::unique_ptr<desktop::HelperListener> listener_; // after sound_: goes first, quietly
     desktop::x11::X11Clipboard clipboard_; // last: its log goes through say()
 };
 

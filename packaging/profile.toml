@@ -29,3 +29,4 @@ ghosts = "/etc/default/grub.d/fjarr-ghosts.cfg"   # ghost screens (docs/26#ghost
 [desktop-x11]                                     # an X11 kiosk, when `setup desktop` configured backend A (docs/23#desktop-x11)
 module    = "/usr/lib/fjarr/desktop/libfjarr-desktop-x11.so"      # fjarr-desktop-x11
 autostart = "/etc/xdg/autostart/fjarr-x11-session.desktop"       # the kiosk session's grant and layout, linked by setup
+group     = "fjarr-desktop"                                       # the helper socket's: the agent and the kiosk account, for the sound (ADR-0034)

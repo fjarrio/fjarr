@@ -228,7 +228,9 @@ void check_desktop(const toml::table& d, const std::string& account, const std::
 
 std::vector<Row> check(const std::string& path, bool net_wanted, const System& sys) { return check(path, net_wanted, std::nullopt, sys); }
 
-std::vector<Row> check_desktop_x11(const std::string& path, const System& sys) {
+std::vector<Row> check_desktop_x11(const std::string& path, const System& sys) { return check_desktop_x11(path, std::nullopt, sys); }
+
+std::vector<Row> check_desktop_x11(const std::string& path, const std::optional<std::string>& kiosk_account, const System& sys) {
     // spec: docs/26#fjarr-agent-setup-desktop — what `setup desktop` does on an X11 kiosk, verified.
     std::vector<Row> rows;
     toml::table tbl;
@@ -247,6 +249,19 @@ std::vector<Row> check_desktop_x11(const std::string& path, const System& sys) {
         const bool there = sys.stat(*autostart).has_value();
         rows.push_back({"desktop", "kiosk session entry", there, there ? *autostart : "not linked: the kiosk session does not grant the agent",
                         there ? "" : "sudo fjarr-agent setup desktop --x11"});
+    }
+    // The sound (ADR-0034): the kiosk account's session program reaches the agent's socket through its group.
+    if (kiosk_account) {
+        const std::string group = (*d)["group"].value_or(std::string("fjarr-desktop"));
+        const std::string redo = "sudo fjarr-agent setup desktop --x11 --account " + *kiosk_account;
+        const auto uid = sys.uid_of(*kiosk_account);
+        rows.push_back({"desktop", "account " + *kiosk_account, uid.has_value(), uid ? "uid " + std::to_string(*uid) : "no such user", uid ? "" : redo});
+        for (const auto& who : {*kiosk_account, tbl["core"]["account"].value_or(std::string("fjarr"))}) {
+            if (!sys.uid_of(who)) continue;
+            const auto have = sys.groups_of(who);
+            const bool in = std::find(have.begin(), have.end(), group) != have.end();
+            rows.push_back({"desktop", who + " in " + group, in, in ? "member" : "not a member", in ? "" : "sudo usermod -aG " + group + " " + who});
+        }
     }
     return rows;
 }

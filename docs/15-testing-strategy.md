@@ -268,7 +268,12 @@ leaves, wiping the grant) and the robot in the fixture's IPC namespace
 `desktop-see`, `-control`, `-hotplug` and `-cursor` run against it
 (`make x11-e2e`) on every push; the browser side is the same for every
 backend, so the browser tests stay on the mutter fixture. The clipboard
-joins in slice 3.7c. The fixture also stages what the mutter fixture
+joins in slice 3.7c. The sound (M3.5 3.5.2, ADR-0034): a `kiosk` account
+(uid 10004, in a `fjarr-desktop` group of gid 10003) runs its own session
+bus, PipeWire and WirePlumber with the fixture's speakers, and
+`fjarr-x11-session`, which hands the agent the sound over a socket shared
+with the robot; the service plays, switches outputs and counts captures as
+the mutter fixture's does, and `desktop-audio` runs in `make x11-e2e`. The fixture also stages what the mutter fixture
 cannot: a monitor that moves (`/move`) or changes mode in place (`/mode`,
 where a click must land on the new geometry's pixel), an owner that never
 answers and text over the limit on the clipboard; and its test window

@@ -164,11 +164,14 @@ int main(int argc, char** argv) {
                 if (d.is_object() && d.contains("helper") && d["helper"].is_object() && d["helper"].contains("user") && d["helper"]["user"].is_string())
                     desktop_account = d["helper"]["user"].get<std::string>();
             }
-            auto rows = fjarr::profile::check(path, net_wanted, desktop_account, fjarr::profile::System::real());
-            if (config.capabilities.count("fjarr.desktop") && config.capabilities["fjarr.desktop"].is_object() &&
-                config.capabilities["fjarr.desktop"].value("backend", std::string{}) == "x11") {
-                const auto x11 = fjarr::profile::check_desktop_x11(path, fjarr::profile::System::real());
-                rows.insert(rows.end(), x11.begin(), x11.end());
+            // On an X11 kiosk that account is the kiosk's, for the sound (ADR-0034): the display manager and its
+            // automatic login are the robot maker's, so GNOME's rows do not apply.
+            const bool x11 = config.capabilities.count("fjarr.desktop") && config.capabilities["fjarr.desktop"].is_object() &&
+                             config.capabilities["fjarr.desktop"].value("backend", std::string{}) == "x11";
+            auto rows = fjarr::profile::check(path, net_wanted, x11 ? std::nullopt : desktop_account, fjarr::profile::System::real());
+            if (x11) {
+                const auto kiosk = fjarr::profile::check_desktop_x11(path, desktop_account, fjarr::profile::System::real());
+                rows.insert(rows.end(), kiosk.begin(), kiosk.end());
             }
             for (const auto& r : rows)
                 std::printf("profile %-7s %-28s %-8s %s%s\n", r.feature.c_str(), r.item.c_str(), r.ok ? "ok" : "MISSING", r.detail.c_str(),

@@ -41,7 +41,19 @@ if [ "${SIM_FIXTURE:-0}" = 1 ]; then
   # kiosk session's autostart entry runs it (docs/23#desktop-x11); built in /workspace (make agent-build).
   SESSION=/workspace/build/release/agent/fjarr-x11-session
   [ -x "$SESSION" ] || { echo "robot-sim: $SESSION is not built: make agent-build"; exit 1; }
-  "$SESSION" --account fjarr >/run/fixture/session.log 2>&1 &
+  # The kiosk's session runs as its own account (M3.5 3.5.2, ADR-0034): a session bus, PipeWire and
+  # WirePlumber with the fixture's speakers, and the session program, which hands the agent the sound
+  # over /run/fjarr/desktop.sock (a tmpfs shared with x11-robot, whose agent makes the socket with
+  # group fjarr-desktop). Xvfb and the test window stay root's.
+  install -d -o kiosk -g kiosk -m 0700 /run/kiosk
+  chmod 0644 /run/fixture/xauth
+  KIOSK=(setpriv --reuid=kiosk --regid=kiosk --init-groups env XDG_RUNTIME_DIR=/run/kiosk HOME=/home/kiosk
+         DBUS_SESSION_BUS_ADDRESS=unix:path=/run/kiosk/bus DISPLAY="${DISPLAY}" XAUTHORITY=/run/fixture/xauth)
+  "${KIOSK[@]}" dbus-daemon --session --address=unix:path=/run/kiosk/bus --nofork --nopidfile >/run/fixture/dbus.log 2>&1 &
+  for _ in $(seq 50); do [ -S /run/kiosk/bus ] && break; sleep 0.1; done
+  "${KIOSK[@]}" pipewire >/run/fixture/pipewire.log 2>&1 &
+  "${KIOSK[@]}" wireplumber >/run/fixture/wireplumber.log 2>&1 &
+  "${KIOSK[@]}" FJARR_DESKTOP_SOCK=/run/fjarr/desktop.sock "$SESSION" --account fjarr >/run/fixture/session.log 2>&1 &
   for _ in $(seq 1 50); do grep -q "granted" /run/fixture/session.log 2>/dev/null && break; sleep 0.1; done
   cat /run/fixture/session.log
   openbox &

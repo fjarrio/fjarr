@@ -1,7 +1,8 @@
 #pragma once
 // The audio reader (docs/23#desktop-audio): what the robot's speakers play, read from the default
-// output's monitor through the PipeWire connection the helper narrowed to that sink, on a PipeWire
-// thread of its own like the stream reader's, into the desktop sound track's appsrc.
+// output's monitor through the PipeWire connection a helper narrowed to that sink (the session helper
+// on GNOME, fjarr-x11-session on X11), on a PipeWire thread of its own like module E's stream
+// reader's, into the desktop sound track's appsrc. Shared by modules E and A.
 // spec: docs/23-agent-core-architecture.md#desktop-audio
 #include <functional>
 #include <memory>
@@ -10,7 +11,7 @@
 #include <glib.h>
 #include <gst/gst.h>
 
-namespace fjarr::desktop::mutter {
+namespace fjarr::desktop {
 
 class AudioReader {
   public:
@@ -36,4 +37,4 @@ class AudioReader {
     std::unique_ptr<Impl> impl_;
 };
 
-} // namespace fjarr::desktop::mutter
+} // namespace fjarr::desktop

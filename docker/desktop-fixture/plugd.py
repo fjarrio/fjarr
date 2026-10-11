@@ -134,6 +134,11 @@ def play(freq, seconds):
     # tone (GStreamer's pipewiresink never started the graph here: spikes/desktop-audio).
     import math, struct, wave
     global player
+    if seconds == 0:  # stop: a scenario starts from silence, whatever an earlier run left playing
+        if player and player.poll() is None:
+            player.kill()
+            player.wait()
+        return "200 quiet"
     if not 50 <= freq <= 8000 or not 0 < seconds <= 60:
         return "400 freq 50-8000, seconds up to 60"
     path = f"/run/desktop/tone-{freq}-{seconds}.wav"
@@ -226,7 +231,7 @@ def on_request(server, _cond):
         elif path == "/paste-image":
             result = paste_image(urllib.parse.parse_qs(query).get("size", ["0"])[0] == "1")
         else:
-            result = "404 /plug, /unplug, /copy?text=, /paste, /copy-image, /paste-image, /play?freq=&seconds=, /speakers?use=, /listening, /session-end or /session-start"
+            result = "404 /plug, /unplug, /copy?text=, /paste, /copy-image, /paste-image, /play?freq=&seconds= (0 stops), /speakers?use=, /listening, /session-end or /session-start"
         code, body = result.split(" ", 1)
         data = body.encode()
         conn.sendall(f"HTTP/1.0 {code} X\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {len(data)}\r\n\r\n".encode() + data)

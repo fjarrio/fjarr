@@ -281,3 +281,26 @@ TEST(SystemProfile, anX11KioskNeedsItsModuleAndTheSessionEntryEachWithItsFix) {
     EXPECT_TRUE(fjarr::profile::all_ok(rows));
     EXPECT_EQ(rows.size(), 2u);
 }
+
+TEST(SystemProfile, anX11KiosksAccountForTheSoundIsInTheHelpersGroupWithTheAgent) {
+    // ADR-0034: with a kiosk account, it and the agent must be in fjarr-desktop; no GDM rows.
+    Fake f;
+    f.files["/usr/lib/fjarr/desktop/libfjarr-desktop-x11.so"] = {0, 0644, false};
+    f.files["/etc/xdg/autostart/fjarr-x11-session.desktop"] = {0, 0644, false};
+    f.users["kiosk"] = 1001;
+    f.groups["kiosk"] = {"kiosk"};
+    f.groups["fjarr"] = {"fjarr", "video", "render", "fjarr-desktop"};
+    auto rows = fjarr::profile::check_desktop_x11(profile_file(), std::optional<std::string>("kiosk"), f.system());
+    ASSERT_NE(find(rows, "kiosk in fjarr-desktop"), nullptr);
+    EXPECT_FALSE(find(rows, "kiosk in fjarr-desktop")->ok);
+    EXPECT_EQ(find(rows, "kiosk in fjarr-desktop")->fix, "sudo usermod -aG fjarr-desktop kiosk");
+    EXPECT_TRUE(find(rows, "fjarr in fjarr-desktop")->ok);
+    EXPECT_EQ(find(rows, "automatic login"), nullptr);
+    f.groups["kiosk"].push_back("fjarr-desktop");
+    rows = fjarr::profile::check_desktop_x11(profile_file(), std::optional<std::string>("kiosk"), f.system());
+    EXPECT_TRUE(fjarr::profile::all_ok(rows));
+    f.users.erase("kiosk");
+    rows = fjarr::profile::check_desktop_x11(profile_file(), std::optional<std::string>("kiosk"), f.system());
+    EXPECT_FALSE(find(rows, "account kiosk")->ok);
+    EXPECT_EQ(find(rows, "account kiosk")->fix, "sudo fjarr-agent setup desktop --x11 --account kiosk");
+}

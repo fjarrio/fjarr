@@ -117,6 +117,7 @@ services:
     volumes:
       - x11-fixture-sock:/tmp/.X11-unix
       - .:/workspace:ro # fjarr-x11-session, as built (make agent-build)
+      - x11-desktop-socket:/run/fjarr # the session program hands the sound to x11-robot (ADR-0034)
 
   # Backend A's robot: the agent as uid 10003, which the fixture's `xhost +si:localuser:fjarr` names.
   x11-robot:
@@ -130,6 +131,7 @@ services:
     volumes:
       - .:/workspace:cached
       - x11-fixture-sock:/tmp/.X11-unix
+      - x11-desktop-socket:/run/fjarr
     environment:
       HOME: /tmp
       FJARR_SERVER_URL: ws://fjarr-server:8080/ws
@@ -466,6 +468,9 @@ volumes:
   # The session helper's socket between desktop-fixture and desktop-robot: a tmpfs both mount, open to
   # the agent's user for creating it (the socket itself is 0660; M3 3.1).
   desktop-socket:
+    driver_opts: {type: tmpfs, device: tmpfs, o: "mode=1777"}
+  # The same between x11-fixture's kiosk session program and x11-robot, for the sound (ADR-0034).
+  x11-desktop-socket:
     driver_opts: {type: tmpfs, device: tmpfs, o: "mode=1777"}
   lab-key: # the lab's throwaway ssh key, robot-services -> dev (docs/27)
   x11sock:

@@ -166,10 +166,21 @@ fjarr-agent setup desktop --yes --x11 --display :7 >/tmp/x11.log 2>&1 || { cat /
 grep -q '^backend = "x11"' /etc/fjarr/fjarr.toml && grep -q '^display = ":7"' /etc/fjarr/fjarr.toml || { cat /etc/fjarr/fjarr.toml; fail "the agent's config does not name backend A on :7"; }
 cmp -s /etc/gdm3/custom.conf /tmp/custom.conf.orig || fail "setup desktop --x11 touched the display manager"
 grep -q '^check: OK' /tmp/x11.log || { cat /tmp/x11.log; fail "setup desktop --x11 did not end with a passing --check"; }
+grep -q 'sound is off' /tmp/x11.log || { cat /tmp/x11.log; fail "setup desktop --x11 with no kiosk account did not say the sound is off"; }
 fjarr-agent setup --undo desktop >/tmp/undo-x11.log 2>&1 || { cat /tmp/undo-x11.log; fail "setup --undo desktop (x11) failed"; }
 [ ! -e /etc/xdg/autostart/fjarr-x11-session.desktop ] || fail "--undo desktop left the autostart entry"
 ! grep -q 'fjarr.desktop' /etc/fjarr/fjarr.toml || { cat /etc/fjarr/fjarr.toml; fail "--undo desktop left the x11 keys in the config"; }
 ok "setup desktop --x11: autostart entry linked, backend A on the display, display manager untouched, --check passed; --undo desktop removed both"
+# The kiosk account, for the desktop's sound (ADR-0034): into fjarr-desktop and named as the helper.
+useradd --create-home kiosk
+fjarr-agent setup desktop --yes --x11 --account kiosk >/tmp/x11k.log 2>&1 || { cat /tmp/x11k.log; fail "setup desktop --x11 --account failed"; }
+id -nG kiosk | grep -qw fjarr-desktop || fail "setup desktop --x11 --account did not put kiosk in fjarr-desktop"
+grep -q '^user = "kiosk"' /etc/fjarr/fjarr.toml && grep -q '^group = "fjarr-desktop"' /etc/fjarr/fjarr.toml || { cat /etc/fjarr/fjarr.toml; fail "the agent's config does not name the kiosk account as the helper"; }
+fjarr-agent setup --undo desktop >/tmp/undo-x11k.log 2>&1 || { cat /tmp/undo-x11k.log; fail "setup --undo desktop (x11, account) failed"; }
+! id -nG kiosk | grep -qw fjarr-desktop || fail "--undo desktop left kiosk in fjarr-desktop"
+! grep -q 'fjarr.desktop' /etc/fjarr/fjarr.toml || { cat /etc/fjarr/fjarr.toml; fail "--undo desktop left the helper keys in the config"; }
+userdel -r kiosk 2>/dev/null || true
+ok "setup desktop --x11 --account: the kiosk joins fjarr-desktop and is the helper; --undo desktop takes both back"
 fjarr-agent setup --undo >/tmp/undo.log 2>&1 || { cat /tmp/undo.log; fail "setup --undo failed"; }
 [ ! -e /etc/fjarr/fjarr.toml ] || fail "--undo left the config in place"
 grep -q '"changes": \[\]' /var/lib/fjarr/setup-changes.json || fail "--undo left changes recorded: $(cat /var/lib/fjarr/setup-changes.json)"

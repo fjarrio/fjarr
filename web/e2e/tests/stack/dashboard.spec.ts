@@ -414,6 +414,7 @@ test("the Desktop panel's Sound plays what the robot's desktop plays, and the ro
   const get = (path: string) => fetch(plugd + path, { signal: AbortSignal.timeout(5000) }).then((r) => r.text(), () => "");
   const listening = async () => Number(await get("/listening"));
   needs((await get("/listening")) !== "", `the desktop fixture's plugd is not reachable at ${plugd} — \`make desktop-e2e\` brings it up`);
+  await get("/play?seconds=0"); // silence, whatever an earlier run left playing
 
   await dashboard.goto();
   await page.getByRole("button", { name: /Desktop Robot 01/ }).click();
@@ -446,6 +447,7 @@ test("the Desktop panel's Sound plays what the robot's desktop plays, and the ro
   await expect(sink).toHaveCount(0);
   // The producer lingers for the tier grace (10 s), then the robot stops capturing its speakers.
   await expect.poll(listening, { timeout: 15_000, intervals: [500] }).toBe(0);
+  await get("/play?seconds=0");
 });
 
 test("the Desktop panel stays when the robot's desktop session goes, says why, and streams again when it is back (mini-PC, 2026-10-04)", async ({ dashboard, stack, page }) => {

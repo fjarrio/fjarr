@@ -4,3 +4,9 @@
 backend = "x11"
 module_dir = "/workspace/build/release/agent/desktop-modules"
 display = ":99"
+
+# The kiosk's session program hands the sound over this socket (ADR-0034, M3.5 3.5.2): the kiosk account
+# (uid 10004 in the fixture image) is the only helper accepted; the socket gets the agent's group.
+[capabilities."fjarr.desktop".helper]
+uid = 10004
+gid = 10003

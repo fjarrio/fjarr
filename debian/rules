@@ -54,5 +54,7 @@ override_dh_auto_install:
 	@# The helper's user unit, installed but enabled for no one: `setup desktop` enables it for the
 	@# desktop account only (dh_installsystemduser would enable it for every user).
 	install -D -m 0644 packaging/systemd/fjarr-desktop-session.service debian/fjarr-desktop-session/usr/lib/systemd/user/fjarr-desktop-session.service
-	install -D -m 0644 packaging/pipewire/fjarr-pipewire-client.conf debian/fjarr-desktop-wayland/usr/share/fjarr/pipewire-client.conf
+	@# The desktop modules' own PipeWire client configuration, read by both (GNOME's screen and sound, X11's
+	@# sound): in fjarr-agent, which both depend on, so the two can be installed side by side.
+	install -D -m 0644 packaging/pipewire/fjarr-pipewire-client.conf debian/fjarr-agent/usr/share/fjarr/pipewire-client.conf
 	install -D -m 0644 packaging/modules-load/fjarr-desktop-session.conf debian/fjarr-desktop-session/usr/lib/modules-load.d/fjarr-desktop-session.conf

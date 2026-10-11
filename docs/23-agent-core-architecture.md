@@ -1065,8 +1065,9 @@ whichever application plays it.
   starts), keeps hearing it when the default output changes, and sees the
   capture open only while the track is enabled (ended 10.3 s after
   disable); the dashboard's Sound toggle plays it in the lab browser. The
-  stop with the sharing is checked on the mini-PC (3.5.4), as the indicator
-  is: the fixture runs no GNOME Shell.
+  X11 fixture passes the same scenario through `fjarr-x11-session` as its
+  kiosk account. The stop with the sharing is checked on the mini-PC
+  (3.5.4), as the indicator is: the fixture runs no GNOME Shell.
 - **On X11** (backend A; [ADR-0034](adr/0034-x11-sound-through-the-session-program.md))
   the agent cannot open the kiosk user's sound server either, so
   `fjarr-x11-session`, already running for the whole kiosk session, is a

@@ -2459,6 +2459,7 @@ void scenario_desktop_audio(Operator& op) {
         r.check("desktop-plug", false, "--desktop-plug not given: nothing can play on the fixture's desktop");
         return;
     }
+    op.http_get_url(op.desktop_plug() + "/play?seconds=0"); // silence, whatever an earlier run left playing
     connect_and_report(op);
     const std::string id = "desktop-audio";
     bool offered = false;
@@ -2505,6 +2506,15 @@ void scenario_desktop_audio(Operator& op) {
             still ? "still heard after the default output changed to fixture-headphones"
                   : (moved.status == 200 ? "not heard on the new output within 5 s (RMS " + std::to_string(static_cast<int>(op.locked<double>(rms))) + ")" : "/speakers: " + moved.body));
     op.http_get_url(op.desktop_plug() + "/speakers?use=fixture-speakers"); // as it was, for the next scenario
+    op.http_get_url(op.desktop_plug() + "/play?seconds=0");
+    // The capture is open while the track is enabled (once restarted on that output), so that its end
+    // below is the disable's doing and not a capture that was never there.
+    int open_now = listening();
+    for (int i = 0; open_now != 1 && i < 20; i++) {
+        op.sleep_ms(250);
+        open_now = listening();
+    }
+    r.check("desktop-audio-capturing", open_now == 1, std::to_string(open_now) + " capture stream(s) open on the speakers while the track is enabled");
     const bool off = op.select(id, false, "active", 5000, "fjarr.desktop");
     r.check("desktop-audio-off", off, off ? "disabled" : "select-tracks enabled=false was not accepted");
     // The producer lingers for the tier grace (10 s), then lets the source go, and the capture with it.

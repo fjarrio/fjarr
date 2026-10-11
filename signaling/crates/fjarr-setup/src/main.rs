@@ -193,7 +193,9 @@ pub struct SetupArgs {
     pub ros_units: Option<Vec<String>>,
     #[arg(long, value_enum)]
     pub dds: Option<Dds>,
-    /// For `setup desktop`: the account the desktop runs as (created when it does not exist).
+    /// For `setup desktop`: the account the desktop runs as (created when it does not exist). With
+    /// `--x11`, the kiosk's existing account, whose session hands over the sound (default: LightDM's
+    /// automatic login).
     #[arg(long, value_name = "NAME")]
     pub account: Option<String>,
     /// For `setup desktop`: how many ghost screens to add, on free connectors (docs/26#ghost-screens).

@@ -5,7 +5,11 @@
 # /copy?text=, /paste, /copy-image and /paste-image[?size=1] are the robot's applications copying
 # and pasting, through xclip, answered exactly as the GNOME fixture's plugd answers them (3.7c).
 # /copy-stall and /copy-big are X11-only failure modes: an owner that never answers, text over the limit.
+# /play, /speakers?use= and /listening are the kiosk's sound (M3.5 3.5.2, ADR-0034), answered as the
+# GNOME fixture's plugd answers them, in the kiosk user's own PipeWire.
 import hashlib
+import json
+import math
 import random
 import struct
 import subprocess
@@ -16,6 +20,73 @@ import zlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 NAME = "RIGHT"
+# The kiosk user's session, where its PipeWire runs (start.sh): sound is played and inspected as it.
+KIOSK = ["setpriv", "--reuid=kiosk", "--regid=kiosk", "--init-groups", "env", "XDG_RUNTIME_DIR=/run/kiosk", "HOME=/home/kiosk",
+         "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/kiosk/bus"]
+player = None  # the pw-play now playing on the kiosk
+
+
+def kiosk(*args):
+    return subprocess.run([*KIOSK, *args], capture_output=True, text=True, timeout=5)
+
+
+def nodes():
+    return json.loads(kiosk("pw-dump").stdout or "[]")
+
+
+def play(freq, seconds):
+    # An application of the kiosk plays a sine to its default output (pw-play, as on GNOME).
+    global player
+    if seconds == 0:  # stop: a scenario starts from silence, whatever an earlier run left playing
+        if player and player.poll() is None:
+            player.kill()
+            player.wait()
+        return 200, "quiet"
+    if not 50 <= freq <= 8000 or not 0 < seconds <= 60:
+        return 400, "freq 50-8000, seconds up to 60"
+    import wave
+    path = f"/tmp/tone-{freq}-{seconds}.wav"
+    w = wave.open(path, "wb")
+    w.setnchannels(1)
+    w.setsampwidth(2)
+    w.setframerate(48000)
+    w.writeframes(b"".join(struct.pack("<h", int(12000 * math.sin(2 * math.pi * freq * i / 48000))) for i in range(int(48000 * seconds))))
+    w.close()
+    if player and player.poll() is None:
+        player.kill()
+    player = subprocess.Popen([*KIOSK, "pw-play", path], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return 200, f"playing {freq} Hz for {seconds} s"
+
+
+def speakers(name):
+    # The default output changes: a null sink named `name`, made if needed, becomes the default.
+    if not name.replace("-", "").isalnum():
+        return 400, "a name of letters, digits and dashes"
+    find = lambda: [o["id"] for o in nodes() if o.get("info", {}).get("props", {}).get("node.name") == name]
+    ids = find()
+    if not ids:
+        kiosk("pw-cli", "create-node", "adapter", f"{{ factory.name=support.null-audio-sink node.name={name} node.description={name} "
+              "media.class=Audio/Sink object.linger=true audio.position=[FL FR] }")
+        for _ in range(50):
+            ids = find()
+            if ids:
+                break
+            time.sleep(0.1)
+        if not ids:
+            return 500, "the sink did not appear"
+    r = kiosk("wpctl", "set-default", str(ids[0]))
+    return (200, name) if r.returncode == 0 else (500, r.stderr)
+
+
+def encoded(result):
+    code, body = result
+    return code, body.encode()
+
+
+def listening():
+    # Capture streams open on the kiosk's outputs: the agent's audio reader is one (stream.capture.sink).
+    n = sum(1 for o in nodes() if o.get("info", {}).get("props", {}).get("stream.capture.sink") in ("true", True))
+    return 200, str(n)
 
 
 def xrandr(*args):
@@ -114,6 +185,13 @@ class Handler(BaseHTTPRequestHandler):
         answered = clipboard(path, urllib.parse.parse_qs(q))
         if answered:
             return self.reply(*answered)
+        sound_q = urllib.parse.parse_qs(q)
+        if path == "/play":
+            return self.reply(*encoded(play(int(sound_q.get("freq", ["440"])[0]), float(sound_q.get("seconds", ["5"])[0]))))
+        if path == "/speakers":
+            return self.reply(*encoded(speakers(sound_q.get("use", [""])[0])))
+        if path == "/listening":
+            return self.reply(*encoded(listening()))
         if self.path == "/plug":
             r = xrandr("--setmonitor", NAME, "1280/340x720/190+1920+0", "none")
             code, body = (200, NAME) if r.returncode == 0 else (500, r.stderr)
@@ -133,7 +211,7 @@ class Handler(BaseHTTPRequestHandler):
             r = xrandr("--delmonitor", NAME)
             code, body = (200, NAME) if r.returncode == 0 else (404, r.stderr or "nothing plugged")
         elif self.path == "/":
-            code, body = 200, "plugd: /plug, /move, /unplug, /copy?text=, /paste, /copy-image, /paste-image"
+            code, body = 200, "plugd: /plug, /move, /unplug, /copy?text=, /paste, /copy-image, /paste-image, /play, /speakers?use=, /listening"
         else:
             code, body = 404, "/plug, /unplug, /copy?text=, /paste, /copy-image or /paste-image"
         self.reply(code, body.encode())

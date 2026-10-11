@@ -104,7 +104,7 @@ target_link_libraries(fjarr-desktop-session PRIVATE PkgConfig::GIO PkgConfig::LI
 # dependencies, not libfjarr's.
 pkg_check_modules(LIBEI REQUIRED IMPORTED_TARGET libei-1.0)
 pkg_check_modules(XKBCOMMON REQUIRED IMPORTED_TARGET xkbcommon)
-add_library(fjarr-desktop-mutter MODULE modules/desktop-mutter/backend.cpp modules/desktop-mutter/eis_input.cpp modules/desktop-mutter/stream_reader.cpp modules/desktop-mutter/audio_reader.cpp
+add_library(fjarr-desktop-mutter MODULE modules/desktop-mutter/backend.cpp modules/desktop-mutter/eis_input.cpp modules/desktop-mutter/stream_reader.cpp src/desktop/audio_reader.cpp src/desktop/desktop_sound.cpp
   src/desktop/helper_protocol.cpp src/desktop/monitor_identity.cpp src/desktop/keymap.cpp src/desktop/clipboard_types.cpp src/desktop/cursor_image.cpp)
 target_include_directories(fjarr-desktop-mutter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(fjarr-desktop-mutter PRIVATE PkgConfig::GST PkgConfig::GIO PkgConfig::LIBEI PkgConfig::XKBCOMMON PkgConfig::LIBPIPEWIRE nlohmann_json::nlohmann_json)
@@ -112,21 +112,25 @@ set_target_properties(fjarr-desktop-mutter PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/desktop-modules" PREFIX "lib" CXX_VISIBILITY_PRESET hidden)
 
 # Backend A (ADR-0006, ADR-0021, M3 3.7): an X11 kiosk from the agent's own process, `ximagesrc` per
-# RandR monitor, XTest input, the XFixes cursor (docs/23#desktop-x11). Its X libraries are the
-# module's, shipped in fjarr-desktop-x11, never libfjarr's.
+# RandR monitor, XTest input, the XFixes cursor (docs/23#desktop-x11); the desktop's sound through the
+# kiosk's session program and libpipewire (ADR-0034). Its X and PipeWire libraries are the module's,
+# shipped in fjarr-desktop-x11, never libfjarr's.
 pkg_check_modules(X11LIBS REQUIRED IMPORTED_TARGET x11 xtst xfixes xrandr)
 add_library(fjarr-desktop-x11 MODULE modules/desktop-x11/backend.cpp modules/desktop-x11/clipboard.cpp src/desktop/edid.cpp
-  src/desktop/monitor_identity.cpp src/desktop/keymap.cpp src/desktop/cursor_image.cpp src/desktop/clipboard_types.cpp)
+  src/desktop/monitor_identity.cpp src/desktop/keymap.cpp src/desktop/cursor_image.cpp src/desktop/clipboard_types.cpp
+  src/desktop/helper_protocol.cpp src/desktop/helper_listener.cpp src/desktop/desktop_sound.cpp src/desktop/audio_reader.cpp)
 target_include_directories(fjarr-desktop-x11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(fjarr-desktop-x11 PRIVATE PkgConfig::GST PkgConfig::X11LIBS PkgConfig::XKBCOMMON nlohmann_json::nlohmann_json)
+target_link_libraries(fjarr-desktop-x11 PRIVATE PkgConfig::GST PkgConfig::GIO PkgConfig::X11LIBS PkgConfig::XKBCOMMON PkgConfig::LIBPIPEWIRE nlohmann_json::nlohmann_json)
 set_target_properties(fjarr-desktop-x11 PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/desktop-modules" PREFIX "lib" CXX_VISIBILITY_PRESET hidden)
 
-# fjarr-x11-session (docs/23#desktop-x11): the kiosk session's grant of the agent's account and its
-# output layout, started by the session's autostart entry. In fjarr-desktop-x11.
-add_executable(fjarr-x11-session desktop-session-x11/main.cpp src/desktop/x11_layout.cpp src/desktop/edid.cpp src/desktop/monitor_identity.cpp)
+# fjarr-x11-session (docs/23#desktop-x11): the kiosk session's grant of the agent's account, its
+# output layout, and the desktop's sound handed to the agent with the GNOME helper's speaker watch and
+# narrowing (ADR-0034); started by the session's autostart entry. In fjarr-desktop-x11.
+add_executable(fjarr-x11-session desktop-session-x11/main.cpp src/desktop/x11_layout.cpp src/desktop/edid.cpp src/desktop/monitor_identity.cpp
+  desktop-session/sound.cpp desktop-session/pipewire.cpp src/desktop/helper_protocol.cpp)
 target_include_directories(fjarr-x11-session PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(fjarr-x11-session PRIVATE PkgConfig::X11LIBS)
+target_link_libraries(fjarr-x11-session PRIVATE PkgConfig::X11LIBS PkgConfig::GIO PkgConfig::LIBPIPEWIRE nlohmann_json::nlohmann_json)
 
 add_executable(fjarr-agent daemon/main.cpp)
 target_link_libraries(fjarr-agent PRIVATE fjarr::fjarr PkgConfig::GST)

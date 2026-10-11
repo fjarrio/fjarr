@@ -1,25 +1,39 @@
 // fjarr-x11-session: the X11 kiosk session's side of backend A (docs/23#desktop-x11, ADR-0006,
-// ADR-0028). Started by the session's XDG autostart entry, as the session's user, it
+// ADR-0028, ADR-0034). Started by the session's XDG autostart entry, as the session's user, it
 //   1. grants the agent's account, as `xhost +si:localuser:fjarr` does (XAddHost, the localuser
-//      server-interpreted family: X's own per-user grant, no authority file changing hands), and
+//      server-interpreted family: X's own per-user grant, no authority file changing hands),
 //   2. lays out the outputs, and lays them out again on every RandR change: a bare X kiosk lays out
-//      nothing and never reacts to a hot-plug (ADR-0006's spikes).
+//      nothing and never reacts to a hot-plug (ADR-0006's spikes), and
+//   3. hands the agent the desktop's sound: it connects to the agent's helper socket as a helper for
+//      the sound only, and serves `speakers` and `start-audio` as the GNOME helper does, with a
+//      PipeWire connection narrowed to the speakers (docs/23#desktop-audio).
 // It exits when the X server goes, with the session.
 //   fjarr-x11-session [--account <agent user>] [--no-layout]
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/extensions/Xrandr.h>
-#include <sys/select.h>
+#include <glib-unix.h>
+#include <glib.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
 
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
+#include <cstdlib>
 #include <map>
+#include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
 
+#include "../desktop-session/pipewire.hpp"
+#include "../desktop-session/sound.hpp"
 #include "desktop/edid.hpp"
+#include "desktop/helper_protocol.hpp"
 #include "desktop/x11_layout.hpp"
 
 namespace {
@@ -156,6 +170,151 @@ void layout(Display* dpy, Window root) {
     say("layout:" + (summary.empty() ? std::string(" no monitor") : summary));
 }
 
+/// The agent's helper socket, for the sound only (ADR-0034): connects out and reconnects, as the GNOME
+/// helper does, and serves the sound part of fjarr-desktop-1 with the same speaker watch and
+/// narrowing. spec: docs/23-agent-core-architecture.md#desktop-audio
+class SoundLink {
+  public:
+    explicit SoundLink(std::string path) : path_(std::move(path)) {
+        sound_ = std::make_unique<fjarr::desktop::helper::SoundWatch>([this] { send_speakers(); });
+        try_connect();
+    }
+
+  private:
+    void try_connect() {
+        const int fd = ::socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
+        sockaddr_un addr{};
+        addr.sun_family = AF_UNIX;
+        std::snprintf(addr.sun_path, sizeof addr.sun_path, "%s", path_.c_str());
+        if (fd < 0 || ::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof addr) != 0) {
+            if (fd >= 0) ::close(fd);
+            if (!waiting_logged_) say("waiting for the agent at " + path_ + " (the desktop's sound)");
+            waiting_logged_ = true;
+            g_timeout_add_seconds(backoff_s_, [](gpointer d) -> gboolean {
+                static_cast<SoundLink*>(d)->try_connect();
+                return G_SOURCE_REMOVE;
+            }, this);
+            backoff_s_ = std::min(backoff_s_ * 2, 10u);
+            return;
+        }
+        waiting_logged_ = false;
+        backoff_s_ = 1;
+        sock_ = fd;
+        watch_ = g_unix_fd_add(sock_, static_cast<GIOCondition>(G_IO_IN | G_IO_HUP | G_IO_ERR), &SoundLink::on_readable, this);
+        const char* desktop = std::getenv("XDG_CURRENT_DESKTOP");
+        send({{"type", "hello"}, {"protocol", fjarr::desktop::proto::PROTOCOL}, {"helper", "fjarr-x11-session"},
+              {"session", {{"type", "x11"}, {"desktop", desktop && *desktop ? desktop : "X11"}, {"compositor", "x11"}}}});
+    }
+
+    void disconnect(const std::string& why) {
+        say("agent connection closed: " + why);
+        if (watch_) g_source_remove(watch_);
+        watch_ = 0;
+        if (sock_ >= 0) ::close(sock_);
+        sock_ = -1;
+        welcomed_ = false;
+        sent_.reset();
+        try_connect();
+    }
+
+    void send(const nlohmann::json& body, const std::vector<int>& fds = {}) {
+        std::string err;
+        if (sock_ >= 0 && !fjarr::desktop::proto::send(sock_, body, fds, &err)) say("send " + body.value("type", "?") + ": " + err);
+    }
+
+    static gboolean on_readable(gint, GIOCondition, gpointer d) {
+        auto* self = static_cast<SoundLink*>(d);
+        fjarr::desktop::proto::Message m;
+        std::string err;
+        switch (fjarr::desktop::proto::receive(self->sock_, m, &err)) {
+        case fjarr::desktop::proto::Received::Message: self->handle(m); return G_SOURCE_CONTINUE;
+        case fjarr::desktop::proto::Received::WouldBlock:
+        case fjarr::desktop::proto::Received::Invalid: return G_SOURCE_CONTINUE;
+        case fjarr::desktop::proto::Received::Closed: self->watch_ = 0; self->disconnect("the agent hung up"); return G_SOURCE_REMOVE;
+        case fjarr::desktop::proto::Received::Error: self->watch_ = 0; self->disconnect(err); return G_SOURCE_REMOVE;
+        }
+        return G_SOURCE_CONTINUE;
+    }
+
+    void handle(const fjarr::desktop::proto::Message& m) {
+        const std::string type = m.type();
+        if (type == "welcome") {
+            welcomed_ = true;
+            say("welcomed by the agent: the desktop's sound is handed over from here");
+            send_speakers();
+        } else if (type == "refuse") {
+            say("refused by the agent: " + m.body.value("reason", std::string{"no reason given"}));
+        } else if (welcomed_ && type == "start-audio") {
+            start_audio(m.body.value("id", 0));
+        } // the rest of fjarr-desktop-1 is the GNOME helper's: backend A reads the screen from X itself
+    }
+
+    void send_speakers() {
+        if (!welcomed_) return;
+        const auto sink = sound_->default_sink();
+        const std::string now = sink ? sink->name : std::string{};
+        if (sent_ && *sent_ == now) return;
+        sent_ = now;
+        if (sink) {
+            send({{"type", "speakers"}, {"sink", {{"name", sink->name}, {"description", sink->description}}}});
+            say("speakers: " + sink->name);
+        } else {
+            send({{"type", "speakers"}, {"sink", nullptr}});
+            say("speakers: none");
+        }
+    }
+
+    void start_audio(int id) {
+        const auto sink = sound_->default_sink();
+        if (!sink) {
+            send({{"type", "audio-failed"}, {"id", id}, {"reason", "the desktop has no output"}});
+            return;
+        }
+        std::string err;
+        const int pw = fjarr::desktop::helper::open_narrowed_pipewire(sink->node, &err); // the speakers and nothing else
+        if (pw < 0) {
+            send({{"type", "audio-failed"}, {"id", id}, {"reason", err}});
+            say("sound " + std::to_string(id) + " failed: " + err);
+            return;
+        }
+        send({{"type", "audio-started"}, {"id", id}, {"node", sink->node}, {"name", sink->name}}, {pw});
+        ::close(pw);
+        say("sound " + std::to_string(id) + " handed over: " + sink->name);
+    }
+
+    std::string path_;
+    std::unique_ptr<fjarr::desktop::helper::SoundWatch> sound_;
+    int sock_ = -1;
+    guint watch_ = 0;
+    unsigned backoff_s_ = 1;
+    bool welcomed_ = false;
+    bool waiting_logged_ = false;
+    std::optional<std::string> sent_; // the sink name last sent ("" = none); unset = not yet told
+};
+
+/// The X connection on the GLib loop: RandR events, and every 5 s besides (a change that sent no event
+/// is still laid out). Xlib may already hold events it read with a reply, so the queue is drained until
+/// empty, not just when the descriptor is readable.
+struct Layout {
+    Display* dpy;
+    Window root;
+    int rr_event;
+    void drain(bool changed) {
+        do {
+            while (XPending(dpy)) {
+                XEvent e;
+                XNextEvent(dpy, &e);
+                if (e.type == rr_event + RRScreenChangeNotify || e.type == rr_event + RRNotify) {
+                    XRRUpdateConfiguration(&e);
+                    changed = true;
+                }
+            }
+            if (changed) layout(dpy, root);
+            changed = false;
+        } while (XPending(dpy));
+    }
+};
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -177,40 +336,47 @@ int main(int argc, char** argv) {
     }
     grant(dpy, account);
     say("granted the agent's account: localuser:" + account);
-    if (!do_layout) {
-        // Keep the grant's session alive is not needed: the grant lasts as long as the X server does.
-        XCloseDisplay(dpy);
-        return 0;
-    }
+    GMainLoop* loop = g_main_loop_new(nullptr, FALSE);
+    const char* sock = std::getenv("FJARR_DESKTOP_SOCK");
+    SoundLink sound(sock && *sock ? sock : "/run/fjarr/desktop.sock");
     int rr_event = 0, rr_error = 0;
-    if (!XRRQueryExtension(dpy, &rr_event, &rr_error)) {
+    std::optional<Layout> lay;
+    if (!do_layout) {
+        say("--no-layout: the outputs are left as they are");
+    } else if (!XRRQueryExtension(dpy, &rr_event, &rr_error)) {
         say("no RandR: the outputs are left as they are");
-        XCloseDisplay(dpy);
-        return 0;
+    } else {
+        const Window root = DefaultRootWindow(dpy);
+        XRRSelectInput(dpy, root, RRScreenChangeNotifyMask | RROutputChangeNotifyMask);
+        layout(dpy, root);
+        lay = Layout{dpy, root, rr_event};
+        g_timeout_add_seconds(5, [](gpointer d) -> gboolean {
+            static_cast<Layout*>(d)->drain(true);
+            return G_SOURCE_CONTINUE;
+        }, &*lay);
     }
-    const Window root = DefaultRootWindow(dpy);
-    XRRSelectInput(dpy, root, RRScreenChangeNotifyMask | RROutputChangeNotifyMask);
-    layout(dpy, root);
-    const int fd = ConnectionNumber(dpy);
-    for (;;) {
-        // On RandR events, and every 5 s besides: a change that sent no event is still laid out.
-        fd_set rd;
-        FD_ZERO(&rd);
-        FD_SET(fd, &rd);
-        timeval tv{5, 0};
-        const int n = XPending(dpy) ? 1 : select(fd + 1, &rd, nullptr, nullptr, &tv);
-        if (n < 0) break;
-        bool changed = n == 0;
-        while (XPending(dpy)) {
-            XEvent e;
-            XNextEvent(dpy, &e);
-            if (e.type == rr_event + RRScreenChangeNotify || e.type == rr_event + RRNotify) {
-                XRRUpdateConfiguration(&e);
-                changed = true;
-            }
+    // The X server going ends the session, and this program with it.
+    struct XWatch {
+        Display* dpy;
+        std::optional<Layout>* lay;
+        GMainLoop* loop;
+    } xw{dpy, &lay, loop};
+    g_unix_fd_add(ConnectionNumber(dpy), static_cast<GIOCondition>(G_IO_IN | G_IO_HUP | G_IO_ERR), [](gint, GIOCondition cond, gpointer d) -> gboolean {
+        auto* w = static_cast<XWatch*>(d);
+        if (cond & (G_IO_HUP | G_IO_ERR)) {
+            g_main_loop_quit(w->loop);
+            return G_SOURCE_REMOVE;
         }
-        if (changed) layout(dpy, root);
-    }
+        if (*w->lay) (*w->lay)->drain(false);
+        else
+            while (XPending(w->dpy)) {
+                XEvent e;
+                XNextEvent(w->dpy, &e);
+            }
+        return G_SOURCE_CONTINUE;
+    }, &xw);
+    g_main_loop_run(loop);
+    g_main_loop_unref(loop);
     XCloseDisplay(dpy);
     return 0;
 }

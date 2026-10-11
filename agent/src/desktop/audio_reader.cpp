@@ -1,5 +1,5 @@
 // spec: docs/23-agent-core-architecture.md#desktop-audio
-#include "audio_reader.hpp"
+#include "desktop/audio_reader.hpp"
 
 #include <algorithm>
 #include <mutex>
@@ -9,7 +9,7 @@
 #include <pipewire/pipewire.h>
 #include <spa/param/audio/format-utils.h>
 
-namespace fjarr::desktop::mutter {
+namespace fjarr::desktop {
 
 namespace {
 constexpr int RATE = 48000, CHANNELS = 2, FRAME_BYTES = CHANNELS * 2; // S16LE interleaved
@@ -159,4 +159,4 @@ void AudioReader::attach(GstElement* appsrc) {
 AudioReader::AudioReader(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 AudioReader::~AudioReader() = default;
 
-} // namespace fjarr::desktop::mutter
+} // namespace fjarr::desktop
