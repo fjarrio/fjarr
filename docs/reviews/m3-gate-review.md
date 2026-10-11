@@ -57,6 +57,10 @@ bookkeeping instead.
   the backend is reached; opsim now waits 15 s and reports the agent's reason.
 - **The offer a browser never answered** (2026-10-05) — the trigger is gone and
   the page recovers on its own; the cause is not known.
+- **The compose gate's desktop step is intermittent**: one CI run in about six
+  (75999c5) decoded no frame within 10 s, with the agent's side normal (the
+  helper connected, the capture ready, the track offered) and no stall logged.
+  Not yet reproduced.
 - **The GNOME fixture's test window has no frame stamp**, so lost frames are
   measured on X11 only.
 - **An X11 kiosk with the agent in a container** is specified, not built.
