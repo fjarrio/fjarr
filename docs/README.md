@@ -73,7 +73,8 @@ the [slice-4.5c ssh-and-scp review](reviews/slice-4.5c-review.md)
 the [slice-4.5d ROS 2 review](reviews/slice-4.5d-review.md)
 the [slice-4.5e operator client review](reviews/slice-4.5e-review.md)
 the [slice-4.5f discovery and login review](reviews/slice-4.5f-review.md)
-and the [M4.5 gate review](reviews/m45-gate-review.md).
+the [M4.5 gate review](reviews/m45-gate-review.md)
+and the [M3 gate review](reviews/m3-gate-review.md).
 
 ## Reading paths
 
