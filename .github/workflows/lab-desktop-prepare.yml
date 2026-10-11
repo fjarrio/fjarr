@@ -102,4 +102,4 @@ jobs:
           mkdir -p build-under-test/flat
           find build-under-test -type f \( -name '*.deb' -o -name 'fjarr-server' -o -name 'fjarr-opsim' \) -exec cp {} build-under-test/flat/ \;
           chmod +x build-under-test/flat/fjarr-server build-under-test/flat/fjarr-opsim
-          sudo -n tools/fjarr-lab/unattended.sh prepare build-under-test/flat
+          sudo -n tools/fjarr-lab/unattended.sh prepare build-under-test/flat "$GITHUB_RUN_ID"

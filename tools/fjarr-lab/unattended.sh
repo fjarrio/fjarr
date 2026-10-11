@@ -3,7 +3,7 @@
 # a desktop robot reached with nobody at the machine, after a reboot. Two halves, because a job
 # cannot outlive the reboot it causes:
 #
-#   sudo unattended.sh prepare <dir>   <dir> holds the build: *.deb, fjarr-server, fjarr-opsim. Undoes
+#   sudo unattended.sh prepare <dir> [<run id>]   <dir> holds the build: *.deb, fjarr-server, fjarr-opsim. Undoes
 #                                      the last `setup desktop`, installs the build, runs `setup desktop
 #                                      --ghost-screens 1`, points the agent at a fjarr-server on this
 #                                      machine (a drop-in: the person's fjarr.toml is never touched),
@@ -45,7 +45,10 @@ boot_id() { cat /proc/sys/kernel/random/boot_id; }
 
 prepare() {
   need_root prepare
-  local dir=${1:?usage: unattended.sh prepare <dir with the .debs, fjarr-server and fjarr-opsim>}
+  local dir=${1:?usage: unattended.sh prepare <dir with the .debs, fjarr-server and fjarr-opsim> [<run id>]}
+  # The run id as an argument: sudo drops GITHUB_RUN_ID from the environment, so every night was
+  # recorded "by hand" and verify refused its own verdict, 2026-10-04 to 10-11 (M3 gate review).
+  local run=${2:-${GITHUB_RUN_ID:-by hand}}
   mkdir -p "$STATE"
   boot_id > "$STATE/boot-id"
   # The baseline: whatever the last run or a person set up for the desktop goes first.
@@ -58,7 +61,7 @@ prepare() {
   install -m 0644 "$here/../../docker/desktop-fixture/testwin.py" "$STATE/testwin.py"
   install -m 0755 "$0" "$STATE/unattended.sh" # the checkout is gone by the next boot
   rm -f "$STATE/result" "$STATE/result.log"
-  echo "${GITHUB_RUN_ID:-by hand}" > "$STATE/prepare-run"
+  echo "$run" > "$STATE/prepare-run"
   pass install "$(dpkg-query -W -f '${Package} ${Version}  ' fjarr-agent fjarr-desktop-wayland)"
 
   # A server of its own, on this machine, with secrets of its own for this run.
@@ -221,5 +224,5 @@ case "${1:-}" in
   prepare) shift; prepare "$@" ;;
   verify) shift; verify "$@" ;;
   report) shift; report "$@" ;;
-  *) echo "usage: unattended.sh prepare <dir> | verify [--on-boot] | report [--prepare-run <id>]"; exit 2 ;;
+  *) echo "usage: unattended.sh prepare <dir> [<run id>] | verify [--on-boot] | report [--prepare-run <id>]"; exit 2 ;;
 esac
