@@ -112,8 +112,10 @@ monitor it lands on.
 
 The mapping is a pure function in `@fjarr/core` (`throughLayout`), tested
 against neighbours, gaps, offsets and monitors of different sizes; the lab
-browser drags from one fixture monitor into another and checks that the
-robot's cursor arrives there while the button is still down.
+browser drags from one fixture monitor into another and checks, in the
+robot's test window, that the pointer crossed while the button was still
+down. **Verified by Erik on the mini-PC (2026-10-11) in the embedded layout,
+in Chrome; separate fullscreen windows and Firefox are still to be tried.**
 
 ### Hot-plug
 
