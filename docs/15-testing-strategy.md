@@ -268,7 +268,15 @@ leaves, wiping the grant) and the robot in the fixture's IPC namespace
 `desktop-see`, `-control`, `-hotplug` and `-cursor` run against it
 (`make x11-e2e`) on every push; the browser side is the same for every
 backend, so the browser tests stay on the mutter fixture. The clipboard
-joins in slice 3.7c.
+joins in slice 3.7c. The fixture also stages what the mutter fixture
+cannot: a monitor that moves (`/move`) or changes mode in place (`/mode`,
+where a click must land on the new geometry's pixel), an owner that never
+answers and text over the limit on the clipboard; and its test window
+stamps its top edge with a counter at 15 Hz (opsim's frame stamp), so
+`desktop-hotplug` checks docs/06's "zero dropped frames on the other
+monitors" as no skipped count across the plug and the renegotiation, rather
+than as a gap, which cannot tell a lost picture from a late one (M3 gate
+review, 2026-10-11).
 
 Every lab job starts from a baseline: `setup --undo desktop`, install the build
 under test, then `setup desktop` with the job's own settings. The machine's

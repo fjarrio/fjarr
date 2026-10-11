@@ -2937,9 +2937,21 @@ void scenario_desktop_hotplug(Operator& op) {
     const std::uint64_t g0 = op.frames(d1);
     const bool flows = op.select(d1, true, "active", 5000, "fjarr.desktop") && op.wait_frames(d1, g0, 5, 10000);
     r.check("desktop-new-monitor-frames", flows, flows ? "frames from " + d1 : "no frames from " + d1 + why_no_frames(op));
+    // Two seconds more, so the watch spans the whole renegotiation and what follows it.
+    op.sleep_ms(2000);
     const auto snap = op.track_snapshot(d0);
     const std::int64_t gap = snap ? snap->max_gap_us : -1;
     r.check("desktop-others-uninterrupted", gap >= 0 && gap < 500'000, d0 + "'s longest gap across the plug and the renegotiation: " + ms_str(gap));
+    // docs/06: "zero dropped frames on the other" monitors. Where the test window stamps its picture
+    // (the X11 fixture: a counter at 15 Hz, each value captured about twice), a skipped count is a
+    // lost picture, which a gap alone cannot tell from a late one (M3 gate review, 2026-10-11).
+    if (snap && snap->have_counter && snap->watch_last > snap->watch_first) {
+        r.check("desktop-others-no-lost-frames", snap->max_delta <= 1,
+                d0 + "'s window counter " + std::to_string(snap->watch_first) + " -> " + std::to_string(snap->watch_last) + " across the plug, largest step " +
+                    std::to_string(snap->max_delta) + (snap->max_delta <= 1 ? " (nothing lost)" : " (pictures lost)"));
+    } else {
+        std::printf("note: %s carries no frame stamp here; lost frames are not measured (the X11 fixture's window stamps)\n", d0.c_str());
+    }
 
     // 1b. A monitor that moves but keeps its size keeps its track and its capture (docs/23
     //     #desktop-monitors): no restart, no gap. Where the fixture can move one (the X11 one).
@@ -2977,7 +2989,13 @@ void scenario_desktop_hotplug(Operator& op) {
         for (const auto& d : *back)
             if (d != d0) d1b = d;
     r.check("desktop-replug-same-id", back && d1b == d1, back ? "re-plugged as " + d1b + " (was " + d1 + ")" : "no re-offer after the re-plug");
-    op.http_get_url(op.desktop_plug() + "/unplug");
+    {
+        // Leave the robot as found, and wait until the agent has seen it: the next scenario counts
+        // the desk tracks it starts with (a run started 84 ms before the agent's next re-read did).
+        const std::size_t m_end = op.inbox_mark();
+        op.http_get_url(op.desktop_plug() + "/unplug");
+        monitors_event(m_end, 1);
+    }
     close_and_assert(op);
 }
 
