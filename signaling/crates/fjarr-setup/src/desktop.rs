@@ -38,6 +38,8 @@ pub const GDM_CONF: &str = "/etc/gdm3/custom.conf";
 pub const DCONF_DB: &str = "/etc/dconf/db/local.d/00-fjarr-desktop";
 pub const DCONF_PROFILE: &str = "/etc/dconf/profile/user";
 pub const HELPER_UNIT: &str = "fjarr-desktop-session.service";
+/// GNOME's first-login wizard runs while this file is missing from the account's config directory.
+pub const INITIAL_SETUP_DONE: &str = ".config/gnome-initial-setup-done";
 pub const HELPER_UNIT_PATH: &str = "/usr/lib/systemd/user/fjarr-desktop-session.service";
 pub const WATCHDOG_TIMER: &str = "fjarr-desktop-watchdog.timer";
 /// Consecutive misses before the watchdog restarts GDM (two checks, 30 s apart).
@@ -544,6 +546,13 @@ pub async fn setup(config_path: &Path, state: &Path, args: DesktopArgs) -> Resul
     // 3. The helper for that account only, and the watchdog.
     let link = helper_wants_link(&home);
     create_owned_dirs(link.parent().expect("a parent"), uid, gid)?;
+    // No "Welcome to Ubuntu" over the robot's screen at the account's first login (docs/26).
+    let done = home.join(INITIAL_SETUP_DONE);
+    if !done.exists() {
+        write_recorded(&mut record, &done, "yes")?;
+        let _ = std::os::unix::fs::lchown(&done, Some(uid), Some(gid));
+        log::success("GNOME's first-login welcome wizard skipped for the account")?;
+    }
     if std::fs::symlink_metadata(&link).is_err() {
         symlink(HELPER_UNIT_PATH, &link).with_context(|| format!("linking {}", link.display()))?;
         let _ = std::os::unix::fs::lchown(&link, Some(uid), Some(gid));

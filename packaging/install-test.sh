@@ -146,6 +146,7 @@ grep -q '^lock-enabled=false' /etc/dconf/db/local.d/00-fjarr-desktop || fail "no
 grep -q '^system-db:local' /etc/dconf/profile/user || fail "the dconf profile does not read the local database"
 link=/home/desktop/.config/systemd/user/graphical-session.target.wants/fjarr-desktop-session.service
 [ "$(readlink "$link")" = /usr/lib/systemd/user/fjarr-desktop-session.service ] || fail "the helper's user unit is not enabled for desktop: $(ls -la "$link" 2>&1)"
+[ "$(cat /home/desktop/.config/gnome-initial-setup-done 2>/dev/null)" = yes ] && [ "$(stat -c %U /home/desktop/.config/gnome-initial-setup-done)" = desktop ] || fail "GNOME's first-login wizard is not skipped for desktop (~/.config/gnome-initial-setup-done)"
 [ "$(stat -c %U /home/desktop/.config/systemd)" = desktop ] || fail "setup made ~desktop/.config/systemd owned by $(stat -c %U /home/desktop/.config/systemd), not desktop"
 [ -z "$(find /etc/systemd/user -name 'fjarr-desktop-session.service' 2>/dev/null)" ] || fail "the helper got enabled for every account"
 grep -A3 '^\[capabilities."fjarr.desktop".helper\]' /etc/fjarr/fjarr.toml | grep -q '^user = "desktop"' || { cat /etc/fjarr/fjarr.toml; fail "the agent's config does not name the desktop account"; }
