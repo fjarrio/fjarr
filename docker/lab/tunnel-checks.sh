@@ -54,7 +54,10 @@ ros2)
   t0=$(now_ms)
   out=""
   while :; do
-    out=$(docker compose exec -T operator-ros bash -lc "$ros_env timeout 10 ros2 topic list" 2>&1)
+    # A query that errors is one more miss, not the verdict: under `set -e` the first error ended the
+    # check in 1.7 s with nothing printed, which is how Cyclone's slower rediscovery after the
+    # participant was recreated read as fact B failing every night from 2026-10-03 (M3 gate review).
+    out=$(docker compose exec -T operator-ros bash -lc "$ros_env timeout 10 ros2 topic list" 2>&1) || true
     case "$out" in *"/fjarr/robot_heartbeat"*) break ;; esac
     if [ $(( $(now_ms) - t0 )) -ge "$deadline_ms" ]; then
       echo "tunnel-checks: ros2 topic list ->" $(echo "$out" | tr '\n' ' ')
@@ -66,7 +69,7 @@ ros2)
   ms=$(( $(now_ms) - t0 ))
   echo "tunnel-checks: ros2 topic list ->" $(echo "$out" | tr '\n' ' ')
   echo "tunnel-checks: discovered in $(( ms / 1000 )).$(( (ms % 1000) / 100 )) s"
-  msg=$(docker compose exec -T operator-ros bash -lc "$ros_env timeout 25 ros2 topic echo --once /fjarr/robot_heartbeat" 2>&1)
+  msg=$(docker compose exec -T operator-ros bash -lc "$ros_env timeout 25 ros2 topic echo --once /fjarr/robot_heartbeat" 2>&1) || true
   echo "tunnel-checks: ros2 topic echo ->" $(echo "$msg" | tr '\n' ' ')
   case "$msg" in *demo-robot-01*) ;; *) echo "tunnel-checks: discovery worked but no sample arrived" >&2; exit 1 ;; esac
   echo "tunnel-checks: ROS 2 discovery and data both crossed the link"

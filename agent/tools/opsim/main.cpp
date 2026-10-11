@@ -3090,6 +3090,7 @@ void scenario_soak(Operator& op) {
     std::int64_t worst_us = 0, total_us = 0;
     g_quiet = true;
     const int warmup = std::max(1, std::min(40, op.cycles() / 5)); // docs/23: baseline after the bounded caches filled
+    std::vector<std::int64_t> rss_after_warmup; // one reading per settled cycle (docs/16: RSS growth)
 
     for (int i = 1; i <= n; i++) {
         const std::int64_t t0 = g_get_monotonic_time();
@@ -3104,6 +3105,7 @@ void scenario_soak(Operator& op) {
         // The agent tears media down after its 150 ms flush window; sessions_alive is the census' view of that.
         if (!wait_memory(op, sessions_gone, 5000, 100, &mem, &err) && why.empty())
             why = mem.is_null() ? "GET /memory failed: " + err : "sessions_alive=" + std::to_string(mem.value("sessions_alive", -1)) + " 5 s after close";
+        if (i > warmup && mem.is_object() && mem.contains("rss_bytes")) rss_after_warmup.push_back(mem.value("rss_bytes", std::int64_t(0)));
         const std::int64_t took = g_get_monotonic_time() - t0;
         total_us += took;
         worst_us = std::max(worst_us, took);
@@ -3178,10 +3180,28 @@ void scenario_soak(Operator& op) {
         const std::int64_t d = diff.value(k, std::int64_t(-1));
         r.check(k, d == 0, d == 0 ? "unchanged at " + now.value(k, json()).dump() : then.value(k, json()).dump() + " -> " + now.value(k, json()).dump() + " (" + (d > 0 ? "+" : "") + std::to_string(d) + ")");
     }
-    const std::int64_t rss_diff = diff.value("rss_bytes", std::int64_t(0));
-    r.check("rss-growth", rss_diff < 5 * 1024 * 1024,
-            mib(then.value("rss_bytes", std::int64_t(0))) + " -> " + mib(now.value("rss_bytes", std::int64_t(0))) + " (" + (rss_diff >= 0 ? "+" : "") + mib(rss_diff) + " over " +
-                std::to_string(n) + " cycles; budget 5 MiB)");
+    // RSS growth (docs/16: < 5 MB): the median of the last quarter of the cycles after warm-up against
+    // the median of the first quarter. Two single readings (baseline, end) swung from -0.36 to +6.09 MiB
+    // on one commit across nights (M3 gate review, 2026-10-11): allocator noise, failing at random. A
+    // leak still shows, as a level that keeps rising; the census above is the exact leak check.
+    auto median = [](std::vector<std::int64_t> v) {
+        std::sort(v.begin(), v.end());
+        return v.empty() ? std::int64_t(0) : v[v.size() / 2];
+    };
+    const std::size_t q = rss_after_warmup.size() / 4;
+    if (q >= 2) {
+        const std::int64_t early = median({rss_after_warmup.begin(), rss_after_warmup.begin() + static_cast<std::ptrdiff_t>(q)});
+        const std::int64_t late = median({rss_after_warmup.end() - static_cast<std::ptrdiff_t>(q), rss_after_warmup.end()});
+        const std::int64_t growth = late - early;
+        r.check("rss-growth", growth < 5 * 1024 * 1024,
+                "median " + mib(early) + " over the first quarter after warm-up -> " + mib(late) + " over the last (" + (growth >= 0 ? "+" : "") + mib(growth) +
+                    "; ends " + mib(diff.value("rss_bytes", std::int64_t(0))) + " apart; budget 5 MiB)");
+    } else {
+        const std::int64_t rss_diff = diff.value("rss_bytes", std::int64_t(0));
+        r.check("rss-growth", rss_diff < 5 * 1024 * 1024,
+                mib(then.value("rss_bytes", std::int64_t(0))) + " -> " + mib(now.value("rss_bytes", std::int64_t(0))) + " (" + (rss_diff >= 0 ? "+" : "") + mib(rss_diff) +
+                    " over " + std::to_string(n) + " cycles, too few for quarters; budget 5 MiB)");
+    }
     if (since->contains("leaks")) {
         const json& leaks = since->at("leaks");
         const json created = leaks.value("created", json::array());
