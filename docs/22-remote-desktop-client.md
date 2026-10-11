@@ -72,12 +72,48 @@ part of the monitor:
 
 ```ts
 const box = contentBox(videoEl);           // accounts for object-fit + videoWidth/Height
-const nx = (e.clientX - box.left) / box.width;   // clamp to [0,1]; outside → no event
+const nx = (e.clientX - box.left) / box.width;   // outside [0,1] → no event, unless a button is held (below)
 ```
 
 Display modes: `fit` (contain), `fill`, and `native` (1:1 pixels with
 scrolling, for pixel-exact work); HiDPI is handled by the agent's `scale`
 being informational only — normalized coordinates make it irrelevant.
+
+### Dragging across monitors {#drag-across-monitors}
+
+A window dragged on the robot crosses from one monitor to the next in one
+motion, as with a mouse at the robot (asked for 2026-10-11; until then the
+pointer stopped at the edge of the monitor the drag started on). **While a
+button is held**, a point outside the view's monitor is not dropped: the
+client maps it through the **robot's own layout** and sends it to the
+monitor it lands on.
+
+- The point, unclamped, becomes robot coordinates: `x + nx·w`, `y + ny·h`
+  of the view's monitor (`monitor.x/y/w/h` from the manifest, the layout the
+  robot's display settings show). The monitor containing that point is the
+  target; in a gap between monitors or beyond the outer edge, the nearest
+  point of the nearest monitor is. The client sends `pointer {track_id,
+  x, y}` normalized to the target, so the agent and the protocol are
+  unchanged: the robot sees one pointer, pressed on one monitor and moved
+  onto another, which both backends take as one drag.
+- **The robot's arrangement decides, not the operator's.** Dragging right
+  out of a monitor reaches the monitor right of it on the robot, wherever
+  the operator has put its view or window. The robot's cursor, drawn in
+  every view ([cursor strategy](#cursor-strategy)), shows where the pointer
+  is. Following the operator's own window placement instead was rejected
+  for now: a browser on Wayland reports every window at 0,0.
+- It holds for every view: the embedded `<DesktopLayout>`, a single view,
+  and [separate windows](#presentation-mode), fullscreen included. The view
+  the drag started in keeps the pointer capture, and the browser keeps
+  delivering its pointer moves, with coordinates past the view's edges, for
+  as long as the button is held, even over another window or screen.
+- Without a held button nothing changes: a point outside the monitor sends
+  nothing, and the operator's pointer simply enters the next view.
+
+The mapping is a pure function in `@fjarr/core` (`throughLayout`), tested
+against neighbours, gaps, offsets and monitors of different sizes; the lab
+browser drags from one fixture monitor into another and checks that the
+robot's cursor arrives there while the button is still down.
 
 ### Hot-plug
 
