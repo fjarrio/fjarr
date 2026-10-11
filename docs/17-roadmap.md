@@ -559,10 +559,22 @@ M3.5 goes before M4 (Erik, 2026-10-11). Slices, planned the same day:
 
 | Slice | What | Done when |
 |---|---|---|
-| **3.5.1 Hear the robot** | `fjarr.audio`'s downlink: a configured microphone (a PipeWire or Pulse source; a test tone in CI), Opus, an audio track offered on demand, only to a session granted `listen` | the dashboard plays the fixture's sound within the docs/16 budget, in CI; a session without `listen` is offered none |
+| **3.5.1 Hear the robot** | `fjarr.audio`'s downlink: a configured microphone (an ALSA device, [docs/23](23-agent-core-architecture.md#audio); a test tone in CI), Opus, an audio track offered on demand, only to a session granted `listen` | the dashboard plays the fixture's sound within the docs/16 budget, in CI; a session without `listen` is offered none |
 | **3.5.2 Desktop audio** | the robot desktop's sound as a track on `fjarr.desktop`: on GNOME the session helper hands the agent the audio output's monitor, as it hands the screen; on X11 the Pulse monitor source | a sound played on the fixture's desktop is heard in the dashboard |
 | **3.5.3 Talk to the robot** | the agent's pre-allocated `recvonly` audio transceiver, decoded and played on a configured output with a hard volume cap; `talk` enforced by the agent | push-to-talk reaches the fixture's sink; releasing it stops the audio within 200 ms; audit events recorded; a session without `talk` gets no uplink |
 | **3.5.4 On the mini-PC** (with Erik) | the webcam's microphone, a speaker for push-to-talk, and the robot desktop's sound (the YouTube test of 2026-10-04) | each heard or played on the real machine |
+
+**3.5.1, hearing the robot (2026-10-11).** The agent's side is e419f71: a
+microphone in `fjarr.audio`'s config (`alsa` or `tone`), Opus at 32 kbps in
+20 ms frames with in-band FEC, one tier, and the tracks added in
+`session_attached` only for a session whose grant says `listen`, so the
+filter costs one check per session. opsim's `audio` scenario decodes the tone
+(RMS above silence) and `audio-unlistened` proves no track is offered. The
+demo dashboard's Microphones panel (53ed27d) mounts an `<AudioSink>` while
+Listen is ticked; its lab browser test requires the audio clock to advance and
+the track to stop streaming when unticked. Not measured: audio latency, as
+[docs/16](16-performance-budgets.md) has no audio budget yet; 3.5.3's
+push-to-talk sets the first one (200 ms to silence). **3.5.1 is done.**
 
 ## Vendor cameras and the design-partner demo {#vendor-cameras}
 
