@@ -414,6 +414,20 @@ Browser side of the docs/06 offer/request model:
   be offered as a download; real file copy in that direction is the native
   client's (ADR-0029).
 
+## Sound (M3.5 slice 3.5.2) {#sound}
+
+What the robot's speakers play arrives as `fjarr.desktop`'s audio track,
+`desktop-audio` ([docs/08](08-protocol.md#track-manifest),
+[docs/23](23-agent-core-architecture.md#desktop-audio)). `<DesktopView>` does
+not play it: sound is the host's choice, as a microphone's is, and a browser
+plays sound only after a gesture. The host mounts `<AudioSink session
+trackId="desktop-audio">` (the `fjarr.audio` component; the track is demanded
+while it is mounted and nothing is sent otherwise) behind a control of its
+own, such as a "Sound" toggle in the toolbar slot, whose click is the gesture.
+The track is there only while the robot has an output, so the toggle shows
+only then (`useTracks`). It is one track for the whole desktop, played once
+in the page however many monitors or separate windows show the screen.
+
 ## Ownership and view-only
 
 Several operators can be on one desktop at once, the way people use a remote

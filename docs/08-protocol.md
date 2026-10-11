@@ -263,7 +263,10 @@ more. `index`, `primary`, `connector` and the `x`/`y` placement are
 informational and change freely; `name` is the EDID model when known. Never key
 anything on `index` or `connector`.
 
-`kind` is `"video"` or `"audio"` (audio tracks: docs/06 `fjarr.audio`).
+`kind` is `"video"` or `"audio"` (audio tracks: docs/06 `fjarr.audio`, and
+`fjarr.desktop`'s one audio track, `desktop-audio`: what the robot's speakers
+play, with `monitor: null`, offered with the desktop's tracks while the robot
+has an output, [docs/23](23-agent-core-architecture.md#desktop-audio)).
 `track_id` is stable across renegotiations. `mid` is the SDP media
 identifier of the transceiver carrying the track (the agent knows it at
 offer time); receivers map incoming `RTCTrackEvent.transceiver.mid` →

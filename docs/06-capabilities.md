@@ -135,10 +135,13 @@ detail is incorporated here).
   cursor strategy, latency knobs, clipboard UX — is
   [docs/22](22-remote-desktop-client.md); the same `select-tracks` message
   as the camera capability carries `preference: "sharpness"` for text.
-- **Desktop audio** (planned, after `fjarr.audio`): the robot's system audio
-  output as a `kind: "audio"` track — PipeWire capture on Wayland, PulseAudio
-  monitor source on X11 (a per-backend criterion in [docs/07](07-desktop-backends.md)).
-  Same demand model and autoplay handling as `fjarr.audio`.
+- **Desktop audio** (M3.5 slice 3.5.2): what the robot's speakers play, the
+  default output's monitor, as the `kind: "audio"` track `desktop-audio`.
+  On GNOME the session helper hands the agent a PipeWire connection narrowed
+  to that output, as it hands the screen
+  ([docs/23](23-agent-core-architecture.md#desktop-audio)); X11 follows. It
+  follows the desktop grant, and stops when the robot stops sharing. Same
+  demand model and autoplay handling as `fjarr.audio`.
 
 **Accepted when:** operator controls the robot-sim desktop end-to-end
 (input-to-photon within [budgets](16-performance-budgets.md)); reboot of the
@@ -357,7 +360,7 @@ on either side (GStreamer `opusenc`/`opusdec`, browser `getUserMedia`).
   travels on `fjarr.desktop` and follows that grant, so whoever sees the
   screen hears it.
 - Not in scope: alert sounds/beeps in the dashboard (host UI concern),
-  desktop-audio capture for `fjarr.desktop` (later, same track model).
+  desktop audio (it is `fjarr.desktop`'s, same track model).
 
 **Accepted when:** an operator hears the robot-sim's synthetic audio source
 within budget (docs/16); PTT delivers speech to the sim's sink with

@@ -643,6 +643,15 @@ its name is bumped with the module seam's.
   capability then asks to capture the new monitor, module E hands it this
   stream's source rather than recording the monitor a second time. A virtual
   monitor's capture is never reported `monitor-gone`: it is the monitor.
+- **Sound** (M3.5 slice 3.5.2, [below](#desktop-audio)). The helper watches
+  the desktop user's PipeWire for the effective default output (the
+  `default` metadata's `default.audio.sink`) and sends `speakers {sink:
+  {name, description} | null}` after `welcome` and whenever it changes.
+  `start-audio {id}` makes it answer `audio-started {id, node, name}` with
+  **one descriptor: a PipeWire connection narrowed to that sink**, exactly as
+  a capture's is narrowed to its node, or `audio-failed {id, reason}`. The
+  helper keeps nothing for it: the agent ends the capture by closing its
+  connection, so there is no `stop-audio`.
 - **Loss.** The helper sends `capture-lost {id, reason: "monitor-gone" |
   "stream-stopped"}` when a capture ends without being asked. mutter does not
   say when a recorded monitor goes away: there is no `Stopped` on the stream and
@@ -654,8 +663,8 @@ its name is bumped with the module seam's.
   `SessionEnded` for every capture (`CaptureLost`, docs/09): the desktop session
   ended or the helper died, and the capability rebuilds its tracks when a helper
   connects again.
-- **Growth.** Later slices add message types (the clipboard came in 3.5,
-  virtual monitors are next) within `fjarr-desktop-1`. An end ignores a
+- **Growth.** Later slices add message types (the clipboard and virtual
+  monitors came in 3.5, the sound in 3.5.2) within `fjarr-desktop-1`. An end ignores a
   type it does not know. Changing the meaning of an existing type bumps the name.
 
 ### The desktop's monitors (M3 slice 3.4) {#desktop-monitors}
@@ -798,7 +807,10 @@ dead input session so the next `open-input` makes a new one. Module E then
 reports `CaptureLost::SharingStopped` (docs/09) for every capture and asks
 for input again only with its next capture. A virtual monitor's stream ends
 its monitor, so it is reported `MonitorGone`, leaves the layout as a
-hot-plug, and is not brought back.
+hot-plug, and is not brought back. The desktop's sound
+([below](#desktop-audio)) stops with them: module E ends its audio capture
+and the source is unavailable until a capture starts again after
+`resume-sharing`.
 
 The capability turns the first `SharingStopped` into `sharing: stopped`
 (docs/08) for every session: each stopped screen's source is unavailable, so
@@ -971,7 +983,7 @@ and the media plane carries it as it carries video, with less:
   `audio`): the agent is a system service, and a desktop user's PipeWire or
   Pulse server is not its to open, nor there at all on a headless robot.
   The desktop's own sound is different, and comes through the session helper
-  ([slice 3.5.2](17-roadmap.md#m35)). CI uses a test tone (`audiotestsrc`),
+  ([below](#desktop-audio)). CI uses a test tone (`audiotestsrc`),
   a source type like the camera's `test`. Config:
   `[capabilities."fjarr.audio".mics.<id>]` with `label` and `source`.
 - **The producer**: `source ! audioconvert ! audioresample ! opusenc` at
@@ -991,6 +1003,57 @@ and the media plane carries it as it carries video, with less:
   pipeline, no encoder, no bytes. No core change is needed: every capability
   already chooses each session's tracks in `session_attached`, from that
   session's grant.
+
+### Desktop audio: what the robot's desktop plays (M3.5 slice 3.5.2) {#desktop-audio}
+
+The desktop's sound is a `kind: "audio"` track of `fjarr.desktop`, not of
+`fjarr.audio` ([docs/06](06-capabilities.md)): it follows the desktop grant,
+so whoever sees the screen hears it, and a `view_only` session too. It is the
+**monitor of the effective default output**: what the robot's speakers play,
+whichever application plays it.
+
+- **The handover** (GNOME, backend E). The agent cannot open the desktop
+  user's PipeWire; the session helper hands it one connection narrowed to the
+  default sink ([the helper protocol](#desktop-helper-protocol), Sound).
+  **Measured 2026-10-12** in the desktop fixture
+  (`spikes/desktop-audio`; PipeWire 1.6.2, WirePlumber 0.5.13), with a null
+  sink as the default output, an application playing 440 Hz to it and a live
+  microphone at 1000 Hz. Through a connection that sees only the core, the
+  sink and the `client-node` factory, a capture stream with
+  `stream.capture.sink = true` heard the 440 Hz tone whether it named the
+  sink by serial or named no target. Naming the microphone by its serial
+  heard nothing (it hangs, as in the narrowing spike), and asking for the
+  default *source* linked the sink's monitor again, never the microphone.
+  The narrowing that keeps the microphones from the screen's connection keeps
+  them from the sound's.
+- **Where it is read.** Module E's **audio reader**: a `pw_stream` on the
+  handed connection, on a PipeWire thread of its own like the stream reader,
+  with `stream.capture.sink = true` and the sink as its target, asking for
+  S16LE, 48 kHz, stereo (PipeWire converts). Each buffer goes into the
+  track's `appsrc`, timestamped on arrival. From there it is an audio track
+  like a microphone's ([above](#audio)): Opus at 32 kbps, one tier, demand
+  driven. GStreamer's `pipewiresrc` is not used, for the reason the stream
+  reader replaced it: it reads PipeWire's own client configuration, which the
+  package does not ship.
+- **Only while someone listens.** The source is available while a helper is
+  connected and reports an output, and is declared with the desktop's other
+  tracks. The capture itself starts when the producer builds its first
+  pipeline (the first `select-tracks` that enables the track) and ends when
+  the producer lets its last one go: a capture link keeps a sink awake, and
+  a robot nobody listens to should not pay for it. A `start-audio` that fails
+  leaves the track silent and is logged.
+- **When the default output changes** (headphones plugged in, HDMI chosen),
+  the helper sends `speakers` again; a running capture is restarted on the
+  new sink and its new reader feeds the pipeline already built, so the track
+  and the session's offer stay as they were. With no output at all
+  (`sink: null`) the track goes unavailable and is re-offered without it.
+- **When sharing stops** ([above](#desktop-sharing-stopped)), the sound stops
+  with the screens: the desktop's user ended the sharing, and the speakers
+  are part of it. It comes back with `resume-sharing`.
+- **On X11** (backend A) the module runs inside the agent with no helper
+  ([above](#desktop-x11)), and the agent cannot open the kiosk user's sound
+  server either. That half of the slice comes after GNOME's, and its handover
+  is decided then.
 
 ### Rate control and tier switching {#rate-control-and-tier-switching}
 
