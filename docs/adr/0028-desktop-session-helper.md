@@ -5,6 +5,7 @@ title: "ADR 0028: The desktop is reached through a session helper"
 - **Status**: accepted
 - **Date**: 2026-09-27
 - **Supersedes**: —
+- **Amended by**: [0034](0034-x11-sound-through-the-session-program.md) (the X11 kiosk's sound)
 
 ## Context
 
@@ -85,7 +86,9 @@ the desktop package, `fjarr-desktop-wayland`.
   helper connects, the capability rebuilds its tracks. The GDM watchdog
   ([ADR-0006](0006-desktop-backend-selection.md)) is a separate root-owned unit,
   not the agent's job.
-- **X11 kiosks (A)** need no long-running helper. The kiosk session grants the
+- **X11 kiosks (A)** need no long-running helper *(amended by
+  [ADR-0034](0034-x11-sound-through-the-session-program.md): the kiosk's session program
+  hands over the sound, as the helper does on GNOME)*. The kiosk session grants the
   agent's account access with
   `xhost +si:localuser:<agent user>` at session start. That is X's own
   per-user grant; no authority file changes hands. The agent then opens the

@@ -755,6 +755,9 @@ descriptor is watched there, and no Xlib call is made from another thread.
 - **Not offered.** Virtual monitors (`RecordVirtual` is mutter's) and the
   sharing stop (GNOME's indicator): `Features` says so and the capability
   refuses `add-monitor` as `unavailable`.
+- **Sound** (M3.5 slice 3.5.2, [ADR-0034](adr/0034-x11-sound-through-the-session-program.md)):
+  through `fjarr-x11-session`, as a helper for the sound only
+  ([below](#desktop-audio)).
 - **Clipboard (slice 3.7c).** X selections on `CLIPBOARD`, through an
   unmapped window the module owns: owner changes from
   `XFixesSelectSelectionInput` (the module's own ownership is not a robot
@@ -770,7 +773,8 @@ descriptor is watched there, and no Xlib call is made from another thread.
   A paste that stops taking chunks for 10 s is dropped.
 
 **`fjarr-x11-session`** is the session side, started by the kiosk
-session's XDG autostart entry, as the session's user. It grants the agent's
+session's XDG autostart entry, as the session's user. It hands the agent the
+desktop's sound over the helper socket ([below](#desktop-audio)). It grants the agent's
 account (`XAddHost` with the `localuser` server-interpreted family: the same
 grant as `xhost +si:localuser:fjarr`, with no authority file changing
 hands), lays out the outputs, and re-lays them on every RandR output or
@@ -1063,10 +1067,17 @@ whichever application plays it.
   disable); the dashboard's Sound toggle plays it in the lab browser. The
   stop with the sharing is checked on the mini-PC (3.5.4), as the indicator
   is: the fixture runs no GNOME Shell.
-- **On X11** (backend A) the module runs inside the agent with no helper
-  ([above](#desktop-x11)), and the agent cannot open the kiosk user's sound
-  server either. That half of the slice comes after GNOME's, and its handover
-  is decided then.
+- **On X11** (backend A; [ADR-0034](adr/0034-x11-sound-through-the-session-program.md))
+  the agent cannot open the kiosk user's sound server either, so
+  `fjarr-x11-session`, already running for the whole kiosk session, is a
+  helper for the sound only: it connects to the same socket, says `hello`
+  with `session: {type: "x11", desktop, compositor: "x11"}`, and serves
+  `speakers` and `start-audio` exactly as the GNOME helper does, with the
+  same speaker watch and narrowing. Module A listens on the socket when a
+  desktop account is configured (`helper.user` or `uid`, as module E) and
+  reads the sound with the same audio reader. Its helper says nothing about
+  monitors or whether the desktop is there: the module reads those from X.
+  Without the socket the session program still grants and lays out.
 
 ### Rate control and tier switching {#rate-control-and-tier-switching}
 

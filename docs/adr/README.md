@@ -55,3 +55,4 @@ options weighed, the choice, and its consequences — so future maintainers
 | [0031](0031-distribution-apt-and-containers-first.md) | Distribution: apt and containers first, from one build, with a system profile | accepted |
 | [0032](0032-ghost-screens.md) | Ghost screens are forced connectors on free root connectors; virtual monitors stay per session | accepted |
 | [0033](0033-desktop-test-lab-and-shared-runners.md) | The desktop is tested on headless mutter in CI and on shared lab machines at night (`fjarr-lab`) | accepted |
+| [0034](0034-x11-sound-through-the-session-program.md) | An X11 kiosk's sound reaches the agent through its session program, narrowed to the speakers as on GNOME | accepted |

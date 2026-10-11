@@ -139,7 +139,8 @@ detail is incorporated here).
   default output's monitor, as the `kind: "audio"` track `desktop-audio`.
   On GNOME the session helper hands the agent a PipeWire connection narrowed
   to that output, as it hands the screen
-  ([docs/23](23-agent-core-architecture.md#desktop-audio)); X11 follows. It
+  ([docs/23](23-agent-core-architecture.md#desktop-audio)), and on an X11 kiosk its
+  session program does the same ([ADR-0034](adr/0034-x11-sound-through-the-session-program.md)). It
   follows the desktop grant, and stops when the robot stops sharing. Same
   demand model and autoplay handling as `fjarr.audio`.
 
