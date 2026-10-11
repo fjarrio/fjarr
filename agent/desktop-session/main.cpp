@@ -23,6 +23,7 @@
 #include <glib-unix.h>
 
 #include "desktop/clipboard_types.hpp"
+#include "desktop/ghost_primary.hpp"
 #include "desktop/helper_protocol.hpp"
 #include "mutter.hpp"
 #include "pipewire.hpp"
@@ -142,8 +143,14 @@ class Helper {
         std::string err;
         const auto monitors = helper::current_monitors(bus_, &err);
         // docs/26#ghost-screens: a ghost is never primary while a real monitor is connected. The
-        // change raises MonitorsChanged, and the corrected layout is what gets sent then.
-        if (enforce_primary(monitors)) return;
+        // change raises MonitorsChanged and the corrected layout follows; the current one is sent
+        // now regardless, since mutter may make no change and then sends no signal, which left the
+        // agent with no monitors at all (mini-PC, 2026-10-11).
+        enforce_primary(monitors);
+        // One primary in what the agent hears, whatever mutter reports (docs/26#ghost-screens).
+        std::vector<Screen> screens;
+        for (const auto& m : monitors) screens.push_back({m.connector, m.primary, m.vendor == "FJR", m.is_virtual, m.x, m.y});
+        const auto sole = sole_primary(screens);
         // A virtual monitor's connector, once the layout shows it (docs/23, Virtual monitors): the
         // monitor appears when the stream's consumer has negotiated its size, after capture-started.
         for (auto& [id, rec] : captures_) {
@@ -174,7 +181,7 @@ class Helper {
             list.push_back({{"connector", m.connector}, {"name", m.name},
                             {"identity", {{"vendor", m.vendor}, {"product", m.product}, {"serial", m.serial}}},
                             {"x", m.x}, {"y", m.y}, {"width", m.width}, {"height", m.height}, {"scale", m.scale},
-                            {"primary", m.primary}, {"kind", m.is_virtual ? "virtual" : "physical"}});
+                            {"primary", sole ? m.connector == *sole : m.primary}, {"kind", m.is_virtual ? "virtual" : "physical"}});
         if (!err.empty()) say("monitors: " + err);
         send({{"type", "monitors"}, {"monitors", list}});
     }
@@ -182,13 +189,18 @@ class Helper {
     /// Makes the leftmost real monitor primary when a ghost is (docs/26#ghost-screens). True when it
     /// asked mutter for the change.
     bool enforce_primary(const std::vector<helper::MonitorInfo>& monitors) {
-        auto ghost = [](const helper::MonitorInfo& m) { return m.vendor == "FJR"; };
+        std::vector<Screen> screens;
+        for (const auto& m : monitors) screens.push_back({m.connector, m.primary, m.vendor == "FJR", m.is_virtual, m.x, m.y});
+        const auto target = primary_to_make(screens);
+        if (!target) return false;
         const auto primary = std::find_if(monitors.begin(), monitors.end(), [](const helper::MonitorInfo& m) { return m.primary; });
-        if (primary == monitors.end() || !ghost(*primary)) return false;
-        const helper::MonitorInfo* best = nullptr;
-        for (const auto& m : monitors)
-            if (!ghost(m) && !m.is_virtual && (!best || m.x < best->x || (m.x == best->x && m.y < best->y))) best = &m;
-        if (!best) return false; // only ghosts: one of them is primary, as it must be
+        const auto best = std::find_if(monitors.begin(), monitors.end(), [&](const helper::MonitorInfo& m) { return m.connector == *target; });
+        // Once per layout: whatever else keeps mutter from taking the change costs one request and a
+        // log line, never a loop (a loop ran the mini-PC out of memory, 2026-10-11).
+        std::string layout;
+        for (const auto& m : monitors) layout += m.connector + (m.primary ? "*" : "") + "@" + std::to_string(m.x) + "," + std::to_string(m.y) + ";";
+        if (layout == primary_tried_for_) return false;
+        primary_tried_for_ = layout;
         std::string err;
         if (!helper::make_primary(bus_, best->connector, &err)) {
             say("could not make " + best->connector + " primary instead of the ghost " + primary->connector + ": " + err);
@@ -423,6 +435,7 @@ class Helper {
     unsigned backoff_s_ = 1;
     bool welcomed_ = false;
     bool waiting_logged_ = false;
+    std::string primary_tried_for_; // the layout enforce_primary last asked mutter to change
     struct Recording {
         std::string connector; // a virtual monitor's: empty until the layout shows it
         std::unique_ptr<helper::Capture> capture;

@@ -566,7 +566,20 @@ applications open on the primary monitor, and an operator's view follows it. So
 (manufacturer `FJR`) and a real monitor is connected, it makes the leftmost real
 monitor primary through mutter's `ApplyMonitorsConfig`, with every position, mode
 and scale kept, persistently, so the account's `monitors.xml` remembers it. With
-only ghosts connected, a ghost is primary, as it must be.
+only ghosts connected, a ghost is primary, as it must be. It asks at most once
+per layout, and not at all when a real monitor is primary already; it sends the
+agent the current monitors whether or not it asked; and when mutter reports more
+than one primary, the agent hears exactly one (a real monitor first, then the
+leftmost). The M3 gate review found why (the mini-PC, 2026-10-11): after a Dell
+came back under a new connector, mutter reported a ghost and the Dell both
+primary, the helper asked again on every change, eight times a second, and each
+new layout reallocated every framebuffer until the out-of-memory killer ended the
+session.
+
+**Ghosts and real monitors share the GPU's display pipes.** The mini-PC's GPU
+drives four; with two ghosts and the three-monitor chain (five), mutter lit one
+monitor, a ghost, and left the Dells dark. Count the real monitors a robot may
+have before adding ghosts.
 
 A **virtual monitor** (mutter's `RecordVirtual`) is the other kind: an extra
 screen for one session, created when the operator asks and gone when they
