@@ -2435,6 +2435,50 @@ void scenario_desktop_control(Operator& op) {
                 (has("key Tab") ? "; Tab reached the window" : "; the compositor took Tab"));
     r.check("desktop-click", width > 0 && has("click button=1 x=321 y=234"), "a click at 321,234 of " + std::to_string(width) + "x" + std::to_string(height) + " landed there");
 
+    // 2b. A mode change keeps input coordinates correct (docs/06), where the fixture can change a
+    //     monitor's mode in place (the X11 one: /mode). The monitor's capture restarts on its new
+    //     size and re-offers; then a click at a normalized point must land on the new geometry's pixel.
+    {
+        const std::size_t mmark = op.inbox_mark();
+        std::size_t smark = op.sig_mark();
+        auto answer_offers = [&](int ms) {
+            const std::int64_t end = g_get_monotonic_time() + ms * 1000LL;
+            while (g_get_monotonic_time() < end)
+                if (auto o = op.wait_signal(smark, "offer", 250)) {
+                    op.answer_offer(*o);
+                    smark = op.sig_mark();
+                }
+        };
+        auto moded = op.http_get_url(op.desktop_plug() + "/mode");
+        if (moded.status != 404) {
+            auto ev = op.wait_envelope(mmark, "fjarr.desktop", "monitors", "event", 5000, [](const Envelope& e) {
+                for (const auto& m : e.payload.value("monitors", json::array()))
+                    if (m.value("w", 0) == 1600 && m.value("h", 0) == 900) return true;
+                return false;
+            });
+            answer_offers(3000);
+            const std::uint64_t f0 = op.frames(desk);
+            const bool flowing = op.select(desk, true, "active", 5000, "fjarr.desktop") && op.wait_frames(desk, f0, 5, 8000);
+            const std::size_t cmark = oracle().size();
+            click(0.25, 0.5); // 0.25 of 1600-1, 0.5 of 900-1: pixel 400,450
+            bool landed = false;
+            for (int i = 0; i < 20 && !landed; i++) {
+                landed = since(cmark).find("click button=1 x=400 y=450") != std::string::npos;
+                if (!landed) op.sleep_ms(100);
+            }
+            r.check("desktop-mode-change", moded.status == 200 && ev && flowing && landed,
+                    std::string(ev ? "1920x1080 -> 1600x900 announced" : "no monitors event with 1600x900") + (flowing ? ", frames again" : ", no frames after") +
+                        (landed ? ", a click at 0.25,0.5 landed on 400,450" : ", the click did not land on 400,450: " + since(cmark).substr(0, 200)));
+            op.http_get_url(op.desktop_plug() + "/mode?restore=1");
+            answer_offers(3000);
+            // The restart took the track out and back: ask for it again, as a client does when a
+            // track returns (docs/21), or the input-to-photon step below watches a track nobody wants.
+            const std::uint64_t f1 = op.frames(desk);
+            op.select(desk, true, "active", 5000, "fjarr.desktop");
+            op.wait_frames(desk, f1, 5, 8000);
+        }
+    }
+
     // 3. Input-to-photon: F9 turns the window green while held; time key-down to the first decoded
     //    frame whose centre changed. docs/16 budget; CI fails only above the 2x ceiling (docs/15).
     std::vector<double> samples;

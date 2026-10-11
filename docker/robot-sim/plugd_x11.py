@@ -122,6 +122,13 @@ class Handler(BaseHTTPRequestHandler):
             # unplug (the mini-PC's ghost moved into the gap, 2026-10-05).
             r = xrandr("--delmonitor", NAME, "--setmonitor", NAME, "1280/340x720/190+2560+0", "none")
             code, body = (200, NAME) if r.returncode == 0 else (500, r.stderr)
+        elif self.path in ("/mode", "/mode?restore=1"):
+            # A mode change in place: LEFT, the test window's monitor, to 1600x900 and back
+            # (docs/06: "a mode change keeps input coordinates correct").
+            geo = "1920/500x1080/280+0+0" if self.path.endswith("restore=1") else "1600/420x900/236+0+0"
+            # Delete and add in one run: Xvfb refuses --setmonitor on a name it already has (BadValue).
+            r = xrandr("--delmonitor", "LEFT", "--setmonitor", "LEFT", geo, "screen")
+            code, body = (200, geo) if r.returncode == 0 else (500, r.stderr)
         elif self.path == "/unplug":
             r = xrandr("--delmonitor", NAME)
             code, body = (200, NAME) if r.returncode == 0 else (404, r.stderr or "nothing plugged")
