@@ -4,7 +4,7 @@
  * spec: docs/22-remote-desktop-client.md#input-pipeline · #testing-docs15 · docs/08#input-events-fjarrdesktop
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { acquireDesktopClipboard, acquireDesktopCursor, acquireDesktopSharing, acquireDesktopState, addDesktopMonitor, contentBox, createFjarrClient, cursorDataUrl, DesktopInput, encodePng, FjarrError, isPasteChord, normalizedPoint, removeDesktopMonitor, type Session } from "../src/index.js";
+import { acquireDesktopClipboard, acquireDesktopCursor, acquireDesktopSharing, acquireDesktopState, addDesktopMonitor, contentBox, createFjarrClient, cursorDataUrl, DesktopInput, encodePng, FjarrError, isPasteChord, normalizedPoint, removeDesktopMonitor, throughLayout, type Session } from "../src/index.js";
 import { encodeBlobChunk } from "../src/blob.js";
 import { fakeMediaStreamFactory, MockAgent, type MockAgentOptions } from "../src/testing/index.js";
 
@@ -93,6 +93,43 @@ describe("DesktopInput", () => {
       ["button", { button: "right", down: true, track_id: "desk-virtual-1", x: 100 / 1280, y: 100 / 720, seq: 1 }],
       ["button", { button: "right", down: false }],
     ]);
+  });
+
+  // docs/22#drag-across-monitors: a drag crosses monitors through the robot's own layout.
+  it("throughLayout: past an edge into the neighbour, the nearest edge in a gap, ties keep the start", () => {
+    const left = { id: "a", x: 0, y: 0, w: 1920, h: 1080 };
+    const right = { id: "b", x: 1920, y: 180, w: 1280, h: 720 }; // smaller, offset down
+    const lay = [left, right];
+    expect(throughLayout(lay, "a", 0.5, 0.5)).toEqual({ monitorId: "a", x: 0.5, y: 0.5 });
+    // 1.25 of 1920 = 2400: 480 px into b; y 540 is 360 into b's 180..900
+    expect(throughLayout(lay, "a", 1.25, 0.5)).toEqual({ monitorId: "b", x: 480 / 1280, y: 360 / 720 });
+    // Above b's top, right of a: the nearest point is b's top edge
+    const above = throughLayout(lay, "a", 1.25, 0.05)!;
+    expect(above.monitorId).toBe("b");
+    expect(above.y).toBe(0);
+    // Past everything on the right: b's right edge
+    expect(throughLayout(lay, "a", 3, 0.5)).toEqual({ monitorId: "b", x: 1, y: 360 / 720 });
+    // Exactly on the shared edge: the starting monitor
+    expect(throughLayout(lay, "a", 1, 0.5)?.monitorId).toBe("a");
+    expect(throughLayout(lay, "zz", 0.5, 0.5)).toBeNull();
+  });
+
+  it("while a button is held, motion past the monitor goes to the monitor it lands on; without one, nothing", async () => {
+    const { agent, input, sent } = await rig();
+    agent.sendMonitors([
+      { id: "virtual-1", index: 0, primary: true, x: 0, y: 0, w: 1280, h: 720, scale: 1 },
+      { id: "virtual-2", index: 1, x: 1280, y: 0, w: 1280, h: 720, scale: 1 },
+    ]);
+    await tick();
+    expect(input.pointerMove({ clientX: 1600, clientY: 360 }, BOX)).toBe(false); // no button: nothing past the edge
+    expect(input.pointerButton({ clientX: 1200, clientY: 360, button: 0 }, true, BOX)).toBe(true);
+    expect(input.pointerMove({ clientX: 1600, clientY: 360 }, BOX)).toBe(true); // dragged 320 px into virtual-2
+    expect(input.pointerButton({ clientX: 1600, clientY: 360, button: 0 }, false, BOX)).toBe(true);
+    await vi.advanceTimersByTimeAsync(50);
+    await tick();
+    const pointer = agent.received.filter((e) => e.cap === "fjarr.desktop" && e.type === "pointer").map((e) => e.payload as { track_id: string; x: number });
+    expect(pointer.at(-1)).toMatchObject({ track_id: "desk-virtual-2", x: 320 / 1280 });
+    expect(sent().filter(([t]) => t === "button").map(([, p]) => (p as { down: boolean }).down)).toEqual([true, false]);
   });
 
   it("seq is one counter per session: a view mounted later continues it, never restarts it (mini-PC, 2026-10-03)", async () => {

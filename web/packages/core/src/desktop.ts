@@ -6,7 +6,7 @@
  */
 import type { BlobRef } from "./blob.js";
 import type { BulkSender, Publisher } from "./channels.js";
-import type { ResultPayload } from "./protocol.js";
+import type { MonitorInfo, ResultPayload } from "./protocol.js";
 import type { Session } from "./session.js";
 
 const CAP = "fjarr.desktop";
@@ -46,6 +46,34 @@ export function normalizedPoint(box: ContentBox, clientX: number, clientY: numbe
   const y = (clientY - box.top) / box.height;
   if (x < 0 || x > 1 || y < 0 || y > 1) return null;
   return { x, y };
+}
+
+/**
+ * A point of monitor `fromId`, normalized and possibly past its edges, through the robot's own
+ * monitor layout (docs/22#drag-across-monitors): the monitor that contains it in robot coordinates,
+ * else the nearest point of the nearest monitor; ties keep the starting monitor. Null when `fromId`
+ * is not in the layout.
+ */
+export function throughLayout(
+  monitors: readonly Pick<MonitorInfo, "id" | "x" | "y" | "w" | "h">[],
+  fromId: string,
+  nx: number,
+  ny: number,
+): { monitorId: string; x: number; y: number } | null {
+  const from = monitors.find((m) => m.id === fromId);
+  if (!from || from.w <= 0 || from.h <= 0) return null;
+  const rx = from.x + nx * from.w;
+  const ry = from.y + ny * from.h;
+  let best: { m: Pick<MonitorInfo, "id" | "x" | "y" | "w" | "h">; cx: number; cy: number; d: number } | null = null;
+  for (const m of monitors) {
+    if (m.w <= 0 || m.h <= 0) continue;
+    const cx = Math.min(Math.max(rx, m.x), m.x + m.w);
+    const cy = Math.min(Math.max(ry, m.y), m.y + m.h);
+    const d = (rx - cx) ** 2 + (ry - cy) ** 2;
+    if (!best || d < best.d || (d === best.d && m.id === fromId)) best = { m, cx, cy, d };
+  }
+  if (!best) return null;
+  return { monitorId: best.m.id, x: (best.cx - best.m.x) / best.m.w, y: (best.cy - best.m.y) / best.m.h };
 }
 
 export interface PointerLike {
@@ -137,10 +165,21 @@ export class DesktopInput {
     return this.point(e, box) !== null;
   }
 
-  /** The motion to `e`, published; null (and nothing sent) outside the monitor's pixels. */
+  /**
+   * The motion to `e`, published; null (and nothing sent) outside the monitor's pixels, except while
+   * a button is held: then the point goes through the robot's layout to the monitor it lands on, so a
+   * drag crosses monitors in one motion (docs/22#drag-across-monitors).
+   */
   private point(e: PointerLike, box: ContentBox | null): { track_id: string; x: number; y: number; seq: number } | null {
-    const track = this.track();
-    const p = box && normalizedPoint(box, e.clientX, e.clientY);
+    let track = this.track();
+    let p = box && normalizedPoint(box, e.clientX, e.clientY);
+    if (!p && box && track?.startsWith("desk-") && this.buttons.size > 0) {
+      const hit = throughLayout(this.session.tracks.monitors.getSnapshot(), track.slice(5), (e.clientX - box.left) / box.width, (e.clientY - box.top) / box.height);
+      if (hit) {
+        track = `desk-${hit.monitorId}`;
+        p = { x: hit.x, y: hit.y };
+      }
+    }
     if (this.disposed || !track || !p) return null;
     const motion = { track_id: track, x: p.x, y: p.y, seq: nextPointerSeq(this.session) };
     this.pointer.publish(motion);

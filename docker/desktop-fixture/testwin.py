@@ -53,6 +53,11 @@ def activate(app):
     click = Gtk.GestureClick(button=0)
     click.connect("pressed", lambda g, _n, x, y: log(f"click button={g.get_current_button()} x={x:.0f} y={y:.0f}"))
     win.add_controller(click)
+    # A drag's positions, which the window keeps receiving past its own monitor while the button is
+    # held (Wayland's implicit grab): the oracle for a drag that crosses monitors (docs/22#drag-across-monitors).
+    drag = Gtk.GestureDrag()
+    drag.connect("drag-update", lambda g, dx, dy: log("drag x={:.0f} y={:.0f}".format(*(lambda p: (p[1] + dx, p[2] + dy))(g.get_start_point()))))
+    win.add_controller(drag)
     win.connect("notify::is-active", lambda w, _p: log(f"focus active={w.is_active()}"))
     win.fullscreen()
     win.present()

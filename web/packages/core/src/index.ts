@@ -94,6 +94,7 @@ export {
   DesktopInput,
   isPasteChord,
   normalizedPoint,
+  throughLayout,
   WHEEL_LINE_PX,
   type ClipboardSync,
   type ContentBox,

@@ -148,6 +148,51 @@ test("a monitor plugged into the robot appears in the Desktop panel's layout, an
   await expect(page.locator("[data-fjarr-desktop] [data-fjarr-track^='desk-']")).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
 });
 
+test("the Desktop panel: a drag crosses from one robot monitor into the next in one motion, through the robot's layout (docs/22#drag-across-monitors)", async ({ dashboard, stack, page }) => {
+  await stack.requireServer();
+  needs(await stack.dashboardReachable(), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
+  const plugd = process.env.E2E_DESKTOP_PLUG ?? "http://desktop-fixture:8091";
+  const call = (what: string) => fetch(`${plugd}/${what}`, { signal: AbortSignal.timeout(10_000) }).then((r) => r.text(), () => "");
+  needs(await fetch(`${plugd}/`, { signal: AbortSignal.timeout(2000) }).then(() => true, () => false), `the fixture's monitor hot-plug is not reachable at ${plugd} — \`make desktop-e2e\` brings it up`);
+  while ((await call("unplug")).startsWith("Meta"));
+
+  await dashboard.goto();
+  await page.getByRole("button", { name: /Desktop Robot 01/ }).click();
+  await dashboard.connect("desktop-robot-01");
+  await dashboard.waitForState("desktop-robot-01", "connected");
+  await expect(page.locator("[data-fjarr-desktop] [data-fjarr-track^='desk-']")).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
+  expect(await call("plug")).toMatch(/^Meta-/);
+  try {
+    await page.locator("[data-demo-monitor-picker]").selectOption("all");
+    const tiles = page.locator("[data-fjarr-desktop-layout] [data-fjarr-layout-monitor]");
+    await expect(tiles).toHaveCount(2);
+    for (const t of await tiles.all()) await expect(t.locator("[data-fjarr-track]")).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 20_000 });
+    // Left and right by where the layout put them (the robot's geometry).
+    const boxes = await Promise.all((await tiles.all()).map(async (t) => ({ t, b: (await t.boundingBox())! })));
+    boxes.sort((p, q) => p.b.x - q.b.x);
+    const from = boxes[0]!, to = boxes[1]!;
+    expect(to.b.x).toBeGreaterThan(from.b.x + from.b.width / 2); // side by side, as mutter places a plugged monitor
+
+    // Press near the left monitor's right edge, drag to the middle of the right one, still pressed.
+    const oracleUrl = process.env.E2E_DESKTOP_ORACLE ?? "http://desktop-fixture:8090/testwin.log";
+    const oracle = () => fetch(oracleUrl, { signal: AbortSignal.timeout(2000) }).then((r) => (r.ok ? r.text() : ""), () => "");
+    const leftWidth = 1280; // the fixture's own monitor, where the test window is (session.sh)
+    const mark = (await oracle()).length;
+    const y = from.b.y + from.b.height * 0.5;
+    await page.mouse.move(from.b.x + from.b.width * 0.9, y);
+    await page.mouse.down();
+    await page.mouse.move(to.b.x + to.b.width * 0.5, to.b.y + to.b.height * 0.5, { steps: 20 });
+    // The robot's own answer: the test window, pressed on the left monitor, keeps receiving the drag
+    // and logs where the robot's pointer is; past the left monitor's width means it crossed.
+    const drags = async () => [...(await oracle()).slice(mark).matchAll(/drag x=(-?\d+) y=(-?\d+)/g)].map((m) => Number(m[1]));
+    await expect.poll(async () => Math.max(-1, ...(await drags())), { timeout: 5000, message: "the robot's pointer never left the first monitor" }).toBeGreaterThan(leftWidth);
+    await page.screenshot({ path: dashboard.out.path("desktop-drag-across.png") });
+    await page.mouse.up();
+  } finally {
+    await call("unplug");
+  }
+});
+
 test("the Desktop panel's clipboard: a copy on the robot reaches the browser, and a paste in the browser pastes on the robot, text and images (M3 3.5)", async ({ dashboard, stack, page }) => {
   await stack.requireServer();
   needs(await stack.dashboardReachable(), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
