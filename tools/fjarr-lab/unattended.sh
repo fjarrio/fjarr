@@ -179,7 +179,7 @@ verify() {
   . "$STATE/secrets"
   local rc=0
   for scenario in desktop-see desktop-control; do
-    "$STATE/fjarr-opsim" --server "ws://127.0.0.1:$PORT/ws" --robot "$ROBOT" --grant-secret "$GRANT" --scenario "$scenario" \
+    FJARR_OPSIM_DUMP_DIR="$STATE" "$STATE/fjarr-opsim" --server "ws://127.0.0.1:$PORT/ws" --robot "$ROBOT" --grant-secret "$GRANT" --scenario "$scenario" \
       --timeout 120 --desktop-oracle "http://127.0.0.1:8090/testwin.log" >"$STATE/$scenario.log" 2>&1 || rc=1
     grep -E '^(PASS|FAIL|SUMMARY)' "$STATE/$scenario.log"
   done

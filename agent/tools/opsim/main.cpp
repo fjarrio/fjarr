@@ -327,7 +327,23 @@ struct TrackRx {
     std::int64_t last_encoded_us = 0, max_encoded_gap_us = 0;
     // The mean luma of the frame's centre (16×16): the input-to-photon harness watches it change.
     int centre_luma = -1;
+    // The latest frame's luma at 96×54, for a failure to show what was on screen (M3 gate review).
+    std::vector<std::uint8_t> thumb;
 };
+
+constexpr int THUMB_W = 96, THUMB_H = 54;
+/// The frame's luma, point-sampled down to THUMB_W×THUMB_H; empty when it has no 8-bit luma.
+std::vector<std::uint8_t> luma_thumb(const GstVideoFrame& f) {
+    if (GST_VIDEO_FRAME_COMP_DEPTH(&f, 0) != 8) return {};
+    const int w = GST_VIDEO_FRAME_WIDTH(&f), h = GST_VIDEO_FRAME_HEIGHT(&f);
+    if (w < THUMB_W || h < THUMB_H) return {};
+    const auto* data = static_cast<const std::uint8_t*>(GST_VIDEO_FRAME_PLANE_DATA(&f, 0));
+    const int stride = GST_VIDEO_FRAME_PLANE_STRIDE(&f, 0), pstride = GST_VIDEO_FRAME_COMP_PSTRIDE(&f, 0), offset = GST_VIDEO_FRAME_COMP_OFFSET(&f, 0);
+    std::vector<std::uint8_t> out(static_cast<std::size_t>(THUMB_W) * THUMB_H);
+    for (int y = 0; y < THUMB_H; y++)
+        for (int x = 0; x < THUMB_W; x++) out[static_cast<std::size_t>(y) * THUMB_W + x] = data[(y * h / THUMB_H) * stride + offset + (x * w / THUMB_W) * pstride];
+    return out;
+}
 
 /// Mean 8-bit luma of the 16×16 block at the centre of a decoded frame; -1 when it has none.
 int centre_luma(const GstVideoFrame& f) {
@@ -999,16 +1015,19 @@ class Peer {
         std::uint64_t ts = 0;
         bool ok = false;
         int luma = -1;
+        std::vector<std::uint8_t> thumb;
         GstVideoFrame frame;
         if (gst_video_frame_map(&frame, &vinfo, buf, GST_MAP_READ)) {
             ok = decode_stamp(frame, counter, ts);
             luma = centre_luma(frame);
+            thumb = luma_thumb(frame);
             gst_video_frame_unmap(&frame);
         }
         const std::int64_t now = g_get_monotonic_time();
         std::lock_guard<std::mutex> lk(self->sh_.mu);
         rx->frames++;
         rx->centre_luma = luma;
+        rx->thumb = std::move(thumb);
         if (!rx->first_frame_us) rx->first_frame_us = now;
         if (rx->last_frame_us && now - rx->last_frame_us > rx->max_gap_us) rx->max_gap_us = now - rx->last_frame_us;
         rx->last_frame_us = now;
@@ -2483,10 +2502,11 @@ void scenario_desktop_control(Operator& op) {
     //    frame whose centre changed. docs/16 budget; CI fails only above the 2x ceiling (docs/15).
     std::vector<double> samples;
     const int base = op.centre_luma(desk);
+    int widest = 0; // the largest change of the centre seen: a failure says how far it got
     for (int i = 0; i < 10 && base >= 0; i++) {
         const std::int64_t t0 = g_get_monotonic_time();
         key("F9", true);
-        const bool lit = op.wait_centre_luma(desk, [&](int l) { return std::abs(l - base) > 20; }, 2000);
+        const bool lit = op.wait_centre_luma(desk, [&](int l) { widest = std::max(widest, std::abs(l - base)); return std::abs(l - base) > 20; }, 2000);
         if (lit) samples.push_back((g_get_monotonic_time() - t0) / 1000.0);
         key("F9", false);
         op.wait_centre_luma(desk, [&](int l) { return std::abs(l - base) <= 8; }, 2000);
@@ -2497,7 +2517,23 @@ void scenario_desktop_control(Operator& op) {
     const double p50 = pct(0.5), p95 = pct(0.95);
     char detail[200];
     std::snprintf(detail, sizeof detail, "%zu/10 samples, p50 %.0f ms, p95 %.0f ms (LAN budget 150/250; CI ceiling 500)", samples.size(), p50, p95);
-    r.check("input-to-photon", samples.size() == 10 && p95 <= 500, detail);
+    std::string why_not;
+    if (samples.size() < 10) {
+        // What the camera saw instead: the centre's baseline, how far it moved, and the frame itself.
+        why_not = "; centre luma " + std::to_string(base) + ", widest change " + std::to_string(widest);
+        const char* dir = std::getenv("FJARR_OPSIM_DUMP_DIR");
+        const auto snap = op.track_snapshot(desk);
+        if (dir && *dir && snap && snap->thumb.size() == static_cast<std::size_t>(THUMB_W) * THUMB_H) {
+            const std::string path = std::string(dir) + "/" + desk + ".pgm";
+            if (FILE* f = std::fopen(path.c_str(), "wb")) {
+                std::fprintf(f, "P5\n%d %d\n255\n", THUMB_W, THUMB_H);
+                std::fwrite(snap->thumb.data(), 1, snap->thumb.size(), f);
+                std::fclose(f);
+                why_not += "; the last frame is in " + path;
+            }
+        }
+    }
+    r.check("input-to-photon", samples.size() == 10 && p95 <= 500, detail + why_not);
 
     // 4. Safety (docs/15): the session ends while Shift is down; the agent releases it.
     mark = oracle().size();
