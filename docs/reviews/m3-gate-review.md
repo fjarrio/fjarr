@@ -53,8 +53,11 @@ bookkeeping instead.
 
 - **A red nightly reaches someone** — an issue opened, or a message, when a
   scheduled run fails; a week of red went unseen.
-- **The image clipboard-write stall** — about 1 in 15 runs in October, before
-  the backend is reached; opsim now waits 15 s and reports the agent's reason.
+- **The image clipboard-write stall** — about 1 in 15 runs in CI in October,
+  before the backend is reached; opsim now waits 15 s and reports the agent's
+  reason. Run back to back on a development host it is far more frequent: 4 of
+  8 `desktop-clipboard` runs on 2026-10-12, the same with and without 3.5.2's
+  changes; the helper never receives the write, and the agent logs nothing.
 - **The offer a browser never answered** (2026-10-05) — the trigger is gone and
   the page recovers on its own; the cause is not known.
 - **The compose gate's desktop step is intermittent**: one CI run in about six

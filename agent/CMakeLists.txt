@@ -91,7 +91,7 @@ endif()
 pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0 gio-unix-2.0)
 # libpipewire: the helper narrows each handed connection to its capture's node (docs/23).
 pkg_check_modules(LIBPIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
-add_executable(fjarr-desktop-session desktop-session/main.cpp desktop-session/mutter.cpp desktop-session/pipewire.cpp src/desktop/helper_protocol.cpp src/desktop/ghost_primary.cpp
+add_executable(fjarr-desktop-session desktop-session/main.cpp desktop-session/mutter.cpp desktop-session/pipewire.cpp desktop-session/sound.cpp src/desktop/helper_protocol.cpp src/desktop/ghost_primary.cpp
   src/desktop/clipboard_types.cpp)
 target_include_directories(fjarr-desktop-session PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(fjarr-desktop-session PRIVATE PkgConfig::GIO PkgConfig::LIBPIPEWIRE nlohmann_json::nlohmann_json)
@@ -104,7 +104,7 @@ target_link_libraries(fjarr-desktop-session PRIVATE PkgConfig::GIO PkgConfig::LI
 # dependencies, not libfjarr's.
 pkg_check_modules(LIBEI REQUIRED IMPORTED_TARGET libei-1.0)
 pkg_check_modules(XKBCOMMON REQUIRED IMPORTED_TARGET xkbcommon)
-add_library(fjarr-desktop-mutter MODULE modules/desktop-mutter/backend.cpp modules/desktop-mutter/eis_input.cpp modules/desktop-mutter/stream_reader.cpp
+add_library(fjarr-desktop-mutter MODULE modules/desktop-mutter/backend.cpp modules/desktop-mutter/eis_input.cpp modules/desktop-mutter/stream_reader.cpp modules/desktop-mutter/audio_reader.cpp
   src/desktop/helper_protocol.cpp src/desktop/monitor_identity.cpp src/desktop/keymap.cpp src/desktop/clipboard_types.cpp src/desktop/cursor_image.cpp)
 target_include_directories(fjarr-desktop-mutter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(fjarr-desktop-mutter PRIVATE PkgConfig::GST PkgConfig::GIO PkgConfig::LIBEI PkgConfig::XKBCOMMON PkgConfig::LIBPIPEWIRE nlohmann_json::nlohmann_json)

@@ -407,6 +407,47 @@ test("the dashboard with its Desktop panel fills the window edge to edge and nev
   }
 });
 
+test("the Desktop panel's Sound plays what the robot's desktop plays, and the robot captures it only while it is on (M3.5 3.5.2)", async ({ dashboard, stack, page }) => {
+  await stack.requireServer();
+  needs(await stack.dashboardReachable(), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
+  const plugd = process.env.E2E_DESKTOP_PLUG ?? "http://desktop-fixture:8091";
+  const get = (path: string) => fetch(plugd + path, { signal: AbortSignal.timeout(5000) }).then((r) => r.text(), () => "");
+  const listening = async () => Number(await get("/listening"));
+  needs((await get("/listening")) !== "", `the desktop fixture's plugd is not reachable at ${plugd} — \`make desktop-e2e\` brings it up`);
+
+  await dashboard.goto();
+  await page.getByRole("button", { name: /Desktop Robot 01/ }).click();
+  await dashboard.connect("desktop-robot-01");
+  await dashboard.waitForState("desktop-robot-01", "connected");
+  // docs/22#sound: the toggle is there because the robot has an output; nothing is captured until it is on.
+  const toggle = page.locator("[data-demo-desktop-sound]");
+  await expect(toggle).toBeVisible({ timeout: 20_000 });
+  expect(await listening()).toBe(0);
+  await toggle.check(); // the click is the gesture a browser wants before it plays sound
+  const sink = page.locator("[data-fjarr-audio='desktop-audio']");
+  await expect(sink).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 10_000 });
+  expect(await get("/play?freq=440&seconds=10")).toContain("playing");
+  // What the browser hears: the level of the sink's stream through an analyser.
+  const level = () =>
+    sink.locator("audio").evaluate(async (a: HTMLAudioElement) => {
+      const ctx = new AudioContext();
+      await ctx.resume().catch(() => undefined); // made outside a gesture it starts suspended, reading zeros
+      const analyser = ctx.createAnalyser();
+      ctx.createMediaStreamSource(a.srcObject as MediaStream).connect(analyser);
+      const buf = new Float32Array(analyser.fftSize);
+      await new Promise((r) => setTimeout(r, 300));
+      analyser.getFloatTimeDomainData(buf);
+      await ctx.close();
+      return Math.sqrt(buf.reduce((acc, v) => acc + v * v, 0) / buf.length);
+    });
+  await expect.poll(level, { timeout: 5000 }).toBeGreaterThan(0.05);
+  dashboard.out.note("desktopSoundLevel", await level(), "the desktop's tone, RMS in the browser (silence is 0)");
+  await toggle.uncheck();
+  await expect(sink).toHaveCount(0);
+  // The producer lingers for the tier grace (10 s), then the robot stops capturing its speakers.
+  await expect.poll(listening, { timeout: 15_000, intervals: [500] }).toBe(0);
+});
+
 test("the Desktop panel stays when the robot's desktop session goes, says why, and streams again when it is back (mini-PC, 2026-10-04)", async ({ dashboard, stack, page }) => {
   await stack.requireServer();
   needs(await stack.dashboardReachable(), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);

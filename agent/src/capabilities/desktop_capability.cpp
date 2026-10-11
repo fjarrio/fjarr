@@ -26,6 +26,8 @@ namespace {
 /// Where packages install their modules (ADR-0021). Overridable so the dev stack and the tests
 /// can point somewhere writable without pretending to be an installed system.
 constexpr const char* DEFAULT_MODULE_DIR = "/usr/lib/fjarr/desktop";
+/// The desktop's sound: not `desk-…`, which names monitors (docs/08#track-manifest).
+constexpr const char* SOUND_TRACK = "desktop-audio";
 
 std::string random_uuid() {
     static std::mt19937_64 rng{std::random_device{}()};
@@ -51,6 +53,7 @@ struct DesktopCapability::Impl {
     std::string unavailable; // why not, when chosen is empty
     nlohmann::json helper = nlohmann::json::object(); // the backend's own config (the session helper's socket and account)
     std::unique_ptr<DesktopBackend> driver; // the live backend from the module
+    std::shared_ptr<VideoSource> sound;     // the desktop's sound (docs/23#desktop-audio); null without one
     std::map<SessionId, SessionContext*> sessions;
     // One track per monitor, keyed by wire id (docs/23#desktop-monitors).
     struct Screen {
@@ -287,6 +290,15 @@ struct DesktopCapability::Impl {
             t.monitor = info(sc->monitor, i);
             out.push_back(std::move(t));
         }
+        // The desktop's sound (docs/23#desktop-audio): one track, while the robot has an output.
+        if (sound && (!available_only || sound->available())) {
+            TrackSpec t;
+            t.track_id = SOUND_TRACK;
+            t.label = "Desktop sound";
+            t.kind = TrackKind::Audio;
+            t.source = SourceRef{sound, "src"};
+            out.push_back(std::move(t));
+        }
         return out;
     }
     void reoffer() {
@@ -482,6 +494,14 @@ void DesktopCapability::configure(const nlohmann::json& config, const SourceFact
     if (auto* clip = impl_->driver->clipboard()) clip->on_changed([this](std::vector<std::string> types) { impl_->on_clipboard_changed(std::move(types)); });
     impl_->driver->on_cursor_shape([this](const CursorShape& shape) { impl_->on_cursor_shape(shape); });
     impl_->driver->on_cursor_position([this](MonitorId m, double x, double y) { impl_->on_cursor_position(m, x, y); });
+    if (impl_->driver->features().desktop_audio) {
+        impl_->sound = impl_->driver->start_audio_capture();
+        if (impl_->sound)
+            impl_->sound->on_availability_changed([this](bool now) {
+                log::info("desktop", now ? "track available" : "track unavailable", {{"track", SOUND_TRACK}});
+                impl_->reoffer();
+            });
+    }
 }
 
 void DesktopCapability::session_attached(SessionContext& ctx, const nlohmann::json&) {
@@ -702,6 +722,7 @@ std::vector<Capability::ConfiguredSource> DesktopCapability::configured_sources(
 void DesktopCapability::shutdown() {
     impl_->sessions.clear();
     impl_->screens.clear();
+    impl_->sound.reset();
     impl_->driver.reset();
 }
 

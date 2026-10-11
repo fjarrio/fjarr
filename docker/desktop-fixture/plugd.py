@@ -125,6 +125,59 @@ def paste_image(size=False):
     return "200 " + digest(r.stdout)
 
 
+player = None  # the pw-play now playing on the desktop
+
+
+def play(freq, seconds):
+    # The desktop plays a sound (M3.5 3.5.2): pw-play, an application of the desktop's user, to the
+    # default output. A sine at `freq` Hz, so a listener can tell it from silence and from another
+    # tone (GStreamer's pipewiresink never started the graph here: spikes/desktop-audio).
+    import math, struct, wave
+    global player
+    if not 50 <= freq <= 8000 or not 0 < seconds <= 60:
+        return "400 freq 50-8000, seconds up to 60"
+    path = f"/run/desktop/tone-{freq}-{seconds}.wav"
+    w = wave.open(path, "wb")
+    w.setnchannels(1)
+    w.setsampwidth(2)
+    w.setframerate(48000)
+    w.writeframes(b"".join(struct.pack("<h", int(12000 * math.sin(2 * math.pi * freq * i / 48000))) for i in range(int(48000 * seconds))))
+    w.close()
+    if player and player.poll() is None:
+        player.kill()
+    player = subprocess.Popen(["pw-play", path], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return f"200 playing {freq} Hz for {seconds} s"
+
+
+def speakers(name):
+    # The default output changes (headphones plugged in): a null sink named `name`, made if needed,
+    # becomes the default. Playing streams follow the default; the agent's capture must too.
+    import json
+    if not name.replace("-", "").isalnum():
+        return "400 a name of letters, digits and dashes"
+    nodes = json.loads(subprocess.run(["pw-dump"], capture_output=True, timeout=5).stdout or b"[]")
+    ids = [o["id"] for o in nodes if o.get("info", {}).get("props", {}).get("node.name") == name]
+    if not ids:
+        subprocess.run(["pw-cli", "create-node", "adapter", f"{{ factory.name=support.null-audio-sink node.name={name} node.description={name} "
+                        "media.class=Audio/Sink object.linger=true audio.position=[FL FR] }"], capture_output=True, timeout=5)
+        if not wait(lambda: any(o.get("info", {}).get("props", {}).get("node.name") == name
+                                for o in json.loads(subprocess.run(["pw-dump"], capture_output=True, timeout=5).stdout or b"[]")), 5):
+            return "500 the sink did not appear"
+        nodes = json.loads(subprocess.run(["pw-dump"], capture_output=True, timeout=5).stdout)
+        ids = [o["id"] for o in nodes if o.get("info", {}).get("props", {}).get("node.name") == name]
+    r = subprocess.run(["wpctl", "set-default", str(ids[0])], capture_output=True, timeout=5)
+    return ("200 " + name) if r.returncode == 0 else "500 " + r.stderr.decode(errors="replace")
+
+
+def listening():
+    # How many capture streams are open on the desktop's outputs: the agent's audio reader is one
+    # (stream.capture.sink). Zero while nobody listens (docs/23#desktop-audio: demand only).
+    import json
+    nodes = json.loads(subprocess.run(["pw-dump"], capture_output=True, timeout=5).stdout or b"[]")
+    n = sum(1 for o in nodes if o.get("info", {}).get("props", {}).get("stream.capture.sink") in ("true", True))
+    return f"200 {n}"
+
+
 def session_end():
     # The desktop session goes, as when GNOME Shell crashed on an unplug (mini-PC, 2026-10-04): to
     # the agent, its helper leaves (docs/08 `desktop: absent`).
@@ -163,10 +216,17 @@ def on_request(server, _cond):
             result = session_start()
         elif path == "/copy-image":
             result = copy_image()
+        elif path == "/play":
+            q = urllib.parse.parse_qs(query)
+            result = play(int(q.get("freq", ["440"])[0]), float(q.get("seconds", ["5"])[0]))
+        elif path == "/listening":
+            result = listening()
+        elif path == "/speakers":
+            result = speakers(urllib.parse.parse_qs(query).get("use", [""])[0])
         elif path == "/paste-image":
             result = paste_image(urllib.parse.parse_qs(query).get("size", ["0"])[0] == "1")
         else:
-            result = "404 /plug, /unplug, /copy?text=, /paste, /copy-image, /paste-image, /session-end or /session-start"
+            result = "404 /plug, /unplug, /copy?text=, /paste, /copy-image, /paste-image, /play?freq=&seconds=, /speakers?use=, /listening, /session-end or /session-start"
         code, body = result.split(" ", 1)
         data = body.encode()
         conn.sendall(f"HTTP/1.0 {code} X\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {len(data)}\r\n\r\n".encode() + data)
@@ -180,5 +240,5 @@ server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server.bind(("0.0.0.0", PORT))
 server.listen(4)
 GLib.io_add_watch(server.fileno(), GLib.IO_IN, lambda *_: on_request(server, None))
-print(f"plugd: monitor hot-plug and the clipboard on :{PORT} (/plug, /unplug, /copy?text=, /paste, /copy-image, /paste-image)", flush=True)
+print(f"plugd: monitor hot-plug and the clipboard on :{PORT} (/plug, /unplug, /copy?text=, /paste, /copy-image, /paste-image, /play, /speakers)", flush=True)
 GLib.MainLoop().run()

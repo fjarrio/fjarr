@@ -14,6 +14,7 @@ add_executable(fjarr-tests
   test_edid.cpp
   test_x11_layout.cpp
   test_ghost_primary.cpp
+  test_default_sink.cpp
   test_cursor_image.cpp
   ${CMAKE_SOURCE_DIR}/agent/src/desktop/monitor_identity.cpp
   ${CMAKE_SOURCE_DIR}/agent/src/desktop/keymap.cpp

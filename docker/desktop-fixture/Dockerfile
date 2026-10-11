@@ -10,9 +10,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends g++ pkg-config libglib2.0-dev nlohmann-json3-dev libpipewire-0.3-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY agent/desktop-session /src/agent/desktop-session
-COPY agent/src/desktop/helper_protocol.hpp agent/src/desktop/helper_protocol.cpp agent/src/desktop/clipboard_types.hpp agent/src/desktop/clipboard_types.cpp agent/src/desktop/ghost_primary.hpp agent/src/desktop/ghost_primary.cpp /src/agent/src/desktop/
+COPY agent/src/desktop/helper_protocol.hpp agent/src/desktop/helper_protocol.cpp agent/src/desktop/clipboard_types.hpp agent/src/desktop/clipboard_types.cpp agent/src/desktop/ghost_primary.hpp agent/src/desktop/ghost_primary.cpp agent/src/desktop/default_sink.hpp /src/agent/src/desktop/
 RUN g++ -std=c++20 -O2 -Wall -Wextra -Werror -I/src/agent/src \
-      /src/agent/desktop-session/main.cpp /src/agent/desktop-session/mutter.cpp /src/agent/desktop-session/pipewire.cpp \
+      /src/agent/desktop-session/main.cpp /src/agent/desktop-session/mutter.cpp /src/agent/desktop-session/pipewire.cpp /src/agent/desktop-session/sound.cpp \
       /src/agent/src/desktop/helper_protocol.cpp /src/agent/src/desktop/clipboard_types.cpp /src/agent/src/desktop/ghost_primary.cpp \
       $(pkg-config --cflags --libs gio-unix-2.0 libpipewire-0.3) -o /fjarr-desktop-session
 
@@ -37,6 +37,7 @@ COPY --chmod=0755 docker/desktop-fixture/selftest.py /usr/local/bin/fixture-self
 COPY --chmod=0755 docker/desktop-fixture/helper_check.py /usr/local/bin/fixture-helper-check
 COPY --chmod=0755 docker/desktop-fixture/testwin.py /usr/local/bin/fixture-testwin
 COPY --chmod=0755 docker/desktop-fixture/plugd.py /usr/local/bin/fixture-plugd
+COPY docker/desktop-fixture/speakers.conf /etc/pipewire/pipewire.conf.d/fixture-speakers.conf
 COPY --from=helper /fjarr-desktop-session /usr/local/bin/fjarr-desktop-session
 USER desktop
 WORKDIR /home/desktop

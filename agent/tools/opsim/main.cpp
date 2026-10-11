@@ -2449,6 +2449,76 @@ void scenario_audio_unlistened(Operator& op) {
     r.check("audio-not-offered", mic.empty(), mic.empty() ? "granted fjarr.audio without listen: no audio track offered" : "offered " + mic + " without listen");
 }
 
+/// M3.5 3.5.2: what the fixture's desktop plays, heard through fjarr.desktop's desktop-audio track — the
+/// helper hands over the speakers, module E reads them only while the track is enabled, and a change of
+/// default output keeps the sound coming (docs/23#desktop-audio). The fixture plays through
+/// --desktop-plug (/play, /speakers).
+void scenario_desktop_audio(Operator& op) {
+    Report& r = op.report();
+    if (op.desktop_plug().empty()) {
+        r.check("desktop-plug", false, "--desktop-plug not given: nothing can play on the fixture's desktop");
+        return;
+    }
+    connect_and_report(op);
+    const std::string id = "desktop-audio";
+    bool offered = false;
+    for (const auto& [t, kind] : op.offered_kinds())
+        if (t == id && kind == "audio") offered = true;
+    r.check("desktop-audio-track", offered, offered ? "the offer carries desktop-audio (kind audio)" : "no desktop-audio track (has the helper reported an output?)");
+    if (!offered) return;
+    auto rms = [&] {
+        auto* t = op.sh().track(id);
+        return t ? t->audio_rms : 0.0;
+    };
+    // Captured only while someone listens: the fixture counts the capture streams on its outputs.
+    auto listening = [&] {
+        auto l = op.http_get_url(op.desktop_plug() + "/listening");
+        return l.status == 200 ? std::atoi(l.body.c_str()) : -1;
+    };
+    const int before = listening();
+    r.check("desktop-audio-idle", before == 0, before == 0 ? "no capture of the speakers before the track is enabled" : std::to_string(before) + " capture stream(s) open before anyone listens");
+    const std::uint64_t f0 = op.frames(id);
+    const bool flowing = op.select(id, true, "active", 5000, "fjarr.desktop") && op.wait_frames(id, f0, 25, 8000);
+    r.check("desktop-audio-flows", flowing, flowing ? "decoded audio within 8 s of enable" : "no decoded audio within 8 s of enable" + why_no_frames(op));
+    if (!flowing) return;
+    // Nothing plays yet: the speakers' monitor is silence.
+    op.sleep_ms(500);
+    const double quiet = op.locked<double>(rms);
+    r.check("desktop-audio-silence", quiet < 300, "RMS " + std::to_string(static_cast<int>(quiet)) + " while nothing plays");
+    // An application plays a tone on the desktop.
+    const std::int64_t t0 = g_get_monotonic_time();
+    auto played = op.http_get_url(op.desktop_plug() + "/play?freq=440&seconds=15");
+    const bool heard = played.status == 200 && op.wait_for([&] { return rms() > 1000; }, 5000);
+    r.check("desktop-audio-heard", heard,
+            heard ? "the tone heard " + ms_str(g_get_monotonic_time() - t0) + " after the fixture started playing (RMS " + std::to_string(static_cast<int>(op.locked<double>(rms))) + ")"
+                  : (played.status == 200 ? "not heard within 5 s (RMS " + std::to_string(static_cast<int>(op.locked<double>(rms))) + ")" : "/play: " + played.body));
+    if (!heard) return;
+    // Headphones plugged in: the default output changes, the player follows it, and so must the capture.
+    auto moved = op.http_get_url(op.desktop_plug() + "/speakers?use=fixture-headphones");
+    op.sleep_ms(1500); // past the restart: the old sink's buffers have drained
+    const std::uint64_t f1 = op.frames(id);
+    const bool still = moved.status == 200 && op.wait_for([&] {
+        auto* t = op.sh().track(id);
+        return t && t->frames >= f1 + 25 && t->audio_rms > 1000;
+    }, 5000);
+    r.check("desktop-audio-output-change", still,
+            still ? "still heard after the default output changed to fixture-headphones"
+                  : (moved.status == 200 ? "not heard on the new output within 5 s (RMS " + std::to_string(static_cast<int>(op.locked<double>(rms))) + ")" : "/speakers: " + moved.body));
+    op.http_get_url(op.desktop_plug() + "/speakers?use=fixture-speakers"); // as it was, for the next scenario
+    const bool off = op.select(id, false, "active", 5000, "fjarr.desktop");
+    r.check("desktop-audio-off", off, off ? "disabled" : "select-tracks enabled=false was not accepted");
+    // The producer lingers for the tier grace (10 s), then lets the source go, and the capture with it.
+    const std::int64_t t_off = g_get_monotonic_time();
+    int open = listening();
+    while (open != 0 && g_get_monotonic_time() - t_off < 15'000'000) {
+        op.sleep_ms(500);
+        open = listening();
+    }
+    r.check("desktop-audio-released", open == 0,
+            open == 0 ? "the speakers' capture ended " + ms_str(g_get_monotonic_time() - t_off) + " after disable" : std::to_string(open) + " capture stream(s) still open 15 s after disable");
+    close_and_assert(op);
+}
+
 void scenario_desktop_see(Operator& op) {
     Report& r = op.report();
     connect_and_report(op);
@@ -3705,7 +3775,7 @@ const std::map<std::string, ScenarioFn> kScenarios = {
     {"no-answer", scenario_no_answer}, {"socket-drop", scenario_socket_drop}, {"ice-restart", scenario_ice_restart}, {"deadman", scenario_deadman},
     {"congested-viewer", scenario_congested_viewer}, {"rejected-track", scenario_rejected_track},
     {"audio", scenario_audio}, {"audio-unlistened", scenario_audio_unlistened},
-    {"desktop-see", scenario_desktop_see}, {"desktop-control", scenario_desktop_control}, {"desktop-hotplug", scenario_desktop_hotplug}, {"desktop-clipboard", scenario_desktop_clipboard}, {"desktop-cursor", scenario_desktop_cursor}, {"desktop-virtual", scenario_desktop_virtual},
+    {"desktop-see", scenario_desktop_see}, {"desktop-control", scenario_desktop_control}, {"desktop-hotplug", scenario_desktop_hotplug}, {"desktop-clipboard", scenario_desktop_clipboard}, {"desktop-cursor", scenario_desktop_cursor}, {"desktop-virtual", scenario_desktop_virtual}, {"desktop-audio", scenario_desktop_audio},
     {"relay-only", scenario_relay_only}, {"tunnel", scenario_tunnel}, {"soak", scenario_soak},
     // netem-<profile>: one function, the profile is read from the scenario name (unknown profile → usage, exit 2).
     {"netem-lan", scenario_netem},     {"netem-wifi-ok", scenario_netem}, {"netem-4g", scenario_netem},     {"netem-lossy", scenario_netem},

@@ -263,11 +263,6 @@ function RemoteView() {
 }
 
 /**
- * The robot's screen with the host's own toolbar (docs/22: the toolbar is a slot the host fills):
- * who has the desktop, take control, the combos a browser cannot capture, and fullscreen with
- * Keyboard Lock. Everything here is public @fjarr/react API.
- */
-/**
  * The robot's microphones (fjarr.audio, docs/23#audio): offered only when the grant says `listen`, so
  * the panel is absent without it. Listening mounts an <AudioSink>, which is the demand: nothing is
  * encoded or sent until someone listens, and the click is the gesture a browser wants for sound.
@@ -296,6 +291,11 @@ function MicrophonesPanel({ session }: { session: Session }) {
   );
 }
 
+/**
+ * The robot's screen with the host's own toolbar (docs/22: the toolbar is a slot the host fills):
+ * who has the desktop, take control, the combos a browser cannot capture, and fullscreen with
+ * Keyboard Lock. Everything here is public @fjarr/react API.
+ */
 function DesktopPanel({ session }: { session: Session }) {
   const view = useRef<DesktopViewHandle>(null);
   const desktop = useControl(session, "desktop");
@@ -303,6 +303,12 @@ function DesktopPanel({ session }: { session: Session }) {
   // The robot's clipboard (docs/22#clipboard): a copy on the robot lands on this browser's clipboard by
   // itself, or, when the browser wants a click first, through "Copy from robot".
   const clipboard = useDesktopClipboard(session);
+  // What the robot's speakers play (docs/22#sound): one track for the whole desktop, there while the
+  // robot has an output; the toggle's click is the gesture the browser wants before it plays sound.
+  const tracks = useTracks(session);
+  const [sound, setSound] = useState(false);
+  const soundEntry = tracks.entries.get("desktop-audio");
+  const hasSound = !!soundEntry && (!soundEntry.removed || sound); // kept while on, so it can be switched off
   // A screen of our own on the robot (docs/22#virtual-monitors-slice-35), sized to this window; it goes
   // when the session ends.
   const [myScreen, setMyScreen] = useState<string | null>(null);
@@ -390,6 +396,13 @@ function DesktopPanel({ session }: { session: Session }) {
           <input type="checkbox" data-demo-auto-resume checked={autoResume} onChange={(e) => setAutoResume(e.target.checked)} />
           Resume when the robot stops sharing
         </label>
+        {hasSound && (
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <input type="checkbox" data-demo-desktop-sound checked={sound} onChange={(e) => setSound(e.target.checked)} />
+            Sound
+            {sound && <AudioSink session={session} trackId="desktop-audio" />}
+          </label>
+        )}
         {clipboard.state.sync === "needs-gesture" && <button onClick={() => run(clipboard.copyFromRobot)}>Copy from robot</button>}
         <span data-demo-clipboard={clipboard.state.sync} style={{ color: "#8b93a1" }}>
           {clipboard.state.sync === "synced" ? "robot's clipboard copied here" : clipboard.state.sync === "failed" ? `clipboard: ${clipboard.state.error}` : ""}

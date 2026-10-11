@@ -1037,11 +1037,17 @@ whichever application plays it.
   package does not ship.
 - **Only while someone listens.** The source is available while a helper is
   connected and reports an output, and is declared with the desktop's other
-  tracks. The capture itself starts when the producer builds its first
-  pipeline (the first `select-tracks` that enables the track) and ends when
-  the producer lets its last one go: a capture link keeps a sink awake, and
-  a robot nobody listens to should not pay for it. A `start-audio` that fails
-  leaves the track silent and is logged.
+  tracks. The capture itself runs only while the producer's pipeline runs:
+  it starts with the first `select-tracks` that enables the track, and ends
+  when the producer stops after the tier grace (10 s). The producer keeps a
+  stopped pipeline built rather than releasing its source, so module E
+  watches the source's `appsrc` on the core loop (after each build, then
+  every 500 ms) and starts or ends the capture when it enters or leaves
+  PAUSED/PLAYING. A capture link keeps a sink awake, and a robot nobody
+  listens to should not pay for it; opsim's `desktop-audio` checks that no
+  capture is open before the track is enabled and none 15 s after it is
+  disabled. A `start-audio` that fails leaves the track silent and is
+  logged.
 - **When the default output changes** (headphones plugged in, HDMI chosen),
   the helper sends `speakers` again; a running capture is restarted on the
   new sink and its new reader feeds the pipeline already built, so the track
@@ -1050,6 +1056,13 @@ whichever application plays it.
 - **When sharing stops** ([above](#desktop-sharing-stopped)), the sound stops
   with the screens: the desktop's user ended the sharing, and the speakers
   are part of it. It comes back with `resume-sharing`.
+- **Verified 2026-10-12** in the desktop fixture: opsim's `desktop-audio`
+  hears silence, then the tone the fixture plays (about 300 ms after it
+  starts), keeps hearing it when the default output changes, and sees the
+  capture open only while the track is enabled (ended 10.3 s after
+  disable); the dashboard's Sound toggle plays it in the lab browser. The
+  stop with the sharing is checked on the mini-PC (3.5.4), as the indicator
+  is: the fixture runs no GNOME Shell.
 - **On X11** (backend A) the module runs inside the agent with no helper
   ([above](#desktop-x11)), and the agent cannot open the kiosk user's sound
   server either. That half of the slice comes after GNOME's, and its handover

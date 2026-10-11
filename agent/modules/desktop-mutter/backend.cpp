@@ -28,6 +28,7 @@
 #include "desktop/helper_protocol.hpp"
 #include "desktop/module.hpp"
 #include "desktop/monitor_identity.hpp"
+#include "audio_reader.hpp"
 #include "stream_reader.hpp"
 #include "eis_input.hpp"
 
@@ -98,6 +99,111 @@ class MonitorSource final : public VideoSource {
     std::function<void(bool)> availability_;
 };
 
+/// The desktop's sound (docs/23#desktop-audio): available while the helper reports an output; captured
+/// only while the producer's pipeline is running, so a robot nobody listens to keeps its sink asleep.
+/// The producer keeps a stopped pipeline built (in NULL) rather than releasing the source, so what
+/// says "nobody listens" is the appsrc's state, watched on the core loop.
+class SoundSource final : public VideoSource {
+  public:
+    /// `want(true)` when the pipeline starts running, `want(false)` when it stops; on the core loop.
+    SoundSource(GMainContext* ctx, std::function<void(bool)> want) : ctx_(ctx), want_(std::move(want)) {}
+    ~SoundSource() override {
+        *alive_ = false;
+        if (poll_) g_source_destroy(poll_), g_source_unref(poll_);
+        if (appsrc_) gst_object_unref(appsrc_);
+    }
+
+    SourceInfo describe() const override { return {"desktop:sound", {{"src", TrackKind::Audio, "audio/x-raw"}}}; }
+
+    GstBin* create_bin() override {
+        if (!available()) return nullptr;
+        GstElement* src = gst_element_factory_make("appsrc", nullptr);
+        if (!src) return nullptr;
+        GstCaps* caps = desktop::mutter::AudioReader::caps();
+        g_object_set(src, "is-live", TRUE, "format", GST_FORMAT_TIME, "do-timestamp", TRUE, "caps", caps, "max-buffers", static_cast<guint64>(50),
+                     "leaky-type", 2 /* downstream: drop the oldest */, nullptr);
+        gst_caps_unref(caps);
+        GstElement* bin = gst_bin_new(nullptr);
+        gst_bin_add(GST_BIN(bin), src);
+        GstPad* pad = gst_element_get_static_pad(src, "src");
+        gst_element_add_pad(bin, gst_ghost_pad_new("src", pad));
+        gst_object_unref(pad);
+        if (appsrc_) gst_object_unref(appsrc_);
+        appsrc_ = GST_ELEMENT(gst_object_ref(src));
+        if (reader_) reader_->attach(appsrc_);
+        // The producer starts the pipeline right after building it, in this same dispatch: look once
+        // that is done, and every 500 ms after for its stop and any restart.
+        struct Job {
+            std::shared_ptr<bool> alive;
+            SoundSource* self;
+        };
+        GSource* once = g_idle_source_new();
+        g_source_set_callback(once, [](gpointer d) -> gboolean {
+            auto* j = static_cast<Job*>(d);
+            if (*j->alive) j->self->check();
+            return G_SOURCE_REMOVE;
+        }, new Job{alive_, this}, [](gpointer d) { delete static_cast<Job*>(d); });
+        g_source_attach(once, ctx_);
+        g_source_unref(once);
+        if (!poll_) {
+            poll_ = g_timeout_source_new(500);
+            g_source_set_callback(poll_, [](gpointer d) -> gboolean {
+                static_cast<SoundSource*>(d)->check();
+                return G_SOURCE_CONTINUE;
+            }, this, nullptr);
+            g_source_attach(poll_, ctx_);
+        }
+        return GST_BIN(bin);
+    }
+
+    bool available() const override { return available_; }
+    void on_availability_changed(std::function<void(bool)> cb) override { availability_ = std::move(cb); }
+    std::string unavailable_reason() const override { return available_ ? "" : reason_; }
+
+    void set_available(bool now, const std::string& why = {}) {
+        reason_ = why;
+        if (now == available_) return;
+        available_ = now;
+        if (availability_) availability_(now);
+    }
+    /// The helper handed the sound over: its reader feeds the pipeline already built.
+    void ready(std::unique_ptr<desktop::mutter::AudioReader> reader) {
+        reader_ = std::move(reader);
+        if (reader_ && appsrc_) reader_->attach(appsrc_);
+    }
+    void drop_reader() { reader_.reset(); }
+    /// The backend is going; the media plane may hold this source a while longer.
+    void detach() {
+        want_ = nullptr;
+        reader_.reset();
+        set_available(false, "the desktop backend stopped");
+    }
+
+  private:
+    /// Running = the appsrc is (or is going) PAUSED or PLAYING. Only a change is reported.
+    void check() {
+        GstState cur = GST_STATE_NULL, pending = GST_STATE_VOID_PENDING;
+        if (appsrc_) gst_element_get_state(appsrc_, &cur, &pending, 0);
+        const bool running = cur >= GST_STATE_PAUSED || pending >= GST_STATE_PAUSED;
+        if (running != running_) {
+            running_ = running;
+            if (!running) reader_.reset();
+            if (want_) want_(running);
+        }
+    }
+
+    GMainContext* ctx_;
+    std::function<void(bool)> want_;
+    std::unique_ptr<desktop::mutter::AudioReader> reader_;
+    GstElement* appsrc_ = nullptr; // the newest pipeline's source
+    GSource* poll_ = nullptr; // every 500 ms on the core loop, from the first pipeline on
+    std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
+    bool running_ = false;
+    bool available_ = false;
+    std::string reason_ = "waiting for the desktop session";
+    std::function<void(bool)> availability_;
+};
+
 class MutterBackend final : public DesktopBackend, public ClipboardHandle {
   public:
     explicit MutterBackend(const desktop::ModuleHost& host, const json& config)
@@ -117,6 +223,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
 
     ~MutterBackend() override {
         drop_helper("the agent is stopping");
+        if (sound_) sound_->detach();
         if (listen_watch_) g_source_destroy(listen_watch_), g_source_unref(listen_watch_);
         if (listen_fd_ >= 0) {
             ::close(listen_fd_);
@@ -155,6 +262,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         f.clipboard = true;    // through the helper's input session (docs/23#desktop-helper-protocol)
         f.local_cursor = true; // mutter's cursor metadata, through module E's stream reader
         f.virtual_monitors = true; // RecordVirtual, through the helper (docs/23, Virtual monitors)
+        f.desktop_audio = true;    // the speakers, through the helper (docs/23#desktop-audio)
         return f;
     }
     std::vector<Monitor> monitors() override { return monitors_; }
@@ -211,8 +319,22 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         if (!it->second.connector.empty()) virtual_by_connector_.erase(it->second.connector);
         captures_.erase(it);
     }
-    std::shared_ptr<VideoSource> start_audio_capture() override { return nullptr; }
-    void stop_audio_capture() override {}
+    std::shared_ptr<VideoSource> start_audio_capture() override {
+        if (!sound_) {
+            sound_ = std::make_shared<SoundSource>(ctx_, [this](bool want) {
+                sound_wanted_ = want;
+                if (want) request_sound();
+                else sound_id_ = 0; // a late audio-started is dropped; closing the reader ended the capture
+            });
+            update_sound();
+        }
+        return sound_;
+    }
+    void stop_audio_capture() override {
+        if (sound_) sound_->drop_reader();
+        sound_wanted_ = false;
+        sound_id_ = 0;
+    }
     void on_cursor_shape(std::function<void(const CursorShape&)> cb) override {
         cursor_shape_cb_ = std::move(cb);
         if (cursor_shape_cb_ && have_shape_) cursor_shape_cb_(shape_);
@@ -477,6 +599,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
                 return;
             }
             welcomed_ = true;
+            sharing_stopped_ = false;
             send({{"type", "welcome"}, {"protocol", desktop::proto::PROTOCOL}});
             say(1, "the desktop session's helper connected (" + m.body["session"].value("compositor", std::string{"?"}) + ")");
             if (session_cb_) session_cb_(true);
@@ -484,6 +607,25 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
             return;
         } else if (type == "monitors") {
             set_monitors(m.body.value("monitors", json::array()));
+        } else if (type == "speakers") {
+            // docs/23#desktop-audio: a new default output restarts a running capture on it.
+            const json sink = m.body.value("sink", json());
+            const std::string name = sink.is_object() ? sink.value("name", std::string{}) : std::string{};
+            if (name == speakers_) return;
+            say(1, name.empty() ? std::string("the desktop has no output") : "the desktop's output is " + name);
+            speakers_ = name;
+            drop_sound("the output changed");
+            update_sound();
+            request_sound();
+        } else if (type == "audio-started") {
+            if (m.body.value("id", 0) != sound_id_ || !sound_ || m.fds.empty()) return; // a stale answer: its descriptor closes
+            const std::string name = m.body.value("name", std::string{});
+            sound_->ready(desktop::mutter::AudioReader::start(ctx_, m.fds[0].release(), name, [this](int level, const std::string& msg) { say(level, msg); }));
+            say(1, "desktop sound from " + name);
+        } else if (type == "audio-failed") {
+            if (m.body.value("id", 0) != sound_id_) return;
+            sound_id_ = 0;
+            say(2, "the helper could not hand the sound over: " + m.body.value("reason", std::string{"?"}));
         } else if (type == "capture-started") {
             const int id = m.body.value("id", 0);
             for (auto& [monitor, c] : captures_)
@@ -498,6 +640,11 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
                     if (reader) reader->on_stalled([this, monitor] { restart_capture(monitor); });
                     c.source->ready(std::move(reader));
                     request_input();
+                    if (sharing_stopped_) { // a capture after a stop is the resume: the sound comes back with it
+                        sharing_stopped_ = false;
+                        update_sound();
+                        request_sound();
+                    }
                     say(1, "capture of " + c.connector + " ready: node " + std::to_string(m.body.value("node", 0u)) + ", " +
                                std::to_string(m.body.value("width", 0)) + "x" + std::to_string(m.body.value("height", 0)));
                 }
@@ -545,6 +692,9 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         } else if (type == "sharing-stopped") {
             // docs/23#desktop-sharing-stopped: someone at the robot stopped it; every capture went with it.
             say(1, "sharing stopped on the robot");
+            sharing_stopped_ = true; // the speakers are part of what was shared (docs/23#desktop-sharing-stopped)
+            drop_sound("sharing stopped on the robot");
+            update_sound();
             for (auto& [monitor, c] : captures_) {
                 if (c.is_virtual) continue; // its stream was the monitor: it leaves as a hot-plug
                 c.source->lost("sharing stopped on the robot");
@@ -560,6 +710,27 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
                     if (lost_cb_) lost_cb_(monitor, gone ? CaptureLost::MonitorGone : CaptureLost::SourceStopped);
                 }
         }
+    }
+
+    /// The sound is there while a helper reports an output and the sharing is on (docs/23#desktop-audio).
+    void update_sound() {
+        if (!sound_) return;
+        if (!welcomed_) sound_->set_available(false, "no desktop session");
+        else if (speakers_.empty()) sound_->set_available(false, "the desktop has no output");
+        else if (sharing_stopped_) sound_->set_available(false, "sharing stopped on the robot");
+        else sound_->set_available(true);
+    }
+    /// Asks the helper for the speakers while someone listens; a new request replaces any earlier one.
+    void request_sound() {
+        if (!sound_ || !sound_wanted_ || !sound_->available()) return;
+        sound_id_ = next_id_++;
+        send({{"type", "start-audio"}, {"id", sound_id_}});
+    }
+    void drop_sound(const std::string& why) {
+        if (!sound_) return;
+        if (sound_id_ || sound_wanted_) say(1, "desktop sound stopped: " + why);
+        sound_->drop_reader();
+        sound_id_ = 0;
     }
 
     /// Input belongs to the remote-desktop session a capture starts, so it is asked for once one has.
@@ -629,6 +800,9 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         // Virtual monitors die with the helper's ScreenCast sessions: nothing to record again later.
         for (auto it = captures_.begin(); it != captures_.end();) it = it->second.is_virtual ? captures_.erase(it) : std::next(it);
         virtual_by_connector_.clear();
+        speakers_.clear();
+        drop_sound("the desktop session ended");
+        update_sound();
         monitors_.clear();
         if (monitors_cb_) monitors_cb_(monitors_);
         if (was_running && session_cb_) session_cb_(false); // after the monitors: they went with it
@@ -666,6 +840,11 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
     std::map<int, std::unique_ptr<ClipRead>> reads_;
     std::map<int, std::function<void(bool, std::string)>> writes_;
     int next_clip_id_ = 1;
+    std::shared_ptr<SoundSource> sound_; // the desktop's sound, once the capability asked for it
+    std::string speakers_;              // the helper's default output; empty = none
+    bool sound_wanted_ = false;         // a pipeline holds the sound's appsrc
+    int sound_id_ = 0;                  // the start-audio in flight or answered; 0 = none
+    bool sharing_stopped_ = false;      // until a capture starts again (resume-sharing)
 };
 
 const char* probe() { return nullptr; } // usable wherever it is installed: the helper says the rest

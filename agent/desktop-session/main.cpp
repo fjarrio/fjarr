@@ -1,7 +1,7 @@
 // fjarr-desktop-session: the desktop user's side of the handover (ADR-0028). It runs in the user's
 // session, talks to mutter over the session bus, and hands the agent descriptors over
-// /run/fjarr/desktop.sock — a PipeWire connection per capture, narrowed to that capture's node, and
-// mutter's EIS socket for input —
+// /run/fjarr/desktop.sock — a PipeWire connection per capture, narrowed to that capture's node,
+// mutter's EIS socket for input, and a connection narrowed to the speakers for the desktop's sound —
 // so frames and input events never pass through it. It connects out to the agent and reconnects.
 // spec: docs/23-agent-core-architecture.md#desktop-helper-protocol
 #include <algorithm>
@@ -13,6 +13,7 @@
 #include <map>
 #include <set>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <sys/socket.h>
@@ -27,6 +28,7 @@
 #include "desktop/helper_protocol.hpp"
 #include "mutter.hpp"
 #include "pipewire.hpp"
+#include "sound.hpp"
 
 using namespace fjarr::desktop;
 using nlohmann::json;
@@ -44,7 +46,11 @@ class Helper {
   public:
     Helper(GMainLoop* loop, GDBusConnection* bus, std::string socket_path) : loop_(loop), bus_(bus), socket_path_(std::move(socket_path)) {}
 
-    void start() { try_connect(); }
+    void start() {
+        // The speakers are watched from the start, so the first `speakers` after a welcome is current.
+        sound_ = std::make_unique<helper::SoundWatch>([this] { send_speakers(); });
+        try_connect();
+    }
 
   private:
     // --- the agent's socket ------------------------------------------------------------------
@@ -83,6 +89,7 @@ class Helper {
         if (sock_ >= 0) ::close(sock_);
         sock_ = -1;
         welcomed_ = false;
+        speakers_sent_.reset();
         captures_.clear();
         clipboard_.reset();
         transfers_.clear();
@@ -120,6 +127,7 @@ class Helper {
             say("welcomed by the agent");
             send_monitors();
             monitors_sub_ = helper::watch_monitors(bus_, [this] { send_monitors(); });
+            send_speakers();
         } else if (type == "refuse") {
             say("refused by the agent: " + m.body.value("reason", std::string{"no reason given"}));
         } else if (!welcomed_) {
@@ -136,6 +144,8 @@ class Helper {
             clipboard_read(m.body);
         } else if (type == "clipboard-set") {
             clipboard_set(m);
+        } else if (type == "start-audio") {
+            start_audio(m.body.value("id", 0));
         } // unknown types are ignored: fjarr-desktop-1 grows by adding them
     }
 
@@ -257,6 +267,41 @@ class Helper {
             }, new std::pair<Helper*, int>(this, id));
         });
         captures_[id] = Recording{connector, std::move(cap), virtual_monitor, std::move(before)};
+    }
+
+    // --- the speakers (docs/23#desktop-audio) -----------------------------------------------------
+    /// `speakers` when the default output differs from what the agent was last told.
+    void send_speakers() {
+        if (!welcomed_ || !sound_) return;
+        const auto sink = sound_->default_sink();
+        const std::string now = sink ? sink->name : std::string{};
+        if (speakers_sent_ && *speakers_sent_ == now) return;
+        speakers_sent_ = now;
+        if (sink) {
+            send({{"type", "speakers"}, {"sink", {{"name", sink->name}, {"description", sink->description}}}});
+            say("speakers: " + sink->name);
+        } else {
+            send({{"type", "speakers"}, {"sink", nullptr}});
+            say("speakers: none");
+        }
+    }
+
+    void start_audio(int id) {
+        const auto sink = sound_ ? sound_->default_sink() : std::nullopt;
+        if (!sink) {
+            send({{"type", "audio-failed"}, {"id", id}, {"reason", "the desktop has no output"}});
+            return;
+        }
+        std::string err;
+        const int pw = helper::open_narrowed_pipewire(sink->node, &err); // the speakers and nothing else (docs/23)
+        if (pw < 0) {
+            send({{"type", "audio-failed"}, {"id", id}, {"reason", err}});
+            say("sound " + std::to_string(id) + " failed: " + err);
+            return;
+        }
+        send({{"type", "audio-started"}, {"id", id}, {"node", sink->node}, {"name", sink->name}}, {pw});
+        ::close(pw);
+        say("sound " + std::to_string(id) + " handed over: " + sink->name + " (node " + std::to_string(sink->node) + ")");
     }
 
     helper::InputSession& input() {
@@ -436,6 +481,8 @@ class Helper {
     bool welcomed_ = false;
     bool waiting_logged_ = false;
     std::string primary_tried_for_; // the layout enforce_primary last asked mutter to change
+    std::unique_ptr<helper::SoundWatch> sound_;
+    std::optional<std::string> speakers_sent_; // the sink name last sent ("" = none); unset = not yet told
     struct Recording {
         std::string connector; // a virtual monitor's: empty until the layout shows it
         std::unique_ptr<helper::Capture> capture;
