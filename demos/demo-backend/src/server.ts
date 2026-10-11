@@ -70,17 +70,25 @@ function mintGrant(robotId: string, operator: { id: string; label: string }, cap
 // developer role carries it — the demo's stand-in for "their auth decides".
 // The desktop is for both: watching it is like a camera, and driving it takes the `desktop` control
 // domain (docs/10#session-ownership), as driving the robot takes `motion`.
+// Hearing the robot's microphones is granted like seeing its cameras: `listen` (docs/10). Talking
+// through its speaker (`talk`) comes with M3.5 slice 3.5.3.
 const ROLES: Record<string, string[]> = {
-  operator: ["fjarr.test", "fjarr.camera", "fjarr.desktop"],
-  developer: ["fjarr.test", "fjarr.camera", "fjarr.desktop", "fjarr.introspect", "fjarr.terminal"],
+  operator: ["fjarr.test", "fjarr.camera", "fjarr.audio", "fjarr.desktop"],
+  developer: ["fjarr.test", "fjarr.camera", "fjarr.audio", "fjarr.desktop", "fjarr.introspect", "fjarr.terminal"],
+};
+/** Grant params per capability, the same for every role here (docs/09 grant claims). */
+const PARAMS: Record<string, Record<string, unknown>> = {
+  "fjarr.audio": { listen: true },
 };
 
 /** The company's own robot registry — their data, not Fjarr's. It knows what each robot has, and a
  *  grant names only those: the robot refuses a session whose grant names a capability it lacks (docs/10). */
 const FLEET_ROBOT = ["fjarr.test", "fjarr.camera", "fjarr.desktop", "fjarr.introspect", "fjarr.terminal"];
+// The demo robots carry a microphone (a test tone); the Mini PC gets its webcam's in M3.5 slice 3.5.4.
+const FLEET_ROBOT_AUDIO = [...FLEET_ROBOT, "fjarr.audio"];
 const robots = [
-  { id: "demo-robot-01", name: "Demo Robot 01", site: "Lab", capabilities: FLEET_ROBOT },
-  { id: "demo-robot-02", name: "Demo Robot 02", site: "Warehouse", capabilities: FLEET_ROBOT },
+  { id: "demo-robot-01", name: "Demo Robot 01", site: "Lab", capabilities: FLEET_ROBOT_AUDIO },
+  { id: "demo-robot-02", name: "Demo Robot 02", site: "Warehouse", capabilities: FLEET_ROBOT_AUDIO },
   { id: "demo-robot-03", name: "Mini PC", site: "Sturegatan 12", capabilities: FLEET_ROBOT },
   // A robot with a screen and no camera: the headless-mutter fixture (`make desktop-e2e`, docs/12#services).
   // Its own site: the 4.5f gate connects by "lab", which must name demo-robot-01 alone.
@@ -186,7 +194,7 @@ const server = createServer(async (req, res) => {
     const grants = ROLES[role];
     if (!grants) return respond(400, { error: `unknown role ${role} (operator | developer)` });
     const operator = { id: `${role}@example.com`, label: role === "developer" ? "Demo Developer" : "Demo Operator" };
-    const capabilities = grants.filter((name) => robot.capabilities.includes(name)).map((name) => ({ name }));
+    const capabilities = grants.filter((name) => robot.capabilities.includes(name)).map((name) => (PARAMS[name] ? { name, params: PARAMS[name] } : { name }));
     return respond(200, { grant: mintGrant(robotId, operator, capabilities), robot_id: robotId, role, capabilities });
   }
 

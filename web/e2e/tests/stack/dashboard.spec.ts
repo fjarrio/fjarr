@@ -28,6 +28,30 @@ test("the demo dashboard connects to demo-robot through the demo backend's grant
   await page.screenshot({ path: dashboard.out.path("dashboard.png") });
 });
 
+test("the Microphones panel plays the robot's microphone while the operator listens, and only then (M3.5 3.5.1)", async ({ dashboard, stack, page }) => {
+  await stack.requireServer();
+  needs(await stack.dashboardReachable(), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
+  await dashboard.goto();
+  await dashboard.connect(env.robotId);
+  await dashboard.waitForState(env.robotId, "connected");
+  // The demo backend grants fjarr.audio with listen (docs/10); the demo robot's microphone is a tone.
+  const listen = page.locator("[data-demo-listen='mic']");
+  await expect(listen).toBeVisible({ timeout: 10_000 });
+  const micStatus = async () => (await dashboard.tracks(env.robotId)).find((t) => t.track_id === "mic")?.status;
+  expect(await micStatus()).not.toBe("streaming"); // nothing is sent until someone listens
+  await listen.check(); // the click is the gesture a browser wants before it plays sound
+  const sink = page.locator("[data-fjarr-audio='mic']");
+  await expect(sink).toHaveAttribute("data-fjarr-status", "streaming", { timeout: 10_000 });
+  // The <audio> element plays: its clock advances, and the browser decodes packets.
+  const t0 = await sink.locator("audio").evaluate((a) => (a as HTMLAudioElement).currentTime);
+  await page.waitForTimeout(1500);
+  const t1 = await sink.locator("audio").evaluate((a) => (a as HTMLAudioElement).currentTime);
+  expect(t1 - t0).toBeGreaterThan(1);
+  await listen.uncheck();
+  await expect(sink).toHaveCount(0);
+  await expect.poll(micStatus, { timeout: 5000 }).not.toBe("streaming");
+});
+
 test("the Terminal panel gives a developer a working shell, and tells an operator why it has none", async ({ dashboard, stack, page }) => {
   test.slow();
   await stack.requireServer();

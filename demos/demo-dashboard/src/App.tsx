@@ -17,6 +17,7 @@
  */
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
+  AudioSink,
   ConnectButton,
   ConnectionQuality,
   DesktopLayout,
@@ -43,6 +44,7 @@ import {
   useStore,
   useTelemetry,
   useTimeSync,
+  useTracks,
   type DesktopViewHandle,
   type Session,
 } from "@fjarr/react";
@@ -242,9 +244,10 @@ function RemoteView() {
         </Panel>
       )}
       <Panel title="Cameras (demand-driven: only visible tiles are streamed)">
-        <VideoGrid session={session} filter={(e) => e.manifest.cap !== "fjarr.desktop"} />
+        <VideoGrid session={session} filter={(e) => e.manifest.cap !== "fjarr.desktop" && e.manifest.kind !== "audio"} />
         {state !== "connected" && <small style={{ color: "#8b93a1" }}>waiting for media — session is {state}</small>}
       </Panel>
+      <MicrophonesPanel session={session} />
       <Panel title="Teleop (fjarr.test drive: publisher with deadman; unmounting stops the robot; one driver at a time)">
         <MotionControl session={session} />
         <TeleopPanel key={driveEpoch} session={session} />
@@ -264,6 +267,35 @@ function RemoteView() {
  * who has the desktop, take control, the combos a browser cannot capture, and fullscreen with
  * Keyboard Lock. Everything here is public @fjarr/react API.
  */
+/**
+ * The robot's microphones (fjarr.audio, docs/23#audio): offered only when the grant says `listen`, so
+ * the panel is absent without it. Listening mounts an <AudioSink>, which is the demand: nothing is
+ * encoded or sent until someone listens, and the click is the gesture a browser wants for sound.
+ */
+function MicrophonesPanel({ session }: { session: Session }) {
+  const tracks = useTracks(session);
+  const mics = [...tracks.entries.values()].filter((e) => e.manifest.kind === "audio" && e.manifest.cap === "fjarr.audio");
+  const [listening, setListening] = useState<Record<string, boolean>>({});
+  if (mics.length === 0) return null;
+  return (
+    <Panel title="Microphones (fjarr.audio: heard only with the grant's listen; streamed only while you listen)">
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        {mics.map((m) => {
+          const id = m.manifest.track_id;
+          const on = listening[id] ?? false;
+          return (
+            <label key={id} data-demo-mic={id} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <input type="checkbox" data-demo-listen={id} checked={on} onChange={(e) => setListening((l) => ({ ...l, [id]: e.target.checked }))} />
+              {m.manifest.label || id}
+              {on && <AudioSink session={session} trackId={id} />}
+            </label>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
 function DesktopPanel({ session }: { session: Session }) {
   const view = useRef<DesktopViewHandle>(null);
   const desktop = useControl(session, "desktop");
