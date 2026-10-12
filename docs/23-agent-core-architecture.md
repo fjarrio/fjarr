@@ -1080,6 +1080,48 @@ whichever application plays it.
   monitors or whether the desktop is there: the module reads those from X.
   Without the socket the session program still grants and lays out.
 
+### The audio uplink: talking to the robot (M3.5 slice 3.5.3) {#audio-uplink}
+
+The operator speaks through the robot's speaker ([docs/08](08-protocol.md#talk)).
+Inbound media is new to the agent, so it needs one core addition and one
+capability part:
+
+- **The core: an inbound slot.** `SessionContext::add_inbound_audio` in
+  `session_attached` ([docs/09](09-interfaces.md)) makes the consumer add one
+  audio transceiver, `recvonly`, with Opus preferences, before the first
+  offer. When webrtcbin's source pad for it appears, the consumer links
+  `queue ! rtpopusdepay ! opusdec ! audioconvert ! audioresample !
+  audio/x-raw,format=S16LE,rate=48000,channels=1 ! appsink` and hands each
+  buffer's samples to the capability's `on_pcm` on that streaming thread.
+  Decoding is per session, as each session has its own pipeline; nothing
+  else in the core changes, and no capability sees RTP or SDP.
+- **The capability: one speaker, one gate.** `fjarr.audio` owns a single
+  output pipeline for the robot, `appsrc ! audioconvert ! volume ! level !
+  output`, built when a speaker is configured and kept PLAYING. Each
+  session's `on_pcm` pushes into its `appsrc` only while that session holds
+  the floor; the check is one atomic read, so a closed gate drops audio on
+  the streaming thread and nothing waits on the core loop. `talk-start` and
+  `talk-stop` move the floor on the core loop. When the floor changes hands
+  or closes, nothing queued plays on: the `appsrc` holds at most 60 ms.
+- **The output.** `speaker.output = "alsa"` with `speaker.device` (default
+  `default`) plays through `alsasink` with a 40 ms buffer, so a release goes
+  quiet well inside docs/06's 200 ms. `"null"` decodes, caps and meters,
+  then discards: the demo robot (a container with no sound card) and CI use
+  it. The volume cap `speaker.max_volume` (0–1, default 0.5) is the `volume`
+  element's fixed value: nothing on the wire can raise it.
+- **What the operator sees.** The `level` element posts every 250 ms while
+  the gate is open; the capability sends the talking session `talk-level`
+  (dBFS after the cap, and the frames played). It is the operator's proof
+  that their voice reaches the speaker, and the test oracle.
+- **Grants and audit.** The uplink is offered only to a session whose grant
+  says `talk` and only when a speaker is configured; `talk-start` from any
+  other session is `capability-denied` or `unavailable`. Every opening and
+  closing is `session_event("audio-uplink", "talk-start" | "talk-stop")` and
+  a log line naming the operator. Session end closes the gate through
+  `session_detached`, like any other held input (docs/15 safety).
+- **Config:** `[capabilities."fjarr.audio".speaker]` with `output`,
+  `device` and `max_volume`.
+
 ### Rate control and tier switching {#rate-control-and-tier-switching}
 
 docs/16 demands adaptive bitrate; the fan-out demands that one encoder

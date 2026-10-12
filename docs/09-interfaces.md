@@ -24,7 +24,7 @@ agent.register_capability(std::make_unique<fjarr::TestCapability>());   // the i
 agent.register_capability(std::make_unique<acme::ArmTeachCapability>());
 agent.on_session_event([](const fjarr::SessionEvent& ev) { /* audit */ });
 // SessionEvent { type: "started"|"ended"|"error"|"audio-uplink"; session_id;
-//                operator_info {id,label}; reason (ended); code (error) }
+//                operator_info {id,label}; reason (ended; audio-uplink: talk-start|talk-stop); code (error) }
 agent.supervision({ .ready = …, .status = …, .watchdog = …, .watchdog_interval_ms = … });  // sd_notify seam (ADR-0019): READY once configured and running, STATUS= the connection
 agent.stop_on_signal(SIGTERM);  // orderly stop as a core-loop callback (never in signal context), bounded by stop_deadline_ms
 int rc = agent.run();   // blocks; exit code 0/1/2 per ADR-0019; or agent.start()/stop() on the host's loop
@@ -151,7 +151,18 @@ public:
 // exactly the case a support engineer must be able to see — driving the event
 // off traffic would show nothing then. It is not a scheduler: work that belongs
 // off the loop still goes through run_async.
-// Both contexts are core-loop-only; capabilities never touch sockets, SDP
+// `add_inbound_audio(InboundAudio{slot, on_pcm})` (added in M3.5, valid only
+// inside session_attached) asks for an audio uplink in the session's first
+// offer: one m-section offered `recvonly` (docs/08#talk). The core owns the
+// codec: it decodes what arrives and calls `on_pcm(samples, count)` with S16
+// mono 48 kHz PCM, about 20 ms at a time — on a GStreamer streaming thread,
+// the one exception to "every callback on the core loop", because 50 hops a
+// second through the loop would add jitter to a voice for nothing. `on_pcm`
+// must not block and may touch only what the capability made thread-safe for
+// it. `session_event(type, reason)` (added in M3.5) reports an audited event
+// for this session through Agent::on_session_event — `audio-uplink` with
+// reason `talk-start` or `talk-stop` (docs/10).
+// Both contexts are core-loop-only (on_pcm aside); capabilities never touch sockets, SDP
 // or GStreamer negotiation.
 // spec: docs/23-agent-core-architecture.md#the-concrete-sessioncontext-and-backendcontext
 

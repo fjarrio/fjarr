@@ -541,7 +541,14 @@ The agent offers its push-to-talk transceiver `recvonly`; a browser creates
 the matching transceiver at `setRemoteDescription` with direction
 `recvonly`, so the core sets it to `sendonly` before `createAnswer` — or
 `replaceTrack()` later moves no media at all (found in the browser lab,
-slice 3a). `getUserMedia` only exists in secure contexts (https,
+slice 3a). What the agent plays is decided by messages
+([docs/08](08-protocol.md#talk), M3.5 3.5.3): `audioUplink.replaceTrack(track)`
+sends `talk-start` and attaches the microphone only once it is granted, so a
+refusal (`busy`, `capability-denied`, `unavailable`) leaves the microphone
+detached and is reported as `audioUplink.refused` (code, message, holder);
+`replaceTrack(null)` detaches and sends `talk-stop`. `usePushToTalk` exposes
+the refusal as its `error` and the agent's `talk-level` as `robotLevel`, so
+the operator sees their voice arrive. `getUserMedia` only exists in secure contexts (https,
 localhost): `usePushToTalk` reports that as its `error` instead of a
 `TypeError`.
 

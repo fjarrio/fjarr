@@ -355,8 +355,10 @@ on either side (GStreamer `opusenc`/`opusdec`, browser `getUserMedia`).
   grant, `talk`, allows the uplink either way (open question #17 closed
   2026-10-11; a separate grant for an open mic added complication for no
   value). The agent plays the operator's audio only between the client's
-  `audio-uplink` start and stop, which are audited session events (docs/10 —
-  a live microphone is as sensitive as a terminal).
+  `talk-start` and `talk-stop` ([docs/08](08-protocol.md#talk)), which are
+  audited `audio-uplink` session events (docs/10 — a live microphone is as
+  sensitive as a terminal). One operator talks at a time; a second is told
+  who holds the speaker.
 - **Desktop audio** (what the robot's desktop plays) is not a microphone: it
   travels on `fjarr.desktop` and follows that grant, so whoever sees the
   screen hears it.

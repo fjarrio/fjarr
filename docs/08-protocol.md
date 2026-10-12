@@ -423,6 +423,32 @@ capability is **input-bearing** but in no control domain: every session has
 its own pty, so terminals run side by side
 ([docs/10](10-security.md#session-ownership)).
 
+### Talk (fjarr.audio) {#talk}
+
+Talking to a person at the robot (M3.5 slice 3.5.3, [docs/06](06-capabilities.md#fjarraudio--two-way-audio-planned)).
+A session whose grant says `fjarr.audio` with `params.talk: true`, on a robot
+with a speaker configured, gets **one audio m-section the agent offers
+`recvonly`** in its first offer (Opus, 48 kHz). It carries no entry in
+`offer.tracks`: it is an uplink, not a track to label. The client answers it
+`sendonly` and attaches its microphone with `replaceTrack()`, with no
+renegotiation ([docs/21](21-web-client-architecture.md#audio-uplink-negotiation)).
+A session without `talk` is offered none.
+
+What the agent plays is decided by messages, not by whether RTP arrives:
+
+| `type` | kind | payload | semantics |
+|---|---|---|---|
+| `talk-start` | request → result | `{}` | open this session's gate to the speaker. `result{ok:true}` once it is open; the client attaches its microphone after it. `capability-denied` without `talk`; `unavailable` with no speaker or no uplink offered; `busy` while another session talks, with `error.data` `{"holder": {"id", "label"}}`. Idempotent for the session that talks |
+| `talk-stop` | request → result | `{}` | close the gate. Idempotent. `result{ok:true}` once closed |
+| `talk-level` | event (agent → the talking session) | `{"rms_db": number, "peak_db": number, "frames": u64}` | what reaches the speaker, after the volume cap, every 250 ms while the gate is open: dBFS, and the 20 ms frames played since `talk-start`. Lets the operator see their voice arrive |
+
+One session talks at a time. The gate closes on `talk-stop`, on session end
+(every reason, [docs/15](15-testing-strategy.md#safety-behaviors)), and when
+the uplink m-section is rejected. Audio that arrives with the gate closed is
+dropped, never played: a client that sends RTP without `talk-start` is heard
+by no one. Each opening and closing is an `audio-uplink` session event for
+the audit log ([docs/09](09-interfaces.md), [docs/10](10-security.md)).
+
 ### Network packets (fjarr.net) {#net-packets}
 
 The [network tunnel](27-network-tunnel.md) uses `fjarr:stream:fjarr.net`
@@ -465,7 +491,7 @@ violation, not a style issue.
 
 `error.code` is a stable string: `auth-failed`, `grant-expired`,
 `capability-unknown`, `capability-denied`, `session-unknown`, `robot-offline`, `rate-limited`,
-`payload-invalid`, `internal`, `control-held`. Codes are append-only.
+`payload-invalid`, `internal`, `control-held`, `unavailable`, `busy`. Codes are append-only.
 
 `control-held` answers an input-bearing request from a session that does not
 hold that capability's control domain. Its `error.data` is
@@ -473,7 +499,8 @@ hold that capability's control domain. Its `error.data` is
 to ask ([docs/10](10-security.md#session-ownership)). An input request from a
 `view_only` grant is answered `capability-denied` instead: waiting would not
 help. Other codes may carry `error.data` too (`busy` on `fjarr.net/open`);
-a client ignores data it does not know.
+a client ignores data it does not know. `unavailable` and `busy`, used by
+capabilities since M2, are listed here as of M3.5 (`talk-start`, [above](#talk)).
 
 ## Versioning {#versioning}
 
