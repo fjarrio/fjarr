@@ -313,26 +313,46 @@ its liveness state within 30 s.
 
 ## `fjarr.ota` — fleet OTA updates (M8)
 
-Backend consumer. Built on **SWUpdate**
-([ADR-0016](adr/0016-swupdate-ota.md)); the fleet daemon's `deploy.py` is the
-documented anti-pattern this replaces (no A/B, no rollback, abort-unsafe).
+Backend consumer; the design is [docs/32](32-fleet-ota.md). The fleet
+daemon's `deploy.py` is the documented anti-pattern this replaces (no A/B, no
+rollback, abort-unsafe).
 
-- **A/B partitioning, atomic apply, automatic rollback** on boot-failure
-  (grub/u-boot env + health-check confirmation window).
-- Artifacts: SWUpdate `.swu`; **streamed binary diffs** (delta updates) to
-  spare LTE data plans; served via the file capability's backend mode with
-  resume.
-- Pre/post install hooks (customer scripts, e.g. "drive to charger first" —
-  the fleet-daemon requirement done safely: refusable, timeout-bounded, logged).
-- Campaigns (Cloud/paid): staged rollout by fleet segment, failure-rate
-  auto-halt, per-device accept→feedback→result reporting.
-- **Opinionated out-of-the-box**: a reference Ubuntu 26.04 partition layout +
-  image-build recipe ships with the docs; deviate only via documented hooks.
+- **A release is one signed version** pinning every component (OS image,
+  apps, configuration, peripherals), each with a rollback class and hardware
+  variants ([ADR-0036](adr/0036-a-release-is-one-signed-version.md)). A
+  release may carry a new image or only lighter components on top of it.
+- **`fjarr-update` orchestrates** fetch, readiness, prepare, install, health,
+  peripherals and commit; the OS slot is written by a narrow applier per
+  recipe ([ADR-0035](adr/0035-releases-orchestrated-appliers-narrow.md)).
+  A/B atomic install with rollback where the recipe has slots.
+- **Readiness**: conditions evaluated on the robot (time window, charger,
+  idle, holds from the robot's own stack over a local API) with a reported
+  reason, and a customer-registered **prepare** action confirmed by a
+  predicate; teleoperation is refused from prepare until commit.
+- **Peripherals** through handlers with a fixed contract (identify, diff,
+  prepare, install, verify by read-back, commit, rollback); reference
+  handlers for u-blox, CAN flashing and router configuration with
+  commit-confirm.
+- **Run logs** like a CI job: a heading per step with its status and
+  duration, the step's output streamed line by line, kept per robot.
+- **Content over HTTPS** as resumable, content-addressed chunks under a
+  per-robot budget per time interval
+  ([ADR-0037](adr/0037-release-content-over-https-chunks.md)).
+- **Campaigns** (Cloud/paid): stages promoted by a person, parallel and
+  batched within a stage, abortable; the fleet's policy decides whether the
+  robot's owner is asked (with the open `<UpdatePrompt>`); security releases
+  follow the EU Cyber Resilience Act's rules.
+- **Recipes**, CI-built: Yocto and NixOS on a ZED Box Mini (Jetson Orin) and
+  on x86, an Ubuntu A/B image on x86, and plain Ubuntu with apt (not atomic).
 
-**Accepted when:** a demo fleet updates via delta with one device
-deliberately failing its post-hook — that device rolls back automatically and
-the campaign reports it; power-cut mid-write leaves the device bootable on
-the old slot.
+**Accepted when:** on every recipe (Yocto and NixOS on the ZED Box Mini;
+Yocto, NixOS and Ubuntu A/B on the x86 mini-PC), a power cut mid-write leaves
+the robot booting the old slot, and a release whose health check fails rolls
+back by itself with the failed step in its run log. Once, across the fleet: a
+staged campaign of one, then several robots, is aborted midway; a release
+downloads across several days within a daily budget, through link drops; and
+a robot's owner schedules an update for tonight in the demo dashboard, which
+then waits for the charger and says so.
 
 ## `fjarr.audio` — two-way audio (planned) {#fjarraudio--two-way-audio-planned}
 

@@ -99,6 +99,16 @@ regresses**:
   (`test_control_domains.cpp` pins the rules in virtual time,
   `test_control.cpp` through the real SessionManager and router);
 - heartbeat teardown timings;
+- **updates** ([docs/32](32-fleet-ota.md), M8): a power cut mid-write boots
+  the old slot; a release whose health check fails rolls back by itself;
+  `take-control` is refused while the update holds `motion`, and the deadman
+  stays in force; the not-ready-to-move state stays visible until the
+  peripherals are verified; a `safety_relevant` component is refused without
+  its policy and its on-site confirmation; a lower release is refused without
+  a downgrade authorization; a router configuration that cuts the uplink
+  reverts. The A/B legs are tested nightly on real hardware in the lab (the
+  ZED Box Mini and the x86 mini-PC), with power cut by a network-controlled
+  socket, because no fixture reproduces a bootloader;
 - **the speaker's gate** ([docs/08](08-protocol.md#talk), M3.5 3.5.3): an
   operator's audio is played only between `talk-start` and `talk-stop`, by
   one session at a time, and the gate closes on every session end, audited.

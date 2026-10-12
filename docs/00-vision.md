@@ -58,8 +58,8 @@ a list of things they occasionally need to do to a robot that nobody will
 ever write a protocol for; this is what stops that list becoming a roadmap.
 
 Longer-term, the same connectivity substrate carries **fleet observability**
-(versions, metrics, error rates) and **atomic OTA updates** (SWUpdate-based
-A/B with rollback) — see [capabilities](06-capabilities.md) and the
+(versions, metrics, error rates) and **atomic OTA updates** (signed releases of
+the whole robot, A/B with rollback, [docs/32](32-fleet-ota.md)) — see [capabilities](06-capabilities.md) and the
 [roadmap](17-roadmap.md).
 
 ## Personas

@@ -2,7 +2,7 @@
 title: "ADR 0016: SWUpdate OTA"
 ---
 
-- **Status**: **proposed** — confirmed (or superseded) when M8 starts
+- **Status**: superseded by [0035](0035-releases-orchestrated-appliers-narrow.md) (2026-10-12): Fjarr orchestrates, and SWUpdate becomes one applier adapter among several
 - **Date**: 2026-09-15
 
 ## Context

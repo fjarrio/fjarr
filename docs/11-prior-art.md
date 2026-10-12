@@ -97,7 +97,8 @@ control-plane teacher.
 - Strict oldest-first replay (8 h of stale telemetry before anything current)
   → live lane + backfill lane.
 - Arbitrary shell over a host FIFO as the update mechanism → never; OTA is
-  SWUpdate with signed artifacts ([ADR-0016](adr/0016-swupdate-ota.md)).
+  signed releases orchestrated by Fjarr ([ADR-0035](adr/0035-releases-orchestrated-appliers-narrow.md),
+  which superseded ADR-0016's SWUpdate-only design).
 - `deploy.py` OTA: no A/B, no rollback, abort-unsafe mid-flash, self-replacing
   via `sleep 10 && …` → the entire `fjarr.ota` design brief.
 - Handlers replying `accepted=true` while `pass # TODO` → a response MUST

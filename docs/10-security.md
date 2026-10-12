@@ -83,6 +83,15 @@ thing take turns; everyone else works side by side.**
   input-bearing grant claims nothing.
 - **`view_only: true` in a grant** means that session can never claim or take
   control, whatever its client does.
+- **The update holds `motion`** (M8, [docs/32](32-fleet-ota.md#readiness)).
+  From an update's prepare step until its commit, `motion` has a system
+  holder, the update, which no operator can take: a drive command or
+  `take-control` is answered `control-held`, naming the update run. The
+  current operator holder, if any, is released first, so the robot stops.
+  The hold ends at commit, at rollback, or when the updater dies. After a
+  reboot the agent gives `motion` to no operator until the updater has said
+  whether a run is in progress. It blocks operator sessions only, never the
+  robot's own stack, which may be driving itself to the charger.
 - **Virtual monitors.** Adding or removing one changes the robot's desktop:
   it is input in the `desktop` domain, refused to `view_only`, at most two per
   session, and each goes with the session that added it.
@@ -238,11 +247,41 @@ What the account can do is the integrator's decision and the whole of the
 policy. Fjarr does not sandbox the shell, and says so rather than implying a
 containment it does not provide.
 
-## Update integrity (forward reference, M8)
+## Update integrity (M8) {#update-integrity}
 
-OTA artifacts are signed (SWUpdate signing + our manifest); agents verify
-before flashing; A/B + health-check rollback bounds the blast radius.
-Detailed in the M8 spec revision of this document.
+Whoever can sign a release can command every robot in a fleet of moving
+machines, so signing is a safety boundary
+([ADR-0036](adr/0036-a-release-is-one-signed-version.md),
+[docs/32](32-fleet-ota.md#signing)):
+
+- Releases are signed TUF-style: an offline root key, release keys that sign
+  manifests, and online keys in Fjarr Cloud that sign only timestamps and
+  targeting. With **company-held keys** (the production setup) a
+  compromised Fjarr Cloud can delay updates but cannot forge one; with
+  **Fjarr-managed keys** (the easy start) it could, and the UI says so.
+  Moving between them is a key rotation.
+- The robot verifies every signature and every chunk's hash before it
+  installs anything; its identity lives on `/data` and survives slot
+  switches; expired metadata leads to a fresh fetch, not a refused install.
+- A/B installs with health-checked commit and boot counting bound the blast
+  radius of a bad release; `forward-only` components run last, after the
+  point of no return is shown.
+- **Safety-relevant components** (STO, a safety PLC, safety-rated drive
+  firmware) are not installed over the air unless the fleet's policy allows
+  it, and then only after confirmation on site: changing a safety function
+  can require a new conformity assessment (EU Machinery Regulation, from
+  January 2027).
+- **Security releases** install automatically by default and may be
+  postponed only up to a ceiling the company sets (EU Cyber Resilience Act,
+  from December 2027).
+- From prepare to commit, `motion` has a system holder, the update
+  ([below](#session-ownership) and [docs/32](32-fleet-ota.md#readiness)); Fjarr
+  never commands motion itself, it only invokes the customer's prepare action.
+- The robot's own stack reaches the updater over `/run/fjarr/update.sock`
+  (group `fjarr-update`, `0660`), never over the network.
+- A lower release than the robot has committed installs only with a signed
+  downgrade authorization, so an old release with a known vulnerability
+  cannot be put back from the network or a USB stick.
 
 ## Dependency & license policy ([ADR-0011](adr/0011-license-open-core.md))
 

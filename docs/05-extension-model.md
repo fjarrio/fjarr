@@ -44,7 +44,7 @@ signatures live in [docs/09](09-interfaces.md); semantically, a capability:
      renegotiation and keeps unchanged tracks flowing
      ([docs/08](08-protocol.md#renegotiation));
    - **dependencies**: names of other capabilities it requires (e.g.
-     `fjarr.ota` → `fjarr.files`). The core validates presence at
+     `fjarr.observability` → `fjarr.logs`). The core validates presence at
      registration; the typed inter-capability handle is deferred to M4
      ([F4](reviews/m1-api-fit-review.md)) — declaring the field now avoids
      a later ABI break;

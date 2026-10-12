@@ -37,7 +37,7 @@ options weighed, the choice, and its consequences — so future maintainers
 | [0013](0013-websocket-signaling.md) | WebSocket signaling with a transport seam | accepted |
 | [0014](0014-astro-starlight-website.md) | Astro + Starlight for the website | accepted |
 | [0015](0015-backend-integration-strategy.md) | Backend integration: unified contract, sidecar + managed twin | accepted |
-| [0016](0016-swupdate-ota.md) | SWUpdate as the OTA foundation | proposed (M8) |
+| [0016](0016-swupdate-ota.md) | SWUpdate as the OTA foundation | superseded by 0035 |
 | [0017](0017-libsoup-websocket.md) | libsoup-3 for agent networking | accepted |
 | [0018](0018-stream-channel-class.md) | Stream channel class (lossy binary frames) | accepted |
 | [0019](0019-agent-process-model.md) | Agent process model — one process, two restartable planes | accepted |
@@ -56,3 +56,6 @@ options weighed, the choice, and its consequences — so future maintainers
 | [0032](0032-ghost-screens.md) | Ghost screens are forced connectors on free root connectors; virtual monitors stay per session | accepted |
 | [0033](0033-desktop-test-lab-and-shared-runners.md) | The desktop is tested on headless mutter in CI and on shared lab machines at night (`fjarr-lab`) | accepted |
 | [0034](0034-x11-sound-through-the-session-program.md) | An X11 kiosk's sound reaches the agent through its session program, narrowed to the speakers as on GNOME | accepted |
+| [0035](0035-releases-orchestrated-appliers-narrow.md) | Fjarr orchestrates releases; the OS-slot engine is a narrow adapter per recipe (supersedes 0016) | accepted |
+| [0036](0036-a-release-is-one-signed-version.md) | A release is one signed version pinning every component; company-held keys, a Fjarr-managed easy start | accepted |
+| [0037](0037-release-content-over-https-chunks.md) | Release content travels as resumable HTTPS chunks under a per-robot budget, not over WebRTC | accepted |

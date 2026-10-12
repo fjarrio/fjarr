@@ -45,6 +45,7 @@ with rationale).
 | 29 | [How-tos over the tunnel](29-tunnel-howtos.md) | Step-by-step recipes for docs/28's ideas: a few commands each, robot side and your side, and the usual pitfall | review |
 | 30 | [Continuous integration](30-continuous-integration.md) | How CI is laid out and kept fast: the job graph, which changes run what, CI images by content hash, caches as a budget, build once and reuse; rules for adding to it | review |
 | 31 | [The hosted demo](31-hosted-demo.md) | The demo stack on a public server behind Cloudflare: names, TLS (Cloudflare to Caddy), coturn, firewall, secrets, deploying and operating it | draft |
+| 32 | [Fleet OTA](32-fleet-ota.md) | `fjarr.ota`: signed releases for the whole robot (image, apps, config, peripherals), readiness and prepare, run logs, budgeted HTTPS chunks, staged campaigns, recipes for Yocto/NixOS/Ubuntu | draft |
 
 ## Architecture decision records
 
