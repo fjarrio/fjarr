@@ -69,9 +69,21 @@ ros2)
   ms=$(( $(now_ms) - t0 ))
   echo "tunnel-checks: ros2 topic list ->" $(echo "$out" | tr '\n' ' ')
   echo "tunnel-checks: discovered in $(( ms / 1000 )).$(( (ms % 1000) / 100 )) s"
-  msg=$(docker compose exec -T operator-ros bash -lc "$ros_env timeout 25 ros2 topic echo --once /fjarr/robot_heartbeat" 2>&1) || true
+  # The sample, under the same deadline and for the same reason: the daemon may still list a topic of
+  # a participant that was just recreated (fact B), and `ros2 topic echo` then errors at once ("could
+  # not determine the type") instead of waiting — that is a miss to retry, not the verdict (nightly,
+  # 2026-10-12: exited 1 after 1.6 s with the topic listed).
+  while :; do
+    msg=$(docker compose exec -T operator-ros bash -lc "$ros_env timeout 10 ros2 topic echo --once /fjarr/robot_heartbeat" 2>&1) || true
+    case "$msg" in *demo-robot-01*) break ;; esac
+    if [ $(( $(now_ms) - t0 )) -ge "$deadline_ms" ]; then
+      echo "tunnel-checks: ros2 topic echo ->" $(echo "$msg" | tr '\n' ' ')
+      echo "tunnel-checks: discovery worked but no sample arrived (not within $(( deadline_ms / 1000 )) s)" >&2
+      exit 1
+    fi
+    sleep 0.5
+  done
   echo "tunnel-checks: ros2 topic echo ->" $(echo "$msg" | tr '\n' ' ')
-  case "$msg" in *demo-robot-01*) ;; *) echo "tunnel-checks: discovery worked but no sample arrived" >&2; exit 1 ;; esac
   echo "tunnel-checks: ROS 2 discovery and data both crossed the link"
   ;;
 *) echo "usage: tunnel-checks.sh ssh|scp|ros2" >&2; exit 2 ;;
