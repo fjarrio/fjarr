@@ -592,7 +592,11 @@ lab browser. Building the scenario found two defects in the tests themselves (a
 release check that could pass on a capture not yet open, and a helper check
 that could close the descriptor it tested), both fixed. The stop with GNOME's
 stop-sharing cannot be staged in the fixture (no GNOME Shell) and moves to
-3.5.4 on the mini-PC. **3.5.2 is done.**
+3.5.4 on the mini-PC. The mini-PC's nightly then found what the clean-install
+tests could not: moving the PipeWire client configuration into `fjarr-agent`
+broke the upgrade over an earlier build of `fjarr-desktop-wayland`, which
+still owned the file; `fjarr-agent` now `Replaces` it, and the upgrade was
+replayed in a container. **3.5.2 is done.**
 
 ## Vendor cameras and the design-partner demo {#vendor-cameras}
 
