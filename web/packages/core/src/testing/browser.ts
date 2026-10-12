@@ -614,6 +614,8 @@ export class LoopbackAgent {
         result = { ok: true, t0: (parsed.payload as { t0: number }).t0, t1, t2: t1 };
       } else if (parsed.type === "select-tracks") {
         result = this.selectTracks(peer, parsed.payload as SelectTracksPayload);
+      } else if (parsed.cap === "fjarr.audio" && (parsed.type === "talk-start" || parsed.type === "talk-stop")) {
+        result = { ok: true }; // docs/08#talk: granted, as an agent with a speaker and a `talk` grant does
       }
     }
     if (!result) return;
