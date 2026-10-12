@@ -85,12 +85,13 @@ const PARAMS: Record<string, Record<string, unknown>> = {
 /** The company's own robot registry — their data, not Fjarr's. It knows what each robot has, and a
  *  grant names only those: the robot refuses a session whose grant names a capability it lacks (docs/10). */
 const FLEET_ROBOT = ["fjarr.test", "fjarr.camera", "fjarr.desktop", "fjarr.introspect", "fjarr.terminal"];
-// The demo robots carry a microphone (a test tone); the Mini PC gets its webcam's in M3.5 slice 3.5.4.
+// The demo robots carry a microphone (a test tone) and a null speaker; the Mini PC its webcam's
+// microphone and a real speaker (M3.5 slice 3.5.4).
 const FLEET_ROBOT_AUDIO = [...FLEET_ROBOT, "fjarr.audio"];
 const robots = [
   { id: "demo-robot-01", name: "Demo Robot 01", site: "Lab", capabilities: FLEET_ROBOT_AUDIO },
   { id: "demo-robot-02", name: "Demo Robot 02", site: "Warehouse", capabilities: FLEET_ROBOT_AUDIO },
-  { id: "demo-robot-03", name: "Mini PC", site: "Sturegatan 12", capabilities: FLEET_ROBOT },
+  { id: "demo-robot-03", name: "Mini PC", site: "Sturegatan 12", capabilities: FLEET_ROBOT_AUDIO },
   // A robot with a screen and no camera: the headless-mutter fixture (`make desktop-e2e`, docs/12#services).
   // Its own site: the 4.5f gate connects by "lab", which must name demo-robot-01 alone.
   { id: "desktop-robot-01", name: "Desktop Robot 01", site: "Office", capabilities: ["fjarr.test", "fjarr.desktop", "fjarr.introspect"] },
