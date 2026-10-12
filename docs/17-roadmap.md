@@ -598,6 +598,24 @@ broke the upgrade over an earlier build of `fjarr-desktop-wayland`, which
 still owned the file; `fjarr-agent` now `Replaces` it, and the upgrade was
 replayed in a container. **3.5.2 is done.**
 
+**3.5.3, talking to the robot (2026-10-12).** The agent offers a session
+granted `talk` one `recvonly` audio m-section (e43f7df spec; 756b2e3 agent,
+968d68c web). The core decodes it per session through a new
+`SessionContext::add_inbound_audio`, and `fjarr.audio` plays one session at
+a time through a speaker pipeline that exists only between `talk-start` and
+`talk-stop`, under a fixed volume cap, sending the talker `talk-level`; every
+start and stop is an audited `audio-uplink` session event. opsim's
+`audio-talk` against the demo robot: nothing of the audio sent before
+`talk-start` is played, 50 frames a second after it, a full-scale source
+peaks at −6.0 dBFS under the 0.5 cap, and the release is answered in about
+2 ms with nothing played after it; `audio-untalked` gets no uplink and
+`capability-denied`. The dashboard's "Hold to talk" plays the lab browser's
+fake microphone at the robot. Building it found that an answer naming no SSRC
+for its uplink lets webrtcbin route the stream to the BUNDLE's first
+transceiver and stall the session; an unmatched stream is now sunk. Not
+measured: mouth-to-ear latency (docs/16, < 250 ms) and echo cancellation
+with a real speaker and microphone, both for 3.5.4. **3.5.3 is done.**
+
 ## Vendor cameras and the design-partner demo {#vendor-cameras}
 
 The first vendor camera packages ([ADR-0020](adr/0020-vendor-sources-as-gstreamer-plugins.md)),
