@@ -61,6 +61,9 @@ if [ "${SIM_FIXTURE:-0}" = 1 ]; then
   testwin_x11.py >/run/fixture/testwin.err 2>&1 &
   python3 -m http.server 8090 --bind 0.0.0.0 --directory /run/fixture/oracle >/dev/null 2>&1 &
   plugd_x11.py &
+  # Ready once the kiosk has a default output, as a robot's session has one by the time anyone connects:
+  # otherwise the session program first reports no speakers (CI, 2026-10-12).
+  for _ in $(seq 100); do "${KIOSK[@]}" wpctl inspect @DEFAULT_AUDIO_SINK@ >/dev/null 2>&1 && break; sleep 0.1; done
   touch /run/fixture/ready
   echo "robot-sim: X11 fixture ready (3840x1080 root, monitor LEFT, oracle :8090, plugd :8091)"
   wait "${XVFB_PID}"

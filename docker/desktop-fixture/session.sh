@@ -31,6 +31,8 @@ fixture-plugd >/run/desktop/plugd.log 2>&1 &
 if [ -d /run/fjarr ]; then
   FJARR_DESKTOP_SOCK=/run/fjarr/desktop.sock fjarr-desktop-session >/run/desktop/helper-live.log 2>&1 &
 fi
+# Ready once the session has a default output (the fixture's speakers, M3.5 3.5.2), as a robot's has.
+for _ in $(seq 100); do wpctl inspect @DEFAULT_AUDIO_SINK@ >/dev/null 2>&1 && break; sleep 0.1; done
 touch /run/desktop/ready
 echo "fixture: desktop ${FIXTURE_WIDTH}x${FIXTURE_HEIGHT} ready (mutter $(mutter --version 2>/dev/null | head -1 | awk '{print $2}'))"
 wait "$mutter_pid"

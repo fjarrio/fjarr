@@ -2600,10 +2600,18 @@ void scenario_desktop_audio(Operator& op) {
     op.http_get_url(op.desktop_plug() + "/play?seconds=0"); // silence, whatever an earlier run left playing
     connect_and_report(op);
     const std::string id = "desktop-audio";
+    // The track comes with the helper's `speakers`: a session that starts before the desktop has a
+    // default output gets it by re-offer, as a dashboard would (docs/23#desktop-audio).
     bool offered = false;
-    for (const auto& [t, kind] : op.offered_kinds())
-        if (t == id && kind == "audio") offered = true;
-    r.check("desktop-audio-track", offered, offered ? "the offer carries desktop-audio (kind audio)" : "no desktop-audio track (has the helper reported an output?)");
+    const std::int64_t t_wait = g_get_monotonic_time();
+    while (!offered && g_get_monotonic_time() - t_wait < 10'000'000) {
+        for (const auto& [t, kind] : op.offered_kinds())
+            if (t == id && kind == "audio") offered = true;
+        if (!offered) op.sleep_ms(200);
+    }
+    r.check("desktop-audio-track", offered,
+            offered ? "desktop-audio (kind audio) offered, " + ms_str(g_get_monotonic_time() - t_wait) + " after connecting"
+                    : "no desktop-audio track within 10 s (has the helper reported an output?)");
     if (!offered) return;
     auto rms = [&] {
         auto* t = op.sh().track(id);
