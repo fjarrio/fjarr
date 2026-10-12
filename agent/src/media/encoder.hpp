@@ -37,6 +37,7 @@ GstElement* make_encode_bin(const EncoderChoice& enc, const TierProfile& tier, c
 /// H.264 is packetized as it is, so the track costs the robot no encoder at all.
 GstElement* make_passthrough_bin(const std::string& prefix);
 /// An audio track's one tier (docs/23#audio): Opus, 48 kHz mono, 20 ms frames, 32 kbps, in-band FEC.
-GstElement* make_opus_bin(const std::string& prefix);
+/// Opus for one audio track (docs/23#audio): voice at 32 kbps, music (a desktop's sound) at 64 kbps.
+GstElement* make_opus_bin(const std::string& prefix, bool music = false);
 
 } // namespace fjarr::media

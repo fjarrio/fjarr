@@ -19,7 +19,8 @@ class SoundSource final : public VideoSource {
         if (appsrc_) gst_object_unref(appsrc_);
     }
 
-    SourceInfo describe() const override { return {"desktop:sound", {{"src", TrackKind::Audio, "audio/x-raw"}}}; }
+    // What a desktop plays is music or a video's sound, not speech (docs/23#audio).
+    SourceInfo describe() const override { return {"desktop:sound", {{"src", TrackKind::Audio, "audio/x-raw", AudioContent::Music}}}; }
 
     GstBin* create_bin() override {
         if (!available()) return nullptr;

@@ -991,8 +991,16 @@ and the media plane carries it as it carries video, with less:
   a source type like the camera's `test`. Config:
   `[capabilities."fjarr.audio".mics.<id>]` with `label` and `source`.
 - **The producer**: `source ! audioconvert ! audioresample ! opusenc` at
-  48 kHz mono, 20 ms frames, 32 kbps (docs/16: 32–64 per track), in-band FEC
-  on; its encoded frames go into the source's ring as video's do. It starts
+  48 kHz mono, 20 ms frames, in-band FEC on: 32 kbps tuned for voice for a
+  microphone, 64 kbps in the general-audio mode for a source that declares
+  `AudioContent::Music`, the desktop's sound (docs/16: 32–64 per track;
+  voice tuning made music muffled on the mini-PC, 2026-10-12). Timestamps
+  follow the samples (`perfect-timestamp`), not when each input buffer
+  arrived: a desktop's PipeWire buffers arrive unevenly, and their arrival
+  times reached the RTP clock, about 60 of every 150 packets off by up to
+  6 ms in the fixture, which a browser plays as speeding up and slowing
+  down. opsim's `desktop-audio` now requires every RTP step to be one
+  frame. Its encoded frames go into the source's ring as video's do. It starts
   on the first demand and stops after the tier grace, as video producers do.
   No keyframes, no tiers and no rate control: an Opus track's bitrate is
   fixed and small next to video's.

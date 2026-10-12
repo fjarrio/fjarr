@@ -2,6 +2,7 @@
 // The video source contract: one way every track enters the media plane.
 // spec: docs/09-interfaces.md#the-video-source-contract
 // spec: docs/23-agent-core-architecture.md#video-sources-one-contract-three-ways-to-provide-one
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -14,10 +15,15 @@
 
 namespace fjarr {
 
+/// What an audio output carries, which decides how it is encoded (docs/23#audio): speech from a
+/// microphone, or anything a desktop plays — music, video sound — which voice tuning muffles.
+enum class AudioContent : std::uint8_t { Voice, Music };
+
 struct SourceOutput {
     std::string name = "src";           // "src" for single-output sources; "left"/"right"/"depth" …
     TrackKind kind = TrackKind::Video;  // Video | Audio
     std::string declared_caps;          // what the output will produce (raw, DMABuf/VAMemory, or x-h264…)
+    AudioContent audio = AudioContent::Voice; // audio outputs only
 };
 
 struct SourceInfo {

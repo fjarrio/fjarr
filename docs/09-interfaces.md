@@ -285,6 +285,8 @@ struct SourceOutput {
   std::string name;        // "src" for single-output sources; "left"/"right"/"depth" …
   TrackKind kind;          // Video | Audio
   std::string declared_caps;  // caps string of what the output will produce (raw, DMABuf/VAMemory, or x-h264…)
+  AudioContent audio = AudioContent::Voice;  // audio outputs: Voice (a microphone) or Music (a desktop's
+                                             // sound), which decides the Opus tuning (docs/23#audio; M3.5)
   // Elementary-stream outputs (`video/x-h264`, passthrough — docs/06): the core parses and
   // packetizes, never transcodes, and builds no encoder for the track. A source with a lower
   // second stream names that output "thumbnail" so the track has two tiers; a lone elementary

@@ -39,6 +39,7 @@
 #include <gio/gio.h>
 #include <glib.h>
 #include <gst/gst.h>
+#include <gst/rtp/gstrtpbuffer.h>
 #include <gst/sdp/sdp.h>
 #include <gst/video/video.h>
 #include <gst/webrtc/webrtc.h>
@@ -340,6 +341,14 @@ struct TrackRx {
     // Audio (docs/23#audio): decoded S16 samples and their RMS over the latest buffer.
     std::uint64_t audio_samples = 0;
     double audio_rms = 0;
+    // The robot's RTP clock for an Opus track: consecutive packets (seqnum + 1) of 20 ms frames advance
+    // the RTP timestamp by exactly 960. Anything else is timestamp jitter, which a browser's jitter
+    // buffer hears as speeding up and slowing down.
+    bool rtp_seen = false;
+    std::uint16_t rtp_seq = 0;
+    std::uint32_t rtp_ts = 0;
+    std::uint64_t audio_ts_jumps = 0;     // consecutive packets whose timestamps differ by other than 960
+    std::int64_t audio_ts_dev_max_us = 0; // the largest |step - 20 ms|
 };
 
 constexpr int THUMB_W = 96, THUMB_H = 54;
@@ -1092,6 +1101,9 @@ class Peer {
             rx->pt = pt;
         }
         glib::GstPadPtr sink_pad = glib::adopt_pad(gst_element_get_static_pad(sink.get(), "sink"));
+        glib::GstPadPtr depay_sink = glib::adopt_pad(gst_element_get_static_pad(depay.get(), "sink"));
+        probes_.emplace_back(depay_sink.get(), GST_PAD_PROBE_TYPE_BUFFER, &Peer::on_audio_rtp, new std::pair<Peer*, TrackRx*>(this, rx),
+                             [](gpointer d) { delete static_cast<std::pair<Peer*, TrackRx*>*>(d); });
         probes_.emplace_back(sink_pad.get(), GST_PAD_PROBE_TYPE_BUFFER, &Peer::on_audio, new std::pair<Peer*, TrackRx*>(this, rx),
                              [](gpointer d) { delete static_cast<std::pair<Peer*, TrackRx*>*>(d); });
         for (GstElement* e : els) gst_element_sync_state_with_parent(e);
@@ -1099,6 +1111,29 @@ class Peer {
         if (gst_pad_link(pad, qsink.get()) != GST_PAD_LINK_OK) logf("peer: linking %s failed", pname.c_str());
         for (auto* p : {&q, &depay, &dec, &conv, &cf, &sink}) p->reset();
         tracks_.push_back(pname);
+    }
+
+    /// RTP packets of an Opus track, before the depayloader: the robot's timestamp steps.
+    static GstPadProbeReturn on_audio_rtp(GstPad*, GstPadProbeInfo* info, gpointer user) {
+        auto* p = static_cast<std::pair<Peer*, TrackRx*>*>(user);
+        GstBuffer* buf = GST_PAD_PROBE_INFO_BUFFER(info);
+        GstRTPBuffer rtp = GST_RTP_BUFFER_INIT;
+        if (!buf || !gst_rtp_buffer_map(buf, GST_MAP_READ, &rtp)) return GST_PAD_PROBE_OK;
+        const std::uint16_t seq = gst_rtp_buffer_get_seq(&rtp);
+        const std::uint32_t ts = gst_rtp_buffer_get_timestamp(&rtp);
+        gst_rtp_buffer_unmap(&rtp);
+        std::lock_guard<std::mutex> lk(p->first->sh_.mu);
+        TrackRx* rx = p->second;
+        if (rx->rtp_seen && static_cast<std::uint16_t>(rx->rtp_seq + 1) == seq) {
+            const std::int64_t step = static_cast<std::int32_t>(ts - rx->rtp_ts);
+            const std::int64_t dev_us = std::llabs(step - 960) * 1000000 / 48000;
+            rx->audio_ts_dev_max_us = std::max(rx->audio_ts_dev_max_us, dev_us);
+            if (step != 960) rx->audio_ts_jumps++;
+        }
+        rx->rtp_seen = true;
+        rx->rtp_seq = seq;
+        rx->rtp_ts = ts;
+        return GST_PAD_PROBE_OK;
     }
 
     static GstPadProbeReturn on_audio(GstPad*, GstPadProbeInfo* info, gpointer user) {
@@ -1122,6 +1157,7 @@ class Peer {
         TrackRx* rx = p->second;
         rx->frames++;
         rx->audio_samples += n;
+
         if (n) rx->audio_rms = std::sqrt(sum / static_cast<double>(n));
         if (!rx->first_frame_us) rx->first_frame_us = now;
         rx->last_frame_us = now;
@@ -2640,6 +2676,18 @@ void scenario_desktop_audio(Operator& op) {
             heard ? "the tone heard " + ms_str(g_get_monotonic_time() - t0) + " after the fixture started playing (RMS " + std::to_string(static_cast<int>(op.locked<double>(rms))) + ")"
                   : (played.status == 200 ? "not heard within 5 s (RMS " + std::to_string(static_cast<int>(op.locked<double>(rms))) + ")" : "/play: " + played.body));
     if (!heard) return;
+    // While the tone plays: does the robot timestamp it evenly? (A desktop's buffers arrive unevenly.)
+    auto regular = [&] {
+        auto* t = op.sh().track(id);
+        return t ? std::make_pair(t->audio_ts_jumps, t->audio_ts_dev_max_us) : std::make_pair<std::uint64_t, std::int64_t>(0, 0);
+    };
+    const auto before_reg = op.locked<std::pair<std::uint64_t, std::int64_t>>(regular);
+    op.sleep_ms(3000);
+    const auto after_reg = op.locked<std::pair<std::uint64_t, std::int64_t>>(regular);
+    const auto jumps = after_reg.first - before_reg.first;
+    r.check("desktop-audio-timestamps", jumps == 0,
+            std::to_string(jumps) + " RTP packet(s) whose timestamp did not advance by one 20 ms frame in 3 s of the tone (largest step error so far " +
+                std::to_string(after_reg.second / 1000) + " ms): uneven timestamps are heard as speeding up and slowing down");
     // Headphones plugged in: the default output changes, the player follows it, and so must the capture.
     auto moved = op.http_get_url(op.desktop_plug() + "/speakers?use=fixture-headphones");
     op.sleep_ms(1500); // past the restart: the old sink's buffers have drained

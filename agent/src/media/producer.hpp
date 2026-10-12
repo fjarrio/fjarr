@@ -104,6 +104,7 @@ class Producer {
     bool stamp_;
     bool passthrough_ = false; // the source's outputs are elementary streams (docs/06)
     bool audio_ = false;       // the output carries audio (docs/23#audio)
+    bool music_ = false;       // ... and it is music (a desktop's sound): encoded for it
     glib::GstElementPtr resample_; // audio: to the encoder's rate
     ProducerConfig config_;
     FrameHub& hub_;

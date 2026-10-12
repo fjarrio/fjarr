@@ -29,6 +29,7 @@ bool Producer::build() {
         if (o.name == source_.output) {
             passthrough_ = o.declared_caps.rfind("video/x-h26", 0) == 0;
             audio_ = o.kind == TrackKind::Audio;
+            music_ = audio_ && o.audio == AudioContent::Music;
         }
     GstBin* bin = source_.source->create_bin();
     if (!bin) {
@@ -231,7 +232,7 @@ bool Producer::start_tier(const std::string& tier) {
                  static_cast<guint64>(0), nullptr);
     try {
         // Passthrough: parse and hand over, byte-stream/au as every consumer's appsrc expects.
-        t->encode = audio_         ? glib::sink_element(make_opus_bin(prefix))
+        t->encode = audio_         ? glib::sink_element(make_opus_bin(prefix, music_))
                     : passthrough_ ? glib::sink_element(make_passthrough_bin(prefix))
                                    : glib::sink_element(make_encode_bin(config_.encoder, profile, prefix));
     } catch (const std::exception& e) {
@@ -276,7 +277,7 @@ bool Producer::start_tier(const std::string& tier) {
             return false;
         }
     }
-    t->kbps = audio_ ? 32 : passthrough_ ? 0 : profile.kbps; // passthrough: the camera sets the rate, not us
+    t->kbps = audio_ ? (music_ ? 64 : 32) : passthrough_ ? 0 : profile.kbps; // passthrough: the camera sets the rate, not us
     t->fps = profile.fps;
     t->max_fps = profile.fps;
     t->sharp = sharp_;
@@ -289,7 +290,8 @@ bool Producer::start_tier(const std::string& tier) {
         playing_ = true;
     }
     if (audio_)
-        log::info("producer", "tier started", {{"producer", name()}, {"tier", tier}, {"audio", "opus 48 kHz mono 32 kbps"}});
+        log::info("producer", "tier started",
+                  {{"producer", name()}, {"tier", tier}, {"audio", music_ ? "opus 48 kHz mono 64 kbps, music" : "opus 48 kHz mono 32 kbps, voice"}});
     else if (passthrough_)
         log::info("producer", "tier started", {{"producer", name()}, {"tier", tier}, {"passthrough", "yes"},
                                                {"stream", tier == "thumbnail" ? "the camera's substream" : "the camera's main stream"}});

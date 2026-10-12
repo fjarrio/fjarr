@@ -75,9 +75,16 @@ GstElement* make_passthrough_bin(const std::string& prefix) {
     return bin;
 }
 
-GstElement* make_opus_bin(const std::string& prefix) {
+GstElement* make_opus_bin(const std::string& prefix, bool music) {
     auto q = [](const std::string& v) { return "\"" + v + "\""; };
-    const std::string desc = "opusenc name=" + q(prefix + "/encoder") + " bitrate=32000 frame-size=20 inband-fec=true audio-type=voice";
+    // perfect-timestamp: output timestamps follow the samples, not when each input buffer arrived. A
+    // desktop's PipeWire buffers arrive unevenly, and those timestamps reached the RTP clock, which a
+    // browser hears as speeding up and slowing down (mini-PC, 2026-10-12). A gap over 100 ms (the
+    // sink fell silent) still resyncs.
+    // Music (a desktop's sound) is not speech: voice tuning at 32 kbps made it muffled and compressed
+    // (mini-PC, 2026-10-12), so it gets the general-audio mode at 64 kbps, docs/16's top for a downlink.
+    const std::string desc = "opusenc name=" + q(prefix + "/encoder") + (music ? " bitrate=64000 audio-type=generic" : " bitrate=32000 audio-type=voice") +
+                             " frame-size=20 inband-fec=true perfect-timestamp=true tolerance=100000000";
     GError* err = nullptr;
     GstElement* bin = gst_parse_bin_from_description(desc.c_str(), TRUE, &err);
     if (err) {
