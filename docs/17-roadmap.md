@@ -616,6 +616,27 @@ transceiver and stall the session; an unmatched stream is now sunk. Not
 measured: mouth-to-ear latency (docs/16, < 250 ms) and echo cancellation
 with a real speaker and microphone, both for 3.5.4. **3.5.3 is done.**
 
+**3.5.4 on the mini-PC, first session (2026-10-12, with Erik), paused.**
+- *The desktop's sound*: heard, but muffled and speeding up and slowing
+  down. Fixed (b46f26e): opusenc carried each PipeWire buffer's arrival time
+  into the RTP clock (about 60 of 150 packets uneven in the fixture, none
+  after `perfect-timestamp`), and voice tuning at 32 kbps suits no music, so
+  a source now declares `AudioContent::Music` (64 kbps). Not yet re-heard.
+- *The webcam's microphone*: **not working, open.** Two problems found.
+  (1) The desktop session's PipeWire holds the ALSA capture device whenever
+  a desktop application records (GNOME Settings' input meter did), and the
+  agent then gets "busy": the 3.5.1 design (ALSA directly) and a desktop on
+  the same machine compete for one device, which needs a decision (the
+  microphone through the session helper as the desktop's sound is, or a
+  WirePlumber rule reserving it for the agent). (2) With the device free,
+  the agent's `alsasrc` still fails with "No such file or directory" on
+  `plughw:CARD=Webcam,DEV=0`, while `arecord` with the same device as the
+  agent's account works: something in the agent's process (environment,
+  ALSA configuration, the card having moved from 1 to 2 at a reboot) to
+  debug next.
+- *Stop sharing* and *talking* (no speaker attached: the default output is
+  `auto_null`) are not tested yet.
+
 ## Vendor cameras and the design-partner demo {#vendor-cameras}
 
 The first vendor camera packages ([ADR-0020](adr/0020-vendor-sources-as-gstreamer-plugins.md)),
