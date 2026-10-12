@@ -3,6 +3,8 @@
 // spec: docs/23-agent-core-architecture.md#the-concrete-sessioncontext-and-backendcontext
 // spec: docs/08-protocol.md#envelope (correlation helpers)
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -32,6 +34,15 @@ struct MonitorInfo {
 struct OperatorInfo {
     std::string id;
     std::string label;
+};
+
+/// An audio uplink for one session (docs/08#talk, docs/23#audio-uplink): one m-section in the first
+/// offer, offered `recvonly`. The core decodes what arrives; `on_pcm` gets S16 mono 48 kHz PCM, about
+/// 20 ms at a time, on a GStreamer streaming thread — the one callback that is not on the core loop
+/// (docs/09). It must not block and may touch only what the capability made thread-safe for it.
+struct InboundAudio {
+    std::string slot; // names the uplink in logs and pipeline graphs ("talk")
+    std::function<void(const std::int16_t* samples, std::size_t count)> on_pcm;
 };
 
 struct TrackSpec {
@@ -91,6 +102,8 @@ class SessionContext {
     virtual TrackState track_state(std::string_view track_id) const = 0;
     /// The manifest_version of the last offer sent (0 before the first).
     virtual unsigned manifest_version() const = 0;
+    /// An audio uplink in the first offer (docs/09; added in M3.5). Only valid inside session_attached.
+    virtual void add_inbound_audio(InboundAudio inbound) = 0;
 
     // Channels (docs/08 classes). Bulk/stream senders exist only if declared.
     virtual ChannelSender& control() = 0;
@@ -106,6 +119,9 @@ class SessionContext {
     /// With `error.data` (docs/08#errors), e.g. who holds what a `busy` refused.
     virtual void fail(const Envelope& request, std::string_view code, std::string_view message, nlohmann::json data) = 0;
     virtual void event(std::string_view type, nlohmann::json payload) = 0;    // kind=event on control
+    /// An audited event for this session through Agent::on_session_event (docs/10; added in M3.5):
+    /// `audio-uplink` with reason `talk-start` or `talk-stop`.
+    virtual void session_event(std::string_view type, std::string_view reason) = 0;
 
     // Blobs (docs/08#blob-frames): the core chunks `bytes` onto this capability's `blob`-framed
     // bulk channel, pumps under the watermarks and reports completion — `done(ok)` runs on the core

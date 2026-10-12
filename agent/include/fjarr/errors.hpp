@@ -31,7 +31,7 @@ inline constexpr std::string_view payload_invalid = "payload-invalid";
 inline constexpr std::string_view internal = "internal";
 /// The robot is not configured for it — a deployment choice, not a fault.
 inline constexpr std::string_view unavailable = "unavailable";
-/// The resource is already in use on this session (one pty per session).
+/// The resource is in use: a pty already open on this session, a tunnel or a speaker another session holds.
 inline constexpr std::string_view busy = "busy";
 /// Input to a control domain another operator holds; data names the holder (docs/10).
 inline constexpr std::string_view control_held = "control-held";

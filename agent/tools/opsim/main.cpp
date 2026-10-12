@@ -392,6 +392,7 @@ struct Shared {
     std::string conn_state = "new", ice_state = "new", gathering_state = "new";
     std::map<std::string, bool> channels; // label -> open
     std::vector<Envelope> inbox; // every inbound envelope, in order
+    int uplink_mline = -1; // the agent's recvonly audio m-section (docs/08#talk), answered sendonly; -1 = none offered
     std::map<std::string, TrackRx> tracks; // by pad name
     std::map<std::string, std::string> mid_by_track; // from the latest manifest
     std::map<std::string, int> pt_by_track;          // from the latest manifest
@@ -678,6 +679,7 @@ class Peer {
             if (!pending_.empty()) vlogf("peer: flushed %zu queued remote candidates", pending_.size());
             pending_.clear();
         }
+        attach_uplink(offer_sdp);
         // A viewer like a browser (docs/08#rtp-feedback): retransmission requests on every receiver;
         // transport-wide feedback follows from the offer's extension when webrtcbin keeps it.
         {
@@ -705,6 +707,81 @@ class Peer {
         emit_wait("set-local-description", answer.get());
         glib::GStrPtr text(gst_sdp_message_as_text(answer->sdp));
         return text.get();
+    }
+
+    /// docs/08#talk: the agent offers its uplink recvonly; a browser answers it sendonly and attaches a
+    /// microphone. opsim attaches a full-scale 330 Hz sine, sending from the start — before talk-start,
+    /// as a careless client would — so the agent's gate is what decides what is played.
+    void attach_uplink(const std::string& offer_sdp) {
+        if (uplink_linked_) return;
+        std::istringstream in(offer_sdp);
+        std::string line;
+        int mline = -1, audio_mline = -1, pt = -1, found = -1, found_pt = -1;
+        auto settle = [&] {
+            if (audio_mline >= 0 && found < 0 && recvonly_) {
+                found = audio_mline;
+                found_pt = pt;
+            }
+        };
+        while (std::getline(in, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            if (line.rfind("m=", 0) == 0) {
+                settle();
+                mline++;
+                recvonly_ = false;
+                audio_mline = line.rfind("m=audio", 0) == 0 ? mline : -1;
+                const auto last = line.find_last_of(' ');
+                pt = audio_mline >= 0 ? std::atoi(line.c_str() + last + 1) : -1;
+            } else if (line == "a=recvonly") {
+                recvonly_ = true;
+            }
+        }
+        settle();
+        if (found < 0) return;
+        GstWebRTCRTPTransceiver* tr = nullptr;
+        g_signal_emit_by_name(webrtc_.get(), "get-transceiver", found, &tr);
+        glib::GObjectPtr<GstWebRTCRTPTransceiver> held(tr);
+        if (!tr) {
+            logf("peer: no transceiver for the uplink m-line %d", found);
+            return;
+        }
+        // As a browser does, the answer names the SSRC it sends with (a=ssrc): without it the robot's
+        // webrtcbin cannot tell which of its BUNDLEd transceivers the stream belongs to.
+        const guint ssrc = static_cast<guint>(g_random_int_range(1, 0x7fffffff));
+        glib::GstCapsPtr pref(gst_caps_new_simple("application/x-rtp", "media", G_TYPE_STRING, "audio", "encoding-name", G_TYPE_STRING, "OPUS", "payload",
+                                                  G_TYPE_INT, found_pt, "clock-rate", G_TYPE_INT, 48000, "encoding-params", G_TYPE_STRING, "2", "ssrc",
+                                                  G_TYPE_UINT, ssrc, nullptr));
+        g_object_set(tr, "direction", GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDONLY, "codec-preferences", pref.get(), nullptr);
+        auto src = glib::make_element("audiotestsrc", "uplink-src");
+        auto conv = glib::make_element("audioconvert", "uplink-conv");
+        auto res = glib::make_element("audioresample", "uplink-res");
+        auto cf = glib::make_element("capsfilter", "uplink-caps");
+        auto enc = glib::make_element("opusenc", "uplink-enc");
+        auto pay = glib::make_element("rtpopuspay", "uplink-pay");
+        if (!src || !conv || !res || !cf || !enc || !pay) {
+            logf("peer: uplink elements missing (opusenc, rtpopuspay)");
+            return;
+        }
+        g_object_set(src.get(), "is-live", TRUE, "wave", 0 /* sine */, "freq", 330.0, "volume", 1.0, nullptr);
+        glib::GstCapsPtr caps(gst_caps_from_string("audio/x-raw,rate=48000,channels=1"));
+        g_object_set(cf.get(), "caps", caps.get(), nullptr);
+        g_object_set(enc.get(), "frame-size", 20, nullptr);
+        g_object_set(pay.get(), "pt", static_cast<guint>(found_pt), "ssrc", ssrc, nullptr);
+        GstElement* els[] = {src.get(), conv.get(), res.get(), cf.get(), enc.get(), pay.get()};
+        for (GstElement* e : els) gst_bin_add(GST_BIN(pipeline_.get()), e);
+        gst_element_link_many(src.get(), conv.get(), res.get(), cf.get(), enc.get(), pay.get(), nullptr);
+        // sink_<n> on an existing transceiver's m-line: webrtcbin sends on that transceiver.
+        auto sink = glib::adopt_pad(gst_element_request_pad_simple(webrtc_.get(), ("sink_" + std::to_string(found)).c_str()));
+        auto srcpad = glib::adopt_pad(gst_element_get_static_pad(pay.get(), "src"));
+        if (!sink || gst_pad_link(srcpad.get(), sink.get()) != GST_PAD_LINK_OK) {
+            logf("peer: the uplink did not link to webrtcbin's sink_%d", found);
+            return;
+        }
+        for (GstElement* e : els) gst_element_sync_state_with_parent(e);
+        uplink_linked_ = true;
+        std::lock_guard<std::mutex> lk(sh_.mu);
+        sh_.uplink_mline = found;
+        logf("peer: uplink offered on m-line %d (pt %d): answering sendonly with a 330 Hz sine", found, found_pt);
     }
 
     void add_remote_candidate(unsigned mline, const std::string& cand) {
@@ -1219,6 +1296,8 @@ class Peer {
     bool remote_described_ = false;
     std::vector<std::pair<unsigned, std::string>> pending_;
     std::vector<std::string> tracks_;
+    bool uplink_linked_ = false; // the uplink's source, once (docs/08#talk)
+    bool recvonly_ = false;      // parsing state for attach_uplink
     bool stopped_ = false;
 };
 
@@ -2453,6 +2532,65 @@ void scenario_audio_unlistened(Operator& op) {
 /// helper hands over the speakers, module E reads them only while the track is enabled, and a change of
 /// default output keeps the sound coming (docs/23#desktop-audio). The fixture plays through
 /// --desktop-plug (/play, /speakers).
+/// M3.5 3.5.3: talking to the robot (docs/08#talk). opsim's uplink sends a full-scale sine from the
+/// start; the agent plays it only between talk-start and talk-stop, after the speaker's volume cap,
+/// and the release is answered at once and followed by no more audio.
+void scenario_audio_talk(Operator& op) {
+    Report& r = op.report();
+    connect_and_report(op);
+    const int mline = op.locked<int>([&] { return op.sh().uplink_mline; });
+    r.check("talk-uplink", mline >= 0, mline >= 0 ? "the offer carries a recvonly audio m-section (m-line " + std::to_string(mline) + "), answered sendonly"
+                                                  : "no uplink in the offer (is a speaker configured, and talk granted?)");
+    if (mline < 0) return;
+    op.sleep_ms(1000); // audio flows already: nothing may be played before talk-start
+    std::size_t mark = op.inbox_mark();
+    const std::int64_t t0 = g_get_monotonic_time();
+    auto started = op.request("fjarr.audio", "talk-start", json::object());
+    const bool start_ok = started && started->payload.value("ok", false);
+    r.check("talk-start", start_ok, start_ok ? "granted in " + ms_str(g_get_monotonic_time() - t0) : (started ? started->payload.dump() : "no result"));
+    if (!start_ok) return;
+    // talk-level every 250 ms: the first one says only what came after talk-start was played.
+    auto first = op.wait_envelope(mark, "fjarr.audio", "talk-level", "event", 2000);
+    r.check("talk-gated", first && first->payload.value("frames", 1000) <= 20,
+            first ? std::to_string(first->payload.value("frames", 0)) + " frame(s) at the first level, 250 ms after talk-start: nothing from the second before it"
+                  : "no talk-level within 2 s");
+    op.sleep_ms(1500);
+    std::optional<Envelope> last;
+    op.locked<int>([&] {
+        for (std::size_t i = mark; i < op.sh().inbox.size(); i++)
+            if (op.sh().inbox[i].type == "talk-level") last = op.sh().inbox[i];
+        return 0;
+    });
+    const auto frames = last ? last->payload.value("frames", 0) : 0;
+    const double peak = last ? last->payload.value("peak_db", -127.0) : -127.0;
+    r.check("talk-heard", frames >= 50, std::to_string(frames) + " frames played through the speaker in ~1.75 s (50 a second)");
+    // A full-scale sine under the demo robot's 0.5 cap peaks at -6 dBFS: the cap holds.
+    r.check("talk-capped", peak <= -5.5 && peak >= -9.0, "peak " + std::to_string(peak) + " dBFS from a full-scale source under a 0.5 cap (-6 dBFS)");
+    const std::int64_t t1 = g_get_monotonic_time();
+    auto stopped = op.request("fjarr.audio", "talk-stop", json::object());
+    const std::int64_t release_us = g_get_monotonic_time() - t1;
+    const bool stop_ok = stopped && stopped->payload.value("ok", false);
+    r.check("talk-release", stop_ok && release_us < 200000,
+            stop_ok ? "the gate closed and answered " + ms_str(release_us) + " after the release (docs/06: within 200 ms)" : "talk-stop failed");
+    mark = op.inbox_mark();
+    op.sleep_ms(700);
+    const bool quiet = !op.wait_envelope(mark, "fjarr.audio", "talk-level", "event", 1);
+    r.check("talk-stopped", quiet, quiet ? "no talk-level in 700 ms after talk-stop: nothing more played" : "talk-level after talk-stop");
+    close_and_assert(op);
+}
+
+/// fjarr.audio without `talk` (docs/10): no uplink offered, and talk-start refused.
+void scenario_audio_untalked(Operator& op) {
+    Report& r = op.report();
+    connect_and_report(op);
+    const int mline = op.locked<int>([&] { return op.sh().uplink_mline; });
+    r.check("talk-no-uplink", mline < 0, mline < 0 ? "granted fjarr.audio without talk: no uplink offered" : "an uplink was offered without talk");
+    auto started = op.request("fjarr.audio", "talk-start", json::object());
+    const std::string code = started ? started->payload.value("error", json::object()).value("code", std::string{}) : "";
+    r.check("talk-denied", code == "capability-denied", started ? "talk-start answered " + (code.empty() ? started->payload.dump() : code) : "no result");
+    close_and_assert(op);
+}
+
 void scenario_desktop_audio(Operator& op) {
     Report& r = op.report();
     if (op.desktop_plug().empty()) {
@@ -3784,7 +3922,8 @@ const std::map<std::string, ScenarioFn> kScenarios = {
     {"smoke", scenario_smoke},       {"toggle", scenario_toggle},   {"hotplug", scenario_hotplug},     {"silent-operator", scenario_silent_operator},
     {"no-answer", scenario_no_answer}, {"socket-drop", scenario_socket_drop}, {"ice-restart", scenario_ice_restart}, {"deadman", scenario_deadman},
     {"congested-viewer", scenario_congested_viewer}, {"rejected-track", scenario_rejected_track},
-    {"audio", scenario_audio}, {"audio-unlistened", scenario_audio_unlistened},
+    {"audio", scenario_audio}, {"audio-unlistened", scenario_audio_unlistened}, {"audio-talk", scenario_audio_talk},
+    {"audio-untalked", scenario_audio_untalked},
     {"desktop-see", scenario_desktop_see}, {"desktop-control", scenario_desktop_control}, {"desktop-hotplug", scenario_desktop_hotplug}, {"desktop-clipboard", scenario_desktop_clipboard}, {"desktop-cursor", scenario_desktop_cursor}, {"desktop-virtual", scenario_desktop_virtual}, {"desktop-audio", scenario_desktop_audio},
     {"relay-only", scenario_relay_only}, {"tunnel", scenario_tunnel}, {"soak", scenario_soak},
     // netem-<profile>: one function, the profile is read from the scenario name (unknown profile → usage, exit 2).
@@ -3815,6 +3954,7 @@ int main(int argc, char** argv) {
     if (opts.scenario.rfind("desktop-", 0) == 0) opts.capabilities.push_back("fjarr.desktop");
     if (opts.scenario.rfind("audio", 0) == 0) opts.capabilities.push_back("fjarr.audio");
     if (opts.scenario == "audio") opts.capability_params["fjarr.audio"] = json{{"listen", true}}; // audio-unlistened: granted without it
+    if (opts.scenario == "audio-talk") opts.capability_params["fjarr.audio"] = json{{"talk", true}};  // audio-untalked: granted without it
     gst_init(&argc, &argv);
 
     Shared sh;

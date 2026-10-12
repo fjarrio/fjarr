@@ -79,6 +79,7 @@ class SessionContextImpl final : public SessionContext {
     void update_tracks(std::vector<TrackSpec> full_set) override;
     TrackState track_state(std::string_view track_id) const override;
     unsigned manifest_version() const override;
+    void add_inbound_audio(InboundAudio inbound) override;
     ChannelSender& control() override;
     ChannelSender& realtime() override;
     ChannelSender& bulk() override;
@@ -89,6 +90,7 @@ class SessionContextImpl final : public SessionContext {
     void fail(const Envelope& request, std::string_view code, std::string_view message) override;
     void fail(const Envelope& request, std::string_view code, std::string_view message, nlohmann::json data) override;
     void event(std::string_view type, nlohmann::json payload) override;
+    void session_event(std::string_view type, std::string_view reason) override;
     blob::BlobRef send_blob(std::string bytes, std::string media_type, std::function<void(bool ok)> done) override;
     void cancel_blob(std::string_view blob_id) override;
     std::unique_ptr<FdWatch> watch_readable(int fd, std::function<bool()> on_readable) override;
@@ -154,6 +156,8 @@ class Session : public std::enable_shared_from_this<Session> {
     // --- used by SessionContextImpl (core loop only)
     const nlohmann::json& granted_params(std::string_view cap) const;
     void add_track(const std::string& cap, TrackSpec spec);
+    void add_inbound_audio(const std::string& cap, InboundAudio inbound);
+    void session_event(std::string_view type, std::string_view reason);
     void update_tracks(const std::string& cap, std::vector<TrackSpec> full_set);
     TrackState track_state(std::string_view track_id) const;
     ChannelSender& sender(ChannelClass cls, const std::string& cap);
@@ -233,6 +237,7 @@ class Session : public std::enable_shared_from_this<Session> {
     std::string attaching_cap_;
     std::unique_ptr<media::ConsumerPipeline> consumer_;
     std::vector<std::pair<std::string, TrackSpec>> pending_tracks_; // (cap, spec) declared at attach
+    std::vector<std::pair<std::string, InboundAudio>> pending_inbound_; // (cap, uplink) declared at attach (docs/23#audio-uplink)
     std::map<std::string, std::pair<std::string, TrackSpec>> tracks_; // track_id → (cap, spec)
     std::map<std::string, std::string> subscribed_tier_; // track_id → tier currently subscribed
     unsigned manifest_version_ = 0;

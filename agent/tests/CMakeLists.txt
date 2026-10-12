@@ -31,6 +31,7 @@ add_executable(fjarr-tests
   test_rate_estimator.cpp
   test_supervision.cpp
   test_terminal_capability.cpp
+  test_audio_capability.cpp
   test_net.cpp
   test_sctp_watch.cpp
   test_tier_policy.cpp

@@ -4,6 +4,7 @@
 // code that talks to webrtcbin: offer builder, renegotiation, ICE, DTLS/
 // connection state, data channels, get-stats.
 // spec: docs/23-agent-core-architecture.md#offer-construction-and-renegotiation · #consumer-pipeline-per-session
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -116,6 +117,9 @@ class ConsumerPipeline {
                const std::vector<ChannelParams>& channels);
     /// Add a track branch (initial or by renegotiation). Reuses a pooled transceiver of the same kind.
     ConsumerTrack* add_track(const TrackSpec& spec, const std::string& cap);
+    /// An audio uplink (docs/23#audio-uplink): a recvonly Opus transceiver for the next offer; what
+    /// arrives on it is decoded to S16 mono 48 kHz and handed to `on_pcm` on the streaming thread.
+    bool add_inbound_audio(const std::string& slot, std::function<void(const std::int16_t*, std::size_t)> on_pcm);
     /// Removal the docs/23 way: valve closed first, transceiver inactive, kept in the pool.
     void remove_track(const std::string& track_id);
     ConsumerTrack* track(const std::string& track_id);
@@ -151,6 +155,16 @@ class ConsumerPipeline {
 
   private:
     struct AppSrcSink;
+    /// One uplink: fixed once added, read from webrtcbin's pad-added (a streaming thread).
+    struct Inbound {
+        std::string slot;
+        std::function<void(const std::int16_t*, std::size_t)> on_pcm;
+        GstWebRTCRTPTransceiver* transceiver = nullptr; // compared only; owned by `transceiver_ref`
+        glib::GObjectPtr<GstWebRTCRTPTransceiver> transceiver_ref;
+        std::atomic<bool> linked{false};
+    };
+    static void on_pad_added(GstElement* webrtc, GstPad* pad, gpointer user);
+    void link_inbound(GstPad* pad, const std::shared_ptr<Inbound>& in);
     void connect_signals();
     void on_negotiation_needed_cb();
     static void on_ice_candidate_cb(GstElement*, guint mline, gchar* cand, gpointer user);
@@ -174,6 +188,7 @@ class ConsumerPipeline {
     std::vector<glib::SignalConnection> signals_;
     std::vector<glib::GObjectPtr<GstWebRTCDataChannel>> channels_;
     std::map<std::string, std::unique_ptr<ConsumerTrack>> tracks_;
+    std::vector<std::shared_ptr<Inbound>> inbound_; // added before the first offer only (docs/23#audio-uplink)
     int next_pt_ = 96;
     std::vector<std::string> tunnel_interfaces_;
     bool offer_in_flight_ = false;

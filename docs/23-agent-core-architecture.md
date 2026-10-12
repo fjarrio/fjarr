@@ -1094,25 +1094,33 @@ capability part:
   audio/x-raw,format=S16LE,rate=48000,channels=1 ! appsink` and hands each
   buffer's samples to the capability's `on_pcm` on that streaming thread.
   Decoding is per session, as each session has its own pipeline; nothing
-  else in the core changes, and no capability sees RTP or SDP.
-- **The capability: one speaker, one gate.** `fjarr.audio` owns a single
-  output pipeline for the robot, `appsrc ! audioconvert ! volume ! level !
-  output`, built when a speaker is configured and kept PLAYING. Each
-  session's `on_pcm` pushes into its `appsrc` only while that session holds
-  the floor; the check is one atomic read, so a closed gate drops audio on
-  the streaming thread and nothing waits on the core loop. `talk-start` and
-  `talk-stop` move the floor on the core loop. When the floor changes hands
-  or closes, nothing queued plays on: the `appsrc` holds at most 60 ms.
+  else in the core changes, and no capability sees RTP or SDP. webrtcbin
+  places an incoming stream by the SSRC the answer names for it (`a=ssrc`;
+  browsers name it, and fjarr-opsim does as they do): an answer that names
+  none leaves the stream on the first transceiver of the BUNDLE. A stream
+  that matches no uplink is sunk into a `fakesink` and logged, because an
+  unlinked pad stops webrtcbin's receive path and the session with it
+  (found building the opsim scenario).
+- **The capability: one speaker, one gate.** `fjarr.audio` owns the robot's
+  speaker pipeline, `appsrc ! audioconvert ! volume ! output`, built at
+  `talk-start` and set to NULL at `talk-stop`: nothing queued plays on after
+  a release, and the robot's audio device is free while nobody talks. Each
+  session's `on_pcm` pushes into the `appsrc` only while that session holds
+  the floor, under a mutex held for one 20 ms frame, so a closed gate drops
+  audio on the streaming thread and nothing waits on the core loop.
+  `talk-start` and `talk-stop` move the floor on the core loop. The `appsrc`
+  holds at most 60 ms.
 - **The output.** `speaker.output = "alsa"` with `speaker.device` (default
   `default`) plays through `alsasink` with a 40 ms buffer, so a release goes
   quiet well inside docs/06's 200 ms. `"null"` decodes, caps and meters,
   then discards: the demo robot (a container with no sound card) and CI use
   it. The volume cap `speaker.max_volume` (0–1, default 0.5) is the `volume`
   element's fixed value: nothing on the wire can raise it.
-- **What the operator sees.** The `level` element posts every 250 ms while
-  the gate is open; the capability sends the talking session `talk-level`
-  (dBFS after the cap, and the frames played). It is the operator's proof
-  that their voice reaches the speaker, and the test oracle.
+- **What the operator sees.** `on_pcm` measures what it pushes, scaled by
+  the cap exactly as the `volume` element scales it, and every 250 ms the
+  capability sends the talking session `talk-level` (RMS and peak in dBFS
+  after the cap, and the frames played). It is the operator's proof that
+  their voice reaches the speaker, and the test oracle.
 - **Grants and audit.** The uplink is offered only to a session whose grant
   says `talk` and only when a speaker is configured; `talk-start` from any
   other session is `capability-denied` or `unavailable`. Every opening and
@@ -1121,6 +1129,13 @@ capability part:
   `session_detached`, like any other held input (docs/15 safety).
 - **Config:** `[capabilities."fjarr.audio".speaker]` with `output`,
   `device` and `max_volume`.
+- **Verified** (2026-10-12): opsim's `audio-talk` against the demo robot
+  (`null` output, cap 0.5) sends a full-scale sine from before
+  `talk-start`: nothing of it is played before, 50 frames a second after,
+  peaking at −6.0 dBFS; `talk-stop` answers in about 2 ms and no level
+  follows. `audio-untalked` is offered no uplink and refused
+  `capability-denied`. The floor, `busy` with its holder, and the gate
+  closing on every session end are unit tests (`test_audio_capability`).
 
 ### Rate control and tier switching {#rate-control-and-tier-switching}
 

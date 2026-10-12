@@ -4,6 +4,7 @@
 #include <set>
 #include <sstream>
 
+#include <gst/app/gstappsink.h>
 #include <gst/sdp/sdp.h>
 #include <gst/video/video.h>
 
@@ -286,6 +287,105 @@ ConsumerTrack* ConsumerPipeline::add_track(const TrackSpec& spec, const std::str
     ConsumerTrack* raw = t.get();
     tracks_[spec.track_id] = std::move(t);
     return raw;
+}
+
+bool ConsumerPipeline::add_inbound_audio(const std::string& slot, std::function<void(const std::int16_t*, std::size_t)> on_pcm) {
+    // docs/23#audio-uplink: offered recvonly with Opus preferences, before the first offer; a browser
+    // answers it sendonly and attaches its microphone with replaceTrack(), never renegotiating.
+    const int pt = next_pt_++;
+    glib::GstCapsPtr pref(gst_caps_new_simple("application/x-rtp", "media", G_TYPE_STRING, "audio", "encoding-name", G_TYPE_STRING, "OPUS", "payload",
+                                              G_TYPE_INT, pt, "clock-rate", G_TYPE_INT, 48000, "encoding-params", G_TYPE_STRING, "2", "useinbandfec",
+                                              G_TYPE_STRING, "1", nullptr));
+    GstWebRTCRTPTransceiver* trans = nullptr;
+    g_signal_emit_by_name(webrtc_.get(), "add-transceiver", GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_RECVONLY, pref.get(), &trans);
+    if (!trans) return false;
+    auto in = std::make_shared<Inbound>();
+    in->slot = slot;
+    in->on_pcm = std::move(on_pcm);
+    in->transceiver = trans;
+    in->transceiver_ref.reset(trans); // add-transceiver returns a reference of ours
+    if (inbound_.empty()) {
+        // Fires on a streaming thread when the peer's RTP for a receiving transceiver arrives.
+        signals_.emplace_back(webrtc_.get(), "pad-added", G_CALLBACK(&ConsumerPipeline::on_pad_added), new SignalContext{this, alive_, post_},
+                              [](gpointer d, GClosure*) { delete static_cast<SignalContext*>(d); });
+    }
+    inbound_.push_back(std::move(in));
+    log::info("consumer", "audio uplink offered", {{"session", sid8_}, {"slot", slot}, {"pt", std::to_string(pt)}});
+    return true;
+}
+
+void ConsumerPipeline::on_pad_added(GstElement*, GstPad* pad, gpointer user) {
+    // A streaming thread: only the uplinks (fixed before the first offer) and the pipeline are read.
+    const auto* ctx = static_cast<const SignalContext*>(user);
+    if (ctx->alive.expired() || GST_PAD_DIRECTION(pad) != GST_PAD_SRC) return;
+    GstWebRTCRTPTransceiver* trans = nullptr;
+    g_object_get(pad, "transceiver", &trans, nullptr);
+    glib::GObjectPtr<GstWebRTCRTPTransceiver> held(trans);
+    for (const auto& in : ctx->me->inbound_)
+        if (in->transceiver == trans && !in->linked.exchange(true)) return ctx->me->link_inbound(pad, in);
+    // A stream we did not ask for, or could not place (an answer naming no SSRC for its uplink): an
+    // unlinked pad stops webrtcbin's receive path and with it the whole session, so it is sunk.
+    gchar* mid = nullptr;
+    if (trans) g_object_get(trans, "mid", &mid, nullptr);
+    glib::GStrPtr mid_held(mid);
+    log::warn("consumer", "incoming stream dropped: it matches no uplink", {{"session", ctx->me->sid8_}, {"pad", glib::pad_name(pad)}, {"mid", mid ? mid : "?"}});
+    auto sink = glib::make_element("fakesink", ctx->me->name() + "/unmatched-" + glib::pad_name(pad));
+    if (!sink) return;
+    g_object_set(sink.get(), "sync", FALSE, "async", FALSE, nullptr);
+    gst_bin_add(GST_BIN(ctx->me->pipeline_.get()), sink.get());
+    gst_element_sync_state_with_parent(sink.get());
+    auto sinkpad = glib::adopt_pad(gst_element_get_static_pad(sink.get(), "sink"));
+    gst_pad_link(pad, sinkpad.get());
+}
+
+void ConsumerPipeline::link_inbound(GstPad* pad, const std::shared_ptr<Inbound>& in) {
+    // queue ! rtpopusdepay ! opusdec ! audioconvert ! audioresample ! S16 mono 48 kHz ! appsink, under
+    // session:<sid8>/<slot>/<role> (docs/24 grammar).
+    const std::string p = prefix(in->slot);
+    auto queue = glib::make_element("queue", p + "/queue");
+    auto depay = glib::make_element("rtpopusdepay", p + "/depay");
+    auto dec = glib::make_element("opusdec", p + "/decoder");
+    auto conv = glib::make_element("audioconvert", p + "/convert");
+    auto res = glib::make_element("audioresample", p + "/resample");
+    auto filter = glib::make_element("capsfilter", p + "/caps");
+    auto sink = glib::make_element("appsink", p + "/appsink");
+    if (!queue || !depay || !dec || !conv || !res || !filter || !sink) {
+        log::error("consumer", "audio uplink elements missing (rtpopusdepay, opusdec?)", {{"session", sid8_}, {"slot", in->slot}});
+        return;
+    }
+    glib::GstCapsPtr pcm(gst_caps_from_string("audio/x-raw,format=S16LE,rate=48000,channels=1,layout=interleaved"));
+    g_object_set(filter.get(), "caps", pcm.get(), nullptr);
+    g_object_set(queue.get(), "max-size-time", static_cast<guint64>(100 * GST_MSECOND), "max-size-buffers", 0u, "max-size-bytes", 0u, "leaky", 2, nullptr);
+    g_object_set(sink.get(), "sync", FALSE, "max-buffers", 4u, "drop", TRUE, nullptr);
+    // Each decoded buffer straight to the capability, on this streaming thread (docs/09: on_pcm).
+    GstAppSinkCallbacks cb{};
+    cb.new_sample = [](GstAppSink* appsink, gpointer d) -> GstFlowReturn {
+        auto sample = glib::adopt_sample(gst_app_sink_pull_sample(appsink));
+        if (!sample) return GST_FLOW_OK;
+        GstBuffer* buf = gst_sample_get_buffer(sample.get());
+        GstMapInfo map;
+        if (buf && gst_buffer_map(buf, &map, GST_MAP_READ)) {
+            const auto* in = static_cast<const std::shared_ptr<Inbound>*>(d);
+            (*in)->on_pcm(reinterpret_cast<const std::int16_t*>(map.data), map.size / sizeof(std::int16_t));
+            gst_buffer_unmap(buf, &map);
+        }
+        return GST_FLOW_OK;
+    };
+    gst_app_sink_set_callbacks(GST_APP_SINK(sink.get()), &cb, new std::shared_ptr<Inbound>(in),
+                               [](gpointer d) { delete static_cast<std::shared_ptr<Inbound>*>(d); });
+    GstElement* chain[] = {queue.get(), depay.get(), dec.get(), conv.get(), res.get(), filter.get(), sink.get()};
+    for (GstElement* e : chain) gst_bin_add(GST_BIN(pipeline_.get()), e);
+    if (!gst_element_link_many(queue.get(), depay.get(), dec.get(), conv.get(), res.get(), filter.get(), sink.get(), nullptr)) {
+        log::error("consumer", "audio uplink did not link", {{"session", sid8_}, {"slot", in->slot}});
+        return;
+    }
+    for (GstElement* e : chain) gst_element_sync_state_with_parent(e);
+    auto qsink = glib::adopt_pad(gst_element_get_static_pad(queue.get(), "sink"));
+    if (gst_pad_link(pad, qsink.get()) != GST_PAD_LINK_OK) {
+        log::error("consumer", "audio uplink pad did not link", {{"session", sid8_}, {"slot", in->slot}});
+        return;
+    }
+    log::info("consumer", "audio uplink receiving", {{"session", sid8_}, {"slot", in->slot}});
 }
 
 namespace {

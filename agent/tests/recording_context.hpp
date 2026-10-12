@@ -39,6 +39,8 @@ struct RecordingContext final : SessionContext {
     nlohmann::json grants = nlohmann::json::object(); // what granted_params() answers, for every capability
     const nlohmann::json &granted_params(std::string_view) const override { return grants; }
     void add_track(TrackSpec spec) override { added.push_back(spec.track_id); }
+    void add_inbound_audio(InboundAudio in) override { inbound.push_back(std::move(in)); }
+    std::vector<InboundAudio> inbound; // uplinks asked for (docs/23#audio-uplink); a test feeds their on_pcm
     void update_tracks(std::vector<TrackSpec> full_set) override {
         std::vector<std::string> ids;
         for (const auto &t : full_set) ids.push_back(t.track_id);
@@ -91,6 +93,8 @@ struct RecordingContext final : SessionContext {
                                        {"error", {{"code", std::string(code)}, {"message", std::string(message)}, {"data", std::move(data)}}}}});
     }
     void event(std::string_view type, nlohmann::json p) override { sent.push_back({"event", std::string(type), std::move(p)}); }
+    void session_event(std::string_view type, std::string_view reason) override { session_events.emplace_back(type, reason); }
+    std::vector<std::pair<std::string, std::string>> session_events; // (type, reason), the audit hook
     blob::BlobRef send_blob(std::string bytes, std::string media_type, std::function<void(bool)> done) override {
         char id[64];
         std::snprintf(id, sizeof id, "01930000-0000-7000-8000-%012d", ++blob_seq);

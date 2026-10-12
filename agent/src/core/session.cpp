@@ -180,6 +180,8 @@ const SessionId& SessionContextImpl::id() const { return session_.id(); }
 const OperatorInfo& SessionContextImpl::operator_info() const { return session_.operator_info(); }
 const nlohmann::json& SessionContextImpl::granted_params(std::string_view cap) const { return session_.granted_params(cap); }
 void SessionContextImpl::add_track(TrackSpec spec) { session_.add_track(cap_, std::move(spec)); }
+void SessionContextImpl::add_inbound_audio(InboundAudio inbound) { session_.add_inbound_audio(cap_, std::move(inbound)); }
+void SessionContextImpl::session_event(std::string_view type, std::string_view reason) { session_.session_event(type, reason); }
 void SessionContextImpl::update_tracks(std::vector<TrackSpec> full_set) { session_.update_tracks(cap_, std::move(full_set)); }
 TrackState SessionContextImpl::track_state(std::string_view track_id) const { return session_.track_state(track_id); }
 unsigned SessionContextImpl::manifest_version() const { return session_.manifest_version(); }
@@ -426,6 +428,11 @@ void Session::attach(std::vector<AttachedCapability> caps) {
         if (consumer_->add_track(spec, cap)) tracks_[spec.track_id] = {cap, spec};
     }
     pending_tracks_.clear();
+    // Audio uplinks (docs/23#audio-uplink): a recvonly m-section each, in this first offer.
+    for (auto& [cap, inbound] : pending_inbound_)
+        if (!consumer_->add_inbound_audio(inbound.slot, std::move(inbound.on_pcm)))
+            log::warn("session", "audio uplink not offered", {{"session", sid8_}, {"cap", cap}, {"slot", inbound.slot}});
+    pending_inbound_.clear();
     nlohmann::json accept = protocol::signaling_base("session-accept");
     accept["session_id"] = id_;
     deps_.send_signal(std::move(accept));
@@ -1065,6 +1072,18 @@ ChannelSender& Session::sender(ChannelClass cls, const std::string& cap) {
     if (it != senders_.end()) return *it->second;
     static_cast<DeniedSender*>(denied_.get())->why = label + " is not open (declare the channel in the manifest, and wait for the session to connect)";
     return *denied_;
+}
+
+void Session::add_inbound_audio(const std::string& cap, InboundAudio inbound) {
+    if (!attaching_ || attaching_cap_ != cap) throw FjarrError("payload-invalid", "add_inbound_audio is only valid inside session_attached");
+    if (!inbound.on_pcm) throw FjarrError("payload-invalid", "add_inbound_audio needs on_pcm");
+    pending_inbound_.emplace_back(cap, std::move(inbound));
+}
+
+void Session::session_event(std::string_view type, std::string_view reason) {
+    // docs/10: the audit hook. Logged too, naming the operator.
+    log::info("session", "session event", {{"session", sid8_}, {"type", std::string(type)}, {"reason", std::string(reason)}, {"operator", operator_.label}});
+    if (deps_.emit) deps_.emit(SessionEvent{std::string(type), id_, operator_, std::string(reason), ""});
 }
 
 void Session::add_track(const std::string& cap, TrackSpec spec) {

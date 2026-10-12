@@ -46,7 +46,10 @@ int main() {
     config.capabilities["fjarr.test"] = {{"enabled", true}, {"test_hooks", true}}; // the demo drives the hooks
     // fjarr.audio (docs/23#audio, M3.5): a microphone, here a 440 Hz tone; heard only by a session
     // whose grant says `listen`.
-    config.capabilities["fjarr.audio"] = {{"mics", {{"mic", {{"label", "Microphone (test tone)"}, {"source", {{"type", "tone"}, {"freq", 440}}}}}}}};
+    // Its speaker (3.5.3, docs/23#audio-uplink) is `null`: the demo runs in a container with no sound card,
+    // so an operator's voice is decoded, capped at half volume and metered (talk-level), then dropped.
+    config.capabilities["fjarr.audio"] = {{"mics", {{"mic", {{"label", "Microphone (test tone)"}, {"source", {{"type", "tone"}, {"freq", 440}}}}}}},
+                                          {"speaker", {{"output", "null"}, {"max_volume", 0.5}}}};
     // fjarr.camera (docs/06): three tracks through the video source contract — a pattern, the lab's
     // RTSP simulator (rtsp-sim in docker-compose.yml), and the host webcam, which is only there
     // with docker-compose.camera.yml (docs/12); without it the track is unavailable, with its reason
