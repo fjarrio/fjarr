@@ -99,6 +99,13 @@ regresses**:
   (`test_control_domains.cpp` pins the rules in virtual time,
   `test_control.cpp` through the real SessionManager and router);
 - heartbeat teardown timings;
+- **the speaker's gate** ([docs/08](08-protocol.md#talk), M3.5 3.5.3): an
+  operator's audio is played only between `talk-start` and `talk-stop`, by
+  one session at a time, and the gate closes on every session end, audited.
+  `test_audio_capability.cpp` pins the floor, `busy`, the cap and the close
+  on detach; opsim's `audio-talk` sends audio before `talk-start` and requires
+  none of it played, the cap held and nothing after the release; the lab
+  browser holds and releases the dashboard's Talk button;
 - **tunnel isolation** ([docs/27](27-network-tunnel.md#testing)): with two
   robots attached at once, no packet crosses from one link to the other in
   either direction, and each end drops anything not addressed to its own

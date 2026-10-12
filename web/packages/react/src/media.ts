@@ -5,9 +5,9 @@
  *       docs/22 core requirement #8 (a view observes its own document, never the opener's)
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AcquireOptions, MediaStreamTrackLike, Session, TrackEntry, TrackHandle, TrackStatus } from "@fjarr/core";
+import type { AcquireOptions, MediaStreamTrackLike, Session, TrackEntry, TrackHandle, TrackStatus, UplinkLevel } from "@fjarr/core";
 import { useSession } from "./context.js";
-import { useTrackEntry } from "./hooks.js";
+import { useStore, useTrackEntry } from "./hooks.js";
 
 export interface UseVideoTrackOptions extends AcquireOptions {
   /** Keep the track flowing while off-screen (minimized overlay, PiP). */
@@ -215,9 +215,14 @@ export interface PushToTalkBinding {
   talking: boolean;
   start: () => Promise<void>;
   stop: () => void;
+  /** Why talking failed: the microphone, or the agent's refusal (`busy` names who is talking). */
   error: Error | null;
-  /** The agent offered no uplink transceiver (grant lacks `fjarr.audio` talk). */
+  /** The agent offered no uplink transceiver (grant lacks `fjarr.audio` talk, or the robot has no speaker). */
   unavailable: boolean;
+  /** The session's offer carries an uplink: a talk control can be shown (docs/08#talk). */
+  offered: boolean;
+  /** What reaches the robot's speaker while talking, after its volume cap (`talk-level`); null otherwise. */
+  robotLevel: UplinkLevel | null;
 }
 
 /**
@@ -277,7 +282,10 @@ export function usePushToTalk(session: Session | undefined, options: PushToTalkO
           throw new Error("released");
         }
         if (!ok) {
-          setUnavailable(true);
+          // docs/08#talk: no uplink at all, or the agent refused (busy: someone else is talking).
+          const refused = s.audioUplink.state.getSnapshot().refused;
+          if (!refused || refused.code === "unavailable") setUnavailable(true);
+          else setError(new Error(refused.code === "busy" && refused.holder?.label ? `${refused.holder.label} is talking through the robot's speaker` : refused.message));
           throw new Error("released");
         }
         mic.current = stream;
@@ -298,5 +306,6 @@ export function usePushToTalk(session: Session | undefined, options: PushToTalkO
 
   useEffect(() => () => stop(), [stop]);
 
-  return { talking, start, stop, error, unavailable };
+  const uplink = useStore(s.audioUplink.state);
+  return { talking, start, stop, error, unavailable, offered: uplink.offered, robotLevel: uplink.level };
 }

@@ -52,6 +52,28 @@ test("the Microphones panel plays the robot's microphone while the operator list
   await expect.poll(micStatus, { timeout: 5000 }).not.toBe("streaming");
 });
 
+test("holding Talk plays the operator's microphone through the robot's speaker, and releasing stops it (M3.5 3.5.3)", async ({ dashboard, stack, page }) => {
+  await stack.requireServer();
+  needs(await stack.dashboardReachable(), `demo-dashboard is not running at ${env.dashboardHttp} — \`make demo-up\``);
+  await dashboard.goto();
+  await dashboard.connect(env.robotId);
+  await dashboard.waitForState(env.robotId, "connected");
+  // The demo backend grants talk and the demo robot has a (null) speaker: the uplink is offered.
+  const talk = page.locator("[data-demo-talk]");
+  await expect(talk).toHaveAttribute("data-demo-talk", "idle", { timeout: 10_000 });
+  // The lab browser's fake microphone (a beep) is the operator's voice; holding the button is the gesture.
+  await talk.hover();
+  await page.mouse.down();
+  await expect(talk).toHaveAttribute("data-demo-talk", "talking", { timeout: 10_000 });
+  // The agent's talk-level: frames played through the robot's speaker keep coming while held.
+  const level = page.locator("[data-demo-talk-level]");
+  await expect.poll(async () => Number((await level.getAttribute("data-demo-talk-level").catch(() => null)) ?? 0), { timeout: 5000 }).toBeGreaterThan(25);
+  dashboard.out.note("talkFrames", Number(await level.getAttribute("data-demo-talk-level")), "20 ms frames played at the robot while Talk was held");
+  await page.mouse.up();
+  await expect(talk).toHaveAttribute("data-demo-talk", "idle", { timeout: 2000 });
+  await expect(level).toHaveCount(0);
+});
+
 test("the Terminal panel gives a developer a working shell, and tells an operator why it has none", async ({ dashboard, stack, page }) => {
   test.slow();
   await stack.requireServer();

@@ -47,6 +47,7 @@ import {
   useTracks,
   type DesktopViewHandle,
   type Session,
+  usePushToTalk,
 } from "@fjarr/react";
 import { RobotStatusProvider, useRobotStatus } from "./robot-status.tsx";
 import { Diagnostics } from "./diagnostics.tsx";
@@ -271,9 +272,30 @@ function MicrophonesPanel({ session }: { session: Session }) {
   const tracks = useTracks(session);
   const mics = [...tracks.entries.values()].filter((e) => e.manifest.kind === "audio" && e.manifest.cap === "fjarr.audio");
   const [listening, setListening] = useState<Record<string, boolean>>({});
-  if (mics.length === 0) return null;
+  // Talking through the robot's speaker (docs/08#talk, M3.5 3.5.3): hold the button; the agent plays only
+  // between its talk-start and talk-stop, and says how loud it arrives.
+  const ptt = usePushToTalk(session);
+  if (mics.length === 0 && !ptt.offered) return null;
   return (
-    <Panel title="Microphones (fjarr.audio: heard only with the grant's listen; streamed only while you listen)">
+    <Panel title="Audio (fjarr.audio: microphones heard with the grant's listen, the speaker with talk)">
+      {ptt.offered && (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8 }}>
+          <button
+            data-demo-talk={ptt.talking ? "talking" : "idle"}
+            onPointerDown={() => void ptt.start()}
+            onPointerUp={ptt.stop}
+            onPointerLeave={ptt.stop}
+          >
+            {ptt.talking ? "Talking…" : "Hold to talk"}
+          </button>
+          {ptt.talking && ptt.robotLevel && (
+            <span data-demo-talk-level={ptt.robotLevel.frames} style={{ color: "#8b93a1" }}>
+              at the robot's speaker: {ptt.robotLevel.rmsDb.toFixed(0)} dBFS
+            </span>
+          )}
+          {ptt.error && <span style={{ color: "#f85149" }}>{ptt.error.message}</span>}
+        </div>
+      )}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         {mics.map((m) => {
           const id = m.manifest.track_id;

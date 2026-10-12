@@ -407,6 +407,37 @@ describe("publish side + clocks + uplink", () => {
     expect(s.audioUplink.active).toBe(false);
   });
 
+  it("the uplink asks talk-start before attaching the microphone and sends talk-stop after a release (docs/08#talk)", async () => {
+    const h = harness({ uplinkMid: "7" });
+    const s = await connected(h);
+    const mic = { id: "mic", kind: "audio", muted: false, readyState: "live" as const, addEventListener() {}, removeEventListener() {}, stop() {} };
+    await s.audioUplink.replaceTrack(mic);
+    const talk = () => h.agent.received.filter((e) => e.cap === "fjarr.audio").map((e) => e.type);
+    expect(talk()).toEqual(["talk-start"]);
+    expect(s.audioUplink.state.getSnapshot()).toMatchObject({ offered: true, active: true, refused: null });
+    // The agent's talk-level reaches the state while talking.
+    h.agent.sendEvent("fjarr.audio", "talk-level", { rms_db: -12.5, peak_db: -6, frames: 40 });
+    expect(s.audioUplink.state.getSnapshot().level).toEqual({ rmsDb: -12.5, peakDb: -6, frames: 40 });
+    await s.audioUplink.replaceTrack(null);
+    await tick();
+    expect(talk()).toEqual(["talk-start", "talk-stop"]);
+    expect(s.audioUplink.state.getSnapshot()).toMatchObject({ active: false, level: null });
+  });
+
+  it("a refused talk-start leaves the microphone detached and says who holds the speaker", async () => {
+    const h = harness({
+      uplinkMid: "7",
+      onRequest: (env) =>
+        env.type === "talk-start" ? { ok: false, error: { code: "busy", message: "someone else is talking", data: { holder: { id: "op-2", label: "Bo" } } } } : undefined,
+    });
+    const s = await connected(h);
+    const mic = { id: "mic", kind: "audio", muted: false, readyState: "live" as const, addEventListener() {}, removeEventListener() {}, stop() {} };
+    await expect(s.audioUplink.replaceTrack(mic)).resolves.toBe(false);
+    expect(s.audioUplink.active).toBe(false);
+    expect(s.audioUplink.state.getSnapshot().refused).toEqual({ code: "busy", message: "someone else is talking", holder: { id: "op-2", label: "Bo" } });
+    expect(h.events.some((e) => e.type === "audio-uplink")).toBe(false); // nothing attached, nothing audited
+  });
+
   it("stats sampler publishes per-track stats and health once a second", async () => {
     const h = harness();
     const s = await connected(h);

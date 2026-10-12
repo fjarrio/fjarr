@@ -31,6 +31,9 @@ import { EnvelopeRouter, type EnvelopeHandler, type RequestOptions, type Telemet
 import { parseMediaSections } from "./sdp.js";
 import { StatsSampler, type SessionHealth, type SessionStats } from "./stats.js";
 import { createStore, type ReadonlyStore } from "./store.js";
+
+/** fjarr.audio: talk-start/talk-stop and talk-level (docs/08#talk). */
+const AUDIO_CAP = "fjarr.audio";
 import { Heartbeat, TimeSync, type TimeSyncEstimate } from "./timesync.js";
 import { TrackRegistry, type AcquireOptions, type TrackHandle, type TrackSnapshot, type AgentTrackStats } from "./tracks.js";
 import type { SignalingSocket, SocketFactory } from "./transport.js";
@@ -123,10 +126,40 @@ export interface ControlState {
   readonly domains: Readonly<Partial<Record<ControlDomain, DomainControl>>>;
 }
 
+/** What reaches the robot's speaker while this session talks (docs/08#talk `talk-level`): dBFS after its volume cap. */
+export interface UplinkLevel {
+  readonly rmsDb: number;
+  readonly peakDb: number;
+  /** 20 ms frames played since talk-start. */
+  readonly frames: number;
+}
+
+/** Why the agent would not let this session talk (`busy` names who does). */
+export interface UplinkRefusal {
+  readonly code: string;
+  readonly message: string;
+  readonly holder?: { readonly id: string; readonly label: string };
+}
+
+export interface UplinkState {
+  /** The agent's offer carries an uplink: `talk` granted and a speaker on the robot (docs/08#talk). */
+  readonly offered: boolean;
+  readonly active: boolean;
+  /** The last talk-start refusal; cleared when one is granted. */
+  readonly refused: UplinkRefusal | null;
+  /** The agent's latest talk-level while talking; null otherwise. */
+  readonly level: UplinkLevel | null;
+}
+
 export interface AudioUplink {
-  /** Attach/detach the operator's microphone on the agent's pre-allocated transceiver (no renegotiation). */
+  /**
+   * Attach the operator's microphone on the agent's pre-allocated transceiver (no renegotiation),
+   * once the agent granted `talk-start`; null detaches and sends `talk-stop` (docs/21#audio-uplink-negotiation).
+   * False, with `state.refused` set, when the agent refused or there is no uplink.
+   */
   replaceTrack(track: MediaStreamTrackLike | null): Promise<boolean>;
   readonly active: boolean;
+  readonly state: ReadonlyStore<UplinkState>;
 }
 
 export interface Session {
@@ -221,6 +254,7 @@ export class SessionImpl implements Session {
   /** One free (uncounted, unbacked-off) grant refresh per attempt; a second consecutive grant-expired is a real round. */
   private freeRoundUsed = false;
   private uplinkActive = false;
+  private readonly uplinkStore = createStore<UplinkState>({ offered: false, active: false, refused: null, level: null });
   /** mids the current offer marks as audio uplinks (remote `recvonly`); the push-to-talk slots. */
   private uplinkMids = new Set<string>();
 
@@ -297,6 +331,10 @@ export class SessionImpl implements Session {
       // The agent's per-track view (docs/08 bandwidth-stats) is core state, not a consumer's subscription:
       // it must not keep a session alive under the idle policy.
       if (env.type === "bandwidth-stats" && env.kind === "event") this.registry.noteAgentStats(env.payload, deps.now());
+      if (env.cap === AUDIO_CAP && env.type === "talk-level" && env.kind === "event") {
+        const p = env.payload as { rms_db?: number; peak_db?: number; frames?: number };
+        if (this.uplinkActive) this.patchUplink({ level: { rmsDb: p?.rms_db ?? -127, peakDb: p?.peak_db ?? -127, frames: p?.frames ?? 0 } });
+      }
       this.router.handleIncoming(env);
     });
   }
@@ -567,6 +605,7 @@ export class SessionImpl implements Session {
     const remote = new Map<string, "sendrecv" | "sendonly" | "recvonly" | "inactive">();
     for (const m of parseMediaSections(msg.sdp)) if (m.kind === "audio" && m.mid !== null) remote.set(m.mid, m.direction);
     this.uplinkMids = new Set([...remote].filter(([, d]) => d === "recvonly").map(([mid]) => mid));
+    this.patchUplink({ offered: this.uplinkMids.size > 0 });
     for (const t of pc.getTransceivers()) {
       if (t.mid === null) continue;
       const want = remote.get(t.mid);
@@ -766,6 +805,7 @@ export class SessionImpl implements Session {
     this.remoteDescribed = false;
     this.iceQueue = [];
     this.uplinkMids = new Set();
+    this.patchUplink({ offered: false, active: false, level: null });
     const pc = this.pc;
     this.pc = null;
     if (pc) {
@@ -909,25 +949,57 @@ export class SessionImpl implements Session {
     };
   }
 
+  private patchUplink(patch: Partial<UplinkState>): void {
+    this.uplinkStore.set({ ...this.uplinkStore.getSnapshot(), ...patch });
+  }
+
   private buildAudioUplink(): AudioUplink {
     const self = this;
+    const setActive = (active: boolean) => {
+      if (active === this.uplinkActive) return;
+      this.uplinkActive = active;
+      this.patchUplink({ active, level: null });
+      this.deps.emit({ type: "audio-uplink", robotId: this.robotId, active }); // audit (docs/10)
+    };
     return {
       replaceTrack: async (track) => {
         const pc = this.pc;
-        if (!pc) return false;
-        const t = pc.getTransceivers().find((x) => x.mid !== null && this.uplinkMids.has(x.mid));
-        if (!t) return false;
-        await t.sender.replaceTrack(track);
-        const active = track !== null;
-        if (active !== this.uplinkActive) {
-          this.uplinkActive = active;
-          this.deps.emit({ type: "audio-uplink", robotId: this.robotId, active }); // audit (docs/10)
+        const t = pc?.getTransceivers().find((x) => x.mid !== null && this.uplinkMids.has(x.mid));
+        if (!pc || !t) {
+          if (track) this.patchUplink({ refused: { code: "unavailable", message: "this session has no audio uplink: talk is not granted, or the robot has no speaker" } });
+          return false;
         }
+        if (track) {
+          // docs/08#talk: the agent plays only what follows its granted talk-start, so ask first.
+          try {
+            await this.request(AUDIO_CAP, "talk-start", {});
+          } catch (e) {
+            const err = e instanceof FjarrError ? e : null;
+            const holder = err?.data?.["holder"] as { id?: string; label?: string } | undefined;
+            this.patchUplink({
+              refused: {
+                code: err?.code ?? "internal",
+                message: err?.message ?? String(e),
+                ...(holder ? { holder: { id: holder.id ?? "", label: holder.label ?? "" } } : {}),
+              },
+            });
+            return false;
+          }
+          this.patchUplink({ refused: null });
+          await t.sender.replaceTrack(track);
+          setActive(true);
+          return true;
+        }
+        await t.sender.replaceTrack(null);
+        const was = this.uplinkActive;
+        setActive(false);
+        if (was) void this.request(AUDIO_CAP, "talk-stop", {}).catch(() => undefined); // the session ending closes it too
         return true;
       },
       get active() {
         return self.uplinkActive;
       },
+      state: this.uplinkStore,
     };
   }
 

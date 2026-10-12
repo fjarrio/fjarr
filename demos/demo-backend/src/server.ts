@@ -78,7 +78,8 @@ const ROLES: Record<string, string[]> = {
 };
 /** Grant params per capability, the same for every role here (docs/09 grant claims). */
 const PARAMS: Record<string, Record<string, unknown>> = {
-  "fjarr.audio": { listen: true },
+  // docs/10: hearing the robot's microphones (listen) and talking through its speaker (talk) are granted.
+  "fjarr.audio": { listen: true, talk: true },
 };
 
 /** The company's own robot registry — their data, not Fjarr's. It knows what each robot has, and a

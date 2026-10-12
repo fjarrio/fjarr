@@ -114,7 +114,7 @@ export {
   type VideoLike,
   type WheelLike,
 } from "./desktop.js";
-export { createSession, type AudioUplink, type ControlState, type DomainControl, type Session, type SessionDeps, type SessionEvent, type SessionInfo, type SessionOptions, type SessionState, type TrackApi } from "./session.js";
+export { createSession, type AudioUplink, type UplinkLevel, type UplinkRefusal, type UplinkState, type ControlState, type DomainControl, type Session, type SessionDeps, type SessionEvent, type SessionInfo, type SessionOptions, type SessionState, type TrackApi } from "./session.js";
 export { createFjarrClient, type FjarrClient, type FjarrClientConfig, type PersistenceAdapter, type SessionManager } from "./client.js";
 export type { WireEvent } from "./wire.js";
 export {
