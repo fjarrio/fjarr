@@ -617,6 +617,7 @@ measured: mouth-to-ear latency (docs/16, < 250 ms) and echo cancellation
 with a real speaker and microphone, both for 3.5.4. **3.5.3 is done.**
 
 **3.5.4 on the mini-PC, first session (2026-10-12, with Erik), paused.**
+
 - *The desktop's sound*: heard, but muffled and speeding up and slowing
   down. Fixed (b46f26e): opusenc carried each PipeWire buffer's arrival time
   into the RTP clock (about 60 of 150 packets uneven in the fixture, none
