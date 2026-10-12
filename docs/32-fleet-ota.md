@@ -24,7 +24,7 @@ a critique of that survey. The decisions he made:
 | Version identity | one fleet-wide release version; a robot always runs exactly one release |
 | Rollout | stages chosen and promoted by a person, after watching the stage for days; parallel within a stage, batched so the server is not flooded; abortable at any time |
 | Peripherals | a handler contract and a Fjarr-maintained library of handlers |
-| Reference hardware | a Stereolabs ZED Box Mini (Jetson Orin NX/Nano, NVMe) and the lab's x86 mini-PC |
+| Reference hardware | a Stereolabs ZED Box Mini (Jetson Orin NX/Nano, NVMe) and a second x86 mini-PC in the lab, reflashed nightly so the first keeps its M3 desktop tests |
 | Operating systems | Yocto and NixOS from the start, side by side, on both machines; an Ubuntu A/B image on x86; plain Ubuntu with apt as a non-atomic path |
 | Signing | keys held by the robot company in production; a Fjarr-managed key per tenant as an easy start |
 | Transport | HTTPS, resumable, content-addressed chunks, under a budget per time interval so a download can spread over days |
@@ -440,9 +440,9 @@ bundled, not discovered on the robot.
 |---|---|---|---|---|
 | Yocto | ZED Box Mini | meta-tegra + meta-fjarr, A/B rootfs on NVMe; the bootloader capsule a separate `firmware` component | A/B atomic; capsule forward-only | chunks |
 | NixOS | ZED Box Mini | jetpack-nixos flake + the Fjarr module, A/B image layout | A/B atomic | chunks of store paths |
-| Yocto | x86 mini-PC | the same layer, UEFI | A/B atomic | chunks |
-| NixOS | x86 mini-PC | the same flake, UEFI | A/B atomic | chunks of store paths |
-| Ubuntu A/B | x86 mini-PC | an Ubuntu 26.04 image on two slots (build tool chosen in 8.0, mkosi the candidate) | A/B atomic | chunks |
+| Yocto | second x86 mini-PC | the same layer, UEFI | A/B atomic | chunks |
+| NixOS | second x86 mini-PC | the same flake, UEFI | A/B atomic | chunks of store paths |
+| Ubuntu A/B | second x86 mini-PC | an Ubuntu 26.04 image on two slots (build tool chosen in 8.0, mkosi the candidate) | A/B atomic | chunks |
 | Ubuntu + apt | any Ubuntu robot | today's robots, unchanged | per package, not atomic | apt's own |
 
 The last row matters: most robots running Fjarr today are stock Ubuntu. They
@@ -456,8 +456,8 @@ environment); `/usr` read-only in the slot, `/etc` from the image with
 machine-specific state on `/data`, and `/home` and `/var` on `/data`. The
 accounts and groups the agent and the desktop helper need (ADR-0028) are
 created by `sysusers.d` and `tmpfiles.d` in the image, so a desktop survives
-slot switches. The lab mini-PC's GNOME desktop is the reason the Ubuntu image
-carries one: its M3 nightly runs there.
+slot switches. The Ubuntu image carries a GNOME desktop, as robots with a
+desktop run today, so the M3 desktop tests can run on it too.
 
 **Provisioning.** `fjarr provision` flashes both slots (an empty second slot
 is a known trap on custom Jetson carriers), installs the device identity and
@@ -487,8 +487,6 @@ slices until he does:
 - choosing a stage's robots stratified by hardware variant;
 - a permissive licence for the reference handlers, so customers can fork
   them into proprietary ones (today they would be AGPL like the rest);
-- a second x86 machine for the nightly A/B tests, so the mini-PC's M3 desktop
-  nightly is not disturbed ([docs/18](18-open-questions.md) #46).
 
 ## Not in M8
 
@@ -503,4 +501,4 @@ Listed in [docs/18](18-open-questions.md): whether Fjarr may publish
 reference images containing NVIDIA, Stereolabs or GPL components (#43);
 secure boot and GPLv3 "installation information" for customers who lock
 their robots (#44); whether the ZED Box Mini's carrier configuration can be
-packaged openly (#45); and the x86 test machine (#46).
+packaged openly (#45).

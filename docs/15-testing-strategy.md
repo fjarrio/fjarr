@@ -107,7 +107,7 @@ regresses**:
   its policy and its on-site confirmation; a lower release is refused without
   a downgrade authorization; a router configuration that cuts the uplink
   reverts. The A/B legs are tested nightly on real hardware in the lab (the
-  ZED Box Mini and the x86 mini-PC), with power cut by a network-controlled
+  ZED Box Mini and the second x86 mini-PC), with power cut by a network-controlled
   socket, because no fixture reproduces a bootloader;
 - **the speaker's gate** ([docs/08](08-protocol.md#talk), M3.5 3.5.3): an
   operator's audio is played only between `talk-start` and `talk-stop`, by

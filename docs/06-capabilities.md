@@ -346,7 +346,7 @@ rollback, abort-unsafe).
   on x86, an Ubuntu A/B image on x86, and plain Ubuntu with apt (not atomic).
 
 **Accepted when:** on every recipe (Yocto and NixOS on the ZED Box Mini;
-Yocto, NixOS and Ubuntu A/B on the x86 mini-PC), a power cut mid-write leaves
+Yocto, NixOS and Ubuntu A/B on the second x86 mini-PC), a power cut mid-write leaves
 the robot booting the old slot, and a release whose health check fails rolls
 back by itself with the failed step in its run log. Once, across the fleet: a
 staged campaign of one, then several robots, is aborted midway; a release

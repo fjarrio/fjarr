@@ -1050,23 +1050,24 @@ Stereolabs ZED Box Mini (Jetson Orin NX/Nano, NVMe) and the x86 mini-PC.
 | **8.2 The updater** | `fjarr-update` and its state machine, the run state on `/data`, run logs (steps, statuses, streamed output, the local journal and backfill after a reboot; the messages in docs/08), install from a local bundle or USB, the apt applier for today's Ubuntu robots | a release installs on an existing Ubuntu robot and its run log reads step by step, live and after a reboot; a release from USB installs offline and its log uploads on reconnect |
 | **8.3 Transport** | HTTPS chunk fetch with resume, the budget per interval in the site's time zone, the rate cap from the agent's bandwidth estimate, space checks, cache cleanup | on a link shaped to 5 Mb/s with drops every few minutes, a 1 GB release arrives across 3 days within a 400 MB daily budget, while a 2 Mb/s video session keeps ≥ 90 % of its bitrate with no freeze over 1 s |
 | **8.4 Yocto and NixOS on the ZED Box Mini** | one ZED Box Mini board package; meta-fjarr and the jetpack-nixos flake built on it, side by side; their appliers; health (reachability, probes, the confirmation window); `fjarr provision` | nightly in the lab, for both: an update, a failed health check that rolls back, a power cut mid-write that recovers; neither is done until both pass |
-| **8.5a Ubuntu A/B on x86** | the mini-PC board package, the x86 layout, the Ubuntu A/B image and its applier | the same nightly tests on the mini-PC; its M3 desktop nightly still passes on the image |
+| **8.5a Ubuntu A/B on x86** | the mini-PC board package, the x86 layout, the Ubuntu A/B image and its applier | the same nightly tests on the second mini-PC; the image carries a GNOME desktop that the M3 desktop tests pass on |
 | **8.5b Yocto and NixOS on x86** | the Yocto layer and the NixOS flake on UEFI x86 | the same nightly tests for both |
 | **8.6 Readiness** | the local API (facts, holds, prepare actions, probes, on-site confirmation), the conditions and their reasons, the update hold on `motion`, not-ready-to-move, hook phases, `/data` snapshots, ceilings and deadlines | an update waits for the charger and says why; prepare times out cleanly; `take-control` is refused during an install; a rollback restores migrated data |
 | **8.7 Peripherals** | the handler contract; u-blox configuration, a CAN flasher, and router configuration with a router-side revert, on the bench | one release updates the OS, the GNSS configuration and an MCU in order; a router configuration that cuts the uplink reverts by itself |
 | **8.8 Campaigns** *(Cloud/paid)* | stages and promotion, batching, abort; the fleet's policy (`auto`, `ask-end-user`) and deadlines; the security channel; campaign YAML; the run grid; each stage against the rest of the fleet (success, rollbacks, reboots, disconnects); `<UpdatePrompt>` | one robot, then several, then the rest across simulated robots and the box; an abort midway; a robot's owner schedules tonight in the demo dashboard |
 
-**Preconditions, before 8.0.** The ZED Box Mini joins the lab as a nightly
-runner with USB recovery access. Every A/B machine is powered through a
-network-controlled socket and set in its firmware to power on when power
-returns, so power cuts can be tested unattended. The x86 recipes are tested
-on the lab mini-PC (Erik, 2026-10-12); reflashing it collides with its M3
-desktop nightly, which the Ubuntu A/B image must therefore carry, and a
-second x86 machine is open question #46.
+**Preconditions, before 8.0.** The ZED Box Mini and a second x86 mini-PC
+(Erik's, 2026-10-12) join the lab as nightly runners, the Jetson with USB
+recovery access. The x86 recipes are reflashed nightly on the second
+mini-PC, so the first keeps its M3 desktop nightly untouched. Every A/B
+machine is powered through a network-controlled socket with a local API
+(Shelly Plug S Gen3, switched over HTTP from the runner, password-protected,
+its draw read back to confirm the cut) and set in its firmware to power on
+when power returns, so power cuts are tested unattended.
 
 **Gate:** [docs/06 OTA criteria](06-capabilities.md#fjarrota--fleet-ota-updates-m8).
 On every recipe (Yocto and NixOS on the ZED Box Mini; Yocto, NixOS and Ubuntu
-A/B on the x86 mini-PC): a power cut mid-write boots the old slot, and a
+A/B on the second x86 mini-PC): a power cut mid-write boots the old slot, and a
 failed health check rolls back and shows in the run log. Once, across the
 fleet: a staged campaign with an abort, a multi-day budgeted download, and an
 owner scheduling an update.
