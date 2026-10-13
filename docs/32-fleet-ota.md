@@ -32,8 +32,8 @@ a critique of that survey. The decisions he made:
 | Order | M8 before M7, reporting just enough (the release version and update outcomes) |
 | Open core | the robot side open (AGPL); fleet campaigns, the chunk service and statistics paid |
 
-Points this document proposes that Erik has not decided yet are collected
-at the end, under [Proposed](#proposed).
+Points first proposed in this document and decided on review are at the
+end, under [Decided on review](#review-decisions).
 
 ## Releases {#releases}
 
@@ -263,8 +263,9 @@ any language, speaking JSON over stdin and stdout, with a fixed set of verbs:
 | `rollback` | restore the previous version, for `restorable` components |
 
 A handler's output becomes its step's log ([below](#runs)). Fjarr ships three
-reference handlers in M8. They call tools the customer installs, so no GPL
-flasher is bundled into Fjarr:
+reference handlers in M8, MIT-licensed so customers can fork them into their
+own ([ADR-0038](adr/0038-reference-handlers-permissive.md)). They call tools
+the customer installs, so no GPL flasher is bundled into Fjarr:
 
 - **u-blox GNSS configuration**: diff the settings, write them to RAM, check
   the fix, then persist;
@@ -402,17 +403,19 @@ measurements of slice 8.0. The starting points are:
   rest finish and report. Abort never downgrades a robot: going back is a
   separate campaign of an older release, with a downgrade authorization,
   where its components allow it (Jetson firmware cannot go backwards).
-- A campaign can be written as reviewable YAML (stages, group, windows) as
-  well as built in the UI.
+- A campaign can be written as reviewable YAML (stages, group, policy,
+  windows) as well as built in the UI.
+- When choosing a stage, its robots can be spread across hardware variants
+  (an option, off by default).
 - Before M7, a campaign page shows each stage against the rest of the fleet
   on what M8 itself knows: install success, rollbacks, reboots and
   disconnects. M7 adds the product's own metrics, keyed on the same release
   version.
 
-**Who decides when** is the fleet's policy, set by the robot company: `auto`
-installs within the conditions and informs the robot's owner; `ask-end-user`
-lets the owner choose now, tonight in the window, or a time, until the
-company's deadline. The owner sees the choice in the company's own app, with
+**Who decides when** is the fleet's policy, set by the robot company, and a
+campaign may set its own: `auto` installs within the conditions and informs
+the robot's owner; `ask-end-user` lets the owner choose now, tonight in the
+window, or a time, until the company's deadline. The owner sees the choice in the company's own app, with
 `<UpdatePrompt>` from `@fjarr/react` (open source, like the rest of the web
 library) or through a plain API, together with the live readiness reason, and
 can change it until the point of no return. The paid part is the policy and
@@ -493,25 +496,31 @@ by hand.
 
 Open (AGPL): the release format and `fjarr bundle`, the board packages and
 recipes, `fjarr-update` with its appliers, conditions, local API, prepare
-and hooks, the handler contract and the reference handlers, `fjarr provision`,
+and hooks, the handler contract, `fjarr provision`,
 `<UpdatePrompt>`, and installing a release on one robot or by hand. Paid
 (Fjarr Cloud and the commercial license): campaigns across a fleet (stages,
 batching, abort, the fleet's update policy and its enforcement), the chunk
 store and download prediction as a service, Fjarr-managed signing keys, and
-long-term release statistics. See
+long-term release statistics. The reference handlers are MIT
+([ADR-0038](adr/0038-reference-handlers-permissive.md)). See
 [docs/03](03-product-strategy.md#open-core-split-adr-0011-adr-0015).
 
-## Proposed {#proposed}
+## Decided on review {#review-decisions}
 
-Points this design proposes that Erik has not decided; each stays out of the
-slices until he does:
+Erik's answers to the points this design first proposed (2026-10-13):
 
-- an `ask-operator` policy (someone at the robot company approves each
-  robot) beside `auto` and `ask-end-user`, and policies set per campaign as
-  well as per fleet;
-- choosing a stage's robots stratified by hardware variant;
-- a permissive licence for the reference handlers, so customers can fork
-  them into proprietary ones (today they would be AGPL like the rest);
+- **Policies per campaign** as well as per fleet: yes. A campaign may set its
+  own policy and deadline (an urgent fix as `auto` within 24 hours in a fleet
+  that otherwise asks its owners).
+- **`ask-operator`** (someone at the robot company approves each robot):
+  later, when a customer needs it; it is the same consent mechanism pointed
+  at another person, so adding it changes nothing else.
+- **Stages spread across hardware variants:** an option when choosing a stage,
+  off by default, so a release that breaks one variant is caught in the
+  first stage.
+- **The reference handlers are MIT**
+  ([ADR-0038](adr/0038-reference-handlers-permissive.md)), so customers can
+  fork them into proprietary handlers.
 
 ## Not in M8
 

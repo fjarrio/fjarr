@@ -59,3 +59,4 @@ options weighed, the choice, and its consequences — so future maintainers
 | [0035](0035-releases-orchestrated-appliers-narrow.md) | Fjarr orchestrates releases; the OS-slot engine is a narrow adapter per recipe (supersedes 0016) | accepted |
 | [0036](0036-a-release-is-one-signed-version.md) | A release is one signed version pinning every component; company-held keys, a Fjarr-managed easy start | accepted |
 | [0037](0037-release-content-over-https-chunks.md) | Release content travels as resumable HTTPS chunks under a per-robot budget, not over WebRTC | accepted |
+| [0038](0038-reference-handlers-permissive.md) | The reference peripheral handlers are MIT, an exception to ADR-0011, so customers can fork them | accepted |
