@@ -1,0 +1,4 @@
+#!/bin/sh
+# /etc/resolv.conf is bind-mounted while the chroot scripts run; link it to resolved's stub here.
+set -e
+ln -sfn ../run/systemd/resolve/stub-resolv.conf "$BUILDROOT/etc/resolv.conf"

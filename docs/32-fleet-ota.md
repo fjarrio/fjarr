@@ -476,6 +476,60 @@ created by `sysusers.d` and `tmpfiles.d` in the image, so a desktop survives
 slot switches. The Ubuntu image carries a GNOME desktop, as robots with a
 desktop run today, so the M3 desktop tests can run on it too.
 
+### The x86 test image in slice 8.0 {#x86-test-image}
+
+Slice 8.0 tests one concrete layout on the lab's x86 mini-PC before any
+recipe is built. The research behind it (2026-10-13) put **systemd-sysupdate
+with systemd-boot** first and **RAUC with GRUB** second; the measurements
+decide, and an ADR records the choice.
+
+- **Built with mkosi** (26, from Ubuntu 26.04's universe) from pinned
+  inputs: a snapshot mirror, `SourceDateEpoch`, a fixed `Seed`. One build
+  gives the disk image, each slot's root partition image and its unified
+  kernel image (UKI).
+- **The GPT layout:** an EFI system partition of 2 GiB; a second ESP-type
+  partition `fjarr-rescue` of 1 GiB; two root slots of 16 GiB, labelled
+  `fjarr_<version>` (an empty slot is `_empty`); `fjarr-data` for the rest.
+- **Each UKI pins its own slot** with `root=PARTLABEL=fjarr_<version>`.
+  Never gpt-auto or `root=dissect`: both pick the newest root partition, so
+  booting the old UKI would mount the new root and defeat the rollback.
+- **Boot counting** by systemd-boot, three tries, in the UKI's file name
+  (`+LEFT-DONE`). `systemd-bless-boot` removes the counter once
+  `boot-complete.target` is reached, and Fjarr's health check is ordered
+  before it. Nothing sets a default entry (`loader.conf` `default`,
+  `LoaderEntryDefault`, `bootctl set-default`): the sort order alone picks
+  the newest healthy slot, then the rescue entry, then exhausted slots.
+- **A rescue system:** one UKI with a small OS running from RAM (sshd with
+  the lab keys, DHCP, the disk tools). It is both the installer that
+  rewrites the disk and the permanent rescue, kept on the main ESP and as
+  the removable-path loader of `fjarr-rescue`, which is the firmware's
+  second boot entry.
+- **Machine state on `/data`:** the SSH host keys, the DHCP client
+  identifier (the MAC, so a router's reservation survives a new image) and
+  the update cache. The root is mounted read-only; if Ubuntu fights that in
+  8.0, the root is mounted read-write and this section says so.
+- **A trial boot that cannot come up reboots:** `panic=10`, the hardware
+  watchdog, and a deadline on `boot-complete.target`, so a failing slot uses
+  up its tries instead of waiting in emergency mode.
+- **The applier spike** wraps `systemd-sysupdate` (installing from a local
+  directory, never a URL) in the [five verbs](#appliers). sysupdate has no
+  verb to roll back now or to install without activating; the spike renames
+  the UKI for both, and 8.0 measures how much such glue costs.
+
+**Reflashing the lab machine.** The machine is rewritten over the network,
+never by hand at its keyboard:
+
+1. Boot the rescue UKI once, with the firmware's one-shot `BootNext`. If
+   anything goes wrong, the next reset boots the old system.
+2. Over SSH into the RAM system, write the image, grow the disk's last
+   partition, copy the rescue UKI to both ESPs and create the firmware's two
+   boot entries.
+3. Check the entries and both ESPs before any reboot; then boot the on-disk
+   rescue once, then slot A.
+
+The first rewrite of a machine waits until it can be power-cycled remotely
+or someone is near it; every image is rehearsed in QEMU with OVMF first.
+
 **Recipes, not images.** M8 publishes recipes and tooling only; whoever
 builds an image from them distributes it to their own robots and owes what
 that brings (the GPL's source offer, NVIDIA's and Stereolabs' licence terms).

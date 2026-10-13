@@ -139,6 +139,8 @@ ioctls.
 | `docker-cli`, `docker-compose-v2` (dev image) | 26.04 | docker-outside-of-docker: the lab drives the compose stack from `dev` (Apache-2.0) |
 | `iproute2` (`tc`, dev image) | 26.04 | netem media-path profiles inside the robot container (GPL-2.0 tool, dev-only, never linked) |
 | coturn (container) | 4.6 | dev/self-host TURN (BSD-3) |
+| mkosi, systemd-ukify, systemd-repart, systemd-boot-efi, OVMF, qemu-system-x86 (`docker/ota-build`) | Ubuntu 26.04 (mkosi 26, systemd 259) | building the x86 test images and rehearsing them in a VM (M8 slice 8.0, [docs/32](32-fleet-ota.md#x86-test-image)). LGPL-2.1+ (mkosi, systemd), BSD-2 (OVMF), GPL-2.0 (QEMU, a tool); what the images contain is the recipe's own list |
+| desync, xdelta3, bsdiff, zchunk, diffoscope (`spikes/ota-delta`) | 1.1.4 (upstream binary, checksum verified) / 26.04 | the 8.0 delta harness, chunks against binary diffs. BSD-3 (desync, bsdiff, zchunk), GPL-2.0+ (Ubuntu's xdelta3), GPL-3.0+ (diffoscope); harness only — a diff decoder on robots would be upstream xdelta 3.1+ (Apache-2.0) or zstd (BSD) |
 | Xvfb/openbox/x11vnc/noVNC (robot-sim) | 26.04 | fake robot desktop |
 | Docker + Compose v2 | ≥ 24 | the environment itself |
 

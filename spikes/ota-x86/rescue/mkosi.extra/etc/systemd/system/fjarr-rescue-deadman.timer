@@ -1,0 +1,9 @@
+[Unit]
+Description=Dead-man timer for the rescue system
+
+[Timer]
+OnBootSec=15min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

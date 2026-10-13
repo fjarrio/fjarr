@@ -1,0 +1,10 @@
+#!/bin/sh
+# spec: docs/32#x86-test-image
+set -e
+systemctl enable systemd-networkd systemd-resolved fjarr-rescue-deadman.timer
+systemctl enable ssh.socket
+# A RAM system on a real machine reacts to the hardware watchdog.
+mkdir -p /etc/systemd/system.conf.d
+printf '[Manager]\nRuntimeWatchdogSec=30s\nRebootWatchdogSec=2min\n' > /etc/systemd/system.conf.d/10-watchdog.conf
+# Ubuntu's kernel package deny-lists the watchdog drivers, which also stops modules-load.d.
+sed -i -E '/^blacklist (iTCO_wdt|i6300esb)$/d' /usr/lib/modprobe.d/blacklist_linux_*.conf

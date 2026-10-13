@@ -1,0 +1,13 @@
+# Any wired port, DHCP with the MAC as client identifier, so the router's reservation
+# holds across every image (docs/32#x86-test-image).
+[Match]
+Type=ether
+Kind=!*
+
+[Network]
+DHCP=yes
+MulticastDNS=yes
+LLMNR=no
+
+[DHCPv4]
+ClientIdentifier=mac

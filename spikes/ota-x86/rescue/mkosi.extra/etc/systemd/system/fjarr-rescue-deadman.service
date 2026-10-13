@@ -1,0 +1,9 @@
+[Unit]
+Description=Reboot the rescue system unless an operator claimed it
+# The rescue boots once through BootNext; rebooting returns to whatever the firmware
+# boots next. `touch /run/lab-ok` over SSH keeps the system up.
+ConditionPathExists=!/run/lab-ok
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl reboot
