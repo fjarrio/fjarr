@@ -558,6 +558,15 @@ rehearsal changed:
   so two UKIs that differ in one script share few chunks (5.9 MB to fetch at
   a 64 KiB average, against 0.8 MB by xdelta3, of 73 MB for the whole UKI).
   The delta measurements weigh an uncompressed initrd.
+- **Two builds of one release are byte-identical** (the 16 GiB root partition
+  and the UKI), so a delta carries only real change. It took a pinned
+  package snapshot, `SourceDateEpoch` and a fixed `Seed`, and three fixes
+  found by comparing two builds: Ubuntu's `alternatives.log` and ldconfig's
+  `aux-cache` are removed from the image, the image's own initrd archive is
+  clamped to `SourceDateEpoch`, and the microcode archive is supplied by the
+  build (mkosi 26 stamps its own with the build time and concatenates the
+  files in directory order). `fjarr bundle check` looks for the same kinds of
+  drift.
 
 **Recipes, not images.** M8 publishes recipes and tooling only; whoever
 builds an image from them distributes it to their own robots and owes what

@@ -17,5 +17,5 @@ docker build -q -t fjarr-ota-build "$here/../../docker/ota-build" >/dev/null
 mkdir -p "$here/out/$what" "$here/out/cache"
 exec docker run --rm --privileged -v /dev:/dev \
   -v "$here:/src" -w "/src/$what" \
-  fjarr-ota-build mkosi --force --cache-directory=/src/out/cache --output-directory="/src/out/$what" \
+  fjarr-ota-build mkosi --force --cache-directory=/src/out/cache --package-cache-dir=/src/out/pkgcache --output-directory="/src/out/$what" \
   --extra-tree=/src/.lab/tree:/ "$@" build
