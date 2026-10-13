@@ -1,0 +1,14 @@
+[Unit]
+Description=Fjarr trial-boot health check (marks the slot good through boot-complete.target)
+After=multi-user.target network-online.target ssh.socket fjarr-data-init.service
+Wants=network-online.target
+Before=boot-complete.target
+OnFailure=fjarr-mark-bad.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/fjarr/health-check
+
+[Install]
+RequiredBy=boot-complete.target

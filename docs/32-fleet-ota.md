@@ -506,8 +506,7 @@ decide, and an ADR records the choice.
   second boot entry.
 - **Machine state on `/data`:** the SSH host keys, the DHCP client
   identifier (the MAC, so a router's reservation survives a new image) and
-  the update cache. The root is mounted read-only; if Ubuntu fights that in
-  8.0, the root is mounted read-write and this section says so.
+  the update cache. The root is mounted read-write in 8.0 (below).
 - **A trial boot that cannot come up reboots:** `panic=10`, the hardware
   watchdog, and a deadline on `boot-complete.target`, so a failing slot uses
   up its tries instead of waiting in emergency mode.
@@ -529,6 +528,36 @@ never by hand at its keyboard:
 
 The first rewrite of a machine waits until it can be power-cycled remotely
 or someone is near it; every image is rehearsed in QEMU with OVMF first.
+
+**Rehearsed in QEMU (2026-10-14, `spikes/ota-x86`).** Every case below
+passes from a fresh disk: an update installed but not activated, then tried
+and blessed; rolling back now; a failed health check rolling back; a kernel
+panic on the trial boot using up one try; a root partition that never
+appears using up all three (about two minutes each); every slot exhausted
+booting the rescue entry; the reflash through `BootNext`; and the firmware
+falling through to `fjarr-rescue` when systemd-boot is missing. What the
+rehearsal changed:
+
+- **The root is read-write in 8.0.** Ubuntu keeps dpkg's database in `/var`,
+  so a read-only root with `/var` on `/data` is its own design; the SSH host
+  keys and the update cache are on `/data` already.
+- **A missing root hangs unless told not to.** The initrd waits for the root
+  device forever, and PID 1 keeps the watchdog fed. Each UKI carries
+  `rootflags=x-systemd.device-timeout=90s`, and an extra initrd makes the
+  initrd's emergency and rescue modes reboot.
+- **Ubuntu deny-lists the watchdog drivers** (`iTCO_wdt` among them), which
+  also stops `modules-load.d`. The images remove those lines; systemd then
+  drives the watchdog with a 30-second timeout.
+- **sysupdate activates what it installs:** the new version sorts first at
+  once. The applier renames the new UKI to `+0-0` (sorted last) until
+  `set-next`; a power cut between the two renames boots the new slot early,
+  with its three tries.
+- **udev lags the relabel:** after sysupdate renames the slot's partition,
+  the applier triggers a change event so `state` reads the new label.
+- **Compressed sections defeat chunks.** A UKI's initrd is zstd-compressed,
+  so two UKIs that differ in one script share few chunks (5.9 MB to fetch at
+  a 64 KiB average, against 0.8 MB by xdelta3, of 73 MB for the whole UKI).
+  The delta measurements weigh an uncompressed initrd.
 
 **Recipes, not images.** M8 publishes recipes and tooling only; whoever
 builds an image from them distributes it to their own robots and owes what

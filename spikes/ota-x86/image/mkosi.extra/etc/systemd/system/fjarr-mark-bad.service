@@ -1,0 +1,7 @@
+[Unit]
+Description=Mark this trial boot bad and reboot into the previous slot
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/systemd/systemd-bless-boot bad
+ExecStart=/usr/bin/systemctl reboot

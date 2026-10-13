@@ -1,0 +1,16 @@
+#!/bin/sh
+# Runs outside the chroot, before the UKI is assembled (docs/32#x86-test-image).
+set -e
+# /etc/resolv.conf is bind-mounted while the chroot scripts run; link it to resolved's stub here.
+ln -sfn ../run/systemd/resolve/stub-resolv.conf "$BUILDROOT/etc/resolv.conf"
+# An extra initrd appended to mkosi's default one: if the initrd cannot mount the slot's root
+# (rootflags=x-systemd.device-timeout bounds the wait), its emergency mode reboots instead of
+# asking for the locked root password, so the trial uses up a try instead of hanging.
+d=$(mktemp -d)
+for u in emergency rescue; do
+  mkdir -p "$d/etc/systemd/system/$u.service.d"
+  cp "$SRCDIR/mkosi.extra/etc/systemd/system/$u.service.d/fjarr-reboot.conf" "$d/etc/systemd/system/$u.service.d/"
+done
+mkdir -p "$ARTIFACTDIR/io.mkosi.initrd"
+(cd "$d" && find . -mindepth 1 | LC_ALL=C sort | cpio -o -H newc --reproducible --quiet) > "$ARTIFACTDIR/io.mkosi.initrd/50-fjarr-reboot.cpio"
+rm -rf "$d"

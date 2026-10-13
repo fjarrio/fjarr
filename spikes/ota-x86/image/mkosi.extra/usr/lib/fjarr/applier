@@ -1,0 +1,60 @@
+#!/bin/sh
+# The 8.0 applier spike for the Ubuntu A/B image: docs/32#appliers' five verbs over
+# systemd-sysupdate and systemd-boot's boot counting (docs/32#x86-test-image).
+#   applier install <version> <staged-dir>   write the free slot and its UKI, NOT activated
+#   applier set-next <version>               the next boot tries <version> (3 tries)
+#   applier state                            JSON: booted version, entries, slots
+#   applier mark-good                        bless the booted trial (the health unit does this)
+#   applier rollback-now                     retire the booted version and reboot into the other
+set -eu
+SYSUPDATE=/usr/lib/systemd/systemd-sysupdate
+ESP=/efi/EFI/Linux
+TRIES=3
+. /etc/os-release
+booted=$IMAGE_VERSION
+
+uki_of() { # the UKI file of a version, whatever its counter
+  for f in "$ESP/${IMAGE_ID}_$1.efi" "$ESP/${IMAGE_ID}_$1+"*.efi; do [ -e "$f" ] && { echo "$f"; return 0; }; done
+  return 1
+}
+
+case "${1:-}" in
+install)
+  v=${2:?version}; dir=${3:?staged dir}
+  [ "$v" != "$booted" ] || { echo "refusing to install over the booted version $v" >&2; exit 2; }
+  "$SYSUPDATE" --transfer-source="$dir" update "$v"
+  # sysupdate relabels the slot through the partition table; udev's by-partlabel links follow
+  # only after a change event.
+  disk=/dev/$(lsblk -no PKNAME "$(findmnt -n -o SOURCE /)")
+  udevadm trigger --action=change --settle "$disk" "$disk"?* 2>/dev/null || true
+  # sysupdate activates what it installs (the newest version sorts first). Park the new UKI as
+  # exhausted (+0-0) so it sorts last until set-next: install and activation stay separate.
+  # A power cut between sysupdate's rename and this one boots the new slot early, with its tries.
+  f=$(uki_of "$v")
+  mv "$f" "$ESP/${IMAGE_ID}_$v+0-0.efi"; sync -f "$ESP"
+  echo "installed $v (inactive)";;
+set-next)
+  v=${2:?version}; f=$(uki_of "$v") || { echo "$v is not installed" >&2; exit 2; }
+  mv "$f" "$ESP/${IMAGE_ID}_$v+$TRIES-0.efi"; sync -f "$ESP"
+  echo "next boot tries $v ($TRIES tries)";;
+state)
+  printf '{"booted":"%s","bless":"%s","entries":[' "$booted" "$(/usr/lib/systemd/systemd-bless-boot status 2>/dev/null || echo unknown)"
+  sep=; for f in "$ESP/${IMAGE_ID}_"*.efi; do
+    [ -e "$f" ] || continue; n=$(basename "$f" .efi); v=${n#${IMAGE_ID}_}; c=
+    case "$v" in *+*) c=${v#*+}; v=${v%%+*};; esac
+    left=; done_=; [ -n "$c" ] && { left=${c%%-*}; case "$c" in *-*) done_=${c#*-};; esac; }
+    printf '%s{"version":"%s","tries_left":%s,"tries_done":%s}' "$sep" "$v" "${left:-null}" "${done_:-null}"; sep=,
+  done
+  printf '],"slots":['; sep=
+  for d in /dev/disk/by-partlabel/*; do n=$(basename "$d"); case "$n" in "${IMAGE_ID}_"*|_empty) printf '%s"%s"' "$sep" "$n"; sep=,;; esac; done
+  printf ']}\n';;
+mark-good)
+  /usr/lib/systemd/systemd-bless-boot good;;
+rollback-now)
+  f=$(uki_of "$booted")
+  others=$(ls "$ESP/${IMAGE_ID}_"*.efi | grep -v "/${IMAGE_ID}_$booted[.+]" | grep -v '+0-' || true)
+  [ -n "$others" ] || { echo "no other bootable version to roll back to" >&2; exit 2; }
+  mv "$f" "$ESP/${IMAGE_ID}_$booted+0-$TRIES.efi"; sync -f "$ESP"
+  echo "retired $booted; rebooting"; systemctl reboot;;
+*) sed -n '2,9p' "$0" >&2; exit 2;;
+esac
