@@ -355,8 +355,22 @@ connection carries control, progress and run logs only.
   ready at its budget.
 - Space is checked before fetching; the cache is cleaned up after commit.
 
-Later, not in M8: robots at one depot sharing chunks over their LAN, and
-precomputed binary deltas for the source releases actually in a fleet.
+**Precomputed deltas** (Erik wants them explored, 2026-10-13). Chunks
+reuse what is unchanged, but a small change spread through a large file (a
+recompiled binary, a retrained model) can touch nearly every chunk. A binary
+diff (xdelta, bsdiff) from one specific old version describes only the
+changed bytes. Since the server knows every robot's installed release, it can
+compute, for a new release, one diff per source release still present in
+the fleet (usually two or three), and a robot fetches the diff matching its
+release, falling back to chunks otherwise. Diffs are signed in the manifest
+like chunks and reconstruct the same content-addressed result, so they change
+nothing after the fetch. Slice 8.0 measures chunks against diffs on real
+updates (a kernel, CUDA, an ML model); slice 8.3b builds them, scoped by
+those numbers.
+
+Later, not in M8: robots at one depot sharing chunks over their LAN. The
+chunk format allows it without change: every chunk is verified against the
+signed manifest whatever its source.
 
 ## Appliers {#appliers}
 
@@ -459,6 +473,17 @@ created by `sysusers.d` and `tmpfiles.d` in the image, so a desktop survives
 slot switches. The Ubuntu image carries a GNOME desktop, as robots with a
 desktop run today, so the M3 desktop tests can run on it too.
 
+**Recipes, not images.** M8 publishes recipes and tooling only; whoever
+builds an image from them distributes it to their own robots and owes what
+that brings (the GPL's source offer, NVIDIA's and Stereolabs' licence terms).
+Ready-made images are revisited when a customer asks (Erik, 2026-10-13;
+[docs/18](18-open-questions.md) #43). The Yocto recipe has a "no GPLv3"
+option (`INCOMPATIBLE_LICENSE = "GPL-3.0*"`) for robots locked with secure
+boot that might count as consumer products under GPLv3; the recipes document
+the question, which is the robot company's (#44). The ZED Box Mini's board
+files are packaged openly only if Stereolabs' licences allow it, and
+otherwise fetched from Stereolabs at build time (#45, settled in 8.0).
+
 **Provisioning.** `fjarr provision` flashes both slots (an empty second slot
 is a known trap on custom Jetson carriers), installs the device identity and
 enrols the robot in its fleet, replacing the flash scripts every team writes
@@ -490,15 +515,12 @@ slices until he does:
 
 ## Not in M8
 
-Depot chunk sharing; precomputed binary deltas per source release; the
-Syslogic AGX Orin board package; statistical release comparison (M7);
+Depot chunk sharing; the Syslogic AGX Orin board package; statistical release comparison (M7);
 automatic promotion or halting of campaigns; handlers beyond the three
 reference ones.
 
 ## Open questions
 
-Listed in [docs/18](18-open-questions.md): whether Fjarr may publish
-reference images containing NVIDIA, Stereolabs or GPL components (#43);
-secure boot and GPLv3 "installation information" for customers who lock
-their robots (#44); whether the ZED Box Mini's carrier configuration can be
-packaged openly (#45).
+[docs/18](18-open-questions.md) #45: whether the ZED Box Mini's board files
+may be packaged openly, settled by slice 8.0. #43 and #44 were closed on
+2026-10-13 ([Recipes, not images](#building)).

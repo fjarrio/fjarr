@@ -1045,10 +1045,11 @@ Stereolabs ZED Box Mini (Jetson Orin NX/Nano, NVMe) and the x86 mini-PC.
 
 | Slice | What | Done when |
 |---|---|---|
-| **8.0 Hardware spikes** | on the ZED Box Mini, a meta-tegra A/B image with the bootloader capsule and a jetpack-nixos A/B image; on x86, a minimal Ubuntu A/B image and boot counting with systemd-boot or GRUB; SWUpdate vs RAUC vs systemd-sysupdate per recipe; the chunking parameters and real delta sizes for typical updates (kernel, CUDA, an ML model) | a power cut mid-install boots the old slot on each image; the measurements choose each recipe's applier and the chunk parameters (recorded in docs/32) |
+| **8.0 Hardware spikes** | on the ZED Box Mini, a meta-tegra A/B image with the bootloader capsule and a jetpack-nixos A/B image; on x86, a minimal Ubuntu A/B image and boot counting with systemd-boot or GRUB; SWUpdate vs RAUC vs systemd-sysupdate per recipe; the chunking parameters and real delta sizes for typical updates (kernel, CUDA, an ML model), by chunks and by precomputed binary diffs (xdelta, bsdiff); the licences of Stereolabs' board files (#45) | a power cut mid-install boots the old slot on each image; the measurements choose each recipe's applier, the chunk parameters and the scope of 8.3b (recorded in docs/32) |
 | **8.1 Release format** | the manifest (components, versions, `requires`, rollback classes, hardware variants), TUF-style signing with company-held and Fjarr-managed keys, the release counter and downgrade authorization; `fjarr bundle`, `check`, `push`; the agent's registration carries its release and version vector (docs/08) | `fjarr bundle` → `push` → verification on a robot succeeds; a flipped byte in a chunk or the manifest, an unknown or expired key, and a lower release without authorization are each refused with a named error; the dashboard shows each robot's release and vector |
 | **8.2 The updater** | `fjarr-update` and its state machine, the run state on `/data`, run logs (steps, statuses, streamed output, the local journal and backfill after a reboot; the messages in docs/08), install from a local bundle or USB, the apt applier for today's Ubuntu robots | a release installs on an existing Ubuntu robot and its run log reads step by step, live and after a reboot; a release from USB installs offline and its log uploads on reconnect |
 | **8.3 Transport** | HTTPS chunk fetch with resume, the budget per interval in the site's time zone, the rate cap from the agent's bandwidth estimate, space checks, cache cleanup | on a link shaped to 5 Mb/s with drops every few minutes, a 1 GB release arrives across 3 days within a 400 MB daily budget, while a 2 Mb/s video session keeps ≥ 90 % of its bitrate with no freeze over 1 s |
+| **8.3b Precomputed deltas** | the server computes one signed binary diff per source release still in the fleet; the robot fetches the diff matching its release and falls back to chunks; download prediction counts diffs; scoped by 8.0's measurements | for the update types where 8.0 found diffs worth it, a robot downloads the diff, reconstructs the identical content, and the bytes fetched match the prediction |
 | **8.4 Yocto and NixOS on the ZED Box Mini** | one ZED Box Mini board package; meta-fjarr and the jetpack-nixos flake built on it, side by side; their appliers; health (reachability, probes, the confirmation window); `fjarr provision` | nightly in the lab, for both: an update, a failed health check that rolls back, a power cut mid-write that recovers; neither is done until both pass |
 | **8.5a Ubuntu A/B on x86** | the mini-PC board package, the x86 layout, the Ubuntu A/B image and its applier | the same nightly tests on the second mini-PC; the image carries a GNOME desktop that the M3 desktop tests pass on |
 | **8.5b Yocto and NixOS on x86** | the Yocto layer and the NixOS flake on UEFI x86 | the same nightly tests for both |
@@ -1072,8 +1073,7 @@ failed health check rolls back and shows in the run log. Once, across the
 fleet: a staged campaign with an abort, a multi-day budgeted download, and an
 owner scheduling an update.
 
-**Later:** depot chunk sharing, precomputed binary deltas per source
-release, the Syslogic AGX Orin board package, statistical release comparison
+**Later:** depot chunk sharing, the Syslogic AGX Orin board package, statistical release comparison
 (M7), more peripheral handlers.
 
 ## Explicitly later
