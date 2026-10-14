@@ -1075,10 +1075,11 @@ KiB chunks, and no case yet for precomputed diffs on Ubuntu. The NUC (the
 second x86 machine, 192.168.10.177) has its Shelly plug: a power cut brings it
 back in 33 s, the rescue UKI boots once by `BootNext` and returns (three of
 three), its firmware watchdog resets a hung kernel by itself (53 s), and the
-rescue's dead-man returns it unclaimed. Its disk is untouched; the rewrite to
-the A/B layout waits for Erik's go. Still to come on x86: container, CUDA and model updates and file-by-file diffs, the
-power cuts, the RAUC comparison on paper; on the ZED Box Mini, everything
-Jetson. #45 is read: Stereolabs' board files are fetched at build time, and
+rescue's dead-man returns it unclaimed. With Erik's go it was rewritten to the
+A/B layout over the network, and updates, rollback and a failed health check
+work on it as in QEMU. Still to come on x86: the power cuts (the gate);
+container, CUDA and model updates and file-by-file diffs; the RAUC comparison
+on paper. On the ZED Box Mini, everything Jetson. #45 is read: Stereolabs' board files are fetched at build time, and
 Erik asks Stereolabs about the rest.
 
 **Gate:** [docs/06 OTA criteria](06-capabilities.md#fjarrota--fleet-ota-updates-m8).

@@ -602,6 +602,13 @@ rehearsal changed:
   of three; the unclaimed rescue reboots itself after 15 minutes; a cut
   through the power switch brings the machine back in 33 s. Three
   `systemd-pcrlock-*` units fail on a machine with a TPM and are masked.
+  Then `reflash.sh` rewrote the NUC to this layout (the write runs at about
+  50 MB/s, 13 minutes for the 36 GiB image; `/data` grows to 198 GB), and
+  the on-disk rescue and slot A both boot. On the hardware, install (22 s
+  from a staged 0.9 GB root), set-next and bless, rollback-now and a failed
+  health check all behave as in QEMU; a reboot takes about 23 s. The
+  firmware adds its own entry for the ESP's removable path, after Fjarr's
+  two, which only adds a fallback.
 - **sysupdate activates what it installs:** the new version sorts first at
   once. The applier renames the new UKI to `+0-0` (sorted last) until
   `set-next`; a power cut between the two renames boots the new slot early,
