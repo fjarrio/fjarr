@@ -545,9 +545,11 @@ rehearsal changed:
   device forever, and PID 1 keeps the watchdog fed. Each UKI carries
   `rootflags=x-systemd.device-timeout=90s`, and an extra initrd makes the
   initrd's emergency and rescue modes reboot.
-- **Ubuntu deny-lists the watchdog drivers** (`iTCO_wdt` among them), which
-  also stops `modules-load.d`. The images remove those lines; systemd then
-  drives the watchdog with a 30-second timeout.
+- **Ubuntu deny-lists the watchdog drivers** (`iTCO_wdt`, `wdat_wdt` and
+  others). The images remove those lines, udev loads the one the board has,
+  and systemd drives it with a 30-second timeout. The lab NUC11's watchdog is
+  the firmware's ACPI WDAT table (`wdat_wdt`, 2 to 613 s), not the chipset's
+  TCO; whether it resets this board is tested with the power switch.
 - **sysupdate activates what it installs:** the new version sorts first at
   once. The applier renames the new UKI to `+0-0` (sorted last) until
   `set-next`; a power cut between the two renames boots the new slot early,

@@ -33,6 +33,6 @@ every image, so `known_hosts` never changes across reflashes.
 
 Results are in [docs/32](../../docs/32-fleet-ota.md#x86-test-image). The rescue system, verified in
 QEMU (2026-10-13): boots to `running`, DHCP on any wired port, SSH with the lab host
-key, the hardware watchdog armed by systemd (Ubuntu deny-lists `iTCO_wdt` and `i6300esb`; the
-image removes those two lines), `panic=10` reboots, and the dead-man reboots after 15 minutes
+key, the hardware watchdog armed by systemd (Ubuntu deny-lists the watchdog drivers; the image
+removes those lines and udev loads `wdat_wdt` on the NUC11, `i6300esb` in QEMU), `panic=10` reboots, and the dead-man reboots after 15 minutes
 unless `/run/lab-ok` exists.

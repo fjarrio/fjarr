@@ -5,7 +5,9 @@ systemctl enable systemd-networkd systemd-resolved ssh.socket fjarr-data-init.se
 mkdir -p /data /efi
 mkdir -p /etc/systemd/system.conf.d
 printf '[Manager]\nRuntimeWatchdogSec=30s\nRebootWatchdogSec=2min\n' > /etc/systemd/system.conf.d/10-watchdog.conf
-sed -i -E '/^blacklist (iTCO_wdt|i6300esb)$/d' /usr/lib/modprobe.d/blacklist_linux_*.conf
+# Ubuntu deny-lists the watchdog drivers; without that, udev loads whichever matches the board
+# (wdat_wdt on the NUC11, iTCO_wdt elsewhere, i6300esb in QEMU).
+sed -i -E '/^blacklist (wdat_wdt|iTCO_wdt|i6300esb)$/d' /usr/lib/modprobe.d/blacklist_linux_*.conf
 # The loader and the ESP are not A/B: nothing on a slot may rewrite them.
 systemctl mask systemd-boot-update.service
 for f in /etc/kernel/postinst.d/zz-systemd-boot /usr/share/kernel/postinst.d/zz-systemd-boot /etc/kernel/postrm.d/zz-systemd-boot; do

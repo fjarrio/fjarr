@@ -6,5 +6,6 @@ systemctl enable ssh.socket
 # A RAM system on a real machine reacts to the hardware watchdog.
 mkdir -p /etc/systemd/system.conf.d
 printf '[Manager]\nRuntimeWatchdogSec=30s\nRebootWatchdogSec=2min\n' > /etc/systemd/system.conf.d/10-watchdog.conf
-# Ubuntu's kernel package deny-lists the watchdog drivers, which also stops modules-load.d.
-sed -i -E '/^blacklist (iTCO_wdt|i6300esb)$/d' /usr/lib/modprobe.d/blacklist_linux_*.conf
+# Ubuntu deny-lists the watchdog drivers; without that, udev loads whichever matches the board
+# (wdat_wdt on the NUC11, iTCO_wdt elsewhere, i6300esb in QEMU).
+sed -i -E '/^blacklist (wdat_wdt|iTCO_wdt|i6300esb)$/d' /usr/lib/modprobe.d/blacklist_linux_*.conf
