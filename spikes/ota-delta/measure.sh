@@ -6,7 +6,10 @@ pair=$1; old=$2; new=$3; avgs=${4:-16 32 64 128 256}
 w=$(mktemp -d /work/m.XXXX); trap 'rm -rf "$w"' EXIT
 size() { stat -c%s "$1"; }
 RAM=$(awk '/MemTotal/ {print $2*1024}' /proc/meminfo)
-f_full=$(zstd -19 --long=31 -T0 -q -c "$new" | wc -c)
+# The full-download baseline, cached by content: zstd -19 of a 16 GiB slot takes half an hour.
+mkdir -p /work/ffull; key=$(sha256sum "$new" | cut -c1-64)
+[ -s "/work/ffull/$key" ] || zstd -19 --long=31 -T0 -q -c "$new" | wc -c > "/work/ffull/$key"
+f_full=$(cat "/work/ffull/$key")
 # Binary diffs, each verified.
 xd=n/a; zp=n/a; bd=n/a
 B=$(( $(size "$old") < 2147483648 ? $(size "$old") : 2147483648 ))

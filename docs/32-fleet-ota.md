@@ -335,8 +335,9 @@ connection carries control, progress and run logs only.
   slot on `/data`, computed at install, and fetches only chunks neither the
   index nor its cache holds: that is the delta. A NixOS system's store paths
   are chunked the same way, so "only the changed store paths travel" is a
-  consequence of chunking, not a second transport. These parameters are a
-  starting point; slice 8.0 measures them on real updates.
+  consequence of chunking, not a second transport. The 64 KiB average is
+  measured on real Ubuntu updates ([below](#measured-x86)); container and
+  model updates are still to measure.
 - Every chunk is verified against the signed manifest before it is stored.
   Fetching **resumes** at the chunk after any interruption.
 - **A budget per time interval** caps what each robot fetches: "2 GB a day",
@@ -372,6 +373,51 @@ those numbers.
 Later, not in M8: robots at one depot sharing chunks over their LAN. The
 chunk format allows it without change: every chunk is verified against the
 signed manifest whatever its source.
+
+### Measured in 8.0: x86 Ubuntu {#measured-x86}
+
+Measured 2026-10-14 on real week-apart updates of the reproducible
+[x86 test image](#x86-test-image): a 16 GiB root slot with about 3 GB of
+content, and its UKI. Pinned to snapshot.ubuntu.com 30
+September and 7 October; between them, exactly two things changed in the
+image's 187 packages, the kernel and OpenSSH. Bytes a robot fetches, at a
+64 KiB average chunk (missing chunks at zstd 19, plus the compressed index
+and 500 bytes per request); diffs by xdelta3, applied and compared before
+they count (`spikes/ota-delta/results/`):
+
+| Update | Full download | Chunks | xdelta3 |
+|---|---|---|---|
+| OpenSSH security update (3 packages), root slot | 897 MB | 2.25 MB (0.61 MB of it the index) | 0.12 MB |
+| Kernel 7.0.0-34 to -38, root slot | 897 MB | 175 MB | 161 MB |
+| Kernel, its UKI | 73 MB | 39.3 MB | 34.3 MB |
+| The week's roll-up (both), root slot | 897 MB | 176 MB | 161 MB |
+| The same release rebuilt without pinning, root slot | 897 MB | 82.7 MB | 0.46 MB |
+
+What this settles, for the Ubuntu recipe so far:
+
+- **64 KiB average chunks.** The total over these updates is flat between 32
+  and 128 KiB (177 to 178 MB) and lowest at 64; smaller chunks pay more in
+  index than they save. Container and model updates still to measure may
+  move it.
+- **Reproducible builds are a precondition for chunks.** An unpinned rebuild
+  of an unchanged release costs 83 MB in chunks, because filesystem metadata
+  changes in scattered places and each one costs a whole chunk; a diff pays
+  0.46 MB for the same noise. `fjarr bundle check` refuses such drift.
+- **A kernel update is about a fifth of the slot, whichever way it travels.**
+  Ubuntu compresses each kernel module separately, so changed modules
+  share nothing with their old versions; a diff saves 8% over chunks. That
+  is far from the threshold for building precomputed diffs (a diff at most
+  half the chunks' size), and it holds for Ubuntu only: Yocto and NixOS can
+  ship modules uncompressed.
+- **Small updates are small either way.** The OpenSSH update fetches about 2
+  MB in chunks against 0.12 MB by diff; the chunk index, one entry per chunk
+  of the whole slot, is a third of that, and sending only the index's
+  changes would remove it. 8.3's chunk server measures the real per-request
+  cost.
+- **Whole-image diffs need memory the robot may not have**, which is why
+  only xdelta3 ran on the 16 GiB slot (bsdiff needs 17 times the old size,
+  `zstd --patch-from` stops at 2 GiB). A file-by-file diff inside the
+  slot is the variant still to measure, with containers, CUDA and models.
 
 ## Appliers {#appliers}
 

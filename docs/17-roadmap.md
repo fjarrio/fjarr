@@ -1066,6 +1066,19 @@ machine is powered through a network-controlled socket with a local API
 its draw read back to confirm the cut) and set in its firmware to power on
 when power returns, so power cuts are tested unattended.
 
+**8.0 status (2026-10-14).** Started on x86, off the machine: the Ubuntu A/B
+test image, its applier, the rescue system and the hands-off reflash pass every
+case in QEMU except a real power cut, and two builds of one release are
+byte-identical ([docs/32](32-fleet-ota.md#x86-test-image)). The first
+week-apart updates are measured ([docs/32](32-fleet-ota.md#measured-x86)): 64
+KiB chunks, and no case yet for precomputed diffs on Ubuntu. The NUC (the
+second x86 machine, 192.168.10.177) is inventoried and backed up, untouched
+otherwise: its first rescue boot and rewrite wait for its Shelly plug. Still to
+come on x86: container, CUDA and model updates and file-by-file diffs, the
+power cuts, the RAUC comparison on paper; on the ZED Box Mini, everything
+Jetson. #45 is read: Stereolabs' board files are fetched at build time, and
+Erik asks Stereolabs about the rest.
+
 **Gate:** [docs/06 OTA criteria](06-capabilities.md#fjarrota--fleet-ota-updates-m8).
 On every recipe (Yocto and NixOS on the ZED Box Mini; Yocto, NixOS and Ubuntu
 A/B on the second x86 mini-PC): a power cut mid-write boots the old slot, and a
