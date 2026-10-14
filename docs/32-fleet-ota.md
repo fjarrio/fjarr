@@ -595,7 +595,13 @@ rehearsal changed:
   others). The images remove those lines, udev loads the one the board has,
   and systemd drives it with a 30-second timeout. The lab NUC11's watchdog is
   the firmware's ACPI WDAT table (`wdat_wdt`, 2 to 613 s), not the chipset's
-  TCO; whether it resets this board is tested with the power switch.
+  TCO, and it resets the board: a kernel crashed with reboot-on-panic off
+  came back 53 s later without the power switch (2026-10-14).
+- **On the real NUC** (2026-10-14), the rescue UKI boots once through
+  `BootNext` and the next reboot returns to the installed system, three times
+  of three; the unclaimed rescue reboots itself after 15 minutes; a cut
+  through the power switch brings the machine back in 33 s. Three
+  `systemd-pcrlock-*` units fail on a machine with a TPM and are masked.
 - **sysupdate activates what it installs:** the new version sorts first at
   once. The applier renames the new UKI to `+0-0` (sorted last) until
   `set-next`; a power cut between the two renames boots the new slot early,

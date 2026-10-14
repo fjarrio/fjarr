@@ -1062,7 +1062,7 @@ Stereolabs ZED Box Mini (Jetson Orin NX/Nano, NVMe) and the x86 mini-PC.
 recovery access. The x86 recipes are reflashed nightly on the second
 mini-PC, so the first keeps its M3 desktop nightly untouched. Every A/B
 machine is powered through a network-controlled socket with a local API
-(Shelly Plug S Gen3, switched over HTTP from the runner, password-protected,
+(a Shelly Gen3 plug, Plug S or Plug M, switched over HTTP from the runner, password-protected,
 its draw read back to confirm the cut) and set in its firmware to power on
 when power returns, so power cuts are tested unattended.
 
@@ -1072,9 +1072,11 @@ case in QEMU except a real power cut, and two builds of one release are
 byte-identical ([docs/32](32-fleet-ota.md#x86-test-image)). The first
 week-apart updates are measured ([docs/32](32-fleet-ota.md#measured-x86)): 64
 KiB chunks, and no case yet for precomputed diffs on Ubuntu. The NUC (the
-second x86 machine, 192.168.10.177) is inventoried and backed up, untouched
-otherwise: its first rescue boot and rewrite wait for its Shelly plug. Still to
-come on x86: container, CUDA and model updates and file-by-file diffs, the
+second x86 machine, 192.168.10.177) has its Shelly plug: a power cut brings it
+back in 33 s, the rescue UKI boots once by `BootNext` and returns (three of
+three), its firmware watchdog resets a hung kernel by itself (53 s), and the
+rescue's dead-man returns it unclaimed. Its disk is untouched; the rewrite to
+the A/B layout waits for Erik's go. Still to come on x86: container, CUDA and model updates and file-by-file diffs, the
 power cuts, the RAUC comparison on paper; on the ZED Box Mini, everything
 Jetson. #45 is read: Stereolabs' board files are fetched at build time, and
 Erik asks Stereolabs about the rest.

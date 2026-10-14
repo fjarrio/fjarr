@@ -13,3 +13,5 @@ systemctl mask systemd-boot-update.service
 for f in /etc/kernel/postinst.d/zz-systemd-boot /usr/share/kernel/postinst.d/zz-systemd-boot /etc/kernel/postrm.d/zz-systemd-boot; do
   [ -e "$f" ] && dpkg-divert --local --rename --divert "$f.fjarr-disabled" "$f" || true
 done
+# TPM PCR policy locking is not used here; on a machine with a TPM these units fail (8.0 NUC).
+systemctl mask systemd-pcrlock-firmware-code.service systemd-pcrlock-firmware-config.service systemd-pcrlock-make-policy.service
