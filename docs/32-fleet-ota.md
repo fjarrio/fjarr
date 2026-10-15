@@ -620,9 +620,22 @@ rehearsal changed:
   blessed. Not once did it need the rescue system, a second power cycle or
   a hand, and after each group a clean update to 1.2 succeeded. `fsck` found
   no damage on either ESP; the main ESP reads as dirty because it is mounted
-  read-write while the system runs, so mounting `/efi` only on demand would
-  keep it clean between updates (next image). This meets 8.0's gate for the
-  Ubuntu A/B image on x86: a power cut mid-install boots the old slot.
+  read-write while the system runs. This meets 8.0's gate for the Ubuntu
+  A/B image on x86: a power cut mid-install boots the old slot.
+- **The ESP is mounted only on demand** (2026-10-15): `/efi` is an
+  automount that unmounts after 30 seconds idle, so between updates the ESP
+  is unmounted and `fsck` finds it fully clean. sysupdate, the applier and
+  `systemd-bless-boot` mount it as they need it; every rehearsal case
+  passes, and the NUC took the change as an ordinary A/B update (1.2 to 1.3,
+  the 1.0 slot reused, 1.2 kept as the fallback).
+- **The disk rewrite runs at 418 MiB/s, not 49:** `dd` reading a pipe gets
+  64 KiB at a time, and with `oflag=direct` but no `iflag=fullblock` each
+  read became its own direct write. The 36 GiB image now takes about a
+  minute and a half instead of 13.
+- **The NUC's TPM went into dictionary-attack lockout** (`0x921`) during
+  the power cuts, so `systemd-tpm2-setup` fails; the images do not use the
+  TPM and mask it. A robot whose identity key lives in a TPM would meet the
+  same lockout after repeated power cuts ([#9](18-open-questions.md)).
 - **sysupdate activates what it installs:** the new version sorts first at
   once. The applier renames the new UKI to `+0-0` (sorted last) until
   `set-next`; a power cut between the two renames boots the new slot early,

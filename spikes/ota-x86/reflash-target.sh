@@ -19,7 +19,9 @@ once) # once <esp-path>: boot \EFI\fjarr\rescue.efi on the next boot only
   efibootmgr -q -n "$n"; efibootmgr | grep -E '^Boot(Next|Order|Current)';;
 write) # write <image.raw.zst>: run from the RAM rescue system
   DISK=${DISK:-/dev/nvme0n1}; img=$2
-  zstd -dc "$img" | dd of="$DISK" bs=4M oflag=direct status=none
+  # iflag=fullblock: a pipe delivers 64 KiB at a time, and without it every read becomes its own
+  # direct write (49 MiB/s on the NUC against 418 with it, 2026-10-15).
+  zstd -dc "$img" | dd of="$DISK" bs=4M iflag=fullblock oflag=direct status=none
   sfdisk -q --relocate gpt-bak-std "$DISK"; echo ', +' | sfdisk -q --no-reread -N 5 "$DISK"
   partx -u "$DISK" || true; udevadm settle
   e2fsck -fy "$(p 5)" >/dev/null 2>&1 || true; resize2fs "$(p 5)" >/dev/null 2>&1

@@ -9,5 +9,7 @@ printf '[Manager]\nRuntimeWatchdogSec=30s\nRebootWatchdogSec=2min\n' > /etc/syst
 # Ubuntu deny-lists the watchdog drivers; without that, udev loads whichever matches the board
 # (wdat_wdt on the NUC11, iTCO_wdt elsewhere, i6300esb in QEMU).
 sed -i -E '/^blacklist (wdat_wdt|iTCO_wdt|i6300esb)$/d' /usr/lib/modprobe.d/blacklist_linux_*.conf
-# TPM PCR policy locking is not used here; on a machine with a TPM these units fail (8.0 NUC).
-systemctl mask systemd-pcrlock-firmware-code.service systemd-pcrlock-firmware-config.service systemd-pcrlock-make-policy.service
+# The TPM is not used here. On the NUC these units fail: pcrlock always, tpm2-setup once the TPM
+# went into dictionary-attack lockout (0x921) after the 60 power cuts of 2026-10-15.
+systemctl mask systemd-pcrlock-firmware-code.service systemd-pcrlock-firmware-config.service systemd-pcrlock-make-policy.service \
+  systemd-tpm2-setup-early.service systemd-tpm2-setup.service

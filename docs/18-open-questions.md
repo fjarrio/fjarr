@@ -16,7 +16,7 @@ answered. Nothing here blocks the current milestone unless marked ⚠.
 | 6 | ~~SWUpdate vs RAUC vs Mender — final call~~ **Closed 2026-10-12** by [ADR-0035](adr/0035-releases-orchestrated-appliers-narrow.md): Fjarr orchestrates, and the engine is a narrow applier chosen per recipe by the M8 8.0 measurements | ADR-0016 (superseded) | — | — |
 | 7 | Metrics retention policy + storage engine (M7) | observability | M7 spec revision | Cloud cost model input |
 | 8 | ~~Staged-rollout campaign semantics (segments, halt rules)~~ **Closed 2026-10-12** by [docs/32](32-fleet-ota.md#campaigns) (Erik): stages chosen and promoted by a person after watching them, parallel and batched within a stage, abortable; no automatic promotion or halt in M8 | M8 | — | — |
-| 9 | TPM-backed device keys — require or recommend? | docs/10 | M5 security review | NUC TPM2 present; portability vs strength |
+| 9 | TPM-backed device keys — require or recommend? | docs/10 | M5 security review | NUC TPM2 present; portability vs strength. 2026-10-15: the lab NUC's TPM went into dictionary-attack lockout (`TPM_RC_LOCKOUT`, 0x921) during 60 power cuts ([docs/32](32-fleet-ota.md#x86-test-image)); a TPM-held key must survive power cuts, so the answer also covers lockout settings and recovery |
 | 10 | TURNS / TCP-443 TURN fallback priority | docs/04 | M5 | hospital/enterprise networks |
 | 11 | Separate PeerConnection for bulk transfers? | docs/16 | M4 measurement | only if isolation budget fails |
 | 12 | `@fjarr/core` for non-React frameworks (Vue/Svelte wrappers)? | delivery model | demand-driven | core is framework-agnostic by design |

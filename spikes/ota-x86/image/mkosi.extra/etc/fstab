@@ -1,3 +1,5 @@
 # By label, never by UUID: every image build would carry new UUIDs.
 PARTLABEL=fjarr-data  /data  ext4  defaults  0 2
-PARTLABEL=esp         /efi   vfat  umask=0077,nofail  0 2
+# The ESP is mounted only while something uses it (an update, bless-boot) and unmounted 30 s
+# later, so a power cut almost always finds it clean (8.0 power cuts, docs/32#x86-test-image).
+PARTLABEL=esp         /efi   vfat  umask=0077,noauto,nofail,x-systemd.automount,x-systemd.idle-timeout=30s  0 2
