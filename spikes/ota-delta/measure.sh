@@ -16,7 +16,8 @@ B=$(( $(size "$old") < 2147483648 ? $(size "$old") : 2147483648 ))
 if xdelta3 -e -9 -B "$B" -f -s "$old" "$new" "$w/p.xd3" 2>/dev/null && xdelta3 -d -f -s "$old" "$w/p.xd3" "$w/r" && cmp -s "$w/r" "$new"; then xd=$(size "$w/p.xd3"); fi
 if [ "$(size "$old")" -le 2147483648 ] && zstd -q -19 -T0 --long=31 --memory=2048MiB --patch-from="$old" "$new" -o "$w/p.zst" -f \
    && zstd -q -d --long=31 --memory=2048MiB --patch-from="$old" "$w/p.zst" -o "$w/r" -f && cmp -s "$w/r" "$new"; then zp=$(size "$w/p.zst"); fi
-if [ $((17 * $(size "$old"))) -lt "$RAM" ] && bsdiff "$old" "$new" "$w/p.bsd" && bspatch "$old" "$w/r" "$w/p.bsd" && cmp -s "$w/r" "$new"; then bd=$(size "$w/p.bsd"); fi
+# bsdiff: 17x the old size in RAM and single-threaded hours above a few hundred MB; capped at 400 MB.
+if [ "$(size "$old")" -le 419430400 ] && [ $((17 * $(size "$old"))) -lt "$RAM" ] && bsdiff "$old" "$new" "$w/p.bsd" && bspatch "$old" "$w/r" "$w/p.bsd" && cmp -s "$w/r" "$new"; then bd=$(size "$w/p.bsd"); fi
 rm -f "$w/r"
 echo "pair,raw_old,raw_new,F_full,avg_KiB,chunks_new,missing,F_chunk_L3,F_chunk_L19,index_B,F_chunk_http,F_xdelta3,F_zstd_patch,F_bsdiff"
 for avg in $avgs; do

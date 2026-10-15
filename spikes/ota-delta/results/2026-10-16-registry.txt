@@ -1,0 +1,5 @@
+compressed registry bytes:
+c1-old 340036070
+c1-new 343750117
+c2-old 24835849
+c2-new 24867969

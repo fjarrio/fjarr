@@ -368,7 +368,8 @@ release, falling back to chunks otherwise. Diffs are signed in the manifest
 like chunks and reconstruct the same content-addressed result, so they change
 nothing after the fetch. Slice 8.0 measures chunks against diffs on real
 updates (a kernel, CUDA, an ML model); slice 8.3b builds them, scoped by
-those numbers.
+those numbers: file-by-file diffs for `app` components
+([measured](#measured-apps)).
 
 Later, not in M8: robots at one depot sharing chunks over their LAN. The
 chunk format allows it without change: every chunk is verified against the
@@ -397,8 +398,9 @@ What this settles, for the Ubuntu recipe so far:
 
 - **64 KiB average chunks.** The total over these updates is flat between 32
   and 128 KiB (177 to 178 MB) and lowest at 64; smaller chunks pay more in
-  index than they save. Container and model updates still to measure may
-  move it.
+  index than they save. With the container, CUDA and model updates below
+  added, 64 KiB is still the lowest (802 MB over twelve updates, against
+  815 at 16 KiB and 840 at 256).
 - **Reproducible builds are a precondition for chunks.** An unpinned rebuild
   of an unchanged release costs 83 MB in chunks, because filesystem metadata
   changes in scattered places and each one costs a whole chunk; a diff pays
@@ -416,8 +418,56 @@ What this settles, for the Ubuntu recipe so far:
   cost.
 - **Whole-image diffs need memory the robot may not have**, which is why
   only xdelta3 ran on the 16 GiB slot (bsdiff needs 17 times the old size,
-  `zstd --patch-from` stops at 2 GiB). A file-by-file diff inside the
-  slot is the variant still to measure, with containers, CUDA and models.
+  `zstd --patch-from` stops at 2 GiB). A file-by-file diff needs memory for
+  one file at a time, and costs about what a whole-image diff costs (below).
+
+### Measured in 8.0: applications, CUDA and models {#measured-apps}
+
+Measured 2026-10-15/16 on pinned public updates
+(`spikes/ota-delta/fetch-pairs.sh`): the official ROS 2 base container
+rebuilt by its maintainers 16 days apart, an application container's patch
+release (Caddy 2.11.6 to 2.11.7 on an unchanged Alpine base), CUDA 13.4.1 to
+13.4.2 (the runtime and cuBLAS), and four ONNX models. The file-by-file
+column diffs only changed files (the smallest of bsdiff, `zstd --patch-from`
+and the file alone), pays once for content that appears under several names
+and nothing for content the robot already holds, and includes the file list.
+
+| Update | Full download | Chunks (64 KiB) | Best whole-file diff | File by file |
+|---|---|---|---|---|
+| ROS 2 container rebuild, every layer rebuilt | 344 MB as `docker pull`, 207 MB at zstd 19 | 69 MB | 8.8 MB | 6.7 MB |
+| Application container, patch release | 21 MB as `docker pull` | 14.2 MB | 1.48 MB | 1.48 MB |
+| The same application's binary alone (52 MB, recompiled Go) | 13.9 MB | 13.6 MB | 1.47 MB (bsdiff) | — |
+| CUDA runtime and cuBLAS, 604 MB of libraries | 412 MB | 80.7 MB | 47.4 MB | 46.8 MB |
+| A model fine-tuned, every weight changed (ViT, 347 MB) | 321 MB | 324 MB | 321 MB | — |
+| A detector retrained, every weight changed (RT-DETR, 83 MB) | 75 MB | 76 MB | 75 MB | — |
+| The same model exported again, weights unchanged (ResNet-50) | 95 MB | 0.12 MB | 0.002 MB | — |
+| Only the classifier head retrained (ResNet-50, an 8 MB head) | 95 MB | 7.8 MB | 7.6 MB | — |
+| OpenSSH update, root slot (U1 above) | 897 MB | 2.25 MB | 0.12 MB | 0.76 MB (0.74 of it the file list) |
+| Kernel update, root slot (K1 above) | 897 MB | 175 MB | 161 MB | 172 MB |
+
+What this settles:
+
+- **Precomputed diffs pay off for applications, not for images or models.**
+  A recompiled binary moves its code and addresses throughout the file, so
+  chunks reuse almost nothing (13.6 of 13.9 MB) while bsdiff fetches a ninth
+  of that. Containers rebuilt upstream without reproducible builds change
+  every tar header, which costs chunks 69 MB and a diff 7 to 9 MB. CUDA
+  saves 40%. Models gain nothing: where every weight changes, everything is
+  fetched whichever way; where few change, chunks already fetch about what
+  changed.
+- **Slice 8.3b is therefore scoped to `app` components** (container
+  images, binaries, packages), **as file-by-file diffs** from each release
+  still in the fleet: they cost what whole-file diffs cost, need memory for
+  one file at a time on the robot, and fall back to chunks for any file
+  without a diff. OS slots stay with chunks and reproducible builds, where
+  diffs saved 8% on a kernel update; so do models.
+- **The file list dominates small updates.** A file-by-file update of the
+  OpenSSH fix moves 18 KB of change and 741 KB of list; the list travels as
+  a diff against the robot's own, which 8.3b measures.
+- **Ubuntu 26.04's coreutils is one 11.8 MB binary under a hundred names.**
+  Per-name accounting would have charged it a hundred times (246 MB instead
+  of 6.7 MB for the ROS container); the transport pays per content hash, as
+  chunks already do.
 
 ## Appliers {#appliers}
 

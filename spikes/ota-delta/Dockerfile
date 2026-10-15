@@ -5,7 +5,7 @@ FROM ubuntu:26.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     xdelta3 bsdiff zstd zchunk casync diffoscope fuse2fs e2fsprogs \
-    python3 python3-zstandard jq time curl ca-certificates \
+    python3 python3-zstandard python3-onnx python3-numpy jq time curl ca-certificates gzip \
     && rm -rf /var/lib/apt/lists/*
 ARG DESYNC_VERSION=1.1.4
 RUN cd /tmp && curl -fsSLO https://github.com/folbricht/desync/releases/download/v${DESYNC_VERSION}/desync_${DESYNC_VERSION}_linux_amd64.tar.gz \
@@ -13,5 +13,5 @@ RUN cd /tmp && curl -fsSLO https://github.com/folbricht/desync/releases/download
     && sha256sum -c --ignore-missing checksums.txt \
     && tar -xzf desync_${DESYNC_VERSION}_linux_amd64.tar.gz desync && install -m 0755 desync /usr/local/bin/desync \
     && rm -rf /tmp/*
-COPY measure.sh recompress.py /usr/local/bin/
+COPY measure.sh recompress.py filewise.py m3_patch.py /usr/local/bin/
 WORKDIR /work
