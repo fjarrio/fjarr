@@ -431,7 +431,9 @@ measurements of slice 8.0. The starting points are:
 
 - **Yocto on Jetson:** SWUpdate on meta-tegra's A/B layout;
 - **NixOS:** the system's generations inside an A/B image layout;
-- **x86 and Ubuntu images:** RAUC or systemd-sysupdate;
+- **Ubuntu A/B on x86:** systemd-sysupdate with systemd-boot's boot counting,
+  chosen in 8.0 ([ADR-0039](adr/0039-x86-ubuntu-ab-sysupdate-systemd-boot.md));
+  Yocto and NixOS on x86 are chosen in 8.5b;
 - **plain Ubuntu:** apt, for the non-atomic path.
 
 ## The fleet side (paid) {#campaigns}
@@ -526,8 +528,9 @@ desktop run today, so the M3 desktop tests can run on it too.
 
 Slice 8.0 tests one concrete layout on the lab's x86 mini-PC before any
 recipe is built. The research behind it (2026-10-13) put **systemd-sysupdate
-with systemd-boot** first and **RAUC with GRUB** second; the measurements
-decide, and an ADR records the choice.
+with systemd-boot** first and **RAUC with GRUB** second; the rehearsal and
+the power cuts below chose the first
+([ADR-0039](adr/0039-x86-ubuntu-ab-sysupdate-systemd-boot.md)).
 
 - **Built with mkosi** (26, from Ubuntu 26.04's universe) from pinned
   inputs: a snapshot mirror, `SourceDateEpoch`, a fixed `Seed`. One build

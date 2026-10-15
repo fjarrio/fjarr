@@ -1149,9 +1149,10 @@ work on it as in QEMU. Sixty power cuts during the install, after `set-next`
 and during the trial boot all came back by themselves on the expected slot
 (2026-10-15): the gate is met for the Ubuntu A/B image on x86
 ([docs/32](32-fleet-ota.md#x86-test-image)), and the ESP is now mounted only on
-demand and the rewrite runs eight times faster. Still to come on x86:
-container, CUDA and model updates and file-by-file diffs; the RAUC comparison
-on paper. On the ZED Box Mini, everything Jetson. #45 is read: Stereolabs' board files are fetched at build time, and
+demand and the rewrite runs eight times faster. The applier is chosen:
+systemd-sysupdate with systemd-boot, RAUC with GRUB compared on paper
+([ADR-0039](adr/0039-x86-ubuntu-ab-sysupdate-systemd-boot.md)). Still to come
+on x86: container, CUDA and model updates and file-by-file diffs. On the ZED Box Mini, everything Jetson. #45 is read: Stereolabs' board files are fetched at build time, and
 Erik asks Stereolabs about the rest.
 
 **Gate:** [docs/06 OTA criteria](06-capabilities.md#fjarrota--fleet-ota-updates-m8).
