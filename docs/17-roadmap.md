@@ -15,6 +15,7 @@ by revision (this document's history), never by renumbering.
 |---|---|---|
 | M0 Docs & environment | **done** 2026-09-15 | doctor 0 failures, 3 tiers + 3 demos build, site builds |
 | M0.5 Public foundations | **done** 2026-09-16 | CI green, fjarr.io + fjarr.dev live, registrations, prior-art anonymization policy |
+| M0.6 Private development | planned, soon | Erik, 2026-10-15: the repo private with CI on self-hosted runners only, the docs behind a Cloudflare login, the landing page and the packages public; public customer docs later ([below](#m06)) |
 | M1 Core + extension API (camera video) | **done** 2026-09-25 | slices 0–2 done and reviewed, 2.9 (baseline bump, [ADR-0022](adr/0022-baseline-ubuntu-2604-gstreamer-128.md)) done 2026-09-18, 3a (browser lab) 2026-09-19, 3b (agent core) 2026-09-20, 3c (introspection + memory ladder) 2026-09-20, **4 (`fjarr.camera` on real sources) 2026-09-20**, 5a/5b (blob frames, `fjarr.introspect`, the served viewer) 2026-09-21, 6a/6b (repair + rate control, passthrough) 2026-09-22, **7a/7b (the remaining fault rows, the latency harness) 2026-09-23/24 — every slice landed**; the [gate review](reviews/m1-gate-review.md) found the ADR-0015 webhook half had never run and that standard-form TURN URLs were silently ignored by the agent, and fixed both. **Gate met 2026-09-25**: CI green and the first fully green nightly on the self-hosted runner, which also recorded the first trustworthy latency numbers — clean 56/79 ms, lossy 82/100, relay 69/102 against budgets of 120/200, 200/350 and 250/450, at 46–52 decoded fps |
 | M2 Desktop spikes + `fjarr.terminal` | **done** 2026-09-27 | 2a terminal and 2c module loader 2026-09-25; 2b the desktop spikes on a dedicated Ryzen mini-PC, [ADR-0006](adr/0006-desktop-backend-selection.md) accepted with numbers (E for GNOME, C second, A for X11 kiosks, forced connectors for headless robots) |
 | M2.6 Encoder families | planned | added 2026-09-24 ([ADR-0025](adr/0025-encoder-families.md)): `nvcodec` and `nvv4l2` behind the existing adapter; closes open question #2 |
@@ -33,6 +34,73 @@ CI (lint, build, docs gates), website deployed via Cloudflare Workers
 Builds, registrations (fjarr.io + fjarr.dev, npm org `@fjarr`, GitHub org
 `fjarrio` connected to crates.io). Prior-art sources anonymized across the
 tree, history and site ([docs/11](11-prior-art.md)).
+
+## M0.6 — Private development {#m06}
+
+**Why.** Erik takes Fjarr private while he settles the licence and the
+business model (2026-10-15): the repository and the developer docs leave
+public view, and what robots and integrators install stays public. Done
+soon, not now; nothing is switched before this milestone runs.
+
+| Surface | After M0.6 |
+|---|---|
+| GitHub `fjarrio/fjarr` | private |
+| CI | self-hosted runners only, none of GitHub's hosted runners |
+| fjarr.io landing page | public |
+| `docs/` on the website | behind Cloudflare Access: the internal developer docs |
+| apt.fjarr.io, get.fjarr.io, `ghcr.io/fjarrio/fjarr-agent` | public |
+| npm `@fjarr`, crates.io | may be public; nothing is published before the licence decision ([below](#m06-licence)) |
+| demo.fjarr.io, signal.fjarr.io | unchanged (already protected) |
+
+What the switch touches was swept on 2026-10-15 (four sweeps and a
+completeness review over the workflows, `tools/ci`, the website, packaging,
+shipped strings and every doc). The slices follow from it.
+
+| Slice | Scope | Done when |
+|---|---|---|
+| **0.6a Runner pool** | at least four isolated amd64 slots (4 vCPU, 16 GB, 80–100 GB each; one ephemeral VM and Docker daemon per job, because the stack jobs bind fixed ports and `tun-up` creates `fjarr0` on the host); one native arm64 runner that is always online (the arm64 packages are on every push, and [ADR-0031](adr/0031-distribution-apt-and-containers-first.md)'s "never emulated" holds); an ephemeral release runner that holds the apt key and never runs anything else; a provisioning script (Ubuntu 26.04, Docker and buildx, gh and aws CLIs, rustup, the TSan `vm.mmap_rnd_bits` sysctl, the tun module, one fixed runner uid, runner-agent updates and a monthly template rebuild); Docker Hub login or a pull-through mirror; `timeout-minutes` on every job and a concurrency rule for back-to-back pushes; the labels in `.github/actionlint.yaml` | `ci.yml` runs green on the pool, side by side with the hosted runners, for a week, within [docs/30](30-continuous-integration.md)'s budget; e2e repeated on the pool shows its timing races no worse |
+| **0.6b Release on a private repo** | check the org's GitHub plan: on Free, a private repository has no environment secrets and no required reviewers, so `release.yml` would lose the apt key's scoping and the manual promotion to stable (Team, or a release path that keeps both); artifact storage (Free allows about 500 MB, CI keeps about 1.6 GB of `.deb`s): a shorter retention or the `.deb`s in a private R2 prefix, with `release.yml` and `tools/ci/ci-run.sh` reading from there; `fjarr-ci` images private (they hold closed code) within the plan's package storage; `fjarr-agent` stays public and anonymous pulls keep working; keyless image signing writes the repository and workflow name to the public Rekor log, which is accepted or replaced by a key; secret scanning and push protection, lost on a private Free repository, replaced by a local or CI secret scan; GitHub's announced charge for self-hosted minutes in private repositories, checked when the switch runs | a release from the private repository signs and publishes to apt testing, a person promotes it to stable, and the public image and install script work anonymously |
+| **0.6c Docs behind a login** | one boundary for the docs (a separate host such as `docs.fjarr.io` is the cleanest; a `/docs/` prefix also works), with the Starlight search index behind the same Access application; a noindex header, a landing-only sitemap and `robots.txt`; `workers.dev` and preview URLs off or protected; fjarr.dev pointed at the landing page; Cloudflare's GitHub app granted the private repository; the Access application created by `deploy/demo/cloudflare.py` generalised (same login, a team allowlist); an ADR amending [ADR-0014](adr/0014-astro-starlight-website.md) | an anonymous visitor reaches the landing page and nothing of `docs/` on any host, preview or search index; a team member logs in and reads the docs; pushing `main` still deploys |
+| **0.6d Public surfaces** | the landing page: no GitHub links, no links into the internal docs, no "the threat model / business plan / specs are public" claims, and no licence or open-core wording while the licence is open (the meta description, the hero, section 10); a public install page with the apt key fingerprint, which `install.sh` names; `/.well-known/security.txt` with a security contact; the `Documentation=` URLs in the shipped systemd units pointed at public pages (in a release); `debian/copyright` without the private source link, and third-party notices for what the binaries bundle (the MIT and Apache Rust crates, the viewer's JavaScript), which their licences require whatever Fjarr's licence becomes | every link in a public artifact (the landing page, the packages, the image, `install.sh`) opens without a login |
+| **0.6e The switch** | the docs and agent guides restated for a private repository and self-hosted CI ([docs/12](12-development-environment.md), [13](13-development-workflow.md), [19](19-website-and-publishing.md), [26](26-robot-install-and-drivers.md#releases), [30](30-continuous-integration.md), [04](04-supported-platforms.md), [15](15-testing-strategy.md), `CLAUDE.md`, `README.md`, `CONTRIBUTING.md`); a new ADR (private repository, CI entirely on self-hosted runners) amending [ADR-0033](adr/0033-desktop-test-lab-and-shared-runners.md); every `runs-on` moved to the pool's labels; then the repository flipped to private, forking disabled at the org, third-party actions pinned by SHA | the repository is private, `ci.yml`, the nightly, the lab workflows and a release all run green on self-hosted runners, and the public surfaces in the table above answer anonymously |
+
+Order: 0.6a and 0.6b first, while the repository is still public and CI can
+run in both places; 0.6c and 0.6d next, since they need nothing private;
+the flip last. Everything already public stays public: anyone who copied a
+version while it was public keeps the licence it carried, and archives may
+hold the website.
+
+### Customer documentation, later {#m06-customer-docs}
+
+`docs/` stays the team's internal documentation. A separate, streamlined documentation for
+customers and users is public: its own tree outside `docs/` and its own
+Starlight build on a public host, written from the internal docs without
+forking their facts, with a build guard that fails on a link into the
+internal docs. It takes over what customers read today: the install guide
+(the public half of [docs/26](26-robot-install-and-drivers.md)), the driver
+catalog pages, the tunnel how-tos, the web libraries' guide, the protocol
+schemas at their `fjarr.io/protocol/` URLs, and the per-release
+versioning (open question 14,
+[docs/19](19-website-and-publishing.md#versioning-published-docs)). Every shipped string that names an internal doc (the agent's hints,
+`fjarr-setup`'s and `fjarr-connect`'s help and prompts, the shipped
+configuration comments, `@fjarr/core`'s errors) is pointed at it, and
+[docs/00](00-vision.md#success-criteria)'s "integrates in a week from the
+docs" means these docs. Its own spec, written when it starts, says the
+hosts, the licence of its text and the support channel.
+
+### The licence decision {#m06-licence}
+
+Open question [#13](18-open-questions.md). Until Erik decides, nothing new is published to npm or crates.io: a
+published version's licence and repository link are permanent, and a
+crate publishes its source, which would make crates.io the one public copy
+of the Rust code. The licence files and fields (`LICENSE`,
+`debian/copyright`, `Cargo.toml`, the `package.json`s, the image's licence
+label), [ADR-0011](adr/0011-license-open-core.md),
+[ADR-0038](adr/0038-reference-handlers-permissive.md)'s framing, the
+open-core split in [docs/03](03-product-strategy.md) and
+[docs/32](32-fleet-ota.md#open-core), and `CONTRIBUTING.md`'s CLA all follow
+the decision, in one change with a superseding ADR. The no-GPL rule for
+shipped artifacts stays under any licence.
 
 ## M1 — Core + extension API, proven by `fjarr.camera` *(done)*
 
