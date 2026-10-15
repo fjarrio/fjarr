@@ -1077,7 +1077,11 @@ back in 33 s, the rescue UKI boots once by `BootNext` and returns (three of
 three), its firmware watchdog resets a hung kernel by itself (53 s), and the
 rescue's dead-man returns it unclaimed. With Erik's go it was rewritten to the
 A/B layout over the network, and updates, rollback and a failed health check
-work on it as in QEMU. Still to come on x86: the power cuts (the gate);
+work on it as in QEMU. Sixty power cuts during the install, after `set-next`
+and during the trial boot all came back by themselves on the expected slot
+(2026-10-15): the gate is met for the Ubuntu A/B image on x86
+([docs/32](32-fleet-ota.md#x86-test-image)). Still to come on x86: `/efi`
+mounted on demand and the slow disk write;
 container, CUDA and model updates and file-by-file diffs; the RAUC comparison
 on paper. On the ZED Box Mini, everything Jetson. #45 is read: Stereolabs' board files are fetched at build time, and
 Erik asks Stereolabs about the rest.

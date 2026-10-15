@@ -609,6 +609,20 @@ rehearsal changed:
   health check all behave as in QEMU; a reboot takes about 23 s. The
   firmware adds its own entry for the ESP's removable path, after Fjarr's
   two, which only adds a fallback.
+- **Power cuts mid-update pass on the NUC** (2026-10-15, 60 cuts through
+  the Shelly plug at random moments, `spikes/ota-x86/powercut.sh`,
+  `results/`). Twenty during the install, from the root write to the UKI
+  renames: the NUC came back on 1.0 every time, the half-written 1.2 never
+  activated. Twenty within two seconds after `set-next`: it came back trying
+  1.2 every time, so the rename is on disk once `sync -f` returns. Twenty
+  during 1.2's first boot, from the kernel to `systemd-bless-boot`'s
+  rename: it came back on 1.2 and blessed it every time, or found it already
+  blessed. Not once did it need the rescue system, a second power cycle or
+  a hand, and after each group a clean update to 1.2 succeeded. `fsck` found
+  no damage on either ESP; the main ESP reads as dirty because it is mounted
+  read-write while the system runs, so mounting `/efi` only on demand would
+  keep it clean between updates (next image). This meets 8.0's gate for the
+  Ubuntu A/B image on x86: a power cut mid-install boots the old slot.
 - **sysupdate activates what it installs:** the new version sorts first at
   once. The applier renames the new UKI to `+0-0` (sorted last) until
   `set-next`; a power cut between the two renames boots the new slot early,
