@@ -481,8 +481,9 @@ measurements of slice 8.0. The starting points are:
 
 - **Yocto on Jetson:** SWUpdate on meta-tegra's A/B layout;
 - **NixOS:** the system's generations inside an A/B image layout;
-- **Ubuntu A/B on x86:** systemd-sysupdate with systemd-boot's boot counting,
-  chosen in 8.0 ([ADR-0039](adr/0039-x86-ubuntu-ab-sysupdate-systemd-boot.md));
+- **Ubuntu A/B on x86:** SWUpdate with EFI Boot Guard, the same engine as the
+  Yocto recipe, chosen in 8.0 ([ADR-0040](adr/0040-x86-ubuntu-ab-swupdate-efibootguard.md),
+  superseding systemd-sysupdate in [ADR-0039](adr/0039-x86-ubuntu-ab-sysupdate-systemd-boot.md));
   Yocto and NixOS on x86 are chosen in 8.5b;
 - **plain Ubuntu:** apt, for the non-atomic path.
 
@@ -557,7 +558,7 @@ bundled, not discovered on the robot.
 | NixOS | ZED Box Mini | jetpack-nixos flake + the Fjarr module, A/B image layout | A/B atomic | chunks of store paths |
 | Yocto | second x86 mini-PC | the same layer, UEFI | A/B atomic | chunks |
 | NixOS | second x86 mini-PC | the same flake, UEFI | A/B atomic | chunks of store paths |
-| Ubuntu A/B | second x86 mini-PC | an Ubuntu 26.04 image on two slots (build tool chosen in 8.0, mkosi the candidate) | A/B atomic | chunks |
+| Ubuntu A/B | second x86 mini-PC | an Ubuntu 26.04 image on two slots, built by mkosi, written by SWUpdate and booted by EFI Boot Guard ([ADR-0040](adr/0040-x86-ubuntu-ab-swupdate-efibootguard.md)) | A/B atomic | chunks |
 | Ubuntu + apt | any Ubuntu robot | today's robots, unchanged | per package, not atomic | apt's own |
 
 The last row matters: most robots running Fjarr today are stock Ubuntu. They
@@ -565,9 +566,9 @@ get the same releases, conditions, consent and run logs, without atomic
 rollback, and the recipe table says so.
 
 **The x86 layout** (all three x86 recipes): a GPT disk with an EFI system
-partition, two root slots and a `/data` partition; boot counting by the
-bootloader chosen in 8.0 (systemd-boot with unified kernel images, or GRUB's
-environment); `/usr` read-only in the slot, `/etc` from the image with
+partition, two root slots and a `/data` partition; the boot state kept by
+the loader chosen in 8.0 for each recipe (EFI Boot Guard for Ubuntu, one
+environment and one UKI per slot, [ADR-0040](adr/0040-x86-ubuntu-ab-swupdate-efibootguard.md)); `/usr` read-only in the slot, `/etc` from the image with
 machine-specific state on `/data`, and `/home` and `/var` on `/data`. The
 accounts and groups the agent and the desktop helper need (ADR-0028) are
 created by `sysusers.d` and `tmpfiles.d` in the image, so a desktop survives
@@ -580,7 +581,10 @@ Slice 8.0 tests one concrete layout on the lab's x86 mini-PC before any
 recipe is built. The research behind it (2026-10-13) put **systemd-sysupdate
 with systemd-boot** first and **RAUC with GRUB** second; the rehearsal and
 the power cuts below chose the first
-([ADR-0039](adr/0039-x86-ubuntu-ab-sysupdate-systemd-boot.md)).
+([ADR-0039](adr/0039-x86-ubuntu-ab-sysupdate-systemd-boot.md)). SWUpdate with
+EFI Boot Guard, tested the same way afterwards, replaced it
+([below](#x86-swupdate-ebg), [ADR-0040](adr/0040-x86-ubuntu-ab-swupdate-efibootguard.md));
+the slots, rescue system, reflash and image findings here carry over.
 
 - **Built with mkosi** (26, from Ubuntu 26.04's universe) from pinned
   inputs: a snapshot mirror, `SourceDateEpoch`, a fixed `Seed`. One build
@@ -765,13 +769,13 @@ filesystem label; the confirmation cuts never landed inside the
 environment write, which takes milliseconds, and the damaged-environment
 case stands in for it.
 
-The difference that decides is the hang: a kernel update that hangs on one
-robot's hardware before userspace is the failure an update system exists
-for, and only the loader's watchdog recovers from it without a person. One
-try instead of three costs a retried download when power fails in the
-first seconds of a new version. Whether that outweighs the extra key, the
-packaging and the GPL-only tools is Erik's call; ADR-0039 stands until a
-superseding ADR records it.
+**Decided (Erik, 2026-10-16): SWUpdate with EFI Boot Guard**, for one update
+engine across the Jetson and x86 recipes
+([ADR-0040](adr/0040-x86-ubuntu-ab-swupdate-efibootguard.md)). The early hang
+supports it: a kernel update that hangs on one robot's hardware before
+userspace is the failure an update system exists for, and only the loader's
+watchdog recovers from it without a person. One try instead of three costs a
+retried download when power fails in the first seconds of a new version.
 
 ## Open core {#open-core}
 

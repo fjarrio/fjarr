@@ -60,4 +60,5 @@ options weighed, the choice, and its consequences — so future maintainers
 | [0036](0036-a-release-is-one-signed-version.md) | A release is one signed version pinning every component; company-held keys, a Fjarr-managed easy start | accepted |
 | [0037](0037-release-content-over-https-chunks.md) | Release content travels as resumable HTTPS chunks under a per-robot budget, not over WebRTC | accepted |
 | [0038](0038-reference-handlers-permissive.md) | The reference peripheral handlers are MIT, an exception to ADR-0011, so customers can fork them | accepted |
-| [0039](0039-x86-ubuntu-ab-sysupdate-systemd-boot.md) | The Ubuntu A/B image on x86 writes slots with systemd-sysupdate and boots through systemd-boot's counting; RAUC with GRUB was the comparison | accepted |
+| [0039](0039-x86-ubuntu-ab-sysupdate-systemd-boot.md) | The Ubuntu A/B image on x86 writes slots with systemd-sysupdate and boots through systemd-boot's counting; RAUC with GRUB was the comparison | superseded by 0040 |
+| [0040](0040-x86-ubuntu-ab-swupdate-efibootguard.md) | The Ubuntu A/B image on x86 writes slots with SWUpdate and boots through EFI Boot Guard, one engine with the Jetson recipe | accepted |

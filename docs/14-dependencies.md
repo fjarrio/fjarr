@@ -140,6 +140,7 @@ ioctls.
 | `iproute2` (`tc`, dev image) | 26.04 | netem media-path profiles inside the robot container (GPL-2.0 tool, dev-only, never linked) |
 | coturn (container) | 4.6 | dev/self-host TURN (BSD-3) |
 | mkosi, systemd-ukify, systemd-repart, systemd-boot-efi, OVMF, qemu-system-x86 (`docker/ota-build`) | Ubuntu 26.04 (mkosi 26, systemd 259) | building the x86 test images and rehearsing them in a VM (M8 slice 8.0, [docs/32](32-fleet-ota.md#x86-test-image)). LGPL-2.1+ (mkosi, systemd), BSD-2 (OVMF), GPL-2.0 (QEMU, a tool); what the images contain is the recipe's own list |
+| SWUpdate, EFI Boot Guard (`efibootguard`, its 0.22 loader pinned by hash) | 2025.12 / 0.19 tools (Ubuntu 26.04), 0.22 loader | the x86 Ubuntu A/B recipe's slot writer and boot loader ([ADR-0040](adr/0040-x86-ubuntu-ab-swupdate-efibootguard.md)). GPL-2.0-only, `libebgenv` included: run as tools by the applier, never linked into Fjarr; they are in images built from the recipe, not in Fjarr's packages |
 | desync, xdelta3, bsdiff, zchunk, diffoscope (`spikes/ota-delta`) | 1.1.4 (upstream binary, checksum verified) / 26.04 | the 8.0 delta harness, chunks against binary diffs. BSD-3 (desync, bsdiff, zchunk), GPL-2.0+ (Ubuntu's xdelta3), GPL-3.0+ (diffoscope); harness only — a diff decoder on robots would be upstream xdelta 3.1+ (Apache-2.0) or zstd (BSD) |
 | Xvfb/openbox/x11vnc/noVNC (robot-sim) | 26.04 | fake robot desktop |
 | Docker + Compose v2 | ≥ 24 | the environment itself |

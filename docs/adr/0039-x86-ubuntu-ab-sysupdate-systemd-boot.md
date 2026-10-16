@@ -3,7 +3,7 @@ title: "ADR 0039: The Ubuntu A/B Image on x86 Uses systemd-sysupdate and systemd
 description: The x86 Ubuntu A/B recipe writes its slots with systemd-sysupdate from a local directory and boots unified kernel images through systemd-boot's boot counting, behind Fjarr's applier; RAUC with GRUB was the comparison. Chosen on slice 8.0's QEMU rehearsal and the lab NUC's 60 power cuts.
 ---
 
-- **Status**: accepted
+- **Status**: superseded by [ADR-0040](0040-x86-ubuntu-ab-swupdate-efibootguard.md)
 - **Date**: 2026-10-15
 - **Supersedes**: —
 
