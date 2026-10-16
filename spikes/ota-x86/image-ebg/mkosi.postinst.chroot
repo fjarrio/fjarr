@@ -1,0 +1,34 @@
+#!/bin/sh
+# spec: docs/32#x86-test-image
+set -e
+systemctl enable systemd-networkd systemd-resolved ssh.socket fjarr-data-init.service fjarr-health.service
+mkdir -p /data /efi
+mkdir -p /etc/systemd/system.conf.d
+printf '[Manager]\nRuntimeWatchdogSec=30s\nRebootWatchdogSec=2min\n' > /etc/systemd/system.conf.d/10-watchdog.conf
+# Ubuntu deny-lists the watchdog drivers; without that, udev loads whichever matches the board
+# (wdat_wdt on the NUC11, iTCO_wdt elsewhere, i6300esb in QEMU).
+sed -i -E '/^blacklist (wdat_wdt|iTCO_wdt|i6300esb)$/d' /usr/lib/modprobe.d/blacklist_linux_*.conf
+# The loader and the ESP are not A/B: nothing on a slot may rewrite them.
+systemctl mask systemd-boot-update.service
+for f in /etc/kernel/postinst.d/zz-systemd-boot /usr/share/kernel/postinst.d/zz-systemd-boot /etc/kernel/postrm.d/zz-systemd-boot; do
+  [ -e "$f" ] && dpkg-divert --local --rename --divert "$f.fjarr-disabled" "$f" || true
+done
+# The TPM is not used here. On the NUC these units fail: pcrlock always, tpm2-setup once the TPM
+# went into dictionary-attack lockout (0x921) after the 60 power cuts of 2026-10-15.
+systemctl mask systemd-pcrlock-firmware-code.service systemd-pcrlock-firmware-config.service systemd-pcrlock-make-policy.service \
+  systemd-tpm2-setup-early.service systemd-tpm2-setup.service
+# --- EFI Boot Guard + SWUpdate (the ADR-0039 comparison) ---
+# The applier runs swupdate itself; nothing listens on a socket.
+systemctl mask swupdate.socket swupdate.service
+systemctl enable fjarr-trial.service
+printf 'fjarr-x86 1.0\n' > /etc/hwrevision          # Ubuntu's swupdate checks hardware compatibility
+# One environment per slot: env 0 boots slot A at the higher revision; env 1 (rev 1) carries a copy
+# of slot A's UKI, a working fallback until slot B is first written. kernelparams stays empty, so
+# each UKI's own command line (root=LABEL=fjarr_<v>) applies. FJARR_EBG_WDOG=0 leaves the
+# loader-armed watchdog off (a board EBG cannot drive would otherwise refuse to boot).
+wd=${FJARR_EBG_WDOG:-60}
+for i in 0 1; do d=/usr/lib/fjarr/ebg/boot$i; mkdir -p "$d"
+  printf "BOOT$i" | iconv -f ascii -t UTF-16LE > "$d/EFILABEL"
+  bg_setenv -f "$d/BGENV.DAT" -r $((2 - i)) -k "C:BOOT$i:fjarr.efi" -w "$wd" -s OK -i 0 -x "fjarr_version=$IMAGE_VERSION" >/dev/null
+  ls -la "$d"
+done

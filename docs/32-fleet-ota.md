@@ -689,6 +689,7 @@ rehearsal changed:
   the power cuts, so `systemd-tpm2-setup` fails; the images do not use the
   TPM and mask it. A robot whose identity key lives in a TPM would meet the
   same lockout after repeated power cuts ([#9](18-open-questions.md)).
+
 - **sysupdate activates what it installs:** the new version sorts first at
   once. The applier renames the new UKI to `+0-0` (sorted last) until
   `set-next`; a power cut between the two renames boots the new slot early,
@@ -724,6 +725,53 @@ otherwise fetched from Stereolabs at build time (#45, settled in 8.0).
 is a known trap on custom Jetson carriers), installs the device identity and
 enrols the robot in its fleet, replacing the flash scripts every team writes
 by hand.
+
+### SWUpdate and EFI Boot Guard, compared {#x86-swupdate-ebg}
+
+ADR-0039's first comparison covered RAUC on paper and dismissed SWUpdate in
+a line. It was then built and tested the same way (2026-10-16,
+`spikes/ota-x86/image-ebg`): the same slots, rescue system and reflash,
+with EFI Boot Guard 0.22 (isar-cip-core's x86 loader) choosing the slot from
+one environment per slot, and SWUpdate 2025.12 writing the slot and its UKI
+from a signed package. Every QEMU case passed, and on the NUC the A/B cycle,
+a failed health check, a crash on the trial boot, a hung trial kernel and 80
+power cuts.
+
+| | systemd-sysupdate + systemd-boot | SWUpdate + EFI Boot Guard |
+|---|---|---|
+| Tries per update | three (a counter in the UKI's name) | one: any reset during the trial (a crash, the watchdog, a power cut) rolls back |
+| A crash on the trial boot | tried again; the second try came up | rolled back to the old version |
+| A root that never appears | three tries, 391 s, then the old version | one try, 131 s |
+| **A trial kernel that hangs before the watchdog driver loads** | **nothing resets the board**: it waits for a person or a power cut, three times over | **the loader armed the watchdog before the kernel**: reset and rollback by itself, 70 s in QEMU, 88 s on the NUC (its WDAT) |
+| Power cuts on the NUC | 60 of 60: install, after set-next, trial | 80 of 80: the same plus the confirmation write; trial cuts before confirmation rolled back (12 of 20), after it kept the update (8) |
+| Boot state | the UKI's file name on the ESP | two environments with a revision and a CRC; a damaged one falls back to the other |
+| No bootable version at all | the rescue entry sorts after exhausted slots | the loader exits to the firmware, which boots the rescue partition |
+| Install on the NUC | 22 s from a staged root | 24 s from a staged signed package |
+| Applier glue | 45 lines, plus parking the new UKI | 50 lines, plus the confirmation units |
+| Image | — | 53 MiB larger (SWUpdate pulls in Python, GnuPG, Lua, a web server; all unused and masked) |
+| Ubuntu 26.04 | systemd 259 (main), mkosi (universe) | SWUpdate and EFI Boot Guard 0.19 in universe; 0.19's loader lacks a rollback fix, so the loader comes from 0.22 |
+| Signing | the release signature only | Ubuntu's SWUpdate refuses unsigned packages: a second key, or a rebuilt SWUpdate |
+| Licence | LGPL-2.1+ | GPL-2.0-only, `libebgenv` included: run as tools, never linked into Fjarr |
+| Engine across recipes | x86 only | the same SWUpdate as the Yocto recipe on Jetson |
+
+Findings on the way: EFI Boot Guard's own tools mount every FAT partition
+on the disk read-write to look for environments, the rescue partition
+included, so the applier reads and writes one environment partition at a
+time; Ubuntu's kernel feeds a running watchdog itself until userspace opens
+it, so `watchdog.handle_boot_enabled=0` is needed for the loader's
+watchdog to cover the kernel's start; a raw slot write keeps the
+filesystem's label but not the GPT's, so each UKI finds its root by
+filesystem label; the confirmation cuts never landed inside the
+environment write, which takes milliseconds, and the damaged-environment
+case stands in for it.
+
+The difference that decides is the hang: a kernel update that hangs on one
+robot's hardware before userspace is the failure an update system exists
+for, and only the loader's watchdog recovers from it without a person. One
+try instead of three costs a retried download when power fails in the
+first seconds of a new version. Whether that outweighs the extra key, the
+packaging and the GPL-only tools is Erik's call; ADR-0039 stands until a
+superseding ADR records it.
 
 ## Open core {#open-core}
 

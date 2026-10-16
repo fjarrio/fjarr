@@ -1,0 +1,16 @@
+#!/bin/sh
+# The 8.0 trial-boot gate: network up, sshd answering, /data mounted. A file on /data fails it on
+# purpose, so a rollback can be tested without a power cut (docs/32#x86-test-image).
+set -u
+# A second file crashes the kernel on the trial boot, to test that the counter takes the hit.
+if [ -e /data/fjarr-test/panic ]; then rm -f /data/fjarr-test/panic; sync; echo c > /proc/sysrq-trigger; fi
+# Holds the trial open, for power cuts aimed at the confirmation write.
+while [ -e /data/fjarr-test/hold-health ]; do sleep 1; done
+if [ -e /data/fjarr-test/fail-health ]; then echo "fail-health present: failing on purpose"; exit 1; fi
+findmnt -n /data >/dev/null || { echo "/data not mounted"; exit 1; }
+for i in $(seq 1 60); do
+  ip -4 route show default | grep -q . && break; sleep 2
+done
+ip -4 route show default | grep -q . || { echo "no default route"; exit 1; }
+systemctl is-active -q ssh.socket || systemctl is-active -q ssh.service || { echo "ssh not listening"; exit 1; }
+echo "healthy: $(. /etc/os-release; echo "$IMAGE_ID $IMAGE_VERSION")"

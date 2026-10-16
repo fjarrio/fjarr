@@ -1154,7 +1154,10 @@ systemd-sysupdate with systemd-boot, RAUC with GRUB compared on paper
 ([ADR-0039](adr/0039-x86-ubuntu-ab-sysupdate-systemd-boot.md)). Container,
 CUDA and model updates are measured with file-by-file diffs
 ([docs/32](32-fleet-ota.md#measured-apps)): 64 KiB chunks hold, and 8.3b is
-scoped to file-by-file diffs for `app` components. x86 Ubuntu is done for 8.0. On the ZED Box Mini, everything Jetson. #45 is read: Stereolabs' board files are fetched at build time, and
+scoped to file-by-file diffs for `app` components. SWUpdate with EFI Boot Guard was then built and
+tested the same way ([docs/32](32-fleet-ota.md#x86-swupdate-ebg)): one try instead of three, but
+the only design that recovers by itself from a kernel that hangs early; the choice between them is
+Erik's, and ADR-0039 stands until then. On the ZED Box Mini, everything Jetson. #45 is read: Stereolabs' board files are fetched at build time, and
 Erik asks Stereolabs about the rest.
 
 **Gate:** [docs/06 OTA criteria](06-capabilities.md#fjarrota--fleet-ota-updates-m8).

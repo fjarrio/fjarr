@@ -1,0 +1,61 @@
+#!/bin/sh
+# The applier over SWUpdate + EFI Boot Guard (the ADR-0039 comparison): the same verbs as the
+# sysupdate one, on two EBG environments, one per slot (docs/32#appliers).
+#   applier install <v> <dir>   swupdate writes the free slot (root + UKI) from <dir>/fjarr_<v>.swu; not activated
+#   applier set-next <v>        the next boot tries <v> once (INSTALLED -> TESTING -> OK or FAILED)
+#   applier state               JSON: booted version and slot, both environments
+#   applier mark-good           TESTING -> OK on the booted slot (fjarr-bless.service)
+#   applier rollback-now        mark the booted environment failed and reboot into the other
+#   applier is-trial            exit 0 if this boot is a trial (TESTING)
+# The environments are read and written one partition at a time (bg_printenv/bg_setenv -f): the
+# stock tools' own discovery mounts every ESP read-write, the rescue partition included.
+set -eu
+exec 9>/run/fjarr-applier.lock; flock 9
+CERT=/etc/fjarr/swu.crt; WD=${FJARR_EBG_WDOG:-60}
+. /etc/os-release; booted=$IMAGE_VERSION
+root() { echo /dev/disk/by-partuuid/4f8a1c2e-6b1d-4c57-9a0e-2d3f5b7a110$([ "$1" = a ] && echo 1 || echo 2); }
+boot() { echo /dev/disk/by-partlabel/fjarr-boot$([ "$1" = a ] && echo 0 || echo 1); }
+idx() { [ "$1" = a ] && echo 0 || echo 1; }
+other() { [ "$1" = a ] && echo b || echo a; }
+bslot=$([ "$(readlink -f "$(root a)")" = "$(findmnt -no SOURCE /)" ] && echo a || echo b)
+getenv() { m=$(mktemp -d); mount -o ro "$(boot "$1")" "$m"
+  bg_printenv -f "$m/BGENV.DAT" -r -o revision,ustate,in_progress,user 2>/dev/null || echo INVALID=1
+  umount "$m"; rmdir "$m"; }
+field() { getenv "$1" | sed -n "s/^$2=//p"; }
+setenv() { s=$1; shift; m=$(mktemp -d); mount -o sync "$(boot "$s")" "$m"
+  bg_setenv -f "$m/BGENV.DAT" -P "$@" >/dev/null; sync -f "$m"; umount "$m"; rmdir "$m"; }
+case "${1:-}" in
+install)
+  v=${2:?version}; dir=${3:?dir}; f=$(other "$bslot")
+  [ "$v" != "$booted" ] || { echo "refusing to install over the booted version $v" >&2; exit 2; }
+  setenv "$f" -r 0 -s FAILED -x fjarr_version=none        # never bootable while it is rewritten
+  mkdir -p /data/fjarr-update/tmp
+  systemd-run --wait --pipe --collect -q -p RuntimeDirectory=swupdate -E TMPDIR=/data/fjarr-update/tmp \
+    swupdate -v -B none --digest-provider opensslCMS -k "$CERT" -e "fjarr,slot-$f" -i "$dir/fjarr_$v.swu"
+  udevadm settle
+  [ "$(blkid -p -s LABEL -o value "$(root "$f")")" = "${IMAGE_ID}_$v" ] || { echo "slot label mismatch" >&2; exit 1; }
+  setenv "$f" -k "C:BOOT$(idx "$f"):fjarr.efi" -w "$WD" -x "fjarr_version=$v"   # still FAILED/rev 0: inactive
+  echo "installed $v (inactive) in slot $f";;
+set-next)
+  v=${2:?version}; s=$(other "$bslot")
+  [ "$(field "$s" fjarr_version)" = "$v" ] || { echo "$v is not installed" >&2; exit 2; }
+  r=$(( $(printf '%s\n%s\n' "$(field a REVISION)" "$(field b REVISION)" | sort -n | tail -1) + 1 ))
+  setenv "$s" -r "$r" -s INSTALLED -i 0; echo "next boot tries $v once";;
+state)
+  printf '{"booted":"%s","booted_slot":"%s","slots":[' "$booted" "$bslot"; sep=
+  for s in a b; do e=$(getenv "$s")
+    printf '%s{"slot":"%s","label":"%s","revision":%s,"ustate":%s,"version":"%s","valid":%s}' "$sep" "$s" \
+      "$(blkid -p -s LABEL -o value "$(root "$s")" 2>/dev/null || true)" \
+      "$(echo "$e" | sed -n 's/^REVISION=//p' | grep . || echo null)" "$(echo "$e" | sed -n 's/^USTATE=//p' | grep . || echo null)" \
+      "$(echo "$e" | sed -n 's/^fjarr_version=//p')" "$(echo "$e" | grep -q INVALID && echo false || echo true)"; sep=,
+  done; printf ']}\n';;
+is-trial) [ "$(field "$bslot" USTATE)" = 2 ];;
+mark-good)
+  [ "$(field "$bslot" USTATE)" = 2 ] || { echo "not a trial boot"; exit 0; }
+  setenv "$bslot" -s OK; echo "$booted confirmed";;
+rollback-now)
+  o=$(other "$bslot")
+  [ "$(field "$o" REVISION)" -gt 0 ] 2>/dev/null && [ "$(field "$o" USTATE)" = 0 ] || { echo "no other bootable version" >&2; exit 2; }
+  setenv "$bslot" -r 0 -s FAILED; echo "retired $booted; rebooting"; systemctl reboot;;
+*) sed -n '2,9p' "$0" >&2; exit 2;;
+esac

@@ -1,0 +1,8 @@
+[Unit]
+Description=Confirm this trial boot (EFI Boot Guard TESTING -> OK)
+Requires=boot-complete.target
+After=boot-complete.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/fjarr/applier mark-good

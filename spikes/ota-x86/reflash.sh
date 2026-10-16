@@ -42,7 +42,7 @@ write)
   scp_ "$img" "$RESCUE" "$target:/run/reflash/"
   want=$(sha256sum < "$img" | cut -d' ' -f1); got=$(ssh_ "sha256sum < /run/reflash/$(basename "$img") | cut -d' ' -f1")
   [ "$want" = "$got" ] || { echo "image checksum mismatch" >&2; exit 1; }
-  ssh_ "DISK=$DISK sh /run/reflash/target.sh write /run/reflash/$(basename "$img")"
+  ssh_ "DISK=$DISK DATA_PART=${DATA_PART:-5} LOADER='${LOADER:-\\EFI\\systemd\\systemd-bootx64.efi}' sh /run/reflash/target.sh write /run/reflash/$(basename "$img")"
   echo "written and checked; run: reflash.sh verify $target";;
 verify)
   # Boot the on-disk rescue once (proves the firmware's second entry), then slot A.
@@ -50,6 +50,6 @@ verify)
   b=$(bootid); ssh_ 'systemctl reboot' || true; sleep 10; wait_boot "$b"
   [ "$(ssh_ hostname)" = fjarr-nuc-rescue ] && echo "on-disk rescue boots" || { echo "on-disk rescue did not boot" >&2; exit 1; }
   b=$(bootid); ssh_ 'systemctl reboot' || true; sleep 10; wait_boot "$b"
-  ssh_ '. /etc/os-release; echo "booted $IMAGE_ID $IMAGE_VERSION"; findmnt -n -o SOURCE,TARGET / /data; bootctl list --no-pager | grep -E "^ +id:"';;
+  ssh_ '. /etc/os-release; echo "booted $IMAGE_ID $IMAGE_VERSION"; findmnt -n -o SOURCE,TARGET / /data; bootctl list --no-pager 2>/dev/null | grep -E "^ +id:" || /usr/lib/fjarr/applier state';;
 *) sed -n '2,10p' "$0" >&2; exit 2;;
 esac

@@ -36,3 +36,19 @@ QEMU (2026-10-13): boots to `running`, DHCP on any wired port, SSH with the lab 
 key, the hardware watchdog armed by systemd (Ubuntu deny-lists the watchdog drivers; the image
 removes those lines and udev loads `wdat_wdt` on the NUC11, `i6300esb` in QEMU), `panic=10` reboots, and the dead-man reboots after 15 minutes
 unless `/run/lab-ok` exists.
+
+## The SWUpdate + EFI Boot Guard variant
+
+`image-ebg/` is the same image booted by EFI Boot Guard 0.22 (one environment per slot, on
+`fjarr-boot0`/`fjarr-boot1`) and written by SWUpdate from a signed package
+([docs/32](../../docs/32-fleet-ota.md#x86-swupdate-ebg)). The loader is Ubuntu's 0.22 build, fetched
+and sha256-checked into `out/ebg/loader/` before building:
+
+```bash
+spikes/ota-x86/build.sh image-ebg --image-version=1.0
+spikes/ota-x86/build.sh image-ebg --image-version=1.2 --output-directory=/src/out/image-ebg-1.2
+spikes/ota-x86/mkswu.sh image-ebg-1.2 1.2          # signed with .lab/swu.key (gitignored)
+spikes/ota-x86/rehearse-ebg.sh all                  # QEMU; VM_SSH_CONF=<nuc config> for the NUC
+DATA_PART=7 LOADER='\EFI\BOOT\BOOTX64.EFI' spikes/ota-x86/reflash.sh write <host> out/image-ebg/fjarr_1.0.raw.zst
+spikes/ota-x86/powercut-ebg.sh install|set-next|trial|mark-good 20
+```

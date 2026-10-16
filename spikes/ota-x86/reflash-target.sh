@@ -9,7 +9,8 @@ p() { case "$DISK" in *[0-9]) echo "${DISK}p$1";; *) echo "$DISK$1";; esac; }
 
 case "$1" in
 once) # once <esp-path>: boot \EFI\fjarr\rescue.efi on the next boot only
-  esp=$2; src=$(findmnt -n -o SOURCE "$esp"); disk=/dev/$(lsblk -no PKNAME "$src")
+  # /efi may be an automount: touch it so it is mounted, then take the vfat mount, not the autofs one.
+  esp=$2; ls "$esp" >/dev/null; src=$(findmnt -n -o SOURCE -t vfat "$esp" | tail -1); disk=/dev/$(lsblk -no PKNAME "$src")
   part=$(cat "/sys/class/block/$(basename "$src")/partition")
   n=$(entry fjarr-rescue-once); [ -n "$n" ] && efibootmgr -q -b "$n" -B
   efibootmgr -q -c -d "$disk" -p "$part" -L fjarr-rescue-once -l '\EFI\fjarr\rescue.efi'
@@ -18,25 +19,27 @@ once) # once <esp-path>: boot \EFI\fjarr\rescue.efi on the next boot only
   efibootmgr -q -o "$(efibootmgr | sed -n 's/^BootOrder: //p' | tr ',' '\n' | grep -vxF "$n" | paste -sd,)"
   efibootmgr -q -n "$n"; efibootmgr | grep -E '^Boot(Next|Order|Current)';;
 write) # write <image.raw.zst>: run from the RAM rescue system
-  DISK=${DISK:-/dev/nvme0n1}; img=$2
+  # DATA_PART: the layout's last partition (5 for the sysupdate image, 7 with EFI Boot Guard);
+  # LOADER: the firmware entry's loader on the ESP (systemd-boot, or EBG at the removable path).
+  DISK=${DISK:-/dev/nvme0n1}; img=$2; DATA_PART=${DATA_PART:-5}; LOADER=${LOADER:-'\EFI\systemd\systemd-bootx64.efi'}
   # iflag=fullblock: a pipe delivers 64 KiB at a time, and without it every read becomes its own
   # direct write (49 MiB/s on the NUC against 418 with it, 2026-10-15).
   zstd -dc "$img" | dd of="$DISK" bs=4M iflag=fullblock oflag=direct status=none
-  sfdisk -q --relocate gpt-bak-std "$DISK"; echo ', +' | sfdisk -q --no-reread -N 5 "$DISK"
+  sfdisk -q --relocate gpt-bak-std "$DISK"; echo ', +' | sfdisk -q --no-reread -N "$DATA_PART" "$DISK"
   partx -u "$DISK" || true; udevadm settle
-  e2fsck -fy "$(p 5)" >/dev/null 2>&1 || true; resize2fs "$(p 5)" >/dev/null 2>&1
+  e2fsck -fy "$(p "$DATA_PART")" >/dev/null 2>&1 || true; resize2fs "$(p "$DATA_PART")" >/dev/null 2>&1
   mkdir -p /mnt/esp /mnt/resc; mount "$(p 1)" /mnt/esp; mount "$(p 2)" /mnt/resc
   mkdir -p /mnt/resc/EFI/BOOT; cp /run/reflash/fjarr-rescue.efi /mnt/resc/EFI/BOOT/BOOTX64.EFI
-  cp /run/reflash/fjarr-rescue.efi /mnt/esp/EFI/Linux/fjarr-rescue.efi
+  mkdir -p /mnt/esp/EFI/Linux; cp /run/reflash/fjarr-rescue.efi /mnt/esp/EFI/Linux/fjarr-rescue.efi
   sync; umount /mnt/resc
   fsck.vfat -n "$(p 2)" >/dev/null
   # Old entries pointing at a partition table that no longer exists go; the firmware's own stay.
   for l in ubuntu Ubuntu fjarr fjarr-rescue-disk fjarr-rescue-once Linux; do
     while n=$(entry "$l") && [ -n "$n" ]; do efibootmgr -q -b "$n" -B; done; done
   efibootmgr -q -c -d "$DISK" -p 2 -L fjarr-rescue-disk -l '\EFI\BOOT\BOOTX64.EFI'
-  efibootmgr -q -c -d "$DISK" -p 1 -L fjarr -l '\EFI\systemd\systemd-bootx64.efi'
+  efibootmgr -q -c -d "$DISK" -p 1 -L fjarr -l "$LOADER"
   order_first "$(entry fjarr)" "$(entry fjarr-rescue-disk)"
-  bootctl --esp-path=/mnt/esp --no-variables list --no-pager | grep -E '^ +id:'
+  bootctl --esp-path=/mnt/esp --no-variables list --no-pager 2>/dev/null | grep -E '^ +id:' || ls -R /mnt/esp/EFI
   umount /mnt/esp; fsck.vfat -n "$(p 1)" >/dev/null
   efibootmgr -v | grep -E '^Boot(Order|[0-9A-F]+\* fjarr)';;
 next-rescue-disk)

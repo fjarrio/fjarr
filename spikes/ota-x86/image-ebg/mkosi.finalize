@@ -1,0 +1,28 @@
+#!/bin/sh
+# Runs outside the chroot, before the UKI is assembled (docs/32#x86-test-image).
+set -e
+# /etc/resolv.conf is bind-mounted while the chroot scripts run; link it to resolved's stub here.
+ln -sfn ../run/systemd/resolve/stub-resolv.conf "$BUILDROOT/etc/resolv.conf"
+# An extra initrd appended to mkosi's default one: if the initrd cannot mount the slot's root
+# (rootflags=x-systemd.device-timeout bounds the wait), its emergency mode reboots instead of
+# asking for the locked root password, so the trial uses up a try instead of hanging.
+d=$(mktemp -d)
+for u in emergency rescue; do
+  mkdir -p "$d/etc/systemd/system/$u.service.d"
+  cp "$SRCDIR/mkosi.extra/etc/systemd/system/$u.service.d/fjarr-reboot.conf" "$d/etc/systemd/system/$u.service.d/"
+done
+mkdir -p "$ARTIFACTDIR/io.mkosi.initrd"
+find "$d" -exec touch -h -d "@${SOURCE_DATE_EPOCH:-0}" {} +   # reproducible: no build time in the archive
+(cd "$d" && find . -mindepth 1 | LC_ALL=C sort | cpio -o -H newc --reproducible --quiet) > "$ARTIFACTDIR/io.mkosi.initrd/50-fjarr-reboot.cpio"
+rm -rf "$d"
+# mkosi 26 builds the microcode cpio with the build time as its directories' mtime and the files
+# in directory order; one in io.mkosi.microcode takes its place, sorted and clamped (8.0 R0).
+u=$(mktemp -d); m=$u/kernel/x86/microcode; mkdir -p "$m"
+for v in amd:AuthenticAMD intel:GenuineIntel; do
+  src="$BUILDROOT/usr/lib/firmware/${v%%:*}-ucode"
+  [ -d "$src" ] && find "$src" -maxdepth 1 -type f | LC_ALL=C sort | xargs cat > "$m/${v#*:}.bin"
+done
+find "$u" -exec touch -h -d "@${SOURCE_DATE_EPOCH:-0}" {} +
+mkdir -p "$ARTIFACTDIR/io.mkosi.microcode"
+(cd "$u" && find . -mindepth 1 | LC_ALL=C sort | cpio -o -H newc --reproducible --quiet) > "$ARTIFACTDIR/io.mkosi.microcode/00-microcode.cpio"
+rm -rf "$u"

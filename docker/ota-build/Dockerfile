@@ -9,6 +9,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ubuntu-keyring debootstrap apt dpkg-dev zstd xz-utils cpio \
     dosfstools e2fsprogs mtools gdisk fdisk util-linux kmod \
     ovmf qemu-system-x86 qemu-utils swtpm openssh-client \
-    python3 ca-certificates curl \
+    python3 ca-certificates curl openssl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src

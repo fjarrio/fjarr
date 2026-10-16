@@ -1,0 +1,12 @@
+[Unit]
+Description=On a trial boot, confirm the slot once boot-complete.target is reached
+After=local-fs.target
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+ExecCondition=/usr/lib/fjarr/applier is-trial
+ExecStart=/usr/bin/systemctl start --no-block fjarr-bless.service
+
+[Install]
+WantedBy=multi-user.target

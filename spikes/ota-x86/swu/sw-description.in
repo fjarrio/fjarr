@@ -1,0 +1,21 @@
+software =
+{
+  version = "@V@";
+  hardware-compatibility: [ "1.0" ];
+  fjarr: {
+    slot-a: {
+      images: ( { filename = "root.raw.zst"; type = "raw"; compressed = "zstd"; installed-directly = true;
+                  device = "/dev/disk/by-partuuid/4f8a1c2e-6b1d-4c57-9a0e-2d3f5b7a1101"; sha256 = "@ROOT_SHA@"; } );
+      files: ( { filename = "fjarr.efi"; type = "rawfile"; path = "/fjarr.efi";
+                 device = "/dev/disk/by-partlabel/fjarr-boot0"; filesystem = "vfat";
+                 properties: { atomic-install = "true"; }; sha256 = "@UKI_SHA@"; } );
+    };
+    slot-b: {
+      images: ( { filename = "root.raw.zst"; type = "raw"; compressed = "zstd"; installed-directly = true;
+                  device = "/dev/disk/by-partuuid/4f8a1c2e-6b1d-4c57-9a0e-2d3f5b7a1102"; sha256 = "@ROOT_SHA@"; } );
+      files: ( { filename = "fjarr.efi"; type = "rawfile"; path = "/fjarr.efi";
+                 device = "/dev/disk/by-partlabel/fjarr-boot1"; filesystem = "vfat";
+                 properties: { atomic-install = "true"; }; sha256 = "@UKI_SHA@"; } );
+    };
+  };
+}

@@ -1,0 +1,6 @@
+[Unit]
+Description=This trial boot failed: reboot, and EFI Boot Guard marks it FAILED and boots the other slot
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl reboot

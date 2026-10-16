@@ -1,0 +1,20 @@
+[Unit]
+Description=Machine state on /data (SSH host keys, update staging)
+RequiresMountsFor=/data
+# An early unit: ssh.socket starts before sockets.target, so this cannot wait for basic.target.
+DefaultDependencies=no
+After=local-fs.target
+Before=sockets.target ssh.socket ssh.service shutdown.target
+Conflicts=shutdown.target
+ConditionPathExists=!/data/ssh/ssh_host_ed25519_key
+
+[Service]
+Type=oneshot
+# The lab images carry the lab's host keys in /etc/ssh; a robot would generate its own.
+ExecStart=/bin/sh -c 'mkdir -p -m 0755 /data/ssh /data/fjarr-update/stage /data/fjarr-test; \
+  if [ -f /etc/ssh/ssh_host_ed25519_key ]; then cp -a /etc/ssh/ssh_host_*_key* /data/ssh/; \
+  else for t in ed25519 ecdsa rsa; do ssh-keygen -q -N "" -t $t -f /data/ssh/ssh_host_$${t}_key; done; fi'
+
+[Install]
+WantedBy=multi-user.target
+RequiredBy=ssh.socket
