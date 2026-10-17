@@ -1,0 +1,9 @@
+# BusyBox init for the Fjarr network rescue; /init ran first.
+# spec: docs/32-fleet-ota.md#jetson-test-image ("Three rescue layers", item 2; "The lab dead-man")
+::respawn:/usr/sbin/syslogd -n -C256
+::respawn:/usr/sbin/fjarr-lab-deadman
+::respawn:/usr/sbin/fjarr-rescue-dhcp
+::respawn:/usr/sbin/sshd -D
+::respawn:/usr/sbin/fjarr-rescue-console
+::ctrlaltdel:/usr/sbin/reboot
+::shutdown:/usr/bin/umount -a -r

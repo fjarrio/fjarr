@@ -1,0 +1,48 @@
+#!/bin/sh
+# shellcheck shell=busybox
+#
+# The lab dead-man: enter RCM when /run/fjarr-lab-ok has gone 20 minutes without a touch, so a
+# rescue nobody reaches ends where the mini-PC can reflash the box.
+# spec: docs/32-fleet-ota.md#jetson-test-image ("The lab dead-man")
+#
+# The lab scripts `touch /run/fjarr-lab-ok` over ssh; every touch starts the 20 minutes again, and
+# the first 20 run from boot. Uptime measures them, not the wall clock, which nothing sets here.
+# The state file carries the count across a respawn by init. fjarr.deadman=<seconds> on the
+# kernel command line shortens the limit for the off-box tests.
+
+ok=/run/fjarr-lab-ok
+state=/run/fjarr-lab-deadman.state
+limit=1200
+read -r cmdline < /proc/cmdline
+for a in $cmdline; do
+	case $a in fjarr.deadman=*) limit=${a#fjarr.deadman=} ;; esac
+done
+case $limit in '' | *[!0-9]*) limit=1200 ;; esac
+
+uptime_s() {
+	read -r up _ < /proc/uptime
+	echo "${up%%.*}"
+}
+
+seen=''
+last=0
+[ -f "$state" ] && read -r seen last < "$state"
+case $last in '' | *[!0-9]*) last=0 ;; esac
+echo "fjarr-net-rescue: dead-man armed: RCM after $limit s without a touch of $ok" > /dev/kmsg
+
+while :; do
+	m=$(stat -c %Y "$ok" 2> /dev/null) || m=''
+	if [ -n "$m" ] && [ "$m" != "$seen" ]; then
+		seen=$m
+		last=$(uptime_s)
+		echo "$seen $last" > "$state"
+	fi
+	if [ $(($(uptime_s) - last)) -ge "$limit" ]; then
+		echo "fjarr-net-rescue: no operator contact for $limit s: entering RCM" > /dev/kmsg
+		reboot-recovery
+		# Still here: RCM was refused. A plain reset leaves it to the firmware's boot order.
+		sleep 30
+		reboot -f
+	fi
+	sleep 10
+done

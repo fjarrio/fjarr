@@ -1,0 +1,5 @@
+# Login shells of the Fjarr network rescue (BusyBox sh).
+# spec: docs/32-fleet-ota.md#jetson-test-image ("Three rescue layers", item 2)
+export PATH=/usr/sbin:/usr/bin
+export PS1='fjarr-net-rescue:$PWD# '
+export TERM="${TERM:-linux}"

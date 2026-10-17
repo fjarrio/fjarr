@@ -1,0 +1,11 @@
+# The network rescue's userland: Ubuntu 22.04 arm64, the Ubuntu release L4T 36.x runs on, executed
+# through the workstation's qemu-user binfmt. Nothing here is installed into the rescue as a package:
+# collect-userland.sh copies the chosen binaries and the libraries they load.
+# spec: docs/32-fleet-ota.md#jetson-test-image ("Three rescue layers", item 2)
+FROM --platform=linux/arm64 ubuntu:22.04@sha256:0a9887931b0e38af2e3487ed39e29436b0535c4f3f52e57745baaf79d1898956
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      busybox openssh-server openssh-sftp-server gdisk e2fsprogs nvme-cli efibootmgr \
+      dosfstools zstd fdisk util-linux gcc libc6-dev \
+ && rm -rf /var/lib/apt/lists/*

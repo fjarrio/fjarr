@@ -1,0 +1,8 @@
+
+Fjarr network rescue (lab): Linux from RAM, booted by UEFI over the network from the mini-PC.
+  touch /run/fjarr-lab-ok   keeps it up 20 more minutes; untouched for 20, it enters RCM
+  reboot-recovery           enters RCM now, for a reflash from the mini-PC
+  reboot                    back to the firmware's boot order
+Disks: lsblk, sgdisk -p /dev/nvme0n1, blkid -t PARTLABEL=APP; no udev, so no /dev/disk/by-*.
+Firmware variables: efibootmgr -v, /sys/firmware/efi/efivars. Log: logread, dmesg.
+

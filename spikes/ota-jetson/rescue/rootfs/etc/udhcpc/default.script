@@ -1,0 +1,29 @@
+#!/bin/sh
+# shellcheck shell=busybox
+#
+# udhcpc's hook in the network rescue: put the lease on the port. The lab router's static lease
+# for the box's MAC gives the rescue the same address as the box's own system.
+# spec: docs/32-fleet-ota.md#jetson-test-image ("Three rescue layers", item 2)
+# shellcheck disable=SC2154 # udhcpc sets interface, ip, mask, router and dns
+
+case $1 in
+deconfig)
+	ip -4 addr flush dev "$interface"
+	ip link set "$interface" up
+	;;
+bound | renew)
+	if ! ip -4 addr show dev "$interface" | grep -q " $ip/${mask:-24} "; then
+		ip -4 addr flush dev "$interface"
+		ip addr add "$ip/${mask:-24}" dev "$interface"
+		echo "fjarr-net-rescue: $interface has $ip/${mask:-24}" > /dev/kmsg
+	fi
+	if [ -n "$router" ]; then
+		ip route replace default via "${router%% *}" dev "$interface"
+	fi
+	: > /etc/resolv.conf
+	for s in $dns; do
+		echo "nameserver $s" >> /etc/resolv.conf
+	done
+	;;
+esac
+exit 0

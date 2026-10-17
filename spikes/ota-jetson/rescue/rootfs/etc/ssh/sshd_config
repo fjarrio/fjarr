@@ -1,0 +1,17 @@
+# sshd of the Fjarr network rescue: root with the lab keys only, and the host key from the
+# workstation's .lab/, so scripts can tell the rescue from the box's own system at the same address.
+# spec: docs/32-fleet-ota.md#jetson-test-image ("Three rescue layers", item 2)
+Port 22
+HostKey /etc/ssh/ssh_host_ed25519_key
+PermitRootLogin prohibit-password
+AuthorizedKeysFile .ssh/authorized_keys
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+UsePAM no
+PrintMotd yes
+PrintLastLog no
+UseDNS no
+PidFile /run/sshd.pid
+ClientAliveInterval 15
+ClientAliveCountMax 4
+Subsystem sftp /usr/lib/openssh/sftp-server

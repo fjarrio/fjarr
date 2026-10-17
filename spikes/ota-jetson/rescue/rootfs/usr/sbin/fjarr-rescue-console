@@ -1,0 +1,9 @@
+#!/bin/sh
+# shellcheck shell=busybox
+#
+# A root shell on the console (a display and keyboard on the box), restarted by init when it
+# ends. The pause keeps init from spinning when no console can be read.
+# spec: docs/32-fleet-ota.md#jetson-test-image ("Three rescue layers", item 2)
+
+cttyhack sh -l
+sleep 5

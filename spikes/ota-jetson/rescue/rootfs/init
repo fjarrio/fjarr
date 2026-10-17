@@ -1,0 +1,46 @@
+#!/bin/sh
+# shellcheck shell=busybox
+#
+# First process of the Fjarr network rescue, the lab's backstop for a ZED Box Mini whose firmware
+# runs but whose NVMe boots nothing: UEFI fetches this system from the mini-PC by PXE or HTTP boot
+# (net-rescue.sh) and it runs from RAM. It prepares the system, then hands PID 1 to BusyBox init,
+# which runs /etc/inittab: the dead-man, DHCP, sshd and a console shell.
+# spec: docs/32-fleet-ota.md#jetson-test-image ("Three rescue layers", item 2)
+#
+# BusyBox sh, and no `set -e`: the rescue carries no bash, and PID 1 must not stop at a failed
+# step; each failure is logged to the kernel log and the rest goes on.
+
+PATH=/usr/sbin:/usr/bin
+export PATH
+
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts /dev/shm
+mount -t devpts -o gid=5,mode=0620,ptmxmode=0666 devpts /dev/pts
+mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run
+mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /tmp
+# efibootmgr and the boot-chain variables need efivarfs (the kernel's EFI runtime services).
+[ -d /sys/firmware/efi/efivars ] && mount -t efivarfs efivarfs /sys/firmware/efi/efivars
+
+log() { echo "fjarr-net-rescue: $*" > /dev/kmsg; }
+
+hostname fjarr-net-rescue
+# A crash resets the box even if the firmware replaced the command line (README: the command line).
+echo 10 > /proc/sys/kernel/panic
+log "starting on $(uname -r), command line: $(cat /proc/cmdline)"
+
+# L3: the hardware watchdog, opened from the initramfs. A hung rescue resets warm.
+if [ -c /dev/watchdog ]; then
+	watchdog -T 60 -t 10 /dev/watchdog && log "watchdog armed: 60 s"
+fi
+
+# The drivers NVIDIA's own recovery image loads: PCIe and NVMe for the disk, the thermal sensors
+# and the fan, and the Realtek Ethernet port (r8168, NVIDIA's out-of-tree build).
+for m in phy_tegra194_p2u pcie_tegra194 nvme tegra-bpmp-thermal pwm-tegra pwm-fan r8168; do
+	modprobe "$m" || log "modprobe $m failed"
+done
+
+ip link set lo up
+mkdir -p /run/sshd
+exec /usr/sbin/init

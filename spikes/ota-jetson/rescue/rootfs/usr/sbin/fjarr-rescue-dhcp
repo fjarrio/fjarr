@@ -1,0 +1,22 @@
+#!/bin/sh
+# shellcheck shell=busybox
+#
+# DHCP on every wired port of the network rescue, started as each port appears (the Realtek
+# driver loads late). udhcpc keeps its lease in the background; init respawns this loop.
+# spec: docs/32-fleet-ota.md#jetson-test-image ("Three rescue layers", item 2)
+
+while :; do
+	for d in /sys/class/net/*; do
+		n=${d##*/}
+		[ -e "$d/device" ] || continue # lo and virtual interfaces
+		[ -d "$d/wireless" ] && continue
+		p=/run/udhcpc.$n.pid
+		if [ -f "$p" ] && kill -0 "$(cat "$p")" 2> /dev/null; then
+			continue
+		fi
+		echo "fjarr-net-rescue: DHCP on $n" > /dev/kmsg
+		udhcpc -b -S -i "$n" -p "$p" -t 4 -T 3 -A 10 -x hostname:fjarr-net-rescue \
+			-s /etc/udhcpc/default.script > /dev/null 2>&1
+	done
+	sleep 10
+done

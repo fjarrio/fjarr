@@ -1,0 +1,11 @@
+# A stand-in for the lab mini-PC: Ubuntu 26.04 with systemd as PID 1, Python and ufw, and no
+# dnsmasq, so minipc-test.sh exercises net-rescue.sh's install, --status and --undo as on the
+# mini-PC, without touching it.
+# spec: docs/32-fleet-ota.md#jetson-test-image ("Three rescue layers", item 2; Q6)
+FROM --platform=linux/amd64 ubuntu:26.04@sha256:c098726dd9b9733f3e885f8de0ef375206a311b0a317eadc40d347b1115fb944
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends systemd systemd-sysv python3 iproute2 ufw util-linux tzdata \
+ && rm -rf /var/lib/apt/lists/*
+STOPSIGNAL SIGRTMIN+3
+CMD ["/usr/lib/systemd/systemd"]
