@@ -60,7 +60,14 @@ From M1, a measurement rig — not vibes:
   Report p50/p95 under clean, lossy, and relay conditions (the lab's
   network profiles).
 - **Input-to-photon**: synthetic click → screen change at a known pixel →
-  time to that change appearing in the received stream.
+  time to that change appearing in the received stream. A sample counts
+  only from a **restored baseline**: before each press the decoded picture
+  must be back where it started (`fjarr-opsim`: the centre's luma within 8),
+  or that press is rejected by name. A capture frozen on the changed
+  picture would otherwise "change" at once and time nothing: nine 0 ms
+  samples passed on the mini-PC on 2026-10-17. The verdict needs 10 valid
+  samples. There is no one-frame floor, because mutter captures on damage
+  (CI's samples are about 17 ms).
 - **Two gates, because the budgets are NUC-class and CI is not.** Shared
   runners with a software encoder cannot hold a p95 honestly, and a gate
   people learn to re-run is worse than no gate. So the CI job fails only
@@ -215,7 +222,9 @@ workflows**, because a job cannot outlive the reboot it causes, and a second job
 in the same run could be handed to the runner in the seconds before the machine
 goes down (decided 2026-10-01, on the mini-PC):
 
-- **`lab-desktop-prepare`, 00:15.** A hosted job takes the `.deb`s of
+- **`lab-desktop-prepare`, 22:15 UTC** (00:15 in Swedish summer time; in
+  winter 23:15, and its job on the machine waits for the window to open at
+  midnight). A hosted job takes the `.deb`s of
   `main`'s newest green CI run — the files CI tested, not a rebuild
   ([docs/30](30-continuous-integration.md#artifacts-built-once)) — and builds
   `fjarr-server` and `fjarr-opsim` from the same commit. On the lab machine, `tools/fjarr-lab/unattended.sh prepare`
@@ -235,19 +244,69 @@ goes down (decided 2026-10-01, on the mini-PC):
   writes its output and a verdict, tagged with the boot and the prepare run, to
   `/var/lib/fjarr-lab/unattended/`. It ends by removing the drop-in, so the
   agent returns to its own server.
-- **`lab-desktop-verify`, 00:45, only reports.** It prints the machine's result
-  and passes or fails on its verdict. GitHub's schedule is not an order. On the
-  first night both workflows started about 3½ hours late, back to back, and
-  verify ran before the reboot. So when verify finds the machine not yet
-  rebooted, it dispatches itself again (at most 5 times) and ends as
-  rescheduled, never as a failure or a pass.
+- **`lab-desktop-verify`, 30 minutes later, only reports.** It prints the
+  machine's result and passes or fails on its verdict. GitHub's schedule is not
+  an order. On the first night both workflows started about 3½ hours late, back
+  to back, and verify ran before the reboot. So while the machine has no
+  verdict yet but is verifying, verify waits for one (up to 3 minutes; back
+  from the reboot, the machine needs about one). When tonight's prepare has not
+  even been created (GitHub fires the two crons with their own lateness),
+  verify waits up to 8 minutes for it to appear, then queues behind it. When
+  there is still no verdict, the machine has not rebooted yet, or tonight's
+  prepare has not finished, it dispatches itself again (at most 5 times) and ends as
+  rescheduled, never as a failure or a pass. GitHub shows a rescheduled run as a success, so each
+  attempt's run name says which run dispatched it, and a night is judged by
+  its last attempt.
   Proven by hand on the mini-PC on 2026-10-02: prepare, a reboot, the machine
   verifying itself at boot, and `report` giving the verdict "passed".
   **A verdict counts only for tonight's prepare.** Verify first asks GitHub
-  for the night's `lab-desktop-prepare` run and fails when it did not
+  for the newest `lab-desktop-prepare` run on `main` and fails when it did not
   succeed; `report --prepare-run <id>` then refuses a verdict written for any
   other run. On 2026-10-03 prepare failed before reaching the machine and
   verify reported the previous night's "passed" as that night's.
+  **Tonight's means it ran tonight**: its job on the machine finished less
+  than 12 hours ago, however long before that GitHub created the run. On
+  2026-10-16 a prepare created 21.7 hours earlier had waited for the machine,
+  which was off; it ran when the next window opened, and verify, 2 minutes
+  later, refused it as "no prepare in the last 12 hours" while the machine
+  was verifying that very prepare. A newest prepare that ended before
+  tonight's 22:15 UTC slot, while that slot is less than 6 hours past, is not
+  stale but not created yet (`tools/ci/tonights_prepare.py`).
+
+Both workflows share one concurrency group, `lab-desktop`, **with `queue:
+max`**: one lab run at a time, and the others wait their turn, first in,
+first out. Verify waits in the group rather than beside prepare, whose first
+job is hosted (3½ to 12 minutes): a verify on the idle runner meanwhile would find
+prepare unfinished and spend its five attempts in a minute (it would have on
+2026-10-02). Without `queue: max` a group keeps only one waiting run, and a
+newer one cancels it: on 2026-10-16 the night's prepare cancelled the previous
+night's waiting verify, and a verify that dispatched itself while a prepare
+waited behind it would have cancelled that prepare. The cost is an outage's
+backlog: while the machine is away, the run at the head of the group waits up
+to 24 hours for it and two more arrive each night, so the queue grows by about
+one run a day. When the machine returns the runs drain in order, and each
+queued prepare installs the newest green build of its moment and reboots the
+machine again; each old verify finds the newest prepare unfinished, dispatches
+itself to the back of the queue and may spend its five attempts. After an
+outage of more than a night, cancel the queued lab runs but the newest pair
+(`gh run list -w lab-desktop-prepare.yml -s queued`), or let them drain.
+
+GitHub fires these schedules hours late. Over the first 16 nights prepare
+started 2 h 06 min to 4 h 46 min after 22:15 UTC, and verify 2 h 00 min to
+4 h 25 min after 22:45 UTC. A prepare that starts in the window's last
+quarter-hour reboots the machine after the window has closed, and that night
+has no verdict. A job that no self-hosted runner takes is cancelled after
+24 hours: the mini-PC was off from 2026-10-14 to 10-16, and the 10-15 prepare
+ended that way.
+
+**A red night reaches someone.** After the window, `nightly-alert`
+([docs/30](30-continuous-integration.md#nightly-alert)) judges the night's
+prepare, verify (its last attempt) and Nightly. A run that failed, was
+cancelled, never came, or still waits for its runner at the check is red, and
+so is a lab run that finished after its window. One issue labelled
+`nightly-red` then stays open, with each red run's link and failing step,
+until a night is all green. Before it, the verify had been red for a week and
+nobody looked ([M3 gate review](reviews/m3-gate-review.md)).
 
 `fjarr-opsim` runs on the lab machine itself and decodes with `openh264dec`, which
 the robot already has for its software encoder. libav (GPL) is never installed on
@@ -272,7 +331,7 @@ GNOME Shell.
 | Where | Runs | Covers |
 |---|---|---|
 | **Headless mutter** (slice 3.0; proven by its spike 2026-09-30): a container with `mutter --headless --virtual-monitor WxH`, its own D-Bus session, PipeWire and WirePlumber, the session helper, and a test window that records what it receives | `ci.yml`, every push, hosted runners | backend E's capture from a PipeWire stream, including the repeated frame on a static screen; input through EIS (the oracle checks keys, text and pointer positions); the session helper's handover and `SO_PEERCRED`, with a stand-in agent (`fixture-helper-check`); the robot's desktop end to end, helper → module E → agent → opsim (`make desktop-e2e`): decoded frames and a still screen (3.1); clicks, physical keys, text typed through the keymap, a combo, an untypable character refused by name, input-to-photon timed by the window turning green while F9 is held, and the key held at session end released (3.2). The window's log is served on `desktop-fixture:8090` for these oracles; monitor hot-plug (3.4): a service on `desktop-fixture:8091` plugs and unplugs mutter **virtual monitors** (`RecordVirtual` from a session of its own, consumed at 1280×720 so it has a size), which mutter reports like any monitor, and `fjarr-opsim desktop-hotplug` asserts the docs/06 criteria (the new track within 2 s, the first monitor's frames uninterrupted, the same `track_id` on re-plug, zero monitors survived); the desktop's sound (M3.5 3.5.2): a null sink is the fixture's speakers, and the same service plays a tone on the desktop (`/play`, with `pw-play`), switches the default output (`/speakers?use=`) and counts the capture streams open on it (`/listening`), so `fjarr-opsim desktop-audio` and the dashboard's Sound test hear the tone, keep hearing it across a change of output, and see the capture open only while the track is enabled; later clipboard, virtual-monitor hot-plug and PipeWire narrowing (the agent must fail to open anything but the granted stream) |
-| **The mini-PC** (`fjarr-lab`, labels `desktop` `gnome`) | nightly, in its CI window | the unattended-access test above; ghost screens ([ADR-0032](adr/0032-ghost-screens.md)) beside a real monitor and the 3-monitor DisplayPort chain; hot-plug on real connectors; input-to-photon against the docs/16 budgets on real hardware |
+| **The mini-PC** (`fjarr-lab`, labels `desktop` `gnome`) | nightly, in its CI window | the unattended-access test above; ghost screens ([ADR-0032](adr/0032-ghost-screens.md)) beside a real monitor and the 3-monitor DisplayPort chain; hot-plug on real connectors; input-to-photon against the docs/16 budgets on real hardware. Not the mode change: `desktop-control` runs there without a plug service (`--desktop-plug`), so it reports that step as not run, and a mode change on backend E is covered nowhere end to end (backend A's is, by the X11 fixture's `/mode`). `make desktop-e2e` runs `desktop-control` without a plug too, so that report is checked on every push |
 
 Backend A (X11 kiosk, slice 3.7) uses robot-sim, the Xvfb service CI already
 runs: a 3840×1080 root carved into RandR monitors (`xrandr --setmonitor`;
@@ -292,13 +351,86 @@ bus, PipeWire and WirePlumber with the fixture's speakers, and
 with the robot; the service plays, switches outputs and counts captures as
 the mutter fixture's does, and `desktop-audio` runs in `make x11-e2e`. The fixture also stages what the mutter fixture
 cannot: a monitor that moves (`/move`) or changes mode in place (`/mode`,
-where a click must land on the new geometry's pixel), an owner that never
+where a click must land on the new geometry's pixel; `make x11-e2e` fails
+when that step did not run), an owner that never
 answers and text over the limit on the clipboard; and its test window
 stamps its top edge with a counter at 15 Hz (opsim's frame stamp), so
 `desktop-hotplug` checks docs/06's "zero dropped frames on the other
 monitors" as no skipped count across the plug and the renegotiation, rather
 than as a gap, which cannot tell a lost picture from a late one (M3 gate
 review, 2026-10-11).
+
+**Both fixtures start their sound session as systemd starts a robot's.** On a
+robot, `pipewire.socket` listens before anyone connects, and
+`wireplumber.service` starts after PipeWire and is restarted when it fails.
+The fixtures start the daemons by hand, so they keep the same promises
+themselves (`docker/desktop-fixture/session.sh`, `docker/robot-sim/start.sh`):
+
+- **PipeWire listens before WirePlumber starts.** The fixture waits up to 10 s
+  for PipeWire to answer on the session manager's socket (`pw-cli -r
+  pipewire-0-manager info 0`), and fails its start (`PipeWire never
+  answered`, exit 1) when it never does. WirePlumber connects once and exits
+  for good, with status 69 ("Failed to connect to PipeWire"), when nothing
+  listens yet, and PipeWire's client does not retry.
+- **WirePlumber is restarted when it fails, and every exit is logged** with
+  its status, how long it ran and the time, in `wireplumber.log` and in the
+  fixture's output. A clean exit (status 0, as after a deliberate SIGTERM) is
+  not restarted, as under `Restart=on-failure`. Once the fixture is ready,
+  five failures within 10 s are given up on (`start limit hit`), as under
+  systemd's default start limit, rather than a crash loop filling the log.
+- **Ready means the desktop has a default output.** With none 20 s (by the
+  clock) after the rest of the session is up, the fixture prints `no default
+  output`, whether WirePlumber runs and the tails of WirePlumber's and
+  PipeWire's logs, and exits 1. `up --wait` fails there, instead of the
+  suites failing a minute later with "no frames". Both limits are generous on
+  purpose: the healthcheck allows about a minute, and a false fatal on a
+  loaded runner would be the very intermittent failure this replaces.
+
+Every desktop suite (`make desktop-e2e`, `desktop-browser`, `x11-e2e`,
+`desktop-fixture-test`, the compose gate's desktop step) prints the
+WirePlumber exits its fixture logged, or that there were none, when it passes
+too: the restart loop would otherwise hide a crash that a passing run
+recovered from. Each suite starts a fresh fixture container, so these lines and
+the logs below are that run's alone. When a suite fails, it also prints the fixture's internals —
+whether WirePlumber runs, the tails of the session daemons' logs, `pw-link -l`
+and `wpctl status` (`fixture-session dump` in the mutter fixture, `start.sh
+dump` in the kiosk) — and the robot's whole log, not its last lines. When the
+fixture fails its own start, they print its log, which `up --wait` does not.
+
+`make desktop-fixture-test` holds both fixtures to the contract with a
+test-only fault, `FIXTURE_FAULT` (`docker/lab/fixture-startup-test.sh`):
+
+- `wireplumber-first`: WirePlumber starts a second before PipeWire. The
+  fixture must log the failed start (status 69), restart it and become ready
+  with a default output, and the dump must show the running WirePlumber and
+  leave the fixture healthy. Killed later (SIGKILL), WirePlumber must come
+  back with the default output; stopped (SIGTERM), it must stay stopped.
+- `pipewire-late`: the usual order, with PipeWire a second late. Only the wait
+  keeps WirePlumber from losing the race, so the fixture must become ready
+  with no WirePlumber exit at all. Then WirePlumber killed five times within
+  10 s must be given up on, and say so.
+- `no-session-manager`: WirePlumber never starts. The fixture must exit 1 with
+  `no default output` instead of becoming ready.
+- `no-pipewire`: PipeWire never starts. The fixture must exit 1, saying that
+  PipeWire never answered.
+
+Why (2026-10-17): six CI jobs from 2026-10-03 to 10-14, about 2 % of fixture
+starts, failed on a fixture with no working session manager. The capture's
+PipeWire stream was never linked ("no frames within 10 s", or the self-test's
+"no frame"), and where the run recorded it, the desktop had no default output
+either, for as long as anyone looked (11 to 73 s). A rerun on fresh daemons
+passed. Starting WirePlumber first, on the old start, reproduces all of it,
+down to the fixture turning ready after 15 s instead of 5 s. That shows what a
+missing session manager does, not that the race is what happened in CI. The
+race is the leading hypothesis, not an observation: the fixtures started both
+daemons at once (1.96 ms apart on an idle workstation), and each failing
+container took its WirePlumber log with it. The wait means the race cannot
+happen again, so no future log can show it. The hypothesis holds if the
+signature and every WirePlumber exit stay absent over the next ~150 fixture
+starts in CI: were the cause still there at 1.8 % per start, 150 clean starts
+would happen only 7 % of the time. A logged exit (its
+status and how long it ran), or `no default output` with WirePlumber running,
+points elsewhere.
 
 Every lab job starts from a baseline: `setup --undo desktop`, install the build
 under test, then `setup desktop` with the job's own settings. The machine's

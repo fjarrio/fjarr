@@ -15,7 +15,7 @@ description: The robot's desktop, promise by promise — what each gate criterio
 
 | Promise (docs/06, docs/17) | Verdict | Evidence |
 |---|---|---|
-| the operator controls the desktop end to end, input-to-photon within budget | met in CI and on the mini-PC; the nightly pending | fixtures every push: GNOME and X11 `desktop-control`, input-to-photon p50 39–50 ms, p95 49–54 ms (budget 150/250). The mini-PC: p50 52, p95 59 ms in 3.L. Its nightly measured 0/10 from 2026-10-04: GNOME's welcome wizard covered the test window (finding 2) |
+| the operator controls the desktop end to end, input-to-photon within budget | met in CI and on the mini-PC; the nightly pending | fixtures every push: GNOME and X11 `desktop-control`, input-to-photon p50 39–50 ms, p95 49–54 ms (budget 150/250). The mini-PC: p50 52, p95 59 ms in 3.L. Its nightly measured 0/10 on every night it ran from 2026-10-05 to 10-14, first put down to GNOME's welcome wizard over the test window (finding 2). It was not the wizard (corrected 2026-10-17): the first-login wizard also ran on 10-02 and 10-04, nights with ten real samples; on 10-13 and 10-14, with the upgrade-mode wizard running, the input still reached the test window; and the 10-14 frame dump is the full-screen test window, not the wizard. The cause is still open |
 | a reboot brings the desktop back with no local interaction | met; the nightly's report pending | the mini-PC every night: GDM's automatic login, the helper, frames and input after the reboot, in the machine's own log. The workflow reported failure for a week on bookkeeping (finding 3). The out-of-memory kill of finding 1 also showed recovery: GDM logged the account back in within a minute |
 | a stuck modifier never persists after a disconnect | met | `desktop-release-on-close` on both fixtures every push, and nightly on the mini-PC |
 | hot-plug: a third monitor shown within 2 s | met | X11 fixture 104–482 ms, GNOME fixture 101 ms; the mini-PC's Dells on the DisplayPort chain |
@@ -35,7 +35,7 @@ description: The robot's desktop, promise by promise — what each gate criterio
 | # | Severity | Finding | Resolution |
 |---|---|---|---|
 | 1 | **high** | **The session helper looped until the machine ran out of memory.** With two ghosts and a Dell, after the Dell came back under a new connector, mutter reported a ghost and the Dell both primary. The helper's rule ("a ghost is never primary") asked mutter again on every layout change, eight times a second; each layout reallocated every framebuffer, GPU memory reached the TTM pool's limit (7.2 GB) in seconds, and the out-of-memory killer ended the desktop session | the rule is a pure, tested function that does nothing when a real monitor is primary; the helper asks at most once per layout, always sends its monitors (it had left the agent with none when mutter made no change), and reports exactly one primary (53151f0) |
-| 2 | **high** | **"Welcome to Ubuntu" over a robot's screen.** A fresh account's first login starts `gnome-initial-setup`, in the middle of the screen, over whatever the robot shows, until someone at the machine clicks through it. Every robot set up by `setup desktop` would have shown it. It covered the nightly's test window, which is how it was found | `setup desktop` writes `~/.config/gnome-initial-setup-done`, recorded for `--undo` (75999c5) |
+| 2 | **high** | **"Welcome to Ubuntu" over a robot's screen.** A fresh account's first login starts `gnome-initial-setup`, in the middle of the screen, over whatever the robot shows, until someone at the machine clicks through it. Every robot set up by `setup desktop` would have shown it. Erik saw it on the mini-PC's screen. It was also taken for the cause of the nightly's input-to-photon 0/10, which it was not (corrected 2026-10-17, see the first table) | `setup desktop` writes `~/.config/gnome-initial-setup-done`, recorded for `--undo` (75999c5). That alone traded the first-login wizard for Ubuntu's upgrade-mode one, which then started at every boot of the nightly's account (found 2026-10-17). `setup desktop` now masks both modes' user units for the account, also recorded ([docs/26](../26-robot-install-and-drivers.md#fjarr-agent-setup-desktop)) |
 | 3 | **high** (process) | **Both nightlies had been red for a week, and nobody looked.** The lab's verify refused every verdict since 2026-10-04: the prepare job ran the script through `sudo`, which dropped `GITHUB_RUN_ID`, so every night was recorded "by hand", hiding the machine's own result | the run id is an argument (b8e56ce). A red nightly needs to reach someone: carried forward |
 | 4 | medium | `tunnel-ros-ordering` fact B (Cyclone) failed every night it ran since 2026-10-03: the check ran under `set -e`, so the first `ros2 topic list` that errored ended it in 1.7 s, defeating the 30 s poll written for exactly that | a failing query is one more miss (2f5d07c); the nightly is the proof, as this host's relay session would not connect. The nightly of 2026-10-12 still failed fact B under Cyclone, now in the second step: the topic was listed (the daemon remembered the recreated participant) and `ros2 topic echo` errored at once instead of waiting; it is retried under the same deadline too |
 | 5 | medium | The soak's RSS budget failed at random: two single readings swung from −0.36 to +6.09 MiB on one commit | the median of the last quarter of the cycles against the first quarter's (2f5d07c); the census stays the exact leak check |
@@ -62,10 +62,30 @@ bookkeeping instead.
   the write is lost inside the agent, before any backend.
 - **The offer a browser never answered** (2026-10-05) — the trigger is gone and
   the page recovers on its own; the cause is not known.
-- **The compose gate's desktop step is intermittent**: one CI run in about six
-  (75999c5) decoded no frame within 10 s, with the agent's side normal (the
-  helper connected, the capture ready, the track offered) and no stall logged.
-  Not yet reproduced.
+- **The desktop fixtures' intermittent "no frames"**, first seen in the compose
+  gate's desktop step (75999c5): six CI jobs from 2026-10-03 to 10-14, about
+  2 % of fixture starts, in the compose gate, `desktop-e2e`, the X11 fixture's
+  sound and the fixture self-test. Each passed again on fresh daemons. It was
+  not ICE: ICE, DTLS and the control channel connected in every failing
+  session, and the `selected_pair=""` opsim printed is a field the agent never
+  fills (opsim now says "no RTP sent on any track"). The fixture had no working
+  session manager. The capture's PipeWire stream was never linked, and where
+  the run recorded it, the desktop had no default output either. Starting
+  WirePlumber before PipeWire reproduces the whole signature (2026-10-17): no
+  frames within 10 s, no virtual monitor, no `desktop-audio` track, and the
+  fixture ready only after 15 s, as in the failing `desktop-e2e` run. That
+  WirePlumber lost this start race in CI is the leading hypothesis, not yet
+  observed, because the failing containers took their logs with them. 293c49c
+  read the X11 case (15c608f) as a fixture ready too early, but its output
+  never came in 30 s. The fixtures now start as systemd does on a robot, log
+  every WirePlumber exit, and fail their own start without a default output.
+  Every desktop suite prints the WirePlumber exits, and a failed one also the
+  fixture's internals and the robot's whole log
+  ([docs/15](../15-testing-strategy.md#the-desktop-test-lab)). The race cannot
+  happen on the new start, so no log will show it: the hypothesis holds if the
+  signature and every WirePlumber exit stay absent over the next ~150 fixture
+  starts in CI, and a logged exit, or no default output with WirePlumber
+  running, points elsewhere. Carried forward until then.
 - **The GNOME fixture's test window has no frame stamp**, so lost frames are
   measured on X11 only.
 - **An X11 kiosk with the agent in a container** is specified, not built.

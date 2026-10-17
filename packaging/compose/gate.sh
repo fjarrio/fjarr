@@ -17,11 +17,18 @@ ID=${FJARR_GATE_DEVICE:-compose-robot-01}
 TOKEN=${FJARR_DEV_DEVICE_TOKEN:-dev-only-device-token}
 OP_DEV=fjarr1 # the operator's end in dev; fjarr0 there belongs to the lab's demo robot
 files=(-f packaging/compose/docker-compose.yml -f packaging/compose/gate.override.yml)
+# INTROSPECT: the agent's endpoint as opsim in dev reaches it, so a failing scenario carries the
+# robot's own view of its tracks (docs/24): the sandbox namespace by its name on the lab network, or,
+# with host networking, the host at that network's gateway.
 if [ "$SANDBOX" = 1 ]; then
   files+=(-f packaging/compose/gate.sandbox.yml)
   SERVER=ws://fjarr-server:8080/ws
+  INTROSPECT=http://gate-host:7381
 else
   SERVER=ws://127.0.0.1:8080/ws
+  gw=$(docker network inspect -f '{{(index .IPAM.Config 0).Gateway}}' fjarr_default) ||
+    { echo "compose-gate: FAIL no fjarr_default network (the lab stack is not up: opsim runs in dev on it)" >&2; exit 1; }
+  INTROSPECT=http://$gw:7381
 fi
 dc() { docker compose -p fjarr-compose-gate "${files[@]}" "$@"; }
 say() { echo "compose-gate: $*"; }
@@ -34,6 +41,16 @@ logs_have() {
 fail() {
   echo "compose-gate: FAIL $*" >&2
   dc --profile example logs --no-color --tail 40 >&2 || true
+  exit 1
+}
+# Step 7's failures: the agent's whole log, as the session that failed is rarely in its last lines,
+# the desktop host's own output, and its internals — whether WirePlumber runs, the session daemons'
+# logs, the links (docs/15#the-desktop-test-lab).
+fail_desktop() {
+  dc logs --no-color fjarr-agent desktop-host >&2 || true
+  # Bounded: dc is a function, which timeout cannot run.
+  timeout 60 docker compose -p fjarr-compose-gate "${files[@]}" exec -T desktop-host fixture-session dump >&2 || true
+  echo "compose-gate: FAIL $*" >&2
   exit 1
 }
 cleanup() {
@@ -108,18 +125,22 @@ say "tunnel ok"
 #    told the host's desktop uid and group by number, sees the desktop through the host's helper.
 say "image $FJARR_GATE_DESKTOP_IMAGE (desktop-wayland) from dist/deb/$ARCH"
 docker build -q -f docker/agent/Dockerfile --target desktop-wayland -t "$FJARR_GATE_DESKTOP_IMAGE" . >/dev/null
-docker image inspect fjarr-desktop-fixture >/dev/null 2>&1 || docker compose --profile desktop build -q desktop-fixture
+# Built every time (layer-cached), as the Makefile's desktop targets do: an image from before the
+# fixture's startup contract would test the old start, and its session script has no dump.
+docker compose --profile desktop build -q desktop-fixture
 files+=(-f packaging/compose/gate.desktop.yml)
 out=$(dc run --rm -T fjarr-agent setup desktop --helper-uid 10002 --helper-gid 10777 2>&1) || fail "setup desktop in the image: $out"
 dc up -d --no-deps fjarr-agent >/dev/null
-dc up -d --no-deps desktop-host >/dev/null
+# Waited for: a desktop is ready once it has a default output, and one without fails its own start,
+# saying why, rather than desktop-see a minute later with "no frames" (docs/15#the-desktop-test-lab).
+dc up -d --no-deps --wait desktop-host >/dev/null || fail_desktop "the host's desktop never became ready"
 for _ in $(seq 60); do logs_have fjarr-agent "monitor present" && break; sleep 1; done
-logs_have fjarr-agent "monitor present" || { dc logs --no-color --tail 60 fjarr-agent desktop-host >&2; fail "the agent never got the host's desktop"; }
+logs_have fjarr-agent "monitor present" || fail_desktop "the agent never got the host's desktop"
 docker compose exec -T dev ./build/"${BUILD_PRESET:-release}"/agent/tools/fjarr-opsim --server ws://fjarr-server:8080/ws \
   --robot "$ID" --grant-secret "${FJARR_GRANT_HS256_SECRET:-dev-only-grant-secret}" --timeout 60 --scenario desktop-see \
-  --introspect-token dev-only-introspect-token 2>&1 | tee /tmp/compose-gate-desktop.log | grep -E '^(PASS|FAIL|SUMMARY)' || true
-if ! grep -q "0 failed" /tmp/compose-gate-desktop.log; then
-  dc logs --no-color --tail 60 fjarr-agent desktop-host >&2 || true
-  fail "desktop-see against the compose robot"
-fi
+  --introspect "$INTROSPECT" --introspect-token dev-only-introspect-token 2>&1 | tee /tmp/compose-gate-desktop.log | grep -E '^(PASS|FAIL|SUMMARY)' || true
+grep -q "0 failed" /tmp/compose-gate-desktop.log || fail_desktop "desktop-see against the compose robot"
+# Each WirePlumber exit the host's desktop logged, on a pass too: its restart loop would hide a crash
+# (docs/15#the-desktop-test-lab).
+dc logs --no-color desktop-host 2>/dev/null | grep -a 'wireplumber exited' || say "the host's desktop logged no WirePlumber exit"
 say "PASS — the reference compose file runs a robot, tunnel and desktop included"

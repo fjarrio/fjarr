@@ -59,11 +59,13 @@
 #include "core/glib/raii.hpp"
 #include "core/loop.hpp"
 #include "core/protocol.hpp"
+#include "checks.hpp"
 
 using nlohmann::json;
 using fjarr::Envelope;
 namespace glib = fjarr::glib;
 namespace protocol = fjarr::protocol;
+namespace opsim = fjarr::opsim; // the parts of the checks that need no session (checks.hpp)
 
 namespace {
 
@@ -79,7 +81,7 @@ struct Options {
     std::string introspect; // http://127.0.0.1:7381
     std::string introspect_token; // --introspect-token, else $FJARR_INTROSPECT_TOKEN (the demo exposes the endpoint with one, docs/24)
     std::string desktop_oracle;   // desktop-control: the fixture's test-window log, http://desktop-fixture:8090/testwin.log
-    std::string desktop_plug;     // desktop-hotplug: the fixture's monitor hot-plug, http://desktop-fixture:8091
+    std::string desktop_plug;     // the fixture's plug service, http://desktop-fixture:8091: hot-plug, clipboard, sound, desktop-control's mode change
     int timeout_s = 60;
     int cycles = 200; // soak: connect/stream/close cycles
     /// `smoke --hold N`: keep every track subscribed for N seconds before closing — a viewer that
@@ -104,7 +106,8 @@ void usage() {
                  "                   [--introspect http://127.0.0.1:7381] [--introspect-token <t>] [--verbose]\n"
                  "                   [--exec '<command>'] (tunnel: run it with the link up, $FJARR_ADDR set)\n"
                  "                   [--desktop-oracle <url of the fixture's test-window log>] (desktop-control)\n"
-                 "                   [--desktop-plug <url of the fixture's monitor hot-plug>] (desktop-hotplug, desktop-clipboard)\n"
+                 "                   [--desktop-plug <url of the fixture's plug service>] (desktop-hotplug, desktop-clipboard, desktop-audio;\n"
+                 "                    desktop-control's mode change, reported as not run without it)\n"
                  "scenarios: smoke toggle hotplug rejected-track desktop-see desktop-control desktop-hotplug desktop-clipboard desktop-cursor desktop-virtual silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer tunnel\n"
                  "           soak (--cycles N, needs --introspect)\n"
                  "           netem-{lan,wifi-ok,4g,lossy,bad} (the profile is applied externally: docker/lab/netem.sh)\n"
@@ -305,9 +308,18 @@ struct Result {
 
 struct Report {
     std::vector<Result> results;
+    std::vector<Result> unrun; // checks this run could not do where it runs, by name
     void check(const std::string& name, bool pass, const std::string& detail) {
         results.push_back({name, pass, detail});
         std::printf("%s %s: %s\n", pass ? "PASS" : "FAIL", name.c_str(), detail.c_str());
+        std::fflush(stdout);
+    }
+    /// A check that cannot run here (no fixture service for it): neither a pass nor a fail, said by
+    /// name and counted in the SUMMARY line, because a check left out silently reads as a pass
+    /// (docs/30 principle 8).
+    void not_run(const std::string& name, const std::string& why) {
+        unrun.push_back({name, false, why});
+        std::printf("NOTE %s: not run: %s\n", name.c_str(), why.c_str());
         std::fflush(stdout);
     }
     int failed() const {
@@ -2858,6 +2870,10 @@ void scenario_desktop_control(Operator& op) {
     // 2b. A mode change keeps input coordinates correct (docs/06), where the fixture can change a
     //     monitor's mode in place (the X11 one: /mode). The monitor's capture restarts on its new
     //     size and re-offers; then a click at a normalized point must land on the new geometry's pixel.
+    //     Through the fixture's plug only: without one (the mini-PC) or where the fixture has no /mode
+    //     (the mutter one) the step is reported as not run; a plug that is given but does not answer,
+    //     or fails the change, is a FAIL (opsim::mode_step).
+    //     spec: docs/15-testing-strategy.md#the-desktop-test-lab
     {
         const std::size_t mmark = op.inbox_mark();
         std::size_t smark = op.sig_mark();
@@ -2869,8 +2885,23 @@ void scenario_desktop_control(Operator& op) {
                     smark = op.sig_mark();
                 }
         };
-        auto moded = op.http_get_url(op.desktop_plug() + "/mode");
-        if (moded.status != 404) {
+        Operator::HttpResult moded;
+        if (!op.desktop_plug().empty()) moded = op.http_get_url(op.desktop_plug() + "/mode");
+        const opsim::ModeStep step = opsim::mode_step(op.desktop_plug(), moded.status, moded.error, moded.body);
+        if (step.kind == opsim::ModeStep::Kind::NotRun) r.not_run("desktop-mode-change", step.why);
+        else if (step.kind == opsim::ModeStep::Kind::Fail) {
+            r.check("desktop-mode-change", false, step.why);
+            if (moded.status != 0) {
+                // The plug answered but failed: it may have changed half the mode (the X11 one's
+                // /mode is delmonitor + setmonitor in one xrandr call). Restore, best effort, and
+                // ask for the track again, so the steps below fail on their own cause, not this one.
+                op.http_get_url(op.desktop_plug() + "/mode?restore=1");
+                answer_offers(3000);
+                const std::uint64_t f1 = op.frames(desk);
+                op.select(desk, true, "active", 5000, "fjarr.desktop");
+                op.wait_frames(desk, f1, 5, 8000);
+            }
+        } else {
             auto ev = op.wait_envelope(mmark, "fjarr.desktop", "monitors", "event", 5000, [](const Envelope& e) {
                 for (const auto& m : e.payload.value("monitors", json::array()))
                     if (m.value("w", 0) == 1600 && m.value("h", 0) == 900) return true;
@@ -2886,7 +2917,7 @@ void scenario_desktop_control(Operator& op) {
                 landed = since(cmark).find("click button=1 x=400 y=450") != std::string::npos;
                 if (!landed) op.sleep_ms(100);
             }
-            r.check("desktop-mode-change", moded.status == 200 && ev && flowing && landed,
+            r.check("desktop-mode-change", ev && flowing && landed,
                     std::string(ev ? "1920x1080 -> 1600x900 announced" : "no monitors event with 1600x900") + (flowing ? ", frames again" : ", no frames after") +
                         (landed ? ", a click at 0.25,0.5 landed on 400,450" : ", the click did not land on 400,450: " + since(cmark).substr(0, 200)));
             op.http_get_url(op.desktop_plug() + "/mode?restore=1");
@@ -2900,41 +2931,33 @@ void scenario_desktop_control(Operator& op) {
     }
 
     // 3. Input-to-photon: F9 turns the window green while held; time key-down to the first decoded
-    //    frame whose centre changed. docs/16 budget; CI fails only above the 2x ceiling (docs/15).
-    std::vector<double> samples;
-    const int base = op.centre_luma(desk);
-    int widest = 0; // the largest change of the centre seen: a failure says how far it got
-    for (int i = 0; i < 10 && base >= 0; i++) {
-        const std::int64_t t0 = g_get_monotonic_time();
-        key("F9", true);
-        const bool lit = op.wait_centre_luma(desk, [&](int l) { widest = std::max(widest, std::abs(l - base)); return std::abs(l - base) > 20; }, 2000);
-        if (lit) samples.push_back((g_get_monotonic_time() - t0) / 1000.0);
-        key("F9", false);
-        op.wait_centre_luma(desk, [&](int l) { return std::abs(l - base) <= 8; }, 2000);
-        op.sleep_ms(150);
-    }
-    std::sort(samples.begin(), samples.end());
-    auto pct = [&](double q) { return samples.empty() ? 0.0 : samples[std::min(samples.size() - 1, static_cast<std::size_t>(q * samples.size()))]; };
-    const double p50 = pct(0.5), p95 = pct(0.95);
-    char detail[200];
-    std::snprintf(detail, sizeof detail, "%zu/10 samples, p50 %.0f ms, p95 %.0f ms (LAN budget 150/250; CI ceiling 500)", samples.size(), p50, p95);
-    std::string why_not;
-    if (samples.size() < 10) {
-        // What the camera saw instead: the centre's baseline, how far it moved, and the frame itself.
-        why_not = "; centre luma " + std::to_string(base) + ", widest change " + std::to_string(widest);
+    //    frame whose centre changed, each press from a restored baseline only (opsim::photon_run).
+    //    docs/16 budget; CI fails only above the 2x ceiling (docs/15).
+    //    spec: docs/15-testing-strategy.md#latency-harness
+    std::string dumped; // where the frame of the first rejected press went
+    opsim::PhotonIo io;
+    io.wait_luma = [&](const std::function<bool(int)>& pred, int ms) { return op.wait_centre_luma(desk, pred, ms); };
+    io.luma = [&] { return op.centre_luma(desk); };
+    io.key = [&](bool down) { key("F9", down); };
+    io.now_us = [] { return g_get_monotonic_time(); };
+    io.sleep_ms = [&](int ms) { op.sleep_ms(ms); };
+    io.rejected = [&](int press) {
+        // What the camera saw instead, as the press was given up (M3 gate review): the first one only.
         const char* dir = std::getenv("FJARR_OPSIM_DUMP_DIR");
         const auto snap = op.track_snapshot(desk);
-        if (dir && *dir && snap && snap->thumb.size() == static_cast<std::size_t>(THUMB_W) * THUMB_H) {
-            const std::string path = std::string(dir) + "/" + desk + ".pgm";
-            if (FILE* f = std::fopen(path.c_str(), "wb")) {
-                std::fprintf(f, "P5\n%d %d\n255\n", THUMB_W, THUMB_H);
-                std::fwrite(snap->thumb.data(), 1, snap->thumb.size(), f);
-                std::fclose(f);
-                why_not += "; the last frame is in " + path;
-            }
+        if (!dumped.empty() || !dir || !*dir || !snap || snap->thumb.size() != static_cast<std::size_t>(THUMB_W) * THUMB_H) return;
+        const std::string path = std::string(dir) + "/" + desk + ".pgm";
+        if (FILE* f = std::fopen(path.c_str(), "wb")) {
+            std::fprintf(f, "P5\n%d %d\n255\n", THUMB_W, THUMB_H);
+            std::fwrite(snap->thumb.data(), 1, snap->thumb.size(), f);
+            std::fclose(f);
+            dumped = "; the frame at press " + std::to_string(press + 1) + " is in " + path;
         }
-    }
-    r.check("input-to-photon", samples.size() == 10 && p95 <= 500, detail + why_not);
+    };
+    const int base = op.centre_luma(desk);
+    if (base < 0) io.rejected(0); // no luma to watch at all: keep the frame the track has, if any
+    const opsim::PhotonVerdict photon = opsim::photon_verdict(opsim::photon_run(io, base));
+    r.check("input-to-photon", photon.pass, photon.detail + dumped);
 
     // 4. Safety (docs/15): the session ends while Shift is down; the agent releases it.
     mark = oracle().size();
@@ -3763,24 +3786,12 @@ const std::map<std::string, NetemTolerance> kNetemProfiles = {
     {"bad", {"thumbnail", 15000, 5000, 5, 3000, false, 10000, true}},
 };
 
-/// The agent's view of our session's tracks from GET /stats: "track: bitrate/frames/dropped", plus the selected pair.
+/// The agent's view of our session's tracks from GET /stats (opsim::robot_track_stats).
 std::string agent_track_stats(Operator& op, std::string* err) {
     auto stats = op.http_get("/stats", err);
     if (!stats) return "";
-    for (const auto& s : stats->value("sessions", json::array())) {
-        if (s.value("session_id", "") != op.session_id()) continue;
-        std::string out;
-        const json st = s.value("stats", json::object());
-        for (const auto& [cap, tracks] : st.items()) {
-            if (!tracks.is_array()) continue;
-            for (const auto& t : tracks)
-                out += t.value("track_id", "?") + ": enabled=" + (t.value("enabled", false) ? "yes" : "no") + " tier=" + t.value("tier", "?") + " bitrate=" +
-                       t.value("bitrate_bps", json()).dump() + " bps frames=" + t.value("frames", json()).dump() + " dropped=" + t.value("dropped", json()).dump() + "; ";
-        }
-        if (st.contains("selected_pair")) out += "selected_pair=" + st.at("selected_pair").dump() + "; ";
-        out += "buffered_bytes=" + s.value("buffered_bytes", json()).dump();
-        return out;
-    }
+    for (const auto& s : stats->value("sessions", json::array()))
+        if (s.value("session_id", "") == op.session_id()) return opsim::robot_track_stats(s);
     *err = "session " + op.sid8() + " not in GET /stats";
     return "";
 }
@@ -4048,13 +4059,20 @@ int main(int argc, char** argv) {
     }
     if (code == 0) code = report.failed() ? 1 : 0;
     const int passed = static_cast<int>(report.results.size()) - report.failed();
-    std::printf("SUMMARY %s: %d passed, %d failed%s\n", opts.scenario.c_str(), passed, report.failed(), code == 3 ? ", timeout" : "");
+    // The checks that did not run are named here too: the lab's own logs keep only these lines (docs/30 principle 8).
+    std::string unrun;
+    for (const auto& u : report.unrun) unrun += (unrun.empty() ? "" : ", ") + u.name;
+    if (!unrun.empty()) unrun = ", " + std::to_string(report.unrun.size()) + " not run (" + unrun + ")";
+    std::printf("SUMMARY %s: %d passed, %d failed%s%s\n", opts.scenario.c_str(), passed, report.failed(), unrun.c_str(), code == 3 ? ", timeout" : "");
     std::fflush(stdout);
     if (!opts.json_out.empty()) {
         json out{{"scenario", opts.scenario}, {"robot", opts.robot}, {"server", opts.server}, {"ice_policy", opts.ice_policy}, {"exit_code", code}};
         json results = json::array();
         for (const auto& r : report.results) results.push_back({{"name", r.name}, {"pass", r.pass}, {"detail", r.detail}});
         out["results"] = results;
+        json not_run = json::array();
+        for (const auto& u : report.unrun) not_run.push_back({{"name", u.name}, {"detail", u.detail}});
+        out["not_run"] = not_run;
         json cap = json::array();
         {
             std::lock_guard<std::mutex> lk(sh.mu);

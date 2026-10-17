@@ -1672,9 +1672,15 @@ expects the agent to end in:
 
 Output: a one-screen verdict per assertion (`PASS`/`FAIL name: detail`)
 and, with `--json`, the same as data plus the captured signaling and
-envelopes; exit 0 on all pass, 1 on any fail, 3 on timeout. `make
-agent-leaks SCENARIO=<name>` runs a scenario under the `leaks` tracer and
-prints the diff.
+envelopes; exit 0 on all pass, 1 on any fail, 3 on timeout. A check that
+cannot run where it runs, because no fixture service provides it
+(`desktop-control`'s mode change without `--desktop-plug`), prints
+`NOTE name: not run: why`. The `SUMMARY` line and the JSON's `not_run`
+name it again, and it changes no exit code. A target that needs the check
+looks for its `PASS` itself (`make x11-e2e`), because a check left out
+silently reads as a pass ([docs/30](30-continuous-integration.md#principles),
+principle 8). `make agent-leaks SCENARIO=<name>` runs a scenario under the
+`leaks` tracer and prints the diff.
 
 ## Slices 3a, 3b, 3c, 4, 5 and their gates {#slices-3a-3b-3c-and-their-gates}
 

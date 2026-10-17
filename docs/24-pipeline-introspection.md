@@ -115,6 +115,13 @@ Unix socket alternative `introspect.socket = "/run/fjarr/introspect.sock"`):
 | `GET /log[?minutes=<n>]` | the in-memory log ring (last 10 minutes, `info` and above), newest last |
 | `GET /diagnostics.tar.gz` | the diagnostics bundle |
 
+In `GET /stats`, a session's sample is taken once a second and lists a
+track only while it sends RTP (rtpbin's senders), so a sample with no
+tracks means no RTP went out on any track in that second, not that the
+track was never negotiated. Its `selected_pair` is reserved and always
+`""`: it is not read from webrtcbin's `get-stats` (consumer.hpp), so an
+empty value says nothing about ICE — misread that way on 2026-10-14.
+
 Security: bound to loopback by default; `introspect.bind = "0.0.0.0"` plus
 `introspect.token` is required to expose it on a LAN; it never carries
 credentials or grants (docs/10). The only mutations are `POST /snapshot`

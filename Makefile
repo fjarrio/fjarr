@@ -496,31 +496,62 @@ DEB_ARCH ?= $(shell dpkg --print-architecture 2>/dev/null || uname -m)
 # (tools/ci/image.py, docs/30#ci-images).
 DEB_BUILDER ?= build
 DEB_BUILDER_IMAGE = $(if $(filter prebuilt,$(DEB_BUILDER)),docker image inspect fjarr-deb-builder >/dev/null 2>&1 || { echo "DEB_BUILDER=prebuilt but there is no fjarr-deb-builder image (tools/ci/image.py build fjarr-deb-builder docker/deb-builder)"; exit 1; },docker build -q -t fjarr-deb-builder docker/deb-builder >/dev/null)
+# What a failed desktop suite prints besides the robot's whole log (docs/15#the-desktop-test-lab): the
+# fixture's internals — whether WirePlumber runs, the session daemons' logs, the links, wpctl status.
+# A fixture that fails its own start says why in its log, which `up --wait` does not print.
+DESKTOP_FIXTURE_DUMP = timeout 60 docker compose --profile desktop exec -T desktop-fixture fixture-session dump || true
+X11_FIXTURE_DUMP = timeout 60 docker compose --profile x11 exec -T x11-fixture start.sh dump || true
+# Printed after every desktop suite, passed or failed: each WirePlumber exit the fixture logged. Its restart
+# loop would otherwise hide a crash a passing run recovered from, and these lines are what tells the start
+# race from another cause (docs/15#the-desktop-test-lab).
+DESKTOP_FIXTURE_EXITS = docker compose --profile desktop logs --no-color desktop-fixture 2>/dev/null | grep -a 'wireplumber exited' \
+  || echo "desktop-fixture: no WirePlumber exit logged"
+X11_FIXTURE_EXITS = docker compose --profile x11 logs --no-color x11-fixture 2>/dev/null | grep -a 'wireplumber exited' \
+  || echo "x11-fixture: no WirePlumber exit logged"
+# Each suite starts a fresh fixture container: `up` restarts a stopped one whose image and config are
+# unchanged, and its log, which the exits above and the failure dumps read, would hold every earlier run.
+DESKTOP_FIXTURE_FRESH = docker compose --profile desktop rm -fsv desktop-fixture >/dev/null 2>&1 || true
+X11_FIXTURE_FRESH = docker compose --profile x11 rm -fsv x11-fixture >/dev/null 2>&1 || true
+# The plug service goes only to the scenarios that use it: desktop-control runs without one, as on the
+# mini-PC, and must report its mode change as not run instead of failing it (docs/15#the-desktop-test-lab).
 .PHONY: desktop-e2e
 desktop-e2e: ## M3: the fixture's desktop end to end — see it (frames, a still screen), drive it (input, text, input-to-photon, release on close), hot-plug monitors, the clipboard both ways, the local cursor, virtual monitors, the desktop's sound, through helper → module E → agent → opsim (host-run; make agent-build first)
-	docker compose --profile desktop --profile stack up -d --build --wait desktop-fixture fjarr-server
+	$(DESKTOP_FIXTURE_FRESH)
+	docker compose --profile desktop --profile stack up -d --build --wait desktop-fixture fjarr-server \
+	  || { docker compose --profile desktop logs --no-color desktop-fixture; exit 1; }
 	docker compose --profile desktop --profile stack up -d --no-deps --force-recreate desktop-robot
 	@for i in $$(seq 30); do docker compose --profile desktop logs --no-color desktop-robot 2>/dev/null | grep -q "capture of .* ready" && break; sleep 1; done
-	@rc=0; for s in desktop-see desktop-control desktop-hotplug desktop-clipboard desktop-cursor desktop-virtual desktop-audio; do \
+	@rc=0; log=$$(mktemp); for s in desktop-see desktop-control desktop-hotplug desktop-clipboard desktop-cursor desktop-virtual desktop-audio; do \
+	  case $$s in desktop-hotplug|desktop-clipboard|desktop-audio) plug="--desktop-plug http://desktop-fixture:8091";; *) plug="";; esac; \
 	  $(MAKE) --no-print-directory opsim OPSIM_ROBOT=desktop-robot-01 OPSIM_SCENARIO=$$s OPSIM_INTROSPECT=http://desktop-robot:7381 \
-	    OPSIM_EXTRA="--introspect-token $(INTROSPECT_TOKEN) --desktop-oracle http://desktop-fixture:8090/testwin.log --desktop-plug http://desktop-fixture:8091" || rc=1; \
-	done; \
-	  [ $$rc -eq 0 ] || docker compose --profile desktop logs --no-color --tail 40 desktop-robot desktop-fixture; \
+	    OPSIM_EXTRA="--introspect-token $(INTROSPECT_TOKEN) --desktop-oracle http://desktop-fixture:8090/testwin.log $$plug" >$$log 2>&1 || rc=1; cat $$log; \
+	  if [ $$s = desktop-control ] && ! grep -q "^NOTE desktop-mode-change: not run: no --desktop-plug" $$log; then \
+	    echo "desktop-e2e: desktop-control without --desktop-plug did not report its mode change as not run (docs/15#the-desktop-test-lab)"; rc=1; fi; \
+	done; rm -f $$log; \
+	  [ $$rc -eq 0 ] || { docker compose --profile desktop logs --no-color desktop-robot desktop-fixture; $(DESKTOP_FIXTURE_DUMP); }; \
+	  $(DESKTOP_FIXTURE_EXITS); \
 	  docker compose --profile desktop stop desktop-robot desktop-fixture >/dev/null 2>&1; exit $$rc
 
+# Only this fixture can change a mode in place (/mode), so desktop-control must pass that step here: a
+# plug that lost /mode would otherwise pass as "not run" (docs/15#the-desktop-test-lab, docs/30 principle 8).
 x11-e2e: ## M3 3.7: an X11 kiosk end to end — robot-sim in fixture mode, backend A in the agent's own process (granted by fjarr-x11-session), opsim: see, drive, hot-plug, the clipboard, the local cursor, the sound (host-run; make agent-build first)
-	docker compose --profile x11 --profile stack up -d --build --wait x11-fixture fjarr-server
+	$(X11_FIXTURE_FRESH)
+	docker compose --profile x11 --profile stack up -d --build --wait x11-fixture fjarr-server \
+	  || { docker compose --profile x11 logs --no-color x11-fixture; exit 1; }
 	docker compose --profile x11 --profile stack up -d --no-deps --force-recreate x11-robot
 	@for i in $$(seq 30); do docker compose --profile x11 logs --no-color x11-robot 2>/dev/null | grep -q "capture of .* ready" && break; sleep 1; done
-	@rc=0; for s in desktop-see desktop-control desktop-hotplug desktop-clipboard desktop-cursor desktop-audio; do \
+	@rc=0; log=$$(mktemp); for s in desktop-see desktop-control desktop-hotplug desktop-clipboard desktop-cursor desktop-audio; do \
 	  $(MAKE) --no-print-directory opsim OPSIM_ROBOT=x11-robot-01 OPSIM_SCENARIO=$$s OPSIM_INTROSPECT=http://x11-robot:7381 \
-	    OPSIM_EXTRA="--introspect-token $(INTROSPECT_TOKEN) --desktop-oracle http://x11-fixture:8090/testwin.log --desktop-plug http://x11-fixture:8091" || rc=1; \
-	done; \
-	  [ $$rc -eq 0 ] || docker compose --profile x11 logs --no-color --tail 60 x11-robot x11-fixture; \
+	    OPSIM_EXTRA="--introspect-token $(INTROSPECT_TOKEN) --desktop-oracle http://x11-fixture:8090/testwin.log --desktop-plug http://x11-fixture:8091" >$$log 2>&1 || rc=1; cat $$log; \
+	  if [ $$s = desktop-control ] && ! grep -q "^PASS desktop-mode-change:" $$log; then \
+	    echo "x11-e2e: desktop-control did not pass its mode change, which only this fixture stages (docs/15#the-desktop-test-lab)"; rc=1; fi; \
+	done; rm -f $$log; \
+	  [ $$rc -eq 0 ] || { docker compose --profile x11 logs --no-color x11-robot x11-fixture; $(X11_FIXTURE_DUMP); }; \
+	  $(X11_FIXTURE_EXITS); \
 	  docker compose --profile x11 stop x11-robot x11-fixture >/dev/null 2>&1; exit $$rc
 
 .PHONY: lab-test lab-runner-install
-ci-test: ## tools/ci's own tests: the change classifier and the CI images' content hash (docs/30)
+ci-test: ## tools/ci's own tests: the change classifier, the CI images' content hash, the lab's "tonight's prepare", the red-night alert (docs/30)
 	@tools/ci/test.sh
 
 lab-test: ## fjarr-lab's tests: schedule, reservations, graceful stop, against fake systemctl (docs/12#lab-machines-and-fjarr-lab)
@@ -537,7 +568,9 @@ lab-runner-install: ## ON A LAB MACHINE, as root: install fjarr-lab, its units a
 
 .PHONY: desktop-fixture-test
 desktop-browser: ## M3: the demo dashboard's Desktop panel in the lab browser against the fixture's desktop — view, input, hot-plug; every test must run, none may skip (host-run; needs the demo stack, the lab browser and make agent-build)
-	docker compose --profile desktop --profile stack up -d --build --wait desktop-fixture fjarr-server
+	$(DESKTOP_FIXTURE_FRESH)
+	docker compose --profile desktop --profile stack up -d --build --wait desktop-fixture fjarr-server \
+	  || { docker compose --profile desktop logs --no-color desktop-fixture; exit 1; }
 	docker compose --profile desktop --profile stack up -d --no-deps --force-recreate desktop-robot
 	@for i in $$(seq 30); do docker compose --profile desktop logs --no-color desktop-robot 2>/dev/null | grep -q "capture of .* ready" && break; sleep 1; done
 	@# From dev, where the fixture's and the robot's compose names resolve (the runner cannot reach them).
@@ -548,14 +581,24 @@ desktop-browser: ## M3: the demo dashboard's Desktop panel in the lab browser ag
 	  skips=$$(python3 -c 'import json,sys; r=[]; w=lambda o: [w(v) for v in (o.values() if isinstance(o,dict) else o if isinstance(o,list) else [])] + ([r.append(o.get("description",""))] if isinstance(o,dict) and o.get("type")=="skip" else []); w(json.load(open("build/desktop-browser.json"))); print("\n".join(sorted(set(r))))' 2>/dev/null); \
 	  if [ ! -f build/desktop-browser.json ]; then echo "desktop-browser: no report was written"; rc=1; \
 	  elif [ -n "$$skips" ]; then echo "desktop-browser: a test skipped — they must all run here:"; echo "$$skips" | sed 's/^/  /'; rc=1; fi; \
-	  [ $$rc -eq 0 ] || { docker compose --profile desktop --profile demo logs --no-color --tail 300 desktop-robot; docker compose --profile desktop --profile demo logs --no-color --tail 40 desktop-fixture demo-dashboard; }; \
+	  [ $$rc -eq 0 ] || { docker compose --profile desktop --profile demo logs --no-color desktop-robot desktop-fixture; docker compose --profile desktop --profile demo logs --no-color --tail 40 demo-dashboard; $(DESKTOP_FIXTURE_DUMP); }; \
+	  $(DESKTOP_FIXTURE_EXITS); \
 	  docker compose --profile desktop stop desktop-robot desktop-fixture >/dev/null 2>&1; exit $$rc
 
-desktop-fixture-test: ## M3: headless mutter proves capture and EIS input, then the session helper's handover of both (docs/15#the-desktop-test-lab)
-	docker compose --profile desktop up -d --build --wait desktop-fixture
+# After the self-test, both fixtures' startup contract under fault: each image started on its own, with
+# no compose project, the X11 one with a stand-in session program so it needs no agent build
+# (docs/15#the-desktop-test-lab).
+desktop-fixture-test: ## M3: headless mutter proves capture and EIS input, then the session helper's handover of both; both fixtures keep their startup contract under fault (docs/15#the-desktop-test-lab)
+	$(DESKTOP_FIXTURE_FRESH)
+	docker compose --profile desktop up -d --build --wait desktop-fixture \
+	  || { docker compose --profile desktop logs --no-color desktop-fixture; exit 1; }
 	@docker compose --profile desktop exec -T desktop-fixture sh -c 'fixture-selftest && fixture-helper-check /usr/local/bin/fjarr-desktop-session'; rc=$$?; \
-	  [ $$rc -eq 0 ] || docker compose --profile desktop logs --no-color --tail 30 desktop-fixture; \
+	  [ $$rc -eq 0 ] || { docker compose --profile desktop logs --no-color desktop-fixture; $(DESKTOP_FIXTURE_DUMP); }; \
+	  $(DESKTOP_FIXTURE_EXITS); \
 	  docker compose --profile desktop stop desktop-fixture >/dev/null 2>&1; exit $$rc
+	docker compose --profile x11 build -q x11-fixture
+	docker/lab/fixture-startup-test.sh gnome
+	docker/lab/fixture-startup-test.sh x11
 
 .PHONY: compose-gate
 compose-gate: ## M2.5 gate: the reference compose file runs a robot, tunnel included (host-run; needs make deb + the lab stack; docs/26#containerized-robots)

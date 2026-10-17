@@ -23,6 +23,8 @@ add_executable(fjarr-tests
   ${CMAKE_SOURCE_DIR}/agent/src/desktop/edid.cpp
   ${CMAKE_SOURCE_DIR}/agent/src/desktop/x11_layout.cpp
   ${CMAKE_SOURCE_DIR}/agent/src/desktop/ghost_primary.cpp
+  test_opsim_checks.cpp
+  ${CMAKE_SOURCE_DIR}/agent/tools/opsim/checks.cpp
   test_frame_hub.cpp
   test_channels.cpp
   test_blob.cpp
@@ -46,7 +48,8 @@ add_executable(fjarr-tests
   test_sources.cpp
   test_camera.cpp
 )
-target_include_directories(fjarr-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+# ../tools: the parts of fjarr-opsim's checks that need no session (opsim/checks.hpp), tested like the agent's own.
+target_include_directories(fjarr-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src ${CMAKE_CURRENT_SOURCE_DIR}/../tools)
 target_link_libraries(fjarr-tests PRIVATE fjarr::fjarr GTest::gtest PkgConfig::GST PkgConfig::SOUP PkgConfig::XKBCOMMON)
 target_compile_definitions(fjarr-tests PRIVATE FJARR_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/protocol/fixtures")
 # The supervision probe spawns the real daemon under a fake systemd notify socket (docs/15).
