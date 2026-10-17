@@ -122,6 +122,27 @@ track was never negotiated. Its `selected_pair` is reserved and always
 `""`: it is not read from webrtcbin's `get-stats` (consumer.hpp), so an
 empty value says nothing about ICE — misread that way on 2026-10-14.
 
+#### Capture frame counts {#capture-frame-counts}
+
+A source that repeats content it already sent marks the repeat
+(`FjarrFrameRepeat`, [docs/23](23-agent-core-architecture.md#desktop-capture-memory)),
+so `GET /sources` shows, per capture and since it started:
+
+- `frames.new`: buffers the source delivered with new pixels (for module E,
+  buffers mutter recorded with pixels);
+- `frames.repeated`: buffers pushed again with the same content (the
+  keepalive on a still screen, and the frame given to a newly built
+  pipeline);
+- `frames.cursor_only`: buffers that carried only cursor metadata;
+- `frames.newest_age_ms`: how long ago the newest new frame arrived;
+- `memory`: `dmabuf` with its `drm-format`, or `shm` with the reason
+  ([docs/23](23-agent-core-architecture.md#desktop-capture-memory)).
+
+A picture frozen behind healthy counters shows as `repeated` rising while
+`new` stands still and `newest_age_ms` grows. That is also what a still
+screen looks like, so only a screen known to change (the scanout check,
+[docs/15](15-testing-strategy.md#the-desktop-test-lab)) tells the two apart.
+
 Security: bound to loopback by default; `introspect.bind = "0.0.0.0"` plus
 `introspect.token` is required to expose it on a LAN; it never carries
 credentials or grants (docs/10). The only mutations are `POST /snapshot`

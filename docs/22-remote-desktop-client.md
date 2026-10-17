@@ -304,6 +304,14 @@ It is built in M3, and local cursor is the default on Wayland as everywhere
 else. X11 needs nothing new: XFixes reports shape changes, and `ximagesrc
 show-pointer=false` captures without the cursor.
 
+Capturing GNOME monitors as DMA-BUF ([ADR-0041](adr/0041-desktop-capture-dmabuf.md))
+changes nothing for the client: the cursor metadata arrives on DMA-BUF buffers
+exactly as on shared memory (position, shape and hotspot, measured on the
+mini-PC 2026-10-17), and metadata mode stays the default. A pointer that a
+robot application hides arrives as an invalid cursor id (0); the agent sends it
+as a `hidden` shape, and the view draws nothing, which the DMA-BUF change's
+tests check.
+
 ## Virtual monitors (slice 3.5)
 
 `addDesktopMonitor(session, {width, height})` in `@fjarr/core` asks the robot

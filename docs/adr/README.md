@@ -62,3 +62,4 @@ options weighed, the choice, and its consequences — so future maintainers
 | [0038](0038-reference-handlers-permissive.md) | The reference peripheral handlers are MIT, an exception to ADR-0011, so customers can fork them | accepted |
 | [0039](0039-x86-ubuntu-ab-sysupdate-systemd-boot.md) | The Ubuntu A/B image on x86 writes slots with systemd-sysupdate and boots through systemd-boot's counting; RAUC with GRUB was the comparison | superseded by 0040 |
 | [0040](0040-x86-ubuntu-ab-swupdate-efibootguard.md) | The Ubuntu A/B image on x86 writes slots with SWUpdate and boots through EFI Boot Guard, one engine with the Jetson recipe | accepted |
+| [0041](0041-desktop-capture-dmabuf.md) | Module E captures physical monitors as DMA-BUF and hands them to VA without a copy, shared memory as the fallback, because SHM streams freeze behind a directly scanned-out window | accepted |

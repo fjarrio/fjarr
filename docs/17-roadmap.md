@@ -608,6 +608,23 @@ readline: the module now ships its own client configuration over
 (the session package alone). An X11 kiosk with the agent in a container is
 specified and not built. **3.8 is done**; every M3 slice is.
 
+**The nightly red, explained (2026-10-17).** The unattended-access nightly
+on the mini-PC was red every night from 10-08. Two harness bugs: opsim ran
+the X11-only mode change without a plug and failed by construction, and
+input-to-photon counted presses from a frozen picture as 0 ms samples, a
+false pass on 10-17 (both fixed in 5b864a3). Ubuntu's upgrade wizard opened
+on every boot (8735c52), verify judged a late prepare stale, and nothing
+reported a red night (91a550d). Under them was a real defect, found on the
+machine the same day: since the local cursor (232dbbf), mutter 50.1 scans a
+fullscreen GPU window directly out and records nothing into the shared-memory
+stream the agent reads, so the operator saw a frozen picture behind green
+counters. Erik chose DMA-BUF capture without a copy into VA
+([ADR-0041](adr/0041-desktop-capture-dmabuf.md)); mutter fixed the shared-memory
+side in 50.5, which Ubuntu 26.04 does not have
+([open question #49](18-open-questions.md)). The M3 gate waits for that
+change and a green night with the new scanout check
+([docs/15](15-testing-strategy.md#the-desktop-test-lab)).
+
 ## M3.5 — Hear the robot {#m35}
 
 **`fjarr.audio`** (robot microphone downlink, push-to-talk uplink through the

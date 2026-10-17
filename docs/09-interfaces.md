@@ -204,7 +204,12 @@ public:
   // handed the stream over, then available, so the capability declares the
   // track at once and the core adds it when it is ready. Null for an unknown
   // monitor. (Changed 2026-09-30 from an opaque CaptureSource, M3 3.1.)
-  virtual std::shared_ptr<VideoSource> start_capture(MonitorId, CaptureOptions) = 0;  // {cursor_in_video}
+  // CaptureOptions {cursor_in_video, dmabuf}: `dmabuf` is the media plane's
+  // import list, the DMA-BUF formats the encoder takes without a copy as
+  // {drm_fourcc, modifier} pairs; empty means system memory only. A backend
+  // that can hand over device memory picks from it and declares the memory in
+  // its source's caps; others ignore it (ADR-0041, docs/23#desktop-capture-memory).
+  virtual std::shared_ptr<VideoSource> start_capture(MonitorId, CaptureOptions) = 0;
   virtual void stop_capture(MonitorId) = 0;             // never disturbs other captures
   // Virtual monitors: headless robots, or a monitor sized to the operator's
   // window. The size must be asked for (unasked, mutter made it 1x1). It lives

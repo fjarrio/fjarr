@@ -237,7 +237,9 @@ What surprised us:
 - **Zero-copy did not happen.** When `pipewiresrc` is free to negotiate
   DMA-BUF with mutter, the stream fails with "target not found". Constrained to
   system memory, it works. Every GNOME number above is for the copying path, so
-  DMA-BUF is headroom, not a baseline.
+  DMA-BUF is headroom, not a baseline. *(2026-10-17: this no longer reproduces
+  on the mini-PC, and [ADR-0041](0041-desktop-capture-dmabuf.md) makes DMA-BUF
+  module E's capture memory.)*
 - **`pipewiresrc` drops PipeWire's cursor metadata.** With cursor-mode
   "metadata", its most verbose trace shows no cursor handling. Local-cursor mode
   on Wayland therefore needs Fjarr's own PipeWire consumer, as
