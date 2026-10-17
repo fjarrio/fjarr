@@ -1,0 +1,8 @@
+#!/bin/bash
+# The test's cp: runs the real cp, then logs the file it wrote in the fake root.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname "$0")/lib.sh"
+real cp "$@"
+d=$(area "${*: -1}")
+[ -z "$d" ] || ev "$d"

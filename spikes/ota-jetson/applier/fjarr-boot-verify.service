@@ -1,0 +1,17 @@
+[Unit]
+Description=Mark this boot good for L4TLauncher (nvbootctrl verify) unless it is a trial
+Documentation=file:/usr/lib/fjarr/applier
+# spec: docs/32-fleet-ota.md#jetson-test-image. Replaces meta-tegra's nv_update_verifier.service,
+# which verifies every boot, the trial too; a trial is verified only by mark-good, after health.
+# Without a verify, three warm resets would retire a committed slot.
+RequiresMountsFor=/data
+Wants=setup-nv-boot-control.service
+After=fjarr-trial.service multi-user.target boot-complete.target setup-nv-boot-control.service
+ConditionPathExists=!/data/fjarr-update/applier/trial
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/fjarr/applier boot-verify
+
+[Install]
+WantedBy=multi-user.target

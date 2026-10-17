@@ -1,0 +1,6 @@
+#!/bin/bash
+# The test's systemctl: logs what the applier asks systemd to do.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname "$0")/lib.sh"
+ev "systemctl:$*"

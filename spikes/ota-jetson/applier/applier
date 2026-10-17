@@ -1,0 +1,424 @@
+#!/bin/bash
+# The Jetson applier: x86's verbs and calling convention (spikes/ota-x86/image-ebg/mkosi.extra/
+# usr/lib/fjarr/applier) on NVIDIA's root A/B, where each root slot is tied to a bootloader chain.
+# Installed as /usr/lib/fjarr/applier. What each verb writes: README.md beside this file.
+#   applier install <v> <dir>        swupdate writes the other slot (APP or APP_b, its kernel and
+#                                    kernel-dtb) from <dir>/fjarr_<v>.swu; not activated
+#   applier set-next <v>             the next boot tries <v> once: a capsule when the slot's chain
+#                                    needs one, otherwise nvbootctrl set-active-boot-slot
+#   applier state                    JSON: slots, chains (firmware version, marker), trial, UEFI
+#                                    variables, PMC, ESRT, bios_version, nvbootctrl
+#   applier mark-good                after health: verify the trial boot and commit it
+#   applier rollback-now [--mark-bad]  switch to the other slot and reboot
+#   applier is-trial                 exit 0 if this boot is a trial
+#   applier trial-boot               fjarr-trial.service: count a trial boot; the second rolls back
+#   applier boot-verify              fjarr-boot-verify.service: nvbootctrl verify when not a trial
+# spec: docs/32-fleet-ota.md#appliers, docs/32-fleet-ota.md#jetson-test-image
+set -euo pipefail
+
+# FJARR_ROOT is for the tests only (test.sh): a fake root with fake sysfs, efivarfs and /data.
+R=${FJARR_ROOT:-}
+EFIVARS=$R/sys/firmware/efi/efivars
+PMC=$R/sys/devices/platform/bus@0/c360000.pmc   # NVIDIA's PMC scratch nodes, where nvbootctrl reads them
+ESRT=$R/sys/firmware/efi/esrt/entries/entry0
+BIOS=$R/sys/class/dmi/id/bios_version
+ESP=$R/boot/efi
+DEV=$R/dev/disk/by-partlabel
+OS_RELEASE=$R/etc/os-release
+CERT=$R/etc/fjarr/swu.crt
+STATE=$R/data/fjarr-update/applier   # trial, last-trial, slot-a|b, chain-a|b (key=value files)
+SWU_TMP=$R/data/fjarr-update/tmp
+RUNDIR=$R/run/fjarr-applier          # verified: this boot passed nvbootctrl verify
+LOCK=$R/run/fjarr-applier.lock
+BLESS_UNIT=fjarr-bless.service
+# UEFI variable GUIDs (edk2-nvidia Silicon/NVIDIA/NVIDIA.dec; the UEFI spec's global GUID).
+NV=781e084c-a330-417c-b678-38e696380cb9      # gNVIDIAPublicVariableGuid
+NVTOK=ed3374ef-767b-42fa-af70-db520a392822   # gNVIDIATokenSpaceGuid: BootChainFwPrevious, ...ResetCount
+EFIG=8be4df61-93ca-11d2-aa0d-00e098032b8c    # EFI_GLOBAL_VARIABLE: OsIndications, BootNext
+
+refuse() { echo "refused: $*" >&2; exit 2; }
+fail() { echo "failed: $*" >&2; exit 1; }
+idx() { if [ "$1" = a ]; then echo 0; else echo 1; fi; }
+other() { if [ "$1" = a ]; then echo b; else echo a; fi; }
+part() { if [ "$1" = a ]; then echo APP; else echo APP_b; fi; }
+upper() { if [ "$1" = a ]; then echo A; else echo B; fi; }
+osr() { sed -n "s/^$1=//p" "$OS_RELEASE" 2>/dev/null | tr -d '"' | head -n 1; }
+
+# --- UEFI variables through efivarfs: 4 bytes of attributes, then the data, all little-endian.
+# NVIDIA's variables are immutable files until `chattr -i`, and one write() is one SetVariable, so
+# a variable is written whole with one dd, as NVIDIA's nv_ota_common.func does.
+efivar_exists() { [ -e "$EFIVARS/$1-$2" ]; }
+efivar_bytes() { od -An -v -tu1 "$1" | tr '\n' ' '; }
+efivar_get() { # <name> <guid>: prints "<attributes> <value>" (data up to 8 bytes), 1 when absent
+  local f=$EFIVARS/$1-$2 b i v=0
+  [ -e "$f" ] || return 1
+  read -r -a b <<<"$(efivar_bytes "$f")"
+  [ "${#b[@]}" -ge 5 ] || return 1
+  for ((i = 4; i < ${#b[@]} && i < 12; i++)); do v=$((v | (b[i] << (8 * (i - 4))))); done
+  echo "$((b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24))) $v"
+}
+efivar_value() { local a v; read -r a v <<<"$(efivar_get "$1" "$2")" || return 1; [ -n "${v:-}" ] || return 1; echo "$v"; }
+le_hex() { local i b out=''; for ((i = 0; i < $2; i++)); do printf -v b '%02x' $((($1 >> (8 * i)) & 255)); out+=$b; done; echo "$out"; }
+hex_bytes() { local i esc=''; for ((i = 0; i < ${#1}; i += 2)); do esc+="\\x${1:i:2}"; done; printf '%b' "$esc"; }
+efivar_set() { # <name> <guid> <attributes when new> <data bytes> <value>
+  local f=$EFIVARS/$1-$2 attrs=$3 existed=0 tmp hex a v
+  if [ -e "$f" ]; then
+    read -r a v <<<"$(efivar_get "$1" "$2")" || true
+    attrs=${a:-$attrs}; existed=1
+    chattr -i "$f"
+  fi
+  hex=$(le_hex "$attrs" 4)$(le_hex "$5" "$4")
+  tmp=$(mktemp)
+  hex_bytes "$hex" > "$tmp"
+  dd if="$tmp" of="$f" bs=$((4 + $4)) count=1 status=none
+  rm -f "$tmp"
+  # The kernel makes vendor variables immutable again only when it creates them; restore it.
+  if [ "$existed" = 1 ] && [ "$2" != "$EFIG" ]; then chattr +i "$f"; fi
+}
+efivar_del() { # <name> <guid>
+  local f=$EFIVARS/$1-$2
+  if [ -e "$f" ]; then chattr -i "$f"; rm -f "$f"; fi
+}
+
+# --- L4TLauncher's per-slot retry counter: a PMC scratch register, read and written through
+# NVIDIA's pmc sysfs nodes as "0x%x" (meta-tegra's NVIDIA-SAUCE pmc patch).
+pmc_get() { local x; x=$(cat "$PMC/$1" 2>/dev/null) || return 1; echo $((x)); }
+pmc_set() { printf '0x%x\n' "$2" | dd of="$PMC/$1" status=none; }
+retry_max() { local m; m=$(efivar_value RootfsRetryCountMax "$NV" 2>/dev/null) || m=3; if ((m > 3)); then m=3; fi; echo "$m"; }
+# A slot is bootable for L4TLauncher only if both views agree: RootfsStatusSlot seeds the counter
+# at a cold boot, the counter decides on every boot (L4TRootfsValidation.c). Set both.
+mark_slot() { # <slot> bad|good
+  local s=$1 u; u=$(upper "$s")
+  if [ "$2" = bad ]; then
+    efivar_set "RootfsStatusSlot$u" "$NV" 7 4 255   # NVIDIA_OS_STATUS_UNBOOTABLE
+    pmc_set "rootfs_retry_count_$s" 0
+  else
+    efivar_set "RootfsStatusSlot$u" "$NV" 7 4 0     # NVIDIA_OS_STATUS_NORMAL
+    pmc_set "rootfs_retry_count_$s" "$(retry_max)"
+  fi
+}
+
+# --- State files on /data: key=value lines, replaced atomically (a temp file beside, sync, rename).
+kv() { sed -n "s/^$2=//p" "$1" 2>/dev/null | head -n 1; }
+put() { # <file> <key=value>...
+  local f=$1 tmp; shift
+  mkdir -p "${f%/*}"
+  tmp=$(mktemp "$f.XXXXXX")
+  printf '%s\n' "$@" > "$tmp"
+  sync -f "$tmp"; mv "$tmp" "$f"; sync -f "$f"
+}
+
+# --- Which slot this is. The firmware's current chain (nvbootctrl) must be the root partition's
+# slot, as unified A/B pairs them; "?" when they disagree or either is unknown.
+fw_slot() { # the last line of nvbootctrl get-current-slot: 0 or 1
+  case "$(nvbootctrl get-current-slot 2>/dev/null | tail -n 1 | tr -d '[:space:]' || true)" in 0) echo a ;; 1) echo b ;; *) echo '?' ;; esac
+}
+root_slot() { # by device path, or by major:minor when the kernel names the root /dev/root
+  local src mm s
+  src=$(findmnt -no SOURCE / 2>/dev/null || true)
+  src=$(readlink -f "$src" 2>/dev/null || echo "$src")
+  for s in a b; do
+    if [ -n "$src" ] && [ "$src" = "$(readlink -f "$DEV/$(part "$s")")" ]; then echo "$s"; return; fi
+  done
+  mm=$(findmnt -no MAJ:MIN / 2>/dev/null || true)
+  for s in a b; do
+    if [ -n "$mm" ] && [ "$mm" = "$(lsblk -dno MAJ:MIN "$DEV/$(part "$s")" 2>/dev/null | tr -d ' ')" ]; then echo "$s"; return; fi
+  done
+  echo '?'
+}
+booted_slot() { local f r; f=$(fw_slot); r=$(root_slot); if [ "$f" = "$r" ]; then echo "$f"; else echo '?'; fi; }
+need_booted() { local b; b=$(booted_slot); [ "$b" != '?' ] || refuse "the firmware's current slot ($(fw_slot)) is not the root partition's ($(root_slot))"; echo "$b"; }
+
+# --- Firmware versions: L4T versions such as 36.5.2. bios_version is "36.5.2-gcid-<n>" from
+# NVIDIA's firmware and "v36.5.2" from meta-tegra's source build; the ESRT holds 0x00240502.
+bios_fw() { local s; s=$(cat "$BIOS" 2>/dev/null || true); s=${s#v}; echo "${s%%-*}"; }
+hexver() { local IFS=.; read -r a b c <<<"$1"; echo $((((a & 65535) << 16) | ((b & 255) << 8) | (c & 255))); }
+decver() { echo "$((($1 >> 16) & 65535)).$((($1 >> 8) & 255)).$(($1 & 255))"; }
+is_fw() { [[ $1 =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; }
+capsule_status() { nvbootctrl dump-slots-info 2>/dev/null | sed -n 's/^Capsule update status: *//p' | head -n 1; }
+capsule_pending() { local o; o=$(efivar_value OsIndications "$EFIG" 2>/dev/null) || return 1; (((o & 4) != 0)); }
+# Each chain's firmware version as UEFI read it from that chain's VER partition at this boot:
+# SystemFwVersions, volatile, two UINT32 (chain A, then B) in the ESRT's 0x00BBMMmm, MAX_UINT32
+# when a chain's VER could not be read (edk2-nvidia SetFwVersionVariable: FmpVersionLibPartition.c
+# in r36.5.1, TegraFmp.c in r36.4.4; NVIDIA's nv-l4t-bootloader-config.sh get_bl_version reads it).
+chain_fw() { # <a|b>: the L4T version, or "?" when unreadable; returns 1 when the variable is absent
+  local f=$EFIVARS/SystemFwVersions-$NV vb
+  [ -e "$f" ] || return 1
+  read -r -a vb <<<"$(od -An -v -tu1 -j $((4 + 4 * $(idx "$1"))) -N4 "$f" | tr '\n' ' ')"
+  if [ "${#vb[@]}" != 4 ] || [ "${vb[*]}" = "255 255 255 255" ]; then echo '?'; return 0; fi
+  decver $((vb[0] | (vb[1] << 8) | (vb[2] << 16) | (vb[3] << 24)))
+}
+
+# --- Pre-flight. Every refusal comes before the first write and exits 2.
+check_version() { [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9._+~-]*$ ]] || refuse "bad version '$1'"; }
+check_committed() {
+  [ ! -e "$STATE/trial" ] || refuse "a trial of $(kv "$STATE/trial" version) is in progress"
+  [ -e "$RUNDIR/verified" ] || refuse "this boot has not been verified yet (fjarr-boot-verify)"
+}
+check_firmware_idle() {
+  local v
+  if v=$(efivar_value BootChainFwStatus "$NV"); then refuse "BootChainFwStatus is $v: a chain switch has not been settled"; fi
+  if v=$(efivar_value BootChainFwNext "$NV"); then refuse "BootChainFwNext is $v: a chain switch is pending"; fi
+  if efivar_exists BootNext "$EFIG"; then refuse "BootNext is set (lab rule L5)"; fi
+  # Boot-services only in BootChainDxe, so normally invisible here; checked if it ever shows.
+  if v=$(efivar_value BootChainFwResetCount "$NVTOK"); then ((v < 2)) || refuse "BootChainFwResetCount is $v"; fi
+  if capsule_pending; then refuse "a capsule is pending (OsIndications bit 2)"; fi
+  if v=$(efivar_value L4TDefaultBootMode "$NV"); then [ "$v" != 3 ] || refuse "L4TDefaultBootMode is recovery"; fi
+  if [ ! -e "$PMC/rootfs_retry_count_a" ] || [ ! -e "$PMC/rootfs_retry_count_b" ]; then refuse "no PMC retry counters in $PMC"; fi
+}
+stage_capsule() { # <capsule> <sha256>: copy, sync, rename, sync; never BOOTAA64.efi (lab rule L5)
+  local d=$ESP/EFI/UpdateCapsule
+  mkdir -p "$d" || return 1
+  cp "$1" "$d/TEGRA_BL.Cap.tmp" || return 1
+  sync -f "$d/TEGRA_BL.Cap.tmp" || return 1
+  if [ "$(sha256sum < "$d/TEGRA_BL.Cap.tmp" | cut -d' ' -f1)" != "$2" ]; then
+    rm -f "$d/TEGRA_BL.Cap.tmp"; echo "the capsule copy on the ESP differs" >&2; return 1
+  fi
+  mv "$d/TEGRA_BL.Cap.tmp" "$d/TEGRA_BL.Cap" || return 1
+  sync -f "$d/TEGRA_BL.Cap"
+}
+
+# BootChainDxe keeps BootChainFwStatus after a chain switch, SUCCESS (0) included. Left set, it
+# cancels the next capsule and makes the next switch end without switching (BootChainDxe.c), so a
+# boot that is known good clears a SUCCESS; any other status stays for a person (lab rule L7).
+settle_chain_status() {
+  local s
+  s=$(efivar_value BootChainFwStatus "$NV") || return 0
+  if efivar_exists BootChainFwNext "$NV"; then return 0; fi
+  if [ "$s" = 0 ]; then
+    echo "clearing BootChainFwStatus=0, a finished chain switch"
+    efivar_del BootChainFwStatus "$NV"
+  else
+    echo "BootChainFwStatus is $s: left for a person to read" >&2
+  fi
+}
+chain_complete() { # <slot> <fw>: this chain booted this firmware and the boot was verified
+  local s=$1 fw=$2
+  is_fw "$fw" || return 0
+  if [ "$(kv "$STATE/chain-$s" fw)" != "$fw" ] || [ "$(kv "$STATE/chain-$s" state)" != complete ]; then
+    put "$STATE/chain-$s" "fw=$fw" state=complete
+  fi
+}
+stamp_verified() { mkdir -p "$RUNDIR"; put "$RUNDIR/verified" "boot=$(cat "$R/proc/sys/kernel/random/boot_id" 2>/dev/null || echo unknown)"; }
+end_trial() { # <result>: the trial marker takes its result, then becomes last-trial in one rename, the commit point
+  local lines
+  mapfile -t lines < <(grep -v '^result=' "$STATE/trial" || true)
+  put "$STATE/trial" "${lines[@]}" "result=$1"
+  mv "$STATE/trial" "$STATE/last-trial"
+  sync -f "$STATE/last-trial"
+}
+rollback_checks() { # <booted> <other>
+  local o=$2 st
+  st=$(efivar_value "RootfsStatusSlot$(upper "$o")" "$NV" 2>/dev/null) || st=0
+  [ "$st" = 0 ] || refuse "slot $o is marked unbootable ($st): no other bootable slot"
+  [ "$(kv "$STATE/chain-$o" state)" != in-progress ] || refuse "chain $o may hold a half-written capsule"
+  if efivar_exists BootNext "$EFIG"; then refuse "BootNext is set: the chain switch would fail (lab rule L5)"; fi
+}
+rollback() { # <booted> <other> <mark-bad 0|1>
+  local b=$1 o=$2 s
+  if [ "$3" = 1 ]; then mark_slot "$b" bad; fi
+  if s=$(efivar_value BootChainFwStatus "$NV"); then
+    echo "clearing BootChainFwStatus=$s: left set, BootChainDxe would end the switch without making it"
+    efivar_del BootChainFwStatus "$NV"
+  fi
+  if ! nvbootctrl set-active-boot-slot "$(idx "$o")"; then
+    [ "$3" = 1 ] || fail "nvbootctrl set-active-boot-slot $(idx "$o") failed"
+    # The slot's counter is 0 now: at the warm reset L4TLauncher leaves it for the other itself.
+    echo "nvbootctrl set-active-boot-slot failed: rebooting anyway" >&2
+  fi
+  echo "leaving slot $b; rebooting into slot $o"
+  systemctl reboot
+}
+
+verb=${1:-}
+case "$verb" in
+state | is-trial) ;;
+install | set-next | mark-good | rollback-now | trial-boot | boot-verify)
+  exec 9>"$LOCK"
+  flock 9
+  ;;
+*) sed -n '5,15p' "$0" >&2; exit 2 ;;
+esac
+booted=$(osr IMAGE_VERSION); booted=${booted:-unknown}
+
+case "$verb" in
+install)
+  v=${2:?version}; dir=${3:?dir}; check_version "$v"
+  [ "$v" != "$booted" ] || refuse "refusing to install over the booted version $v"
+  swu=$dir/fjarr_$v.swu; cap=$dir/fjarr_$v.cap
+  [ -f "$swu" ] || refuse "no $swu"
+  fw=$(cat "$dir/fjarr_$v.fw" 2>/dev/null || true)
+  is_fw "$fw" || refuse "no firmware version in $dir/fjarr_$v.fw"
+  [ -n "$(osr IMAGE_ID)" ] || refuse "no IMAGE_ID in $OS_RELEASE"
+  b=$(need_booted); f=$(other "$b")
+  check_committed; check_firmware_idle
+  csum=
+  if [ -f "$cap" ]; then cap=$(cd "$dir" && pwd -P)/fjarr_$v.cap; csum=$(sha256sum < "$cap" | cut -d' ' -f1); else cap=; fi
+  # Writes. The slot is unbootable while it is rewritten; a failure leaves it so.
+  mark_slot "$f" bad
+  if [ -e "$STATE/slot-$f" ]; then rm -f "$STATE/slot-$f"; sync -f "$STATE"; fi
+  mkdir -p "$SWU_TMP"
+  systemd-run --wait --pipe --collect -q -p RuntimeDirectory=swupdate -E "TMPDIR=$SWU_TMP" \
+    swupdate -v -B none --digest-provider opensslCMS -k "$CERT" -e "fjarr,slot-$f" -i "$swu"
+  label=$(blkid -p -s LABEL -o value "$DEV/$(part "$f")" 2>/dev/null || true)
+  [ "$label" = "$(osr IMAGE_ID)_$v" ] || fail "slot $f carries the label '$label', not $(osr IMAGE_ID)_$v"
+  put "$STATE/slot-$f" "version=$v" "fw=$fw" "capsule=$cap" "capsule_sha256=$csum"
+  mark_slot "$f" good
+  echo "installed $v (inactive) in slot $f, for firmware $fw"
+  ;;
+set-next)
+  v=${2:?version}; check_version "$v"
+  b=$(need_booted); f=$(other "$b")
+  [ "$(kv "$STATE/slot-$f" version)" = "$v" ] || refuse "$v is not installed in slot $f"
+  st=$(efivar_value "RootfsStatusSlot$(upper "$f")" "$NV" 2>/dev/null) || st=0
+  [ "$st" = 0 ] || refuse "slot $f is marked unbootable ($st)"
+  [ "$(pmc_get "rootfs_retry_count_$f" || echo 0)" -gt 0 ] || refuse "slot $f has no retries left"
+  check_committed; check_firmware_idle
+  fw=$(kv "$STATE/slot-$f" fw)
+  is_fw "$fw" || refuse "slot $f's record names no firmware version"
+  # The slot boots on its own chain, so the chain must hold the release's firmware, complete. The
+  # version is the firmware's own reading of the chain when it gives one, else the marker's; the
+  # marker alone says whether Fjarr's last write of the chain completed.
+  why=
+  cfw=$(chain_fw "$f") || cfw=$(kv "$STATE/chain-$f" fw)
+  if [ ! -e "$STATE/chain-$f" ]; then why="no marker says its firmware is complete"
+  elif [ "$(kv "$STATE/chain-$f" state)" != complete ]; then why="its last capsule did not complete"
+  elif [ "$cfw" = '?' ]; then why="the firmware could not read its version"
+  elif [ "$cfw" != "$fw" ]; then why="it holds ${cfw:-an unknown version}"; fi
+  if [ -n "$why" ]; then
+    cap=$(kv "$STATE/slot-$f" capsule); sum=$(kv "$STATE/slot-$f" capsule_sha256)
+    if [ -z "$cap" ] || [ ! -f "$cap" ]; then refuse "chain $f needs a capsule ($why) and $v carries none"; fi
+    [ "$(sha256sum < "$cap" | cut -d' ' -f1)" = "$sum" ] || refuse "$cap changed since install"
+    lsv=$(cat "$ESRT/lowest_supported_fw_version" 2>/dev/null || echo 0); want=$(hexver "$fw")
+    ((want >= lsv)) || refuse "capsule $fw is below the lowest supported firmware $(decver "$lsv")"
+    [ -e "$ESP/EFI/BOOT/BOOTAA64.efi" ] || refuse "$ESP holds no L4TLauncher: not the ESP"
+  fi
+  # Writes. The trial marker comes first: whatever the switch does next, the boot it leads to
+  # is a trial. The chain is marked in progress before anything can write it.
+  put "$STATE/trial" "version=$v" "slot=$f" "previous=$b" boots=0 "capsule=$([ -n "$why" ] && echo 1 || echo 0)" "fw=$fw"
+  if [ -n "$why" ]; then
+    put "$STATE/chain-$f" "fw=$fw" state=in-progress
+    # Nothing is armed until OsIndications is set: a failure before it ends the trial here.
+    stage_capsule "$cap" "$sum" || { rm -f "$STATE/trial"; sync -f "$STATE"; fail "could not stage the capsule on the ESP"; }
+    o=$(efivar_value OsIndications "$EFIG" 2>/dev/null) || o=0
+    efivar_set OsIndications "$EFIG" 7 8 $((o | 4))   # EFI_OS_INDICATIONS_FILE_CAPSULE_DELIVERY_SUPPORTED
+    echo "next boot writes the $fw capsule to chain $f ($why) and tries $v once"
+  else
+    nvbootctrl set-active-boot-slot "$(idx "$f")"
+    echo "next boot tries $v once (chain $f holds $fw)"
+  fi
+  ;;
+trial-boot)
+  [ -e "$STATE/trial" ] || exit 0
+  t=$(kv "$STATE/trial" slot); v=$(kv "$STATE/trial" version)
+  b=$(booted_slot)
+  [ "$b" != '?' ] || fail "the firmware's current slot ($(fw_slot)) is not the root partition's ($(root_slot))"
+  if [ "$b" != "$t" ]; then
+    end_trial fell-back
+    echo "the trial of $v on slot $t is over: slot $b booted"
+    exit 0
+  fi
+  n=$(($(kv "$STATE/trial" boots) + 1))
+  put "$STATE/trial" "version=$v" "slot=$t" "previous=$(kv "$STATE/trial" previous)" "boots=$n" \
+    "capsule=$(kv "$STATE/trial" capsule)" "fw=$(kv "$STATE/trial" fw)"
+  if ((n >= 2)); then
+    echo "boot $n of the trial of $v: one try, rolling back"
+    o=$(other "$b"); rollback_checks "$b" "$o"; rollback "$b" "$o" 1
+    exit 0
+  fi
+  systemctl start --no-block "$BLESS_UNIT"
+  echo "trial boot of $v"
+  ;;
+mark-good)
+  [ -e "$STATE/trial" ] || { echo "not a trial boot"; exit 0; }
+  t=$(kv "$STATE/trial" slot); v=$(kv "$STATE/trial" version); fw=$(kv "$STATE/trial" fw)
+  b=$(need_booted)
+  [ "$b" = "$t" ] || refuse "slot $b booted; the trial of $v is on slot $t"
+  if [ "$(kv "$STATE/trial" capsule)" = 1 ]; then
+    cs=$(capsule_status)
+    [ "$cs" = 1 ] || fail "capsule update status ${cs:-unknown}, not 1"
+  fi
+  [ "$(bios_fw)" = "$fw" ] || fail "the firmware runs $(bios_fw), the trial expects $fw"
+  nvbootctrl verify
+  stamp_verified
+  chain_complete "$t" "$fw"
+  settle_chain_status
+  end_trial good
+  echo "$v confirmed on slot $t"
+  ;;
+rollback-now)
+  b=$(need_booted); o=$(other "$b")
+  mark=0; [ "${2:-}" != --mark-bad ] || mark=1
+  # An unconfirmed trial is retired, as x86 marks it FAILED.
+  if [ -e "$STATE/trial" ] && [ "$(kv "$STATE/trial" slot)" = "$b" ]; then mark=1; fi
+  rollback_checks "$b" "$o"
+  rollback "$b" "$o" "$mark"
+  ;;
+boot-verify)
+  [ ! -e "$STATE/trial" ] || { echo "a trial boot: only mark-good verifies it"; exit 0; }
+  nvbootctrl verify
+  stamp_verified
+  b=$(booted_slot)
+  if [ "$b" != '?' ]; then chain_complete "$b" "$(bios_fw)"; fi
+  settle_chain_status
+  ;;
+is-trial)
+  [ -e "$STATE/trial" ] && [ "$(kv "$STATE/trial" slot)" = "$(booted_slot)" ]
+  ;;
+state)
+  jstr() { local s=$1; s=${s//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\n'/\\n}; s=${s//$'\t'/\\t}; s=${s//$'\r'/}; printf '"%s"' "$s"; }
+  jkv() { # a key=value file as a JSON object, or null
+    local k v out='' sep=''
+    [ -e "$1" ] || { printf null; return; }
+    while IFS='=' read -r k v; do
+      [ -n "$k" ] || continue
+      if [[ $v =~ ^(0|[1-9][0-9]{0,15})$ ]]; then out+="$sep$(jstr "$k"):$v"; else out+="$sep$(jstr "$k"):$(jstr "$v")"; fi
+      sep=,
+    done < "$1"
+    printf '{%s}' "$out"
+  }
+  jvar() { local a v; if read -r a v <<<"$(efivar_get "$1" "$2" 2>/dev/null)" && [ -n "${v:-}" ]; then printf '{"attributes":%s,"value":%s}' "$a" "$v"; else printf null; fi; }
+  jfile() { local x; if x=$(cat "$1" 2>/dev/null); then jstr "$x"; else printf null; fi; }
+  jnum() { local x; x=$(cat "$1" 2>/dev/null || true); if [[ $x =~ ^[0-9]+$ ]]; then printf '%s' "$x"; else printf null; fi; }
+  b=$(booted_slot)
+  printf '{"booted":%s,"booted_slot":%s,"firmware_slot":%s,"root_slot":%s,"is_trial":%s,"verified_this_boot":%s,' \
+    "$(jstr "$booted")" "$(jstr "$b")" "$(jstr "$(fw_slot)")" "$(jstr "$(root_slot)")" \
+    "$([ -e "$STATE/trial" ] && [ "$(kv "$STATE/trial" slot)" = "$b" ] && echo true || echo false)" \
+    "$([ -e "$RUNDIR/verified" ] && echo true || echo false)"
+  printf '"slots":['; sep=
+  for s in a b; do
+    printf '%s{"slot":"%s","partition":"%s","label":%s,"installed":%s,"RootfsStatusSlot%s":%s,"retry_count":%s}' "$sep" "$s" \
+      "$(part "$s")" "$(jstr "$(blkid -p -s LABEL -o value "$DEV/$(part "$s")" 2>/dev/null || true)")" \
+      "$(jkv "$STATE/slot-$s")" "$(upper "$s")" "$(jvar "RootfsStatusSlot$(upper "$s")" "$NV")" \
+      "$(x=$(pmc_get "rootfs_retry_count_$s" 2>/dev/null) && echo "$x" || echo null)"
+    sep=,
+  done
+  printf '],"chains":['; sep=
+  for s in a b; do
+    printf '%s{"chain":"%s","fw":%s,"marker":%s,"boot_chain_status":%s}' "$sep" "$s" \
+      "$(if x=$(chain_fw "$s"); then jstr "$x"; else printf null; fi)" "$(jkv "$STATE/chain-$s")" "$(jfile "$PMC/boot_chain_status_$s")"
+    sep=,
+  done
+  printf '],"trial":%s,"last_trial":%s,"efivars":{' "$(jkv "$STATE/trial")" "$(jkv "$STATE/last-trial")"
+  sep=
+  for nv in BootChainFwCurrent:$NV BootChainFwNext:$NV BootChainFwStatus:$NV BootChainOsCurrent:$NV \
+    BootChainFwPrevious:$NVTOK BootChainFwResetCount:$NVTOK RootfsStatusSlotA:$NV RootfsStatusSlotB:$NV \
+    RootfsRetryCountMax:$NV RootfsRedundancyLevel:$NV L4TDefaultBootMode:$NV OsIndications:$EFIG BootNext:$EFIG; do
+    printf '%s"%s":%s' "$sep" "${nv%%:*}" "$(jvar "${nv%%:*}" "${nv#*:}")"; sep=,
+  done
+  printf '},"pmc":{'; sep=
+  for n in rootfs_sr_magic rootfs_current rootfs_retry_count_a rootfs_retry_count_b boot_chain_status_a boot_chain_status_b boot_chain_current; do
+    printf '%s"%s":%s' "$sep" "$n" "$(jfile "$PMC/$n")"; sep=,
+  done
+  fwv=$(cat "$ESRT/fw_version" 2>/dev/null || true)
+  printf '},"esrt":{"fw_version":%s,"fw":%s,"lowest_supported_fw_version":%s,"last_attempt_version":%s,"last_attempt_status":%s},' \
+    "$(jnum "$ESRT/fw_version")" "$(if [[ $fwv =~ ^[0-9]+$ ]]; then jstr "$(decver "$fwv")"; else printf null; fi)" \
+    "$(jnum "$ESRT/lowest_supported_fw_version")" "$(jnum "$ESRT/last_attempt_version")" "$(jnum "$ESRT/last_attempt_status")"
+  cs=$(capsule_status || true)
+  printf '"bios_version":%s,"capsule_status":%s,"capsule_staged":%s,"capsule_pending":%s,' "$(jfile "$BIOS")" \
+    "$([[ $cs =~ ^[0-9]+$ ]] && echo "$cs" || echo null)" \
+    "$([ -e "$ESP/EFI/UpdateCapsule/TEGRA_BL.Cap" ] && echo true || echo false)" "$(capsule_pending && echo true || echo false)"
+  printf '"nvbootctrl":{"bootloader":%s,"rootfs":%s}}\n' "$(jstr "$(nvbootctrl dump-slots-info 2>&1 || true)")" \
+    "$(jstr "$(nvbootctrl -t rootfs dump-slots-info 2>&1 || true)")"
+  ;;
+esac

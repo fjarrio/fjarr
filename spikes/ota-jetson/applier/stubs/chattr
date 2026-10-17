@@ -1,0 +1,13 @@
+#!/bin/bash
+# The test's chattr: the immutable bit of efivarfs as the file's write permission. The tests run
+# as an ordinary user, so a write to a file left immutable fails as it would on the box.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname "$0")/lib.sh"
+flag=$1; f=$2
+case "$flag" in
+-i) real chmod u+w "$f" ;;
++i) real chmod a-w "$f" ;;
+*) echo "chattr stub: unsupported $*" >&2; exit 1 ;;
+esac
+ev "chattr:$flag:$(area "$f")"

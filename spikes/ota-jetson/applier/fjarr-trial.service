@@ -1,0 +1,22 @@
+[Unit]
+Description=Count a trial boot; the second one rolls back (one try, warm or cold)
+Documentation=file:/usr/lib/fjarr/applier
+# spec: docs/32-fleet-ota.md#jetson-test-image. L4TLauncher's retry counter forgets a power cut,
+# so the applier counts the trial's boots on /data. A trial that goes on starts fjarr-bless.
+DefaultDependencies=no
+RequiresMountsFor=/data
+# nvbootctrl reads /etc/nv_boot_control.conf (the chip id, the board spec), which meta-tegra's
+# setup-nv-boot-control writes into /run at boot.
+Wants=setup-nv-boot-control.service
+After=local-fs.target setup-nv-boot-control.service
+Before=sysinit.target shutdown.target
+Conflicts=shutdown.target
+ConditionPathExists=/data/fjarr-update/applier/trial
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/fjarr/applier trial-boot
+
+[Install]
+WantedBy=sysinit.target

@@ -1,0 +1,9 @@
+#!/bin/bash
+# The test's sync: runs the real sync, then logs which area it flushed (sync -f <file>).
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname "$0")/lib.sh"
+real sync "$@"
+last=${*: -1}
+t=$(area "$last")
+if [ -n "$t" ]; then ev "sync:${t%%:*}"; else ev "sync:"; fi

@@ -1,0 +1,14 @@
+[Unit]
+Description=Confirm this trial boot once boot-complete.target is reached (applier mark-good)
+Documentation=file:/usr/lib/fjarr/applier
+# spec: docs/32-fleet-ota.md#jetson-test-image. Started only by `applier trial-boot`, so only a
+# trial pulls boot-complete.target in, with the image's health units and its deadline, as on x86.
+# A mark-good that refuses the boot reboots: the trial's second boot, which rolls back.
+Requires=boot-complete.target
+After=boot-complete.target fjarr-trial.service
+RequiresMountsFor=/data
+FailureAction=reboot
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/fjarr/applier mark-good

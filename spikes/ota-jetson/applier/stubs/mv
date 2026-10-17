@@ -1,0 +1,12 @@
+#!/bin/bash
+# The test's mv: runs the real mv, then logs a rename in the fake root. A temp file beside its
+# target (put's "<file>.XXXXXX") is logged as a write of the target.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname "$0")/lib.sh"
+src=${*: -2:1}; dst=${*: -1}
+real mv "$@"
+d=$(area "$dst"); s=$(area "$src")
+[ -n "$d" ] || exit 0
+sb=${src##*/}; db=${dst##*/}
+if [[ $sb == "$db".?????? ]]; then ev "$d"; else ev "${d%%:*}:${s#*:}>${d#*:}"; fi

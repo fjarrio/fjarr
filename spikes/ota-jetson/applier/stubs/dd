@@ -1,0 +1,29 @@
+#!/bin/bash
+# The test's dd: runs the real dd, then logs what it wrote into the fake efivarfs (the whole
+# file: attributes and data, in hex) or a PMC node. A new vendor variable becomes immutable, as
+# efivarfs makes it.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname "$0")/lib.sh"
+of='' in=''
+for a in "$@"; do case $a in of=*) of=${a#of=} ;; if=*) in=${a#if=} ;; esac; done
+tmp=$(real mktemp)
+if [ -n "$in" ]; then real cat "$in" > "$tmp"; else real cat > "$tmp"; fi
+existed=0; [ ! -e "$of" ] || existed=1
+args=()
+for a in "$@"; do case $a in if=*) ;; *) args+=("$a") ;; esac; done
+rc=0; real dd if="$tmp" "${args[@]}" || rc=$?
+if [ "$rc" = 0 ]; then
+  tok=$(area "$of")
+  case "$tok" in
+  efi:*)
+    ev "$tok=$(real od -An -v -tx1 "$tmp" | real tr -d ' \n')"
+    if [ "$existed" = 0 ] && is_vendor_var "$of"; then real chmod a-w "$of"; fi
+    ;;
+  pmc:*) ev "$tok=$(real tr -d '\n' < "$tmp")" ;;
+  "") ;;
+  *) ev "$tok" ;;
+  esac
+fi
+real rm -f "$tmp"
+exit "$rc"

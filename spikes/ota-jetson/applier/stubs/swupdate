@@ -1,0 +1,37 @@
+#!/bin/bash
+# The test's swupdate: checks the options the applier must pass, then writes the selected slot's
+# three partitions as the image's sw-description does (README.md, "The SWUpdate package"); the
+# root's ext4 label is fjarr_<version>. $T/fw/swupdate-fails: fail after the first partition;
+# $T/fw/swupdate-label: write that version into the label instead.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname "$0")/lib.sh"
+sel='' img='' bl=''
+while [ $# -gt 0 ]; do
+  case $1 in
+  -e) sel=$2; shift ;;
+  -i) img=$2; shift ;;
+  -B) bl=$2; shift ;;
+  -k | --digest-provider) shift ;;
+  esac
+  shift
+done
+[ "$bl" = none ] || { echo "swupdate stub: expected -B none, got '$bl'" >&2; exit 1; }
+[ -n "${TMPDIR:-}" ] || { echo "swupdate stub: no TMPDIR" >&2; exit 1; }
+[ -f "$img" ] || { echo "swupdate stub: no $img" >&2; exit 1; }
+v=${img##*/fjarr_}; v=${v%.swu}
+label=$v; [ ! -e "$T/fw/swupdate-label" ] || label=$(real cat "$T/fw/swupdate-label")
+case "$sel" in
+fjarr,slot-a) parts="APP A_kernel A_kernel-dtb" ;;
+fjarr,slot-b) parts="APP_b B_kernel B_kernel-dtb" ;;
+*) echo "swupdate stub: unknown selection '$sel'" >&2; exit 1 ;;
+esac
+ev "swupdate:$sel"
+for p in $parts; do
+  case $p in
+  APP | APP_b) printf 'partition %s\nlabel=fjarr_%s\n' "$p" "$label" > "$R/dev/disk/by-partlabel/$p" ;;
+  *) printf 'partition %s\nimage %s\n' "$p" "$v" > "$R/dev/disk/by-partlabel/$p" ;;
+  esac
+  ev "part:$p"
+  [ ! -e "$T/fw/swupdate-fails" ] || { echo "swupdate stub: failing on purpose" >&2; exit 1; }
+done

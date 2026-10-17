@@ -1,0 +1,13 @@
+#!/bin/bash
+# The test's systemd-run: runs the command in place, with the -E variables.
+set -euo pipefail
+envs=()
+while [ $# -gt 0 ]; do
+  case $1 in
+  -p | --property | -u | --unit) shift 2 ;;
+  -E | --setenv) envs+=("$2"); shift 2 ;;
+  -*) shift ;;
+  *) break ;;
+  esac
+done
+exec env ${envs[@]+"${envs[@]}"} "$@"

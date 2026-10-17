@@ -1,0 +1,7 @@
+#!/bin/bash
+# The test's findmnt -no SOURCE /: the fake root device, $T/fw/root.
+set -euo pipefail
+case "$*" in
+"-no SOURCE /") cat "$T/fw/root" ;;
+*) exit 1 ;;
+esac

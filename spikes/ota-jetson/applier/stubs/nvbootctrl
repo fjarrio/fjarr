@@ -1,0 +1,65 @@
+#!/bin/bash
+# The test's nvbootctrl. NVIDIA's tool is closed: this models what the applier reads from it (the
+# bootloader formats are the stock box's own output; the rootfs form with root A/B on is not yet
+# seen, and the applier does not parse it) and logs the two commands that change the firmware's
+# state, without guessing what they write; that is measured on the box (docs/32 D2).
+#   $T/fw/current          the current slot, 0 or 1
+#   $T/fw/capsule_status   "Capsule update status" (0 when absent)
+#   $T/fw/fail-set-active  set-active-boot-slot fails
+#   $T/fw/model            the end-to-end runs: set-active-boot-slot writes BootChainFwNext (what
+#                          BootChainDxe reads) and verify gives the current slot its retries back,
+#                          the least the closed tool must do; whether it also clears
+#                          BootChainFwStatus or the scratch register's magic is not assumed
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname "$0")/lib.sh"
+target=bootloader
+if [ "${1:-}" = -t ]; then target=$2; shift 2; fi
+cur=$(real cat "$T/fw/current")
+ab() { if [ "$1" = 0 ]; then echo A; else echo B; fi; }
+var() { # <name>: the value byte of a fake UEFI variable, or nothing
+  local f; f=$(real ls "$R"/sys/firmware/efi/efivars/"$1"-* 2>/dev/null | real head -n 1) || true
+  [ -n "$f" ] && real od -An -v -tu1 -j4 -N1 "$f" | real tr -d ' '
+}
+case "${1:-}" in
+get-current-slot) echo "$cur" ;;
+set-active-boot-slot)
+  [ ! -e "$T/fw/fail-set-active" ] || { echo "Error setting active boot slot" >&2; exit 1; }
+  ev "nvbootctrl:set-active-boot-slot $2"
+  if [ -e "$T/fw/model" ]; then
+    f=$R/sys/firmware/efi/efivars/BootChainFwNext-781e084c-a330-417c-b678-38e696380cb9
+    [ ! -e "$f" ] || real chmod u+w "$f"
+    printf '%b' "\\x07\\x00\\x00\\x00\\x0$2\\x00\\x00\\x00" > "$f"; real chmod a-w "$f"
+  fi
+  ;;
+verify)
+  ev "nvbootctrl:verify"
+  if [ -e "$T/fw/model" ]; then
+    printf '0x%x\n' "$(var RootfsRetryCountMax || echo 3)" > "$R/sys/devices/platform/bus@0/c360000.pmc/rootfs_retry_count_$(if [ "$cur" = 0 ]; then echo a; else echo b; fi)"
+  fi
+  ;;
+dump-slots-info)
+  next=$(var BootChainFwNext || true); active=${next:-$cur}
+  if [ "$target" = rootfs ]; then
+    echo "Current rootfs slot: $(ab "$cur")"
+    echo "Active rootfs slot: $(ab "$active")"
+    echo "num_slots: 2"
+    for s in 0 1; do
+      n=$(real cat "$R/sys/devices/platform/bus@0/c360000.pmc/rootfs_retry_count_$(if [ "$s" = 0 ]; then echo a; else echo b; fi)")
+      st=$(var "RootfsStatusSlot$(ab "$s")" || true)
+      printf 'slot: %d,             retry_count: %d,             status: %s\n' "$s" "$((n))" \
+        "$(if [ "${st:-0}" = 0 ]; then echo normal; else echo unbootable; fi)"
+    done
+  else
+    v=$(real cat "$R/sys/firmware/efi/esrt/entries/entry0/fw_version")
+    echo "Current version: $(((v >> 16) & 65535)).$(((v >> 8) & 255)).$((v & 255))"
+    echo "Capsule update status: $(real cat "$T/fw/capsule_status" 2>/dev/null || echo 0)"
+    echo "Current bootloader slot: $(ab "$cur")"
+    echo "Active bootloader slot: $(ab "$active")"
+    echo "num_slots: 2"
+    echo "slot: 0,             status: normal"
+    echo "slot: 1,             status: normal"
+  fi
+  ;;
+*) echo "nvbootctrl stub: unsupported: $*" >&2; exit 1 ;;
+esac

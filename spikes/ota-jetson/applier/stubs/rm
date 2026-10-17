@@ -1,0 +1,11 @@
+#!/bin/bash
+# The test's rm: runs the real rm, then logs each file it removed from the fake root.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname "$0")/lib.sh"
+gone=()
+for a in "$@"; do
+  case $a in -*) ;; *) if [ -e "$a" ] || [ -L "$a" ]; then t=$(area "$a"); [ -z "$t" ] || gone+=("${t%%:*}:-${t#*:}"); fi ;; esac
+done
+real rm "$@"
+for g in ${gone[@]+"${gone[@]}"}; do ev "$g"; done

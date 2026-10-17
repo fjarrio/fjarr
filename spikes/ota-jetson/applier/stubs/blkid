@@ -1,0 +1,8 @@
+#!/bin/bash
+# The test's blkid -p -s LABEL -o value <device>: the label line of a fake partition.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname "$0")/lib.sh"
+dev=${*: -1}
+[ -e "$dev" ] || exit 2
+real sed -n 's/^label=//p' "$dev" | real head -n 1
