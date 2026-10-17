@@ -1,18 +1,21 @@
 # The unattended-access test, first half (docs/15#unattended-access-test-the-industrial-gate): install
 # the packages of main's newest green CI run on the desktop lab machine (docs/30#artifacts-built-once),
-# `setup desktop`, reboot. lab-desktop-verify checks it at 00:45.
+# `setup desktop`, reboot. lab-desktop-verify reports the machine's verdict 30 minutes later.
 # Lab machines serve only schedule and workflow_dispatch from main (ADR-0033, docs/12): never push or
 # pull_request. A daytime dispatch waits in GitHub's queue until fjarr-lab opens the window (00:00).
 name: Lab desktop — prepare
 
 on:
   schedule:
-    - cron: "15 22 * * *"   # 00:15 in Sweden (CEST); GitHub's cron is UTC
+    - cron: "15 22 * * *"   # 00:15 in Swedish summer time; GitHub's cron is UTC, and it starts this hours late
   workflow_dispatch:
 
+# Shared with verify, which waits behind this run. queue max: every lab run waits its turn, first in,
+# first out; by default a newer one cancels the waiting one (docs/15#unattended-access-test-the-industrial-gate).
 concurrency:
   group: lab-desktop
   cancel-in-progress: false
+  queue: max
 
 permissions:
   contents: read

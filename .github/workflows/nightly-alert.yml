@@ -1,0 +1,50 @@
+# A red night reaches someone (docs/30-continuous-integration.md#nightly-alert): after the lab window,
+# judge the night's lab-desktop-prepare, lab-desktop-verify (its last attempt) and Nightly, and keep one
+# issue labelled nightly-red open while the night is red; close it on the first green night. Hosted
+# only: it reads runs and writes an issue, and never touches a lab machine.
+name: Nightly alert
+
+on:
+  schedule:
+    - cron: "30 5 * * *"    # after the lab window and its grace: 06:30 in Swedish winter time, 07:30 in summer
+    - cron: "30 12 * * *"   # again once the Nightly has run: GitHub starts its 02:17 cron 4.6-7 h late
+  workflow_dispatch:
+    inputs:
+      night:
+        description: the night to judge, YYYY-MM-DD (empty for the newest whose lab window has closed)
+        default: ""
+      dry_run:
+        description: only print the verdict and what it would do to the issue
+        type: boolean
+        default: false
+
+concurrency:
+  group: nightly-alert
+  cancel-in-progress: false
+
+permissions:
+  actions: read   # the runs and their jobs
+  issues: write   # the nightly-red issue and its label
+  contents: read  # the checkout: the script, and the crons it reads from the workflows
+
+jobs:
+  alert:
+    name: judge the night; open, update or close the nightly-red issue
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            tools/ci
+            .github/workflows
+      - name: the night's runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIGHT: ${{ inputs.night }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=()
+          if [ -n "$NIGHT" ]; then args+=(--night "$NIGHT"); fi
+          if [ "$DRY_RUN" = true ]; then args+=(--dry-run); fi
+          bash tools/ci/nightly-alert.sh "${args[@]}"

@@ -1,22 +1,31 @@
 # The unattended-access test, second half (docs/15#unattended-access-test-the-industrial-gate): the
 # machine verifies itself at the first boot after lab-desktop-prepare (fjarr-lab-unattended.service);
 # this reports its verdict. GitHub's schedule is not an order, so when the machine has not rebooted
-# yet (or is still verifying) this dispatches itself again and ends as rescheduled — at most 5 times.
-# Lab machines serve only schedule and workflow_dispatch from main (ADR-0033, docs/12).
+# yet, or tonight's prepare has not finished, this dispatches itself again and ends as rescheduled —
+# at most 5 times. Lab machines serve only schedule and workflow_dispatch from main (ADR-0033, docs/12).
 name: Lab desktop — verify
+# GitHub shows a rescheduled run as a success, so an attempt's name says which run dispatched it, and
+# nightly-alert follows the attempts to the last one (docs/30#nightly-alert).
+run-name: "Lab desktop — verify${{ inputs.after && format(' (attempt {0}, after run {1})', inputs.attempt, inputs.after) || '' }}"
 
 on:
   schedule:
-    - cron: "45 22 * * *"   # 00:45 in Sweden (CEST), 30 min after prepare
+    - cron: "45 22 * * *"   # 30 min after prepare (00:45 in Swedish summer time); GitHub starts it hours late
   workflow_dispatch:
     inputs:
       attempt:
         description: which attempt this is (re-dispatches count up to 5)
         default: "1"
+      after:
+        description: the run that dispatched this attempt (verify sets it; leave it empty)
+        default: ""
 
+# Shared with prepare, so verify never runs beside it. queue max: every lab run waits its turn, first in,
+# first out; by default a newer one cancels the waiting one (a missed night's verify, 2026-10-16).
 concurrency:
   group: lab-desktop
   cancel-in-progress: false
+  queue: max
 
 permissions:
   actions: write   # to dispatch itself again when the machine has not rebooted yet
@@ -27,7 +36,7 @@ jobs:
     name: unattended access after the reboot (mini-PC)
     if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, fjarr-lab, desktop, gnome]
-    timeout-minutes: 10
+    timeout-minutes: 15 # up to 8 min for tonight's prepare to be created, then up to 3 for the verdict
     steps:
       - uses: actions/checkout@v4
       - name: the machine's verdict
@@ -38,30 +47,39 @@ jobs:
         run: |
           # Tonight's prepare first: the verdict on the machine counts only if it is for that run. When
           # a prepare failed before reaching the machine, its state is an older night's (2026-10-03).
-          read -r prep status conclusion < <(python3 - "$REPO" <<'PY'
-          import json, os, sys, urllib.request, datetime
-          req = urllib.request.Request(
-              f"https://api.github.com/repos/{sys.argv[1]}/actions/workflows/lab-desktop-prepare.yml/runs?branch=main&per_page=1",
-              headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"], "Accept": "application/vnd.github+json"})
-          runs = json.load(urllib.request.urlopen(req, timeout=20))["workflow_runs"]
-          if not runs:
-              print("none none none"); sys.exit()
-          r = runs[0]
-          age = datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(r["created_at"].replace("Z", "+00:00"))
-          print(r["id"], r["status"], (r["conclusion"] or "none") if age < datetime.timedelta(hours=12) else "stale")
-          PY
-          )
-          echo "tonight's prepare: run $prep, $status, $conclusion"
+          # Tonight's is the one that ran on the machine tonight, whenever GitHub created it (2026-10-16).
+          # GitHub starts verify's cron with its own lateness, so tonight's prepare may not exist yet:
+          # wait here for it to be created (up to 8 min), as an attempt that started at once would find
+          # nothing queued ahead of it and the 5 would be spent in a minute.
+          for i in {1..48}; do
+            read -r prep state when < <(python3 tools/ci/tonights_prepare.py "$REPO") || true
+            if [ "$state $when" != "waiting not-created-yet" ] || [ "$i" -eq 48 ]; then break; fi
+            sleep 10
+          done
+          echo "tonight's prepare: run $prep, $state, $when"
           if [ -z "$prep" ]; then echo "::error::could not ask GitHub for tonight's prepare run"; exit 1; fi
-          if [ "$conclusion" = stale ] || [ "$prep" = none ]; then echo "::error::no lab-desktop-prepare run in the last 12 hours"; exit 1; fi
-          if [ "$status" = completed ] && [ "$conclusion" != success ]; then
-            echo "::error::tonight's prepare (run $prep) ended $conclusion: https://github.com/$REPO/actions/runs/$prep"; exit 1
-          fi
           rc=0
-          if [ "$status" != completed ]; then rc=75; else sudo -n tools/fjarr-lab/unattended.sh report --prepare-run "$prep" || rc=$?; fi
+          case "$state" in
+            ran)
+              # Back from the reboot, the machine checks itself for about a minute: wait for it here
+              # rather than spend the attempts, which come about 13 s apart (2026-10-16). Only while it
+              # is verifying: a machine not rebooted yet is re-dispatched at once, not held for 3 min.
+              for i in {1..18}; do
+                rc=0; out=$(sudo -n tools/fjarr-lab/unattended.sh report --prepare-run "$prep" 2>&1) || rc=$?
+                echo "$out"
+                if [ "$rc" -ne 75 ] || [ "$i" -eq 18 ] || [[ "$out" == *"not rebooted since prepare"* ]]; then break; fi
+                sleep 10
+              done ;;
+            # Not finished: behind this run in the group (GitHub started verify first), or still waiting
+            # for the machine. With queue max, the next attempt waits behind it instead of cancelling it.
+            waiting) rc=75 ;;
+            none) echo "::error::no lab-desktop-prepare run on main"; exit 1 ;;
+            stale) echo "::error::no lab-desktop-prepare has run in the last 12 hours: the newest, run $prep, ended $when"; exit 1 ;;
+            *) echo "::error::tonight's prepare (run $prep) ended $state: https://github.com/$REPO/actions/runs/$prep"; exit 1 ;;
+          esac
           if [ "$rc" -ne 75 ]; then exit "$rc"; fi
           if [ "$ATTEMPT" -ge 5 ]; then
-            echo "::error::the machine had still not rebooted and verified after $ATTEMPT attempts"
+            echo "::error::still no verdict after $ATTEMPT attempts: the machine had not rebooted and verified, or tonight's prepare had not finished or been created"
             exit 1
           fi
           next=$((ATTEMPT + 1))
@@ -70,9 +88,9 @@ jobs:
           repo, attempt = sys.argv[1], sys.argv[2]
           req = urllib.request.Request(
               f"https://api.github.com/repos/{repo}/actions/workflows/lab-desktop-verify.yml/dispatches",
-              data=json.dumps({"ref": "main", "inputs": {"attempt": attempt}}).encode(),
+              data=json.dumps({"ref": "main", "inputs": {"attempt": attempt, "after": os.environ["GITHUB_RUN_ID"]}}).encode(),
               headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"], "Accept": "application/vnd.github+json"},
               method="POST")
           urllib.request.urlopen(req, timeout=20)
           PY
-          echo "::notice::not verified yet (attempt $ATTEMPT): dispatched attempt $next, which runs once the machine has rebooted"
+          echo "::notice::not verified yet (attempt $ATTEMPT): dispatched attempt $next, which waits its turn in the lab-desktop group"

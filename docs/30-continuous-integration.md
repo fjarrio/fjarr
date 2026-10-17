@@ -78,7 +78,7 @@ parallel and finishes before the longest one is free.
 | `cpp` | code | `changes` | Release build and tests, RAII gate, ASan/UBSan/LSan (ccache) |
 | `tsan` | code | `changes` | The unit and loop tests under ThreadSanitizer, in the dev image (ccache) |
 | `server-image` | code | `changes` | `fjarr-server` builds standalone from `signaling/` |
-| `desktop-fixture` | code | `changes` | Headless mutter: capture, EIS, the helper's handover; `fjarr-lab` tests |
+| `desktop-fixture` | code | `changes` | Headless mutter: capture, EIS, the helper's handover; both desktop fixtures' startup contract under fault ([docs/15](15-testing-strategy.md#the-desktop-test-lab)); `fjarr-lab` tests |
 | `packages` (amd64, arm64) | code | `changes` | The `.deb`s, installed on a clean Ubuntu, embedded out of tree; uploaded as `debs-<arch>` |
 | `e2e` | code | `changes` | The browser lab on the dev-image stack: suites, opsim, the desktop end to end and in the browser, soak, log gate, tunnel |
 | `agent-image` | code | `packages` | The runtime image **from `debs-amd64`**, the demo robot from it with the browser smoke suites, the reference compose file |
@@ -188,12 +188,62 @@ The rules:
   are as cached as `e2e`'s.
 - **`lab-desktop-prepare.yml`** installs the packages of the newest green
   `main` run of `ci.yml`, and checks out that run's commit so the scripts match
-  the build; it builds only the lab binaries the packages do not contain.
+  the build; it builds only the lab binaries the packages do not contain. It
+  and `lab-desktop-verify.yml` share the concurrency group `lab-desktop` with
+  `queue: max`, so no lab run cancels a waiting one
+  ([docs/15](15-testing-strategy.md#unattended-access-test-the-industrial-gate)).
 - **`release.yml`** publishes the tagged commit's packages, as
   [above](#releases-reuse-cis-packages).
+- **`nightly-alert.yml`** tells someone when a night is red, [below](#nightly-alert).
 
 Lab machines run only `schedule` and `workflow_dispatch` from `main`, never
 `ci.yml` ([ADR-0033](adr/0033-desktop-test-lab-and-shared-runners.md), [docs/12](12-development-environment.md#nightly-ci-and-the-self-hosted-gpu-runner)).
+
+### A red night reaches someone {#nightly-alert}
+
+The scheduled workflows have no one watching them: the lab's verify was red
+for a week before anyone looked ([M3 gate review](reviews/m3-gate-review.md)). `nightly-alert.yml` runs
+`tools/ci/nightly-alert.sh` on a hosted runner twice a day: at 05:30 UTC,
+after the lab window and its grace, and at 12:30 UTC, once the Nightly has
+run (GitHub has started its 02:17 UTC cron 4.6 to 7 hours late). Each check
+judges one **night**: the scheduled `lab-desktop-prepare` and
+`lab-desktop-verify` of the evening before, verify by its last attempt (each
+attempt's run name says which run dispatched it), and the Nightly of that
+date. Unless a night is given, the Nightly is the newest one past its due
+time, so the 05:30 check judges the night before's Nightly again: the alert
+is a cron job too, and a dropped or late 12:30 check would otherwise leave
+that Nightly unjudged. Every run is therefore judged by two checks.
+
+- **Red**: a run that failed or was cancelled; a scheduled run that never came;
+  a run still queued or running past its due time (the lab's at 05:30 UTC,
+  the Nightly's at 12:00 UTC); a lab run that finished after its window.
+  Before its due time an unfinished run is "not yet", neither red nor green,
+  and a night with nothing red and something not yet changes nothing.
+- **On red** it opens one issue labelled `nightly-red` (and the label, the
+  first time), or updates the open one, with the night, each red run's link
+  and its failing step. It comments only when the set of red runs changed,
+  whichever night's check judged them, so each comment is news; a run that
+  never came is keyed by its night, so a second missing night is news too. **On a green night** it closes the open ones with a
+  comment.
+- **The lab runner.** The runner list needs Administration: read, which
+  `GITHUB_TOKEN` cannot be given, so the check says so and judges the runner
+  by its jobs: a lab job still queued, or cancelled before any runner took it,
+  means the mini-PC was off, offline or reserved through its window. A token
+  that can read the list, such as an admin's `gh` for a dry run, shows the
+  runner too: offline is its normal state outside the window, offline inside
+  it (22:00 to 05:30 UTC) is red, and so is no runner with the lab's labels.
+- **Permissions**: `actions: read` for the runs, `issues: write` for the issue
+  and its label, `contents: read` for the checkout.
+
+`tools/ci/nightly-alert.sh --dry-run` prints the verdict and what it would do
+to the issue; `--night YYYY-MM-DD` picks the night and `--now <time>` replays
+a check as it stood then, from the runs' timestamps. `make ci-test` runs it
+against recorded API answers. Replayed against the nights of 2026-10-13 to
+10-17, every night is red: verify failed on 10-13, 10-14, 10-16 and 10-17; on
+10-15 the mini-PC was off, so prepare waited for a runner until GitHub
+cancelled it, and verify was cancelled while it waited in the group; on 10-16
+prepare ran in the next night's window; and the Nightly failed on 10-15 and
+10-17.
 
 ## Measuring {#measuring}
 

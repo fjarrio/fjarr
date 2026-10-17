@@ -373,9 +373,25 @@ fjarr-lab reboot                # a lab job's reboot: waits until the runner is 
 - **Jobs start from a baseline**: undo the previous configuration, install the
   build under test, apply the job's own settings. Manual experiments and CI runs
   do not poison each other ([docs/15](15-testing-strategy.md#the-desktop-test-lab)).
-- **CI's side.** Lab jobs are scheduled shortly after the windows open (00:15)
-  and must finish, reboots included, before they close. A job dispatched by hand
-  during the day waits in GitHub's queue until the machine's window opens.
+- **CI's side.** Lab jobs are scheduled for 22:15 UTC, shortly after the
+  window opens in summer (00:15; in winter they wait for it), and must finish,
+  reboots included, before it closes. GitHub starts them hours late
+  ([docs/15](15-testing-strategy.md#unattended-access-test-the-industrial-gate)).
+  A job dispatched by hand during the day waits in GitHub's queue until the
+  machine's window opens; one that no runner takes within 24 hours is
+  cancelled.
+- **A lab machine powers on by itself when power returns** (its firmware's
+  restore-on-AC-power-loss setting: Power On), so a power cut costs at most
+  the night it happens in. The mini-PC (an ASUS PN51) did not: it was off
+  from 2026-10-14 to 10-16, most likely after a power cut during the lab's
+  power work (its journal ends without a shutdown), and two nights were lost.
+  **Pending (Erik):** set its firmware. After power or cabling work at a lab machine,
+  check `fjarr-lab status` on it before midnight.
+- **A red night reaches someone.** `nightly-alert`
+  ([docs/30](30-continuous-integration.md#nightly-alert)) keeps an issue
+  labelled `nightly-red` open while a lab run or the Nightly is red, including
+  a lab job still waiting for its runner after the window. It cannot tell a
+  reservation from a machine that is off, so a reserved night is red too.
 
 Workflows pick machines **by label**, never by name. Every lab machine carries
 `fjarr-lab`, its architecture, and what it can test:
