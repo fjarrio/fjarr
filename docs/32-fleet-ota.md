@@ -43,7 +43,7 @@ lists every **component**, each with a `version` and a content hash:
 | Kind | Examples | Applied by |
 |---|---|---|
 | `os` | a Yocto image, a NixOS system, an Ubuntu A/B image | the OS applier for the robot's recipe ([below](#appliers)) |
-| `firmware` | the Jetson bootloader capsule | the OS applier, as a separate component |
+| `firmware` | the Jetson bootloader capsule | the OS applier, as a separate component; under review for unified Jetson A/B (8.0, E2, [below](#updater)) |
 | `app` | container images, a Nix closure, a set of apt packages | the app applier |
 | `config` | files under `/etc`, ROS parameters, maps shipped with the release | the config applier |
 | `peripheral` | MCU firmware, a motor controller's firmware or parameters, u-blox settings, router configuration, a PLC program | a peripheral handler ([below](#peripherals)) |
@@ -61,7 +61,8 @@ robot does not reboot. Every component declares:
   anything is fetched. They also give the order peripherals install in;
 - `rollback`: `atomic` (it is in an A/B slot), `restorable` (its applier or
   handler can put the previous version back) or `forward-only` (the Jetson
-  bootloader capsule, most MCU flashes);
+  bootloader capsule, under review for unified Jetson A/B in 8.0, E2
+  ([below](#updater)); most MCU flashes);
 - `migrates_data`: the paths under `/data` it may change, which the updater
   snapshots before it runs ([below](#data));
 - `safety_relevant`: true for safety functions (STO, a safety PLC,
@@ -130,7 +131,7 @@ survives that. Its state machine, per release:
 | 6. Health | the agent's reconnection and the health probes, within the confirmation window ([below](#health)) | probes |
 | 7. Peripherals (restorable) | `restorable` peripheral components in `requires` order, each verified by read-back, then the probes again | handlers |
 | 8. Commit | mark the slot good, raise the release counter, delete the snapshots | — |
-| 9. Forward-only | `forward-only` components (the bootloader capsule, MCU flashes), last | handlers, the applier |
+| 9. Forward-only | `forward-only` components (the bootloader capsule, MCU flashes), last; under review for unified Jetson A/B (8.0, E2, below) | handlers, the applier |
 
 On failure up to step 8, everything rolls back in reverse order: peripherals
 through their handlers, apps and config with the slot or their snapshot, the
@@ -141,6 +142,35 @@ there. A `forward-only` component that fails after it does not roll the OS
 back (the new firmware may require the new OS): the run ends **degraded**,
 the robot is flagged, and the run shows the recovery path its recipe
 documents.
+
+**Under review for unified Jetson A/B (8.0, E2).** Step 9 and the
+`firmware` component assume a bootloader updated apart from the OS. A
+Jetson with NVIDIA's root filesystem A/B in its unified mode, which the
+Yocto recipe uses, ties each bootloader chain to a root slot: NVIDIA
+documents that chain A boots root slot A and chain B root slot B, so every
+slot switch would also be a chain switch. That rule, and the model below
+drawn from it and from edk2-nvidia's source, stay a hypothesis until D2 and
+E2 confirm them on the ZED Box Mini
+([the Jetson test image](#jetson-test-image)), and the rows above change
+only then:
+
+- on Yocto on Jetson, and on NixOS through path (i) of
+  [Q10](#jetson-test-image), the capsule belongs to `os`: the root slot is
+  written at install (step 4); the switch (step 5) stages the capsule on
+  the ESP, and UEFI writes it to the inactive chain during the reboot,
+  which switches chain and slot together. Rolling the slot back brings the
+  old chain back with it, until the next update overwrites that chain. A
+  capsule applied after commit, as step 9 does, would write the old slot's
+  chain and boot the new bootloader on the old root. An update without a
+  capsule boots whatever firmware the other chain holds, so the applier
+  tracks each chain's version;
+- L4TLauncher stays outside the pair: both chains load it from the one
+  ESP, which neither the slot nor the capsule changes;
+- what is one-way is the **version ratchet**: each successful capsule raises
+  the lowest firmware version the box accepts, and only a reflash lowers it;
+- `forward-only` stays for MCU flashes, and for capsules only where the
+  bootloader is not tied to a slot: Ubuntu with apt, and NixOS booting
+  through systemd-boot (path ii of [Q10](#jetson-test-image)).
 
 Every step is idempotent and resumable: a power cut while fetching resumes,
 while installing rewrites the inactive slot, and during the switch the
@@ -236,7 +266,9 @@ A new slot is marked good only when the robot is healthy, not merely booted:
 - **The confirmation window** is 10 minutes by default, configurable per
   fleet. If it ends without a pass, the updater boots the old slot. On Jetson
   the decision is wired into L4T's rootfs validation service, so NVIDIA's own
-  boot-failure fallback respects it.
+  boot-failure fallback respects it: on the Yocto image `fjarr-boot-verify`
+  takes the place of meta-tegra's `nv_update_verifier`
+  ([below](#jetson-test-image)).
 
 ### Persistent data {#data}
 
@@ -290,6 +322,18 @@ and from customers.
   so by default a person on site does it.
 - `forward-only` components document their physical recovery path in their
   recipe (the ZED Box Mini's USB recovery mode, a technician visit).
+- **The ZED Box Mini's recovery path** is USB recovery mode (RCM) from a
+  host on its recovery port, which then reflashes the box: a technician's
+  laptop in the field, the lab's mini-PC in slice 8.0. Linux on the box
+  enters RCM by software, from a slot or the recovery-partition rescue, and
+  in the lab also from the network rescue
+  ([the Jetson test image](#jetson-test-image)). The recovery button is
+  needed only when no Linux comes up to do that: a bootloader chain that
+  hangs before UEFI, or a kernel that hangs before userspace
+  ([docs/18](18-open-questions.md) #48), neither of which a power cut
+  cures, since the cold boot starts the same chain and slot again; and,
+  without the lab's network rescue, firmware that finds nothing on the NVMe
+  to boot.
 - The update hold, the not-ready-to-move state and the refusal of
   `safety_relevant` components get regression tests like every other safety
   behaviour ([docs/15](15-testing-strategy.md#safety-behaviors)).
@@ -479,8 +523,18 @@ peripherals, reporting. The applier installs only from the local cache, never
 streaming over the network. Which engine backs which recipe is settled by the
 measurements of slice 8.0. The starting points are:
 
-- **Yocto on Jetson:** SWUpdate on meta-tegra's A/B layout;
-- **NixOS:** the system's generations inside an A/B image layout;
+- **Yocto on Jetson:** SWUpdate on meta-tegra's A/B layout, run with no
+  bootloader backend (`-B none`), as on x86, where the applier writes EFI
+  Boot Guard's environments itself. The boot state stays NVIDIA's:
+  L4TLauncher's retry counter and the boot-chain variables, read and
+  written through `nvbootctrl` and the UEFI variables. Fjarr adds a
+  trial-boot counter on `/data` and a boot-verify unit,
+  `fjarr-boot-verify`, which replaces meta-tegra's `nv_update_verifier`
+  ([the Jetson test image](#jetson-test-image));
+- **NixOS:** the system's generations inside an A/B image layout; on the
+  ZED Box Mini, 8.0 tries NVIDIA's root A/B with extlinux in each slot
+  first, sharing the Yocto recipe's applier (Q10,
+  [the Jetson test image](#jetson-test-image));
 - **Ubuntu A/B on x86:** SWUpdate with EFI Boot Guard, the same engine as the
   Yocto recipe, chosen in 8.0 ([ADR-0040](adr/0040-x86-ubuntu-ab-swupdate-efibootguard.md),
   superseding systemd-sysupdate in [ADR-0039](adr/0039-x86-ubuntu-ab-sysupdate-systemd-boot.md));
@@ -554,7 +608,7 @@ bundled, not discovered on the robot.
 
 | Recipe | Machine | OS and slots | Rollback | Delta |
 |---|---|---|---|---|
-| Yocto | ZED Box Mini | meta-tegra + meta-fjarr, A/B rootfs on NVMe; the bootloader capsule a separate `firmware` component | A/B atomic; capsule forward-only | chunks |
+| Yocto | ZED Box Mini | meta-tegra + meta-fjarr, A/B rootfs on NVMe; the bootloader chain (QSPI) expected to switch with the slot, its capsule with it (under review until E2, [above](#updater)) | A/B atomic; the QSPI bootloader expected to roll back with the slot, L4TLauncher in the shared ESP not (E2); the version ratchet one-way | chunks |
 | NixOS | ZED Box Mini | jetpack-nixos flake + the Fjarr module, A/B image layout | A/B atomic | chunks of store paths |
 | Yocto | second x86 mini-PC | the same layer, UEFI | A/B atomic | chunks |
 | NixOS | second x86 mini-PC | the same flake, UEFI | A/B atomic | chunks of store paths |
@@ -777,6 +831,259 @@ userspace is the failure an update system exists for, and only the loader's
 watchdog recovers from it without a person. One try instead of three costs a
 retried download when power fails in the first seconds of a new version.
 
+### The Jetson test image in slice 8.0 {#jetson-test-image}
+
+Slice 8.0 tests the Jetson recipes' layout on the lab's ZED Box Mini before
+either recipe is built, as it did [on x86](#x86-test-image). The Jetson half
+started on 2026-10-17, after research (2026-10-16/17) into meta-tegra,
+tegra-demo-distro, jetpack-nixos and NVIDIA's edk2-nvidia source. What it
+found about NVIDIA's A/B scheme is expected from that source and NVIDIA's
+documentation, not measured; the phases below measure it. This section
+states what the test image is and the rules it is tested under; the
+procedures belong in `spikes/ota-jetson/README.md`, not yet written.
+
+**The lab box** is a Stereolabs ZED Box Mini with an Orin NX 16 GB module
+and an NVMe disk, as delivered: L4T R36.4.4 with Stereolabs'
+`stereolabs-zedbox-mini` 1.3.1 package, one root partition and A/B kernel
+partitions. It is powered through its own Shelly plug (192.168.10.202), and
+a USB cable from its recovery port to the lab's mini-PC, the M3 runner, lets
+the mini-PC find it in USB recovery mode (RCM) and flash it. No serial
+console is connected.
+
+**Decided by Erik (2026-10-17)**, accepting the research's recommendations:
+
+| # | Decision |
+|---|---|
+| Q1 | L4T **36.5.2** for both Jetson recipes: the release meta-tegra `scarthgap` and jetpack-nixos `master` are on, with Stereolabs' 1.4.4 driver package for it. Stereolabs publishes no flash script for 36.5.2, so its board package is Fjarr's port |
+| Q2 | **Yocto first**; NixOS then reuses its board package and applier |
+| Q3 | The factory image stays **restorable**: a full backup and one proven restore before the first Fjarr flash |
+| Q4 | A **relay across the recovery button**, driven by the mini-PC, **or a person on site** for the gated steps: writes to the bootloader flash (QSPI), the first capsule, the hung-kernel and capsule-failure tests, and power cuts during a QSPI write (rule L4). Everything else runs unattended behind the network rescue and the dead-man |
+| Q5 | `RootfsRetryCountMax` **3**, NVIDIA's default, plus the applier's **one-try counter** for trial boots. The value lives in the firmware and changes only by capsule or reflash |
+| Q6 | The mini-PC **may be changed** for flashing and the network rescue (an NFS server, NVIDIA's udev rules, Docker, IPv6, dnsmasq for the box's MAC), each change by a script that can undo it, never 00:00–06:00 |
+| Q7 | Yocto builds on Erik's workstation, with `rm_work`, and the shared-state cache on another disk if one is free |
+| Q8 | **Early-hang protection is a gate for 8.4**, measured in 8.0 ([docs/18](18-open-questions.md) #48) |
+| Q9 | The capsule test makes a **real version change**: a 36.4.4 build, then a capsule to 36.5.2 |
+| Q10 | NixOS boots first through NVIDIA's root A/B with extlinux in each slot, sharing the applier (path i); systemd-boot with a UKI per slot (path ii) comes after |
+| Q11 | An ADR on capsule signing and the version ratchet follows the capsule phase (E); until then the spike signs capsules with meta-tegra's test keys |
+
+**The image**, built off the box in phase A:
+
+- **Built with kas** from pinned layers: poky, meta-oe, meta-tegra
+  `scarthgap` (L4T 36.5.2) and meta-swupdate. Its machine,
+  `zedbox-mini-orin-nx16`, builds on meta-tegra's `p3509-a02-p3767-0000`,
+  the board configuration Stereolabs' flash script uses, in the module's
+  non-super power mode as Stereolabs ships it.
+- **SWUpdate** without a bootloader backend, Lua or web server, accepting
+  only a signed package that writes the slot partitions and never the ESP.
+  meta-tegra's capsule recipe builds the capsule beside the image.
+- **A trial that cannot come up resets warm**, the reset L4TLauncher
+  counts: `panic=10`, `rootflags=x-systemd.device-timeout=90s`, an initrd
+  whose emergency mode reboots and whose systemd opens the watchdog (30 s),
+  and a deadline on `boot-complete.target`, as on x86.
+- **The kernel** carries two upstream fixes to the Tegra watchdog driver
+  (`timer-tegra186`), neither in NVIDIA's 36.5.2 tree: the self-ping fix
+  (b42d781e0350) and a kernel watchdog armed at probe and kept alive from
+  the driver's interrupt (46fb093b87a0). A second slot image keeps the
+  unpatched kernel, so D2b measures both.
+- `/boot/efi` is an automount, as `/efi` is on x86.
+
+**The layout** is NVIDIA's NVMe A/B table (`flash_l4t_t234_nvme_rootfs_ab.xml`
+in L4T's `tools/kernel_flash/`, byte-identical in L4T 36.4.4 and 36.5.2, and
+the file meta-tegra uses for its redundant layout) with `/data` added. Phase
+A1 read the sizes from it and, in edk2-nvidia's source, which partitions
+each bootloader chain uses (2026-10-17); D2 confirms them on the box:
+
+| Partitions | What they hold | Size |
+|---|---|---|
+| `APP`, `APP_b` | the two root slots: L4TLauncher takes `APP` on chain A and `APP_b` on chain B. Each carries its kernel, initrd and device tree in `/boot`, named by `/boot/extlinux/extlinux.conf`, which L4TLauncher reads, so they switch with the slot. Unlike the stock box's single `APP`, neither grows to fill the disk | 16 GiB each, set by the image as on x86 (NVIDIA's default is 27 GiB, meta-tegra's 27.5 GiB) |
+| `A_kernel`, `A_kernel-dtb`, `B_kernel`, `B_kernel-dtb` | each chain's kernel and device tree, which L4TLauncher boots when the slot's extlinux configuration is missing or what it names cannot be loaded; written with the slot | 128 MiB and 768 KiB each |
+| `recovery`, `recovery-dtb` | the recovery-partition rescue (below), one pair for both chains | 80 MiB, 512 KiB |
+| `recovery_alt`, `recovery-dtb_alt` | unused: copies for NVIDIA's image-based OTA, which L4TLauncher never boots; empty after a flash | 80 MiB, 512 KiB |
+| `esp` | the only partition of the EFI system type, used by both chains: UEFI loads L4TLauncher (`BOOTAA64.efi`) from it whatever the chain, and takes a staged capsule only from a partition of that type. It sits outside the A/B pair | 64 MiB |
+| `esp_alt` | unused: the fail-safe copy NVIDIA's image-based OTA keeps beside `esp`; no partition type, empty after a flash, used by neither chain | 64 MiB |
+| `A_reserved_on_user`, `B_reserved_on_user`, `reserved` | NVIDIA's reserve, left unused | 31.6 MiB each, 479.5 MiB |
+| `UDA` | NVIDIA's user-data partition, too small for `/data`, left unused | 400 MiB |
+| `/data` | new: the machine state, the update cache and the run state, as on x86 | the rest of the disk, about 205 GiB on the lab box's 238.5 GiB NVMe |
+
+**One L4TLauncher serves both chains.** It sits in `esp`, outside the A/B
+pair, and only a flash writes it (L5), so it must start the kernel on
+whatever firmware each chain holds. By edk2-nvidia's source, 36.4.4's
+L4TLauncher also runs on 36.5.2 firmware, while 36.5.2's drops the
+firmware's own kernel arguments on 36.4.4 firmware. E4 runs the first
+pairing: after its reflash to a 36.4.4 build, 36.4.4's L4TLauncher starts
+the chain its capsule moves to 36.5.2.
+
+**The boot state stays NVIDIA's**, as expected from edk2-nvidia's source
+until D2 measures it:
+
+- **L4TLauncher's retry counter.** A PMC scratch register holds a count per
+  root slot. Each boot through L4TLauncher takes one from the current slot;
+  at zero it marks the slot unbootable (`RootfsStatusSlotA` or `B`,
+  non-volatile UEFI variables) and switches to the other slot, and with it
+  to the other bootloader chain; with both slots unbootable it boots
+  `recovery`. A cold boot sets the register up afresh, so a power cut gives
+  a slot its full count back: only warm resets (a panic, a reboot and, by
+  NVIDIA's documentation, the watchdog) count down. NVIDIA's kernel driver
+  arms the watchdog's "system POR" reset, so D2b measures which kind of
+  reset it is.
+- `RootfsRetryCountMax` is **3** (Q5). The applier adds a **one-try trial
+  counter** on `/data`: the second boot of a trial, warm or cold, rolls it
+  back, which a power cut during the trial would otherwise not do.
+- **The boot-chain variables** (`BootChainFwCurrent`, `BootChainFwNext`,
+  `BootChainFwStatus`, `BootChainFwPrevious`, `BootChainFwResetCount`)
+  drive the switch between the two QSPI chains. A stale status or next
+  value cancels a capsule, a set `BootNext` makes a chain switch fail, and
+  the reset count stops chain switches at 3; the applier checks all three
+  before it stages anything.
+- **`nvbootctrl`**, NVIDIA's closed tool, reads and writes this state, and
+  `nvbootctrl verify` marks a boot good. **`fjarr-boot-verify` replaces
+  meta-tegra's `nv_update_verifier`**: it verifies every boot that is not a
+  trial, and only `mark-good` verifies a trial, after health. Without it, a
+  committed slot would use up its retries in three warm reboots.
+
+**Flashing from the mini-PC.** Linux on the box enters RCM by software
+(`reboot forced-recovery`, which meta-tegra ships as `reboot-recovery`),
+and a power cycle through the plug leaves it, with no button: seen once on
+the stock box on 2026-10-16. meta-tegra's troubleshooting guide calls the
+button the safer way in, citing an NVIDIA forum report of MB1 crashing on a
+software reboot into RCM from chain B; L3 makes every Fjarr Linux, on
+either chain, pass its own RCM round trip before anything relies on it. The
+mini-PC then flashes the box over USB: meta-tegra's `initrd-flash` runs
+natively, and NVIDIA's `l4t_initrd_flash.sh`, with its backup and restore
+tools, runs in an Ubuntu 22.04 container, a host NVIDIA supports. NVIDIA's
+known issue 4695663 (L4T 36.4.4: initrd flashing can fail on host USB ports
+of 10 Gbps or more; the workaround is a hub or a slower port) calls for a
+USB 2.0 hub between the two, unless B finds a port on the mini-PC slower
+than 10 Gbps. The lab has no hub yet (2026-10-17; Erik is getting one), so
+flashing waits for it. Every new firmware build first boots from RAM over
+RCM, writing nothing (D0), before it is written to the QSPI.
+
+**Three rescue layers**, each able to end in RCM, from which the mini-PC
+can always reflash the box:
+
+1. **The recovery-partition rescue.** Fjarr's own small system in
+   `recovery`: an Android boot image with the slot's kernel and an
+   initramfs carrying sshd with the lab keys, DHCP, the disk tools and
+   `reboot-recovery`, with its device tree in `recovery-dtb`. L4TLauncher
+   boots it when both slots are unbootable, and the lab reaches it once
+   through a `BootNext` entry that starts L4TLauncher with
+   `bootmode=recovery`. meta-tegra leaves the partition empty, so the
+   recipe fills it.
+2. **The network rescue.** When the firmware runs but nothing on the NVMe
+   boots, UEFI tries its network boot entries and then waits at its setup
+   screen. The mini-PC answers with proxy-DHCP and PXE and HTTP boot, only
+   to the box's MAC, and serves a kernel with a built-in initramfs carrying
+   the same tools. It serves whenever anything writes the NVMe, the ESP or
+   the UEFI variables.
+3. **RCM**, entered by software from either rescue or from a slot. The
+   recovery button is needed only when none of them comes up: a bootloader
+   chain that hangs before UEFI, or a trial kernel that hangs before
+   userspace while no watchdog covers it (D4, [docs/18](18-open-questions.md)
+   #48; [Safety](#safety)).
+
+**The lab dead-man.** Every Fjarr Linux on the lab box, each slot and both
+rescues, enters RCM when no operator contact has reached it for 20 minutes
+(the lab scripts touch a file over ssh). A power cut is a cold boot that
+resets the retry counter, so without the dead-man a slot that boots but
+cannot be reached would be booted again forever. A trial also keeps its
+confirmation deadline, a warm reboot, so it falls back first.
+
+**The board package**, shared by both recipes:
+
+- **Fjarr's own bootloader files:** a patch carrying Stereolabs' MB1
+  pinmux and GPIO changes to NVIDIA's two files for them, which are BSD-3,
+  and an MB2 configuration of Fjarr's own without the carrier EEPROM read
+  (the carrier has none, and with NVIDIA's default MB2 stops before UEFI).
+  NVIDIA's MB2 file states no licence and includes NVIDIA's proprietary
+  common file, so Fjarr's short file includes that common file and sets
+  only the EEPROM block, instead of patching NVIDIA's. NVIDIA's three files
+  are byte-identical in L4T 36.4.4 and 36.5.2, so Stereolabs' changes carry
+  over unchanged ([docs/18](18-open-questions.md) #45). Every reflash and
+  every capsule carries them.
+- **Fjarr's own carrier device tree** (the USB port mapping, a micro-USB
+  connector, a pulse-per-second input, a suspend key), applied to NVIDIA's
+  36.5.2 device tree, in the slot, so it switches with it. Stereolabs'
+  36.4.4 kernel device trees are never copied over NVIDIA's: they would
+  undo NVIDIA's 36.5.2 changes.
+- **Stereolabs' camera package**, pinned by SHA-256 and fetched at build
+  time; its maintainer scripts never run ([docs/18](18-open-questions.md)
+  #45). Its kernel modules have to be built from source for Fjarr's
+  kernels, so the cameras wait for that source (#47); 8.0's OTA tests do
+  not need them.
+
+**Lab safety rules**, in every phase:
+
+| # | Rule |
+|---|---|
+| L1 | One lock on the mini-PC for anything that touches the box, its plug or RCM; nothing runs 00:00–06:00, the nightly window |
+| L2 | Before any write to the NVMe, the ESP or the UEFI variables: the plug answers, the box answers on its MAC (scripts find it by MAC, not by address), the network rescue is serving, and the latest backup has a verified checksum list |
+| L3 | Every Fjarr Linux can reach RCM: it ships `reboot-recovery`, opens the watchdog from its initrd, runs the dead-man, and passes one RCM round trip before anything relies on it |
+| L4 | No QSPI write of a firmware build that has not booted from RAM over RCM first. No QSPI write at all without Q4, except a capsule byte-identical to firmware this box has already booted from QSPI, once the first capsule passed under Q4 |
+| L5 | `BootNext` is never left set while a capsule or chain switch is pending, and `BOOTAA64.efi` is never written |
+| L6 | At most two warm resets in a row without a verify, on any committed slot |
+| L7 | Anything unexpected: stop, record the state if the box answers, retry nothing blindly |
+| L8 | The plug powers on by default after its own outage, and has no timers |
+
+**The phases**, in order:
+
+| Phase | What | Writes |
+|---|---|---|
+| A | Off the box: the BSPs and their layout (A1), the board package, the image, the capsule's contents, both rescues, the applier against simulated UEFI variables, the flash container, the restore tools | nothing |
+| B | On the stock box: a read-only state dump and online backup, five RCM round trips, then one-shot boots through `BootNext` (the network rescue, the stock recovery, Fjarr's rescue in `recovery`) and the watchdog tests last | `recovery` (backed up), boot entries, a safety script for the stock recovery |
+| C | A full backup with NVIDIA's tools, and one proven restore (Q3) | NVMe; QSPI only with Q4 |
+| D | Fjarr's firmware booted from RAM (D0), the first Fjarr flash (D1), NVIDIA's A/B semantics (D2), the watchdog on a committed slot (D2b), the applier's rehearsal (D3), a hung trial kernel (D4, Q4) | NVMe, QSPI |
+| E | Bootloader capsules: as the slot switch (E1, Q4), rolled back with the slot (E2), refused when unsafe (E3), a real version change from 36.4.4 (E4, Q9, Q4), a broken chain (E5, Q4) | QSPI |
+| F | Power cuts through the plug, 20 per group: during install (8.0's gate), `set-next` with and without a capsule, the trial and `mark-good`; during a capsule's write only with Q4 | NVMe, ESP; QSPI only with Q4 |
+| G | NixOS on 36.5.2: path (i) from a Yocto slot, its firmware, the applier and the install cuts | NVMe, QSPI |
+
+**NVIDIA's restore tool** (`tools/backup_restore/`, the same QSPI handling
+in L4T 36.4.4 and 36.5.2) discards and rewrites the whole NVMe, and erases
+and rewrites the whole QSPI, the UEFI variables with it, whenever the
+backup's index lists the QSPI. Its comment filter matches nothing, so a
+commented-out line still counts: C's restore without Q4 runs from an index
+with that line deleted.
+
+**Measured**, filled in as the phases run:
+
+- RCM entered by software and left by a power cycle, five times of five
+  (B): pending.
+- `BootNext` honoured and consumed; the network rescue by PXE or HTTP boot
+  (B): pending.
+- Whether the watchdog fires once userspace stops feeding it, or NVIDIA's
+  driver keeps feeding it itself, and what a panic does to the retry count
+  (B): pending.
+- One restore of the full backup (C): pending.
+- Whether the factory QSPI carries NVIDIA's QSPI fix (`trimmer2-val`),
+  read from its dump (B, C): pending.
+- Fjarr's firmware from RAM: MB2 past its EEPROM step, and the flashing
+  gadget with Fjarr's device tree (D0): pending.
+- The first flash: both slots and the rescue written, RCM reached from the
+  Fjarr image (D1): pending.
+- NVIDIA's semantics: retries on warm reboots without a verify, what
+  `nvbootctrl verify` writes, the count after a cold boot, whether a
+  fallback switches the chain, `BootChainFwResetCount` after a successful
+  switch, and that both chains take L4TLauncher and the capsule from `esp`,
+  as A1 read in edk2-nvidia's source (D2): pending.
+- A watchdog reset on a committed slot, with and without the kernel fixes,
+  and whether it counts down the retry counter like a warm reboot or
+  restores it like a power cut (D2b): pending.
+- Every rehearsal case from a fresh flash (D3): pending.
+- A hung trial kernel recovering by itself, or the gap recorded (D4,
+  [docs/18](18-open-questions.md) #48): pending.
+- The capsule as the slot switch, rolled back with the slot: the hypothesis
+  [above](#updater) (E1, E2): pending.
+- The version ratchet after a reflash, and a real version change with its
+  apply time, with 36.4.4's L4TLauncher left in the shared ESP (E4):
+  pending.
+- Power cuts during install: 20 of 20 back on the old slot, 8.0's gate for
+  the Yocto image (F): pending.
+- NixOS through L4TLauncher from a slot, with rollback and RCM (G): pending.
+- Flash, install and capsule times: pending.
+
+**After measuring**, two ADRs are planned: one on the Jetson boot path and
+applier (decided by D and G), and one on the capsule ratchet and signing
+keys (decided by E, Q11).
+
 ## Open core {#open-core}
 
 Open (AGPL): the release format and `fjarr bundle`, the board packages and
@@ -816,5 +1123,8 @@ reference ones.
 ## Open questions
 
 [docs/18](18-open-questions.md) #45: whether the ZED Box Mini's board files
-may be packaged openly, settled by slice 8.0. #43 and #44 were closed on
-2026-10-13 ([Recipes, not images](#building)).
+may be packaged openly, settled by slice 8.0. #47: the source of
+Stereolabs' camera modules, which Fjarr's Jetson kernels must build. #48:
+protection against a trial kernel that hangs early on Jetson, a gate for
+8.4 (Q8). #43 and #44 were closed on 2026-10-13
+([Recipes, not images](#building)).

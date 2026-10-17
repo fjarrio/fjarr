@@ -1118,7 +1118,7 @@ Stereolabs ZED Box Mini (Jetson Orin NX/Nano, NVMe) and the x86 mini-PC.
 | **8.2 The updater** | `fjarr-update` and its state machine, the run state on `/data`, run logs (steps, statuses, streamed output, the local journal and backfill after a reboot; the messages in docs/08), install from a local bundle or USB, the apt applier for today's Ubuntu robots | a release installs on an existing Ubuntu robot and its run log reads step by step, live and after a reboot; a release from USB installs offline and its log uploads on reconnect |
 | **8.3 Transport** | HTTPS chunk fetch with resume, the budget per interval in the site's time zone, the rate cap from the agent's bandwidth estimate, space checks, cache cleanup | on a link shaped to 5 Mb/s with drops every few minutes, a 1 GB release arrives across 3 days within a 400 MB daily budget, while a 2 Mb/s video session keeps ≥ 90 % of its bitrate with no freeze over 1 s |
 | **8.3b Precomputed deltas** | for `app` components (container images, binaries, packages), the server computes file-by-file diffs (bsdiff or `zstd --patch-from` per changed file, chosen per file) from each source release still in the fleet; the robot fetches the diffs matching its release and falls back to chunks per file; the file list travels as a diff against the robot's own; download prediction counts diffs. OS slots and models stay with chunks ([8.0's measurements](32-fleet-ota.md#measured-apps)) | an application container's patch release fetches about what 8.0 measured (1.5 MB instead of 21 MB by `docker pull` for the Caddy update), the robot reconstructs the identical content, and the bytes fetched match the prediction |
-| **8.4 Yocto and NixOS on the ZED Box Mini** | one ZED Box Mini board package; meta-fjarr and the jetpack-nixos flake built on it, side by side; their appliers; health (reachability, probes, the confirmation window); `fjarr provision` | nightly in the lab, for both: an update, a failed health check that rolls back, a power cut mid-write that recovers; neither is done until both pass |
+| **8.4 Yocto and NixOS on the ZED Box Mini** | one ZED Box Mini board package; meta-fjarr and the jetpack-nixos flake built on it, side by side; their appliers; health (reachability, probes, the confirmation window); `fjarr provision` | nightly in the lab, for both: an update, a failed health check that rolls back, a power cut mid-write that recovers; a trial kernel that hangs before userspace recovers without a person (Erik, 2026-10-17: [Q8](32-fleet-ota.md#jetson-test-image), [#48](18-open-questions.md)); neither is done until both pass |
 | **8.5a Ubuntu A/B on x86** | the mini-PC board package, the x86 layout, the Ubuntu A/B image and its applier: SWUpdate and EFI Boot Guard ([ADR-0040](adr/0040-x86-ubuntu-ab-swupdate-efibootguard.md)), from 8.0's `spikes/ota-x86/image-ebg`, with a trimmed SWUpdate build and the loader pinned until Ubuntu ships EBG 0.20 or later | the same nightly tests on the second mini-PC; the image carries a GNOME desktop that the M3 desktop tests pass on |
 | **8.5b Yocto and NixOS on x86** | the Yocto layer and the NixOS flake on UEFI x86 | the same nightly tests for both |
 | **8.6 Readiness** | the local API (facts, holds, prepare actions, probes, on-site confirmation), the conditions and their reasons, the update hold on `motion`, not-ready-to-move, hook phases, `/data` snapshots, ceilings and deadlines | an update waits for the charger and says why; prepare times out cleanly; `take-control` is refused during an install; a rollback restores migrated data |
@@ -1134,7 +1134,7 @@ machine is powered through a network-controlled socket with a local API
 its draw read back to confirm the cut) and set in its firmware to power on
 when power returns, so power cuts are tested unattended.
 
-**8.0 status (2026-10-14).** Started on x86, off the machine: the Ubuntu A/B
+**8.0 status (2026-10-17).** Started on x86, off the machine: the Ubuntu A/B
 test image, its applier, the rescue system and the hands-off reflash pass every
 case in QEMU except a real power cut, and two builds of one release are
 byte-identical ([docs/32](32-fleet-ota.md#x86-test-image)). The first
@@ -1158,8 +1158,21 @@ scoped to file-by-file diffs for `app` components. SWUpdate with EFI Boot Guard 
 tested the same way ([docs/32](32-fleet-ota.md#x86-swupdate-ebg)): one try instead of three, but
 the only design that recovers by itself from a kernel that hangs early. Erik chose it for one
 engine across the Jetson and x86 recipes
-([ADR-0040](adr/0040-x86-ubuntu-ab-swupdate-efibootguard.md), superseding ADR-0039). On the ZED Box Mini, everything Jetson. #45 is read: Stereolabs' board files are fetched at build time, and
-Erik asks Stereolabs about the rest.
+([ADR-0040](adr/0040-x86-ubuntu-ab-swupdate-efibootguard.md), superseding ADR-0039).
+
+The Jetson half, on the ZED Box Mini, started on 2026-10-17
+([docs/32](32-fleet-ota.md#jetson-test-image)). Erik accepted decisions
+Q1–Q11 that day: L4T 36.5.2 for both Jetson recipes, Yocto first, the
+factory image restorable, early-hang protection a gate for 8.4 (#48), and
+a relay or a person on site for the steps that write the bootloader flash.
+Phase A, off the box, has started: A1 has read both BSPs and the A/B
+layout, and Stereolabs' bootloader changes carry over to 36.5.2 unchanged.
+The read-only checks that open phase B come next; flashing waits for a USB
+2.0 hub, which Erik is getting. #45 is read: Stereolabs' driver package is
+fetched at build time, pinned to 1.4.4 for 36.5.2; the carrier's bootloader
+and device-tree changes are Fjarr's own; and Erik asked Stereolabs about
+the rest on 2026-10-17, including the modules' source the cameras need on
+Fjarr's kernels (#47).
 
 **Gate:** [docs/06 OTA criteria](06-capabilities.md#fjarrota--fleet-ota-updates-m8).
 On every recipe (Yocto and NixOS on the ZED Box Mini; Yocto, NixOS and Ubuntu
