@@ -35,5 +35,24 @@
     "**/node_modules": true,
     "build": true,
     "signaling/target": true
+  },
+  // Build trees with hundreds of thousands of files (a spike's Yocto build is over a million):
+  // watching them used up the inotify limit and made VS Code and the laptop unresponsive.
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "build/**": true,
+    "signaling/target/**": true,
+    "spikes/*/out/**": true,
+    "spikes/*/.lab/**": true,
+    "web/e2e/out/**": true,
+    "inspiration/**": true
+  },
+  "search.exclude": {
+    "build": true,
+    "signaling/target": true,
+    "spikes/*/out": true,
+    "spikes/*/.lab": true,
+    "web/e2e/out": true,
+    "inspiration": true
   }
 }
