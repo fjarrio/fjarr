@@ -1,0 +1,323 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Erik Örjehag <dev@fjarr.io>
+Date: Sat, 17 Oct 2026 11:00:00 +0200
+Subject: [PATCH] clocksource/drivers/timer-tegra186: backport the kernel watchdog
+ and the self-ping fix
+
+Backport of upstream's watchdog changes to NVIDIA's 5.15 tree (L4T 36.5.2,
+linux-jammy l4t-r36.5.2, e6b364044e43), as of torvalds/linux 46fb093b87a0:
+
+  b42d781e0350 clocksource/drivers/timer-tegra186: Fix watchdog self-pinging
+  ca57bf46e7a9 clocksource/drivers/timer-tegra186: Fix support for multiple
+               watchdog instances
+  341305ea9c89 clocksource/drivers/timer-tegra186: Correct num_wdts for
+               Tegra186 and Tegra234
+  5eb5d8eaeacf clocksource/drivers/timer-tegra186: Register all accessible
+               watchdog timers
+  46fb093b87a0 clocksource/drivers/timer-tegra186: Reserve and service a
+               kernel watchdog
+
+None of them is in NVIDIA's tree and none applies to it as is: NVIDIA's
+driver has its own version of the first and last idea. It arms WDT0 at
+probe (120 s) and pets it from the timer interrupt until userspace's first
+ping, after which userspace owns WDT0. That first ping writes an
+uninitialised local variable into WDTCR (tegra186_wdt_ping(): "value &=
+~WDTCR_LOCAL_INT_ENABLE" with "value" never read from the register), and a
+watchdog stopped by a magic close is no longer covered by the kernel.
+
+This replaces NVIDIA's version with upstream's: WDT0, the first watchdog
+the OS may access, is reserved for the kernel, armed at probe with 120 s and
+petted from its interrupt for as long as the kernel services interrupts; it
+is not exposed to userspace. The other accessible watchdog (WDT1; WDT2
+belongs to the audio processing engine) is registered for userspace without
+any interrupt petting, so a hung userspace is reset. NVIDIA's 5.15-specific
+code is kept: the int-returning remove callback, the noirq PM ops and its
+timeleft calculation.
+
+spec: docs/32-fleet-ota.md#jetson-test-image (D2b measures a watchdog reset
+with and without this patch)
+
+The upstream changes are the work of their authors (Pohsun Su:
+b42d781e0350; Kartik Rajput: the other four), and timer-tegra186.c is
+Copyright (c) 2019-2020 NVIDIA Corporation. This patch is a derivative of
+that file and carries its licence:
+
+SPDX-License-Identifier: GPL-2.0-only
+
+Upstream-Status: Backport [torvalds/linux b42d781e0350, ca57bf46e7a9, 341305ea9c89, 5eb5d8eaeacf, 46fb093b87a0; adapted]
+---
+--- a/drivers/clocksource/timer-tegra186.c
++++ b/drivers/clocksource/timer-tegra186.c
+@@ -57,7 +57,14 @@
+ #define WDTUR 0x00c
+ #define  WDTUR_UNLOCK_PATTERN 0x0000c45a
+ 
+-#define WDT_DEFAULT_TIMEOUT 120
++#define TEGRA186_KERNEL_WDT_TIMEOUT 120
++
++/* WDT security configuration registers */
++#define WDTSCR(x)		(0xf02c + (x) * 4)
++#define  WDTSCR_SEC_WEN		BIT(28)
++#define  WDTSCR_SEC_REN		BIT(27)
++#define  WDTSCR_SEC_G1W		BIT(9)
++#define  WDTSCR_SEC_G1R		BIT(1)
+ 
+ struct tegra186_timer_soc {
+ 	unsigned int num_timers;
+@@ -77,7 +84,7 @@
+ 	void __iomem *regs;
+ 	unsigned int index;
+ 	bool locked;
+-	bool irq_enabled;
++	bool is_kernel_wdt;
+ 
+ 	struct tegra186_tmr *tmr;
+ };
+@@ -92,7 +99,7 @@
+ 	struct device *dev;
+ 	void __iomem *regs;
+ 
+-	struct tegra186_wdt *wdt;
++	struct tegra186_wdt **wdts;
+ 	struct clocksource usec;
+ 	struct clocksource tsc;
+ 	struct clocksource osc;
+@@ -152,7 +159,8 @@
+ 	u32 value;
+ 
+ 	/* unmask hardware IRQ, this may have been lost across powergate */
+-	value = TKEIE_WDT_MASK(wdt->index, 1);
++	value = readl(tegra->regs + TKEIE(wdt->tmr->hwirq));
++	value |= TKEIE_WDT_MASK(wdt->index, 1);
+ 	writel(value, tegra->regs + TKEIE(wdt->tmr->hwirq));
+ 
+ 	/* clear interrupt */
+@@ -177,8 +185,8 @@
+ 		value &= ~WDTCR_PERIOD_MASK;
+ 		value |= WDTCR_PERIOD(1);
+ 
+-		/* enable local interrupt for WDT petting */
+-		if (wdt->irq_enabled)
++		/* enable local interrupt for kernel watchdog */
++		if (wdt->is_kernel_wdt)
+ 			value |= WDTCR_LOCAL_INT_ENABLE;
+ 
+ 		/* enable local FIQ and remote interrupt for debug dump */
+@@ -220,20 +228,21 @@
+ static int tegra186_wdt_ping(struct watchdog_device *wdd)
+ {
+ 	struct tegra186_wdt *wdt = to_tegra186_wdt(wdd);
+-	unsigned int value;
+ 
+ 	tegra186_wdt_disable(wdt);
++	tegra186_wdt_enable(wdt);
+ 
+-	/* Disable WDT interrupt once userspace takes over. */
+-	if (wdt->irq_enabled) {
+-		value &= ~WDTCR_LOCAL_INT_ENABLE;
+-		wdt_writel(wdt, value, WDTCR);
+-		wdt->irq_enabled = false;
+-	}
++	return 0;
++}
++
++static irqreturn_t tegra186_wdt_irq(int irq, void *data)
++{
++	struct tegra186_wdt *wdt = data;
+ 
++	tegra186_wdt_disable(wdt);
+ 	tegra186_wdt_enable(wdt);
+ 
+-	return 0;
++	return IRQ_HANDLED;
+ }
+ 
+ static int tegra186_wdt_set_timeout(struct watchdog_device *wdd,
+@@ -297,6 +306,23 @@
+ 	.get_timeleft = tegra186_wdt_get_timeleft,
+ };
+ 
++static bool tegra186_wdt_is_accessible(struct tegra186_timer *tegra, unsigned int index)
++{
++	u32 value;
++
++	value = readl_relaxed(tegra->regs + WDTSCR(index));
++
++	/* Check OS write access if write blocking is enabled. */
++	if ((value & WDTSCR_SEC_WEN) && !(value & WDTSCR_SEC_G1W))
++		return false;
++
++	/* Check OS read access if read blocking is enabled. */
++	if ((value & WDTSCR_SEC_REN) && !(value & WDTSCR_SEC_G1R))
++		return false;
++
++	return true;
++}
++
+ static struct tegra186_wdt *tegra186_wdt_create(struct tegra186_timer *tegra,
+ 						unsigned int index)
+ {
+@@ -320,8 +346,6 @@
+ 	if (value & WDTCR_LOCAL_INT_ENABLE)
+ 		wdt->locked = true;
+ 
+-	wdt->irq_enabled = true;
+-
+ 	source = value & WDTCR_TIMER_SOURCE_MASK;
+ 
+ 	wdt->tmr = tegra186_tmr_create(tegra, source);
+@@ -340,19 +364,6 @@
+ 		return ERR_PTR(err);
+ 	}
+ 
+-	err = devm_watchdog_register_device(tegra->dev, &wdt->base);
+-	if (err < 0) {
+-		dev_err(tegra->dev, "failed to register WDT: %d\n", err);
+-		return ERR_PTR(err);
+-	}
+-
+-	/*
+-	 * Start the watchdog to recover the system if it crashes before
+-	 * userspace initialize the WDT.
+-	 */
+-	tegra186_wdt_set_timeout(&wdt->base, WDT_DEFAULT_TIMEOUT);
+-	tegra186_wdt_start(&wdt->base);
+-
+ 	return wdt;
+ }
+ 
+@@ -429,23 +440,12 @@
+ 	return clocksource_register_hz(&tegra->usec, USEC_PER_SEC);
+ }
+ 
+-static irqreturn_t tegra186_timer_irq(int irq, void *data)
+-{
+-	struct tegra186_timer *tegra = data;
+-
+-	if (tegra->wdt->irq_enabled) {
+-		tegra186_wdt_disable(tegra->wdt);
+-		tegra186_wdt_enable(tegra->wdt);
+-	}
+-
+-	return IRQ_HANDLED;
+-}
+-
+ static int tegra186_timer_probe(struct platform_device *pdev)
+ {
++	struct tegra186_wdt *kernel_wdt = NULL;
+ 	struct device *dev = &pdev->dev;
+ 	struct tegra186_timer *tegra;
+-	unsigned int irq;
++	unsigned int irq, i;
+ 	int err;
+ 
+ 	tegra = devm_kzalloc(dev, sizeof(*tegra), GFP_KERNEL);
+@@ -466,12 +466,31 @@
+ 
+ 	irq = err;
+ 
+-	/* create a watchdog using a preconfigured timer */
+-	tegra->wdt = tegra186_wdt_create(tegra, 0);
+-	if (IS_ERR(tegra->wdt)) {
+-		err = PTR_ERR(tegra->wdt);
+-		dev_err(dev, "failed to create WDT: %d\n", err);
+-		return err;
++	tegra->wdts = devm_kcalloc(dev, tegra->soc->num_wdts, sizeof(*tegra->wdts), GFP_KERNEL);
++	if (!tegra->wdts)
++		return -ENOMEM;
++
++	for (i = 0; i < tegra->soc->num_wdts; i++) {
++		if (!tegra186_wdt_is_accessible(tegra, i)) {
++			dev_warn(dev, "WDT%u is not accessible\n", i);
++			continue;
++		}
++
++		tegra->wdts[i] = tegra186_wdt_create(tegra, i);
++		if (IS_ERR(tegra->wdts[i]))
++			return dev_err_probe(dev, PTR_ERR(tegra->wdts[i]),
++					     "failed to create WDT%u\n", i);
++
++		/* Reserve the first accessible WDT for the Kernel. */
++		if (!kernel_wdt) {
++			kernel_wdt = tegra->wdts[i];
++			kernel_wdt->is_kernel_wdt = true;
++		} else {
++			err = devm_watchdog_register_device(dev, &tegra->wdts[i]->base);
++			if (err < 0)
++				return dev_err_probe(dev, err,
++						     "failed to register WDT%u\n", i);
++		}
+ 	}
+ 
+ 	err = tegra186_timer_tsc_init(tegra);
+@@ -492,11 +511,16 @@
+ 		goto unregister_osc;
+ 	}
+ 
+-	err = devm_request_irq(dev, irq, tegra186_timer_irq, 0,
+-			       "tegra186-timer", tegra);
+-	if (err < 0) {
+-		dev_err(dev, "failed to request IRQ#%u: %d\n", irq, err);
+-		goto unregister_usec;
++	if (kernel_wdt) {
++		err = devm_request_irq(dev, irq, tegra186_wdt_irq, 0,
++				       dev_name(dev), kernel_wdt);
++		if (err < 0) {
++			dev_err(dev, "failed to request kernel WDT IRQ: %d\n", err);
++			goto unregister_usec;
++		}
++
++		tegra186_wdt_set_timeout(&kernel_wdt->base, TEGRA186_KERNEL_WDT_TIMEOUT);
++		tegra186_wdt_enable(kernel_wdt);
+ 	}
+ 
+ 	return 0;
+@@ -524,9 +548,14 @@
+ static int __maybe_unused tegra186_timer_suspend(struct device *dev)
+ {
+ 	struct tegra186_timer *tegra = dev_get_drvdata(dev);
++	unsigned int i;
++
++	for (i = 0; i < tegra->soc->num_wdts; i++) {
++		struct tegra186_wdt *wdt = tegra->wdts[i];
+ 
+-	if (watchdog_active(&tegra->wdt->base))
+-		tegra186_wdt_disable(tegra->wdt);
++		if (wdt && (wdt->is_kernel_wdt || watchdog_active(&wdt->base)))
++			tegra186_wdt_disable(wdt);
++	}
+ 
+ 	return 0;
+ }
+@@ -534,9 +563,14 @@
+ static int __maybe_unused tegra186_timer_resume(struct device *dev)
+ {
+ 	struct tegra186_timer *tegra = dev_get_drvdata(dev);
++	unsigned int i;
+ 
+-	if (watchdog_active(&tegra->wdt->base))
+-		tegra186_wdt_enable(tegra->wdt);
++	for (i = 0; i < tegra->soc->num_wdts; i++) {
++		struct tegra186_wdt *wdt = tegra->wdts[i];
++
++		if (wdt && (wdt->is_kernel_wdt || watchdog_active(&wdt->base)))
++			tegra186_wdt_enable(wdt);
++	}
+ 
+ 	return 0;
+ }
+@@ -547,12 +581,12 @@
+ 
+ static const struct tegra186_timer_soc tegra186_timer = {
+ 	.num_timers = 10,
+-	.num_wdts = 3,
++	.num_wdts = 2,
+ };
+ 
+ static const struct tegra186_timer_soc tegra234_timer = {
+ 	.num_timers = 16,
+-	.num_wdts = 3,
++	.num_wdts = 2,
+ };
+ 
+ static const struct of_device_id tegra186_timer_of_match[] = {

@@ -1,0 +1,17 @@
+# spec: docs/32-fleet-ota.md#jetson-test-image
+# Only a trial pulls boot-complete.target in (the applier's fjarr-bless.service requires it), so
+# this gate runs on trials only; fjarr-bless confirms the trial once the target is reached.
+[Unit]
+Description=Fjarr trial-boot health check (gates boot-complete.target)
+After=multi-user.target network-online.target sshd.socket fjarr-data-init.service
+Wants=network-online.target
+Before=boot-complete.target
+OnFailure=fjarr-mark-bad.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/fjarr/health-check
+
+[Install]
+RequiredBy=boot-complete.target

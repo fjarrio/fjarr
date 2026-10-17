@@ -1,0 +1,25 @@
+#!/bin/bash
+# data-format <device>: create /data's ext4 on a partition that has never had a file system.
+# spec: docs/32-fleet-ota.md#jetson-test-image
+# A flash creates the fjarr-data partition without formatting it. Anything blkid recognises
+# is left alone, and so is an ext4 whose primary superblock is damaged but whose first backup
+# (block 32768 at 4 KiB, as made here) is intact: that one wants e2fsck, never a new file system.
+set -euo pipefail
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+dev=${1:?usage: data-format <device>}
+
+rc=0
+blkid -p "$dev" >/dev/null 2>&1 || rc=$?
+case $rc in
+  0) exit 0 ;;
+  2) ;;
+  *) echo "data-format: blkid -p $dev failed ($rc); not formatting" >&2; exit 1 ;;
+esac
+
+if dumpe2fs -h -o superblock=32768 -o blocksize=4096 "$dev" >/dev/null 2>&1; then
+  echo "data-format: $dev has no readable superblock but a backup at 32768; run e2fsck -b 32768, not formatting" >&2
+  exit 1
+fi
+
+echo "data-format: creating ext4 on $dev"
+mkfs.ext4 -q -F -L fjarr-data -b 4096 -E lazy_itable_init=1 "$dev"

@@ -1,0 +1,13 @@
+# spec: docs/32-fleet-ota.md#jetson-test-image
+[Unit]
+Description=Create /data's file system on a partition that never had one
+DefaultDependencies=no
+BindsTo=dev-disk-by\x2dpartlabel-fjarr\x2ddata.device
+After=dev-disk-by\x2dpartlabel-fjarr\x2ddata.device
+Before=data.mount shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/fjarr/data-format /dev/disk/by-partlabel/fjarr-data

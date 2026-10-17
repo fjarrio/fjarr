@@ -1,0 +1,18 @@
+# spec: docs/32-fleet-ota.md#jetson-test-image
+[Unit]
+Description=Machine state on /data (SSH host keys, update staging)
+RequiresMountsFor=/data
+# Early: sshd.socket starts before sockets.target, so this cannot wait for basic.target.
+DefaultDependencies=no
+After=local-fs.target
+Before=sockets.target sshd.socket shutdown.target
+Conflicts=shutdown.target
+ConditionPathExists=!/data/ssh/ssh_host_ed25519_key
+
+[Service]
+Type=oneshot
+# The lab image carries the lab's host keys in /etc/ssh; a robot would generate its own.
+ExecStart=/usr/lib/fjarr/data-init
+
+[Install]
+WantedBy=multi-user.target

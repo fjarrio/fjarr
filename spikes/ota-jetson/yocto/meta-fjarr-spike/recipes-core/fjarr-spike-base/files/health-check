@@ -1,0 +1,32 @@
+#!/bin/bash
+# The 8.0 trial-boot gate (fjarr-health.service): /data mounted, a default route, sshd
+# listening. Files in /data/fjarr-test fail it, crash the kernel or hold the trial open on
+# purpose, for the rehearsal and the power cuts, as on x86.
+# spec: docs/32-fleet-ota.md#jetson-test-image
+set -euo pipefail
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+t=/data/fjarr-test
+
+# A crash on the trial boot: the warm reset is the trial's second boot, which rolls back.
+if [ -e "$t/panic" ]; then
+  rm -f "$t/panic"
+  sync
+  echo c > /proc/sysrq-trigger
+fi
+# Holds the trial open, for power cuts aimed at the confirmation.
+while [ -e "$t/hold-health" ]; do sleep 1; done
+if [ -e "$t/fail-health" ]; then
+  echo "fail-health present: failing on purpose"
+  exit 1
+fi
+
+findmnt -n /data >/dev/null || { echo "/data not mounted"; exit 1; }
+for _ in $(seq 1 60); do
+  [ -n "$(ip -4 route show default)" ] && break
+  sleep 2
+done
+[ -n "$(ip -4 route show default)" ] || { echo "no default route"; exit 1; }
+systemctl is-active -q sshd.socket || { echo "sshd not listening"; exit 1; }
+# shellcheck source=/dev/null
+. /etc/os-release
+echo "healthy: $IMAGE_ID $IMAGE_VERSION"

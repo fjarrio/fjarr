@@ -1,0 +1,15 @@
+#!/bin/bash
+# data-init: the directories and SSH host keys /data holds, made on its first mount.
+# spec: docs/32-fleet-ota.md#jetson-test-image
+set -euo pipefail
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+install -d -m 0755 /data/ssh /data/fjarr-update /data/fjarr-update/stage /data/fjarr-test
+if [ -f /etc/ssh/ssh_host_ed25519_key ]; then
+  cp -a /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub /data/ssh/
+else
+  for t in ed25519 ecdsa rsa; do
+    ssh-keygen -q -N "" -t "$t" -f "/data/ssh/ssh_host_${t}_key"
+  done
+fi
+sync -f /data

@@ -1,0 +1,7 @@
+# spec: docs/32-fleet-ota.md#jetson-test-image
+[Unit]
+Description=This trial failed its health check: reboot; the trial's second boot rolls back
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl reboot

@@ -1,0 +1,36 @@
+/*
+ * spec: docs/32-fleet-ota.md#jetson-test-image (Q5)
+ * Pins L4TLauncher's RootfsRetryCountMax: the warm boots each root slot gets before it is
+ * marked unbootable. NVIDIA's L4TConfiguration.dts sets 3 as well; this overlay, applied after
+ * it, keeps the value explicit. It is runtime and locked, so only a reflash or a capsule
+ * changes it on the box.
+ */
+/dts-v1/;
+
+/ {
+	overlay-name = "Fjarr RootfsRetryCountMax";
+
+	fragment@0 {
+		target-path = "/";
+
+		board_config {
+			sw-modules = "uefi";
+		};
+
+		__overlay__ {
+			firmware {
+				uefi {
+					variables {
+						gNVIDIAPublicVariableGuid {
+							RootfsRetryCountMax {
+								data = [@COUNT@ 00 00 00];
+								runtime;
+								locked;
+							};
+						};
+					};
+				};
+			};
+		};
+	};
+};

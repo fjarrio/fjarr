@@ -1,0 +1,16 @@
+# spec: docs/32-fleet-ota.md#jetson-test-image
+# /data: the machine state, the update cache and the run state, outside both root slots. A
+# missing /data does not stop the boot, so the box stays reachable over ssh.
+[Unit]
+Description=Fjarr /data (machine state, update cache, run state)
+Requires=fjarr-data-format.service
+After=fjarr-data-format.service
+
+[Mount]
+What=/dev/disk/by-partlabel/fjarr-data
+Where=/data
+Type=ext4
+Options=noatime
+
+[Install]
+WantedBy=local-fs.target

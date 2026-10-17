@@ -1,0 +1,13 @@
+# spec: docs/32-fleet-ota.md#jetson-test-image
+# /dev/fjarr/root is the root slot of the chain L4TLauncher booted: APP on chain A, APP_b on
+# chain B. The initrd mounts it (root=/dev/fjarr/root), so one slot image boots from either
+# partition and never from the other chain's. It follows 60-persistent-storage.rules, which
+# imports the GPT partition name.
+ACTION=="remove", GOTO="fjarr_slot_root_end"
+SUBSYSTEM!="block", GOTO="fjarr_slot_root_end"
+ENV{DEVTYPE}!="partition", GOTO="fjarr_slot_root_end"
+ENV{ID_PART_ENTRY_SCHEME}!="gpt", GOTO="fjarr_slot_root_end"
+
+ENV{ID_PART_ENTRY_NAME}=="APP|APP_b", PROGRAM=="/usr/lib/fjarr/booted-slot-is $env{ID_PART_ENTRY_NAME}", SYMLINK+="fjarr/root"
+
+LABEL="fjarr_slot_root_end"

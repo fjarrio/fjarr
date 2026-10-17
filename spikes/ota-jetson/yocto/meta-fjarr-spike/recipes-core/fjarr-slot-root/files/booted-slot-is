@@ -1,0 +1,18 @@
+#!/bin/bash
+# booted-slot-is <partition name>: exit 0 when the partition is the root slot of the chain
+# L4TLauncher booted, 1 otherwise (61-fjarr-slot-root.rules).
+# spec: docs/32-fleet-ota.md#jetson-test-image
+# L4TLauncher stores the chain it booted in the volatile UEFI variable BootChainOsCurrent:
+# 4 attribute bytes, then the chain as a 32-bit little-endian number, 0 for A and 1 for B.
+# Chain A boots APP, chain B APP_b (edk2-nvidia's L4TLauncher, FindPartitionInfo).
+set -euo pipefail
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+var=/sys/firmware/efi/efivars/BootChainOsCurrent-781e084c-a330-417c-b678-38e696380cb9
+fields=$(hexdump -n 8 -e '2/4 " %u"' "$var")
+read -r _attributes chain <<<"$fields"
+
+case "$chain:${1:-}" in
+  0:APP | 1:APP_b) exit 0 ;;
+  *) exit 1 ;;
+esac

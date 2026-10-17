@@ -1,0 +1,15 @@
+        <!-- Fjarr (spec: docs/32-fleet-ota.md#jetson-test-image): /data, after both root
+             slots, filling the rest of the disk. Number 17 is explicit, as NVIDIA's APP and
+             APP_b numbers are. No file and no file system: the image formats it on first
+             boot (fjarr-data-format). -->
+        <partition name="fjarr-data" id="17" type="data">
+            <allocation_policy> sequential </allocation_policy>
+            <filesystem_type> basic </filesystem_type>
+            <size> 1073741824 </size>
+            <file_system_attribute> 0 </file_system_attribute>
+            <allocation_attribute> 0x808 </allocation_attribute>
+            <align_boundary> 16384 </align_boundary>
+            <percent_reserved> 0 </percent_reserved>
+            <description> Fjarr /data: machine state, update cache and run state, kept
+              across both root slots. At least 1 GiB, grown to the end of the disk. </description>
+        </partition>

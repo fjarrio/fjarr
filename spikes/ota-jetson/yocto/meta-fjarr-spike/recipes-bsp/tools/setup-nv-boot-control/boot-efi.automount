@@ -1,0 +1,15 @@
+# spec: docs/32-fleet-ota.md#jetson-test-image
+# The ESP is shared by both chains and both slots and sits outside the A/B pair: it is mounted
+# only while something uses it (staging a capsule, reading it) and unmounted 30 s later, so a
+# power cut almost always finds it clean, as /efi on x86.
+[Unit]
+Description=EFI system partition (on demand)
+ConditionPathExists=/dev/disk/by-partlabel/esp
+Before=local-fs.target
+
+[Automount]
+Where=/boot/efi
+TimeoutIdleSec=30s
+
+[Install]
+WantedBy=local-fs.target

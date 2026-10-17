@@ -1,0 +1,71 @@
+# The 8.0 Jetson test image for the lab's ZED Box Mini (Orin NX 16 GB), built with kas.
+# spec: docs/32-fleet-ota.md#jetson-test-image
+# Run it through ./build.sh, which keeps the checkout, downloads, shared state and build under
+# spikes/ota-jetson/out/yocto/ (gitignored) and fills the lab identity in .lab/ once.
+header:
+  version: 14
+
+machine: zedbox-mini-orin-nx16
+distro: fjarr-spike
+target:
+  - fjarr-spike-image
+  # The bootloader capsule beside the image, from the same tegraflash inputs.
+  - tegra-uefi-capsules
+
+# Overridden from the environment (build.sh --image-version, --unpatched-kernel).
+env:
+  FJARR_IMAGE_VERSION: "1.0"
+  FJARR_WDT_BACKPORT: "1"
+
+repos:
+  # This repository: the spike's own layer.
+  fjarr:
+    layers:
+      spikes/ota-jetson/yocto/meta-fjarr-spike:
+
+  # meta-tegra scarthgap, L4T 36.5.2 (Q1). 6d7cc8f is the branch head of 2026-09-29, the
+  # commit tegra-demo-distro's scarthgap branch builds; the other three pins are what that
+  # branch builds it with (its submodules at 874b4877, 2026-10-03), except meta-swupdate,
+  # which tegra-demo-distro leaves to the user: its scarthgap head.
+  meta-tegra:
+    url: https://github.com/OE4T/meta-tegra.git
+    branch: scarthgap
+    commit: 6d7cc8f27e8b3bda2abfa68b2fcfe8d6ecf10464
+
+  poky:
+    url: https://git.yoctoproject.org/poky
+    branch: scarthgap
+    commit: 3a3d07f625aee7b87ea1026526b756447c357652
+    layers:
+      meta:
+      meta-poky:
+
+  meta-openembedded:
+    url: https://git.openembedded.org/meta-openembedded
+    branch: scarthgap
+    commit: 0f00f8b9a21950640da8c5707343e5540133f86e
+    layers:
+      meta-oe:
+
+  meta-swupdate:
+    url: https://github.com/sbabic/meta-swupdate.git
+    branch: scarthgap
+    commit: 25c9be858d1a0d060423b630b34e3a4c19061264
+
+local_conf_header:
+  fjarr-spike-host: |
+    # Q7 builds on the workstation, a laptop shared with other runs (it froze twice under
+    # parallel load on 2026-10-17): six of everything, at the lowest CPU priority. Docker
+    # already starts containers at nice 12
+    # with idle I/O on this host, so the level only ever goes up; an I/O level would raise it.
+    BB_NUMBER_THREADS = "6"
+    BB_NUMBER_PARSE_THREADS = "6"
+    PARALLEL_MAKE = "-j 6"
+    BB_TASK_NICE_LEVEL = "19"
+    # Q7: keep the work trees small; keep the ones 8.0 inspects (the images, the kernel).
+    INHERIT += "rm_work"
+    RM_WORK_EXCLUDE += "fjarr-spike-image fjarr-spike-initramfs linux-jammy-nvidia-tegra"
+    # Stop well before the disk others build and test on runs full.
+    BB_DISKMON_DIRS = " \
+        STOPTASKS,${TMPDIR},20G,100K STOPTASKS,${DL_DIR},20G,100K STOPTASKS,${SSTATE_DIR},20G,100K \
+        HALT,${TMPDIR},5G,10K HALT,${DL_DIR},5G,10K HALT,${SSTATE_DIR},5G,10K"
