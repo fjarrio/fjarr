@@ -1,0 +1,30 @@
+# NVIDIA's L4T flash tools for the lab's ZED Box Mini (M8 slice 8.0,
+# docs/32-fleet-ota.md#jetson-test-image): Ubuntu 22.04, a host NVIDIA supports for L4T 36.x, with
+# the packages of L4T's tools/l4t_flash_prerequisites.sh. The 36.5.2 list is a superset of
+# 36.4.4's (it adds file, gdisk, parted, usbutils, xxd, zlib1g and python-is-python3), so one image
+# serves both releases. Installed the way NVIDIA's script installs them, recommends included.
+#
+# Added for the container: openssh-client (initrd flash reaches the box over ssh), sudo (NVIDIA's
+# scripts call it even as root) and kmod (depmod, for minimal-rootfs.sh's module index). The
+# container never runs NFS daemons: host-nfs-only replaces service and rpcbind, and the host
+# exports the L4T paths (host-setup.sh).
+#
+# Build: docker build -t fjarr-l4t-flash -f spikes/ota-jetson/flash/Dockerfile.l4t spikes/ota-jetson/flash
+# Run: see spikes/ota-jetson/flash/README.md. Never from inside `dev`.
+FROM ubuntu:22.04@sha256:0a9887931b0e38af2e3487ed39e29436b0535c4f3f52e57745baaf79d1898956
+ENV DEBIAN_FRONTEND=noninteractive
+# flash.sh and l4t_create_images_for_kernel_flash.sh test $USER for root, which sudo sets and a
+# container does not.
+ENV USER=root
+RUN apt-get update && apt-get install -y \
+      abootimg binfmt-support binutils cpio cpp \
+      device-tree-compiler dosfstools file gdisk \
+      iproute2 iputils-ping lbzip2 libxml2-utils \
+      netcat-openbsd nfs-kernel-server openssl \
+      parted python3-yaml qemu-user-static rsync sshpass \
+      udev usbutils uuid-runtime whois xmlstarlet xxd zstd zlib1g \
+      lz4 python-is-python3 \
+      openssh-client sudo kmod \
+    && rm -rf /var/lib/apt/lists/*
+COPY --chmod=0755 host-nfs-only /usr/local/sbin/service
+COPY --chmod=0755 host-nfs-only /usr/local/sbin/rpcbind

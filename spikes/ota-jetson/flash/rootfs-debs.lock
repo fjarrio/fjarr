@@ -1,0 +1,73 @@
+# The arm64 packages of the minimal rootfs (minimal-rootfs.sh): every file NVIDIA's flash tools
+# copy out of Linux_for_Tegra/rootfs, from the flash initrd's list and the recovery image's list.
+# From Ubuntu 22.04's release pocket, which is frozen, so the pool keeps these files. Made by
+# lock-rootfs-debs.sh on 2026-10-17 from the signed jammy index on ports.ubuntu.com.
+# spec: docs/32-fleet-ota.md#jetson-test-image
+#
+# <sha256>  <path under https://ports.ubuntu.com/ubuntu-ports/>  <files NVIDIA's lists take from it>
+fb424077519b7b74cdd2dae2c041210d3ee1cf69eacae242af0b6c4679d631d9  pool/main/b/busybox/busybox-static_1.30.1-7ubuntu3_arm64.deb  busybox
+9191f297b303511c2a49fec75410e163ebe77721a271d1328425d6f25b4abd55  pool/main/c/coreutils/coreutils_8.32-4.1ubuntu1_arm64.deb  mktemp mv sync cksum cut dirname du head nohup seq sha1sum sort tr uname wc whoami
+d6e15ead150674a34576825714b38aa99d510ca00cd5b95f132e42e3c76ef433  pool/main/c/cpio/cpio_2.13+dfsg-7_arm64.deb  cpio
+829460c98c24183696042b201cbe2f813421c1d3d5d3f6e1cf819b392e4920d1  pool/main/d/debianutils/debianutils_5.5-1ubuntu2_arm64.deb  run-parts
+b01d6e14c81cea7c7615f7f24814ca4fe2a592c9313362c74b6ac3d983d892d5  pool/main/d/diffutils/diffutils_3.8-0ubuntu2_arm64.deb  diff
+72c511f65ed99c3d223025e5c83f4bd9895c596223fea2e48bfc97d2f1724a57  pool/main/e/e2fsprogs/e2fsprogs_1.46.5-2ubuntu1_arm64.deb  chattr
+83d7f987e62f79a2cd80ea749b9c98b13667cfff7647eadad8b93b4bdca33cae  pool/main/u/util-linux/fdisk_2.37.2-4ubuntu3_arm64.deb  sfdisk
+b116bc1f7a81977492cf9d7816ae870fe94dd403b05dc6d916d55cc1b0804d6a  pool/main/f/findutils/findutils_4.8.0-1ubuntu3_arm64.deb  find
+80ade1c28d904be394229e3dbf840baaecb82ec4b966aec87859ca8c404dec1a  pool/main/g/gdisk/gdisk_1.0.8-4build1_arm64.deb  sgdisk
+64d3b4d606dbef8d865ad0c6175e480ddd00d59e94bf5ed65e1cd3fa1d93adea  pool/main/i/iproute2/iproute2_5.15.0-1ubuntu2_arm64.deb  ip
+629545ad7d5bfb95666f8e250a339051c0d18d2da3fafbe9454d122b309fee64  pool/main/i/iputils/iputils-ping_20211215-1_arm64.deb  ping
+28da86166989b8c3c749ff7ebcf730beefd86612dd5df68c7e603c8121409004  pool/main/i/isc-dhcp/isc-dhcp-client_4.4.1-2.3ubuntu2_arm64.deb  dhclient-script
+0b58de7db07b8625e04304cfd7aca87d9cc00007d94a7f6e25d253baace93b71  pool/main/k/kmod/kmod_29-1ubuntu1_arm64.deb  kmod
+9503b5a374b079d5da38514afa2052bffb2ec07c3a997274622535ff224a60ec  pool/main/a/audit/libaudit1_3.0.7-1build1_arm64.deb  libaudit.so.1
+862f21d69cfad8d9016d2552428c0853172b5356379029ed9d8fba9e6cd6a213  pool/main/u/util-linux/libblkid1_2.37.2-4ubuntu3_arm64.deb  libblkid.so.1
+19703bfe6fde9a161e42f5107451a46cc182a62dd0621a55d06aec7dc372991d  pool/main/libb/libbsd/libbsd0_0.11.5-1_arm64.deb  libbsd.so.0
+b1206b51690a810efc701e1d311e0ac5fd9a9f0f8e216585362512d805d261af  pool/main/g/glibc/libc6_2.35-0ubuntu3_arm64.deb  ld-linux-aarch64.so.1 libc.so.6 libdl.so.2 libm.so.6 libnss_compat.so.2 libnss_files.so.2 libpthread.so.0 libresolv.so.2 librt.so.1 libutil.so.1
+884c8bc87da241abaa2b0ca80162486cf66eff67dfc545bea56622e1170e9ee5  pool/main/libc/libcap-ng/libcap-ng0_0.7.9-2.2build3_arm64.deb  libcap-ng.so.0
+92145875fa9fec673b0155866f6b91f4695e790f006bc80b18344d4b025b6fb8  pool/main/libc/libcap2/libcap2_2.44-1build3_arm64.deb  libcap.so.2
+07f5b417e636610c83d95e408f55ca6e2e8cf44649b8cd7c6dcab2c8078b6214  pool/main/e/e2fsprogs/libcom-err2_1.46.5-2ubuntu1_arm64.deb  libcom_err.so.2
+fb5f8d59de95bbb118a635e83e2a92077e13c6d297980dae3119df057bf88111  pool/main/libx/libxcrypt/libcrypt1_4.4.27-1_arm64.deb  libcrypt.so.1
+334c17b63c295b051450ebb481918bc12592f8d925d255f4391ed1f17bffb223  pool/main/d/dbus/libdbus-1-3_1.12.20-2ubuntu4_arm64.deb  libdbus-1.so.3
+e74c38b7d6d086b15dd48b84566c9b538781385ef772b6afcbfce36ba92891af  pool/main/l/lvm2/libdevmapper1.02.1_1.02.175-2.1ubuntu4_arm64.deb  libdevmapper.so.1.02.1
+493629169d7b02ea7c3fe3ef0dc26e27756a2f2a9f2c2b104ff5c1027ac492aa  pool/main/e/elfutils/libelf1_0.186-1build1_arm64.deb  libelf.so.1
+a3e370ce7d461243b8ac3b45767d81ef780a25f6e0d9bd97551acf3757db3666  pool/main/e/e2fsprogs/libext2fs2_1.46.5-2ubuntu1_arm64.deb  libe2p.so.2
+52b40faa9368fd53a3faf859b9d2f2f70dbc55fc23fe7b05e2cc65012b368481  pool/main/u/util-linux/libfdisk1_2.37.2-4ubuntu3_arm64.deb  libfdisk.so.1
+b6e9a39b0ef3302053734e3a5e52ef12151566bb42d625feab7a502b3071c13b  pool/main/g/gcc-12/libgcc-s1_12-20220319-1ubuntu1_arm64.deb  libgcc_s.so.1
+874132c1265159f0914848390eca9597bd79b9d57cd157a8543264650290e808  pool/main/libg/libgcrypt20/libgcrypt20_1.9.4-3ubuntu3_arm64.deb  libgcrypt.so.20
+ffa9029cdeb2786e0db1f614f3d2205f75f466a66b25e22aa89ecdf814491875  pool/main/libg/libgpg-error/libgpg-error0_1.43-3_arm64.deb  libgpg-error.so.0
+2d254fe8e03ce9cb375649cb3eb7a1dc2ffb9fd906eb01c2077679c3283d9343  pool/main/k/krb5/libgssapi-krb5-2_1.19.2-2_arm64.deb  libgssapi_krb5.so.2
+638a6cf1624d045d0df1e0d693c349ea7c60cfa571f8ee05573b621d36a047ae  pool/main/k/krb5/libk5crypto3_1.19.2-2_arm64.deb  libk5crypto.so.3
+1c638ecff15987115408c4b16715ee1bdb5fe2acf9b15146566f3cbafbe13c6c  pool/main/k/krb5/libkrb5-3_1.19.2-2_arm64.deb  libkrb5.so.3
+379e96322c8288bdc6355c487e07a8bad82bc990ac75011e4f6e475603bede59  pool/main/k/krb5/libkrb5support0_1.19.2-2_arm64.deb  libkrb5support.so.0
+3e2274893e0963c758f0d18ba80d033736909373247a7deb211e9ff590a09133  pool/main/l/lz4/liblz4-1_1.9.3-2build2_arm64.deb  liblz4.so.1
+21f64a20db61954e19ecdd2641d9aace2617b2bf3d55267184e2405d4bd65fdb  pool/main/x/xz-utils/liblzma5_5.2.5-2ubuntu1_arm64.deb  liblzma.so.5
+225e80ab05283fca43a3d6c717d33f92703893c4fb725a3c4c6c6ced536c31e2  pool/main/libm/libmnl/libmnl0_1.0.4-3build2_arm64.deb  libmnl.so.0
+1f065252ba4a808cbde2934ce87f2199b1e9a80814c95a9840d9b4026332d448  pool/main/u/util-linux/libmount1_2.37.2-4ubuntu3_arm64.deb  libmount.so.1
+ab2e58eed36da75635f248fad08a2dd3fbe92c9d1f5e44eb68a99db083e9a9c3  pool/main/libn/libnsl/libnsl2_1.3.0-2build2_arm64.deb  libnsl.so.2
+367fa56319ba13b9017a6217c80f013138ccc450b0588f1be4c765252bec2693  pool/main/p/pam/libpam0g_1.4.0-11ubuntu2_arm64.deb  libpam.so.0 libpam_misc.so.0
+98680da8d89e9606006bb87faf5aebc905aa45ef468162232ad75ef2f3f3a79e  pool/main/p/parted/libparted2_3.4-2build1_arm64.deb  libparted.so.2
+5a0ae9427aaf8e83cb5e089ff10aec94efc2eb703011ec06fc96a28ff8672773  pool/main/p/pcre3/libpcre3_8.39-13build5_arm64.deb  libpcre.so.3
+51849f7ce42215d7eed5a60729cd809bd65037ecab5aa387624d84f3dfcb7118  pool/main/p/popt/libpopt0_1.18-3build1_arm64.deb  libpopt.so.0
+8cc4f056a9af2a53392664f482ad0c0090b13bf703ced53543fa03435eae5f32  pool/main/p/procps/libprocps8_3.3.17-6ubuntu2_arm64.deb  libprocps.so.8
+54291f2dd185d3a759227b31b7de4269e495a084fdad89e24a9cc4d0d20888a7  pool/main/r/readline/libreadline8_8.1.2-1_arm64.deb  libreadline.so.8
+3a0726b2174a40fa28e74712867aa6e40d3d725543e8f668af9e9e59a28c817c  pool/main/libs/libselinux/libselinux1_3.3-1build2_arm64.deb  libselinux.so.1
+69b4ee46ec0612b005dfedb80856f8ea6fc12eb76de7e6be179f6d6e5645982f  pool/main/u/util-linux/libsmartcols1_2.37.2-4ubuntu3_arm64.deb  libsmartcols.so.1
+9af0616c9fbb2c843892b203bc3306587ced1555be24dff154c768cdf27dfe2a  pool/main/o/openssl/libssl3_3.0.2-0ubuntu1_arm64.deb  libcrypto.so.3 libssl.so.3
+d9903f1cf4e3c0a74e0bd2f7c65e673c104833cfaaab370d3f2114ffd06728f3  pool/main/g/gcc-12/libstdc++6_12-20220319-1ubuntu1_arm64.deb  libstdc++.so.6
+6149423a06971f126cb24fdd9196f70f75fbe0808f894f8009e1a51d2e08b340  pool/main/s/systemd/libsystemd0_249.11-0ubuntu3_arm64.deb  libsystemd.so.0
+a6411b7fe99672000a5ee51495cbee0d702d04a8bac341c973fbb82d61babc01  pool/main/n/ncurses/libtinfo6_6.3-2_arm64.deb  libtinfo.so.6
+575e2fd369ddfc14a317229c8d34298a57d6b80ad968e6b98d4549213a14912c  pool/main/s/systemd/libudev1_249.11-0ubuntu3_arm64.deb  libudev.so.1
+6b98796f3d86375efdc0298702861f44effa3342d6892edbc0a79a90b30896d0  pool/main/u/util-linux/libuuid1_2.37.2-4ubuntu3_arm64.deb  libuuid.so.1
+8383eba4771b6027a9c7dd887db2a0b1b08b23cd88e0df8332d65e9f4345623f  pool/main/t/tcp-wrappers/libwrap0_7.6.q-31build2_arm64.deb  libwrap.so.0
+0102eb80384c2432c4be819663341a1c4e511d05f13ec1467643696531ec6491  pool/main/libz/libzstd/libzstd1_1.4.8+dfsg-3build1_arm64.deb  libzstd.so.1
+fea656da6369ae6871c5b260c7d644148266547e14d239307c575c3e3f012a36  pool/main/m/mtd-utils/mtd-utils_2.1.4-1_arm64.deb  flash_erase mtd_debug
+2a1b509b31913e2065a7d746d2424332e8e60b968bb6b85b1141cd021743f614  pool/main/o/openssh/openssh-client_8.9p1-3_arm64.deb  scp
+4266cebc451ed1fe61c2ce1ed7e76397efeff6bfb8390269f8b874d0da67dd41  pool/main/o/openssh/openssh-server_8.9p1-3_arm64.deb  sshd
+35027ef10f354d9fbb76d4963d64767a7cb8ebda5a84afc9e27b063e4d9e70b7  pool/main/p/parted/parted_3.4-2build1_arm64.deb  parted partprobe
+ffa984c115bf9a09927308a5c441e5cc208f2fb138be0a494ad8ee7a0e4d1678  pool/main/s/shadow/passwd_4.8.1-2ubuntu2_arm64.deb  passwd
+1a0ac862fec1428eb81e78f5ff9749511ea9db4a7da6f030811215e9fc73e299  pool/main/p/procps/procps_3.3.17-6ubuntu2_arm64.deb  ps w
+f51a5da5e1dadf24e6b4b8563e6efce6942c7ea78d6488238f8777d7fc2ca797  pool/main/u/util-linux/util-linux_2.37.2-4ubuntu3_arm64.deb  su blkdiscard blockdev findmnt lsblk partx
+caf53e45c17fd9720ac55eae07f0fa0b0402ab600ce59deba0a74a0619c3f949  pool/main/v/vim/xxd_8.2.3995-1ubuntu2_arm64.deb  xxd
+597820b01a8b019d04c9f9db2cad80d9d0ed93d39770066bd833e362c526b345  pool/main/z/zlib/zlib1g_1.2.11.dfsg-2ubuntu9_arm64.deb  libz.so.1
+# chosen for bin/ping: iputils-ping, not inetutils-ping
+# chosen for usr/bin/busybox: busybox-static, not busybox
+# in no package: etc/ssh/sshd_config

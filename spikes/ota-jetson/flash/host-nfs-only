@@ -1,0 +1,28 @@
+#!/bin/bash
+# Installed in the flash container as /usr/local/sbin/service and /usr/local/sbin/rpcbind, ahead of
+# the real ones on PATH. The container runs with the host's network (--net=host), so an rpcbind or
+# rpc.mountd started in it would answer the box's NFS requests from the container's empty exports
+# instead of the host's. NVIDIA's l4t_initrd_flash.sh starts both before it checks for the host's
+# exports (network_prerequisite in tools/kernel_flash/l4t_network_flash.func); here they never
+# start, and the restart reports success only when the host's NFS server answers.
+# spec: docs/32-fleet-ota.md#jetson-test-image (flashing from the mini-PC)
+set -euo pipefail
+
+me=$(basename "$0")
+nfs_service() { [[ "${1:-}" =~ ^(nfs-kernel-server|nfs-server|rpcbind|nfs-common)$ ]]; }
+
+if [ "$me" = rpcbind ]; then
+	echo "fjarr-l4t: not starting rpcbind in the container; the host runs it (flash/host-setup.sh)" >&2
+	exit 0
+fi
+
+if [ "$me" = service ] && nfs_service "${1:-}"; then
+	if showmount -e localhost >/dev/null 2>&1; then
+		echo "fjarr-l4t: '$*' skipped in the container; the host's NFS server answers" >&2
+		exit 0
+	fi
+	echo "fjarr-l4t: the host's NFS server does not answer; run flash/host-setup.sh on the host" >&2
+	exit 1
+fi
+
+exec "/usr/sbin/$me" "$@"
