@@ -19,6 +19,8 @@ struct PadCounters {
     std::atomic<std::int64_t> last_pts_ns{-1};
     std::atomic<std::int64_t> last_wall_us{0};
     std::atomic<std::int64_t> max_gap_us{0};
+    /// Buffers marked FjarrFrameRepeat: content the source sent before (docs/24#capture-frame-counts).
+    std::atomic<std::uint64_t> repeats{0};
 };
 
 /// Install a counting probe on a pad; the counters are readable by pad pointer

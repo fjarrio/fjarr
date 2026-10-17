@@ -16,6 +16,7 @@
 #include "encoder.hpp"
 #include "frame_hub.hpp"
 #include "frame_stamp.hpp"
+#include "pad_counter.hpp"
 
 namespace fjarr::media {
 
@@ -78,6 +79,11 @@ class Producer {
     void on_error(std::function<void(const std::string&)> fn) { on_error_ = std::move(fn); }
     /// Negotiated caps at the source output (after PLAYING), for /sources.
     std::string source_caps() const;
+    /// Where a raw source's frames are (docs/23#encoders-and-tiers): DMA-BUF gets the device-memory head.
+    SourceMemory source_memory() const { return memory_; }
+    /// Buffers at the source's output (`rawcaps:src`, before any conversion or import), repeats
+    /// counted apart (FjarrFrameRepeat); null before build() or for passthrough and audio.
+    const PadCounters* source_counters() const { return source_counter_ ? &source_counter_->counters() : nullptr; }
     std::string name() const { return "producer:" + track_id_; }
 
   private:
@@ -96,6 +102,8 @@ class Producer {
     void apply_rate(const std::string& tier, Tier& t);
     bool sharp_ = false;
     TierProfile profile_for(const std::string& tier) const;
+    bool build_device_head(const std::string& pad_name);
+    void watch_bus();
     static GstFlowReturn on_new_sample(GstAppSink* sink, gpointer user);
     static gboolean on_bus(GstBus* bus, GstMessage* msg, gpointer user);
 
@@ -113,9 +121,12 @@ class Producer {
     glib::GstElementPtr source_bin_;
     glib::GstElementPtr convert_;
     glib::GstElementPtr rawcaps_;
+    glib::GstElementPtr vacaps_; // the device-memory head: NV12 in VA memory after its one importer
     glib::GstElementPtr tee_;
     std::map<std::string, glib::GstElementPtr> passthrough_tees_; // passthrough: one per source output, so an undemanded stream has somewhere to go
     glib::GstPadPtr source_pad_;
+    SourceMemory memory_ = SourceMemory::System;
+    std::unique_ptr<PadCounter> source_counter_;
     glib::PadProbe stamp_probe_;
     glib::PadProbe alloc_probe_; // stamped sources stay on system memory (see build())
     StampPainter painter_;

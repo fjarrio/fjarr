@@ -1,22 +1,22 @@
 // spec: docs/23-agent-core-architecture.md#desktop-helper-protocol (The stream reader and the cursor)
+// spec: docs/23-agent-core-architecture.md#desktop-capture-memory (ADR-0041: DMA-BUF first, SHM as the fallback)
 #include "stream_reader.hpp"
 
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
-#include <unistd.h>
 #include <mutex>
+#include <optional>
+#include <unistd.h>
 
-#include <gst/app/gstappsrc.h>
 #include <pipewire/pipewire.h>
 #include <spa/buffer/meta.h>
-#include <spa/param/buffers.h>
 #include <spa/param/video/format-utils.h>
 
 namespace fjarr::desktop::mutter {
 
 namespace {
 constexpr int MAX_SIDE = 384; // docs/08: cursor images at most 384×384
-std::size_t meta_size(int side) { return sizeof(spa_meta_cursor) + sizeof(spa_meta_bitmap) + static_cast<std::size_t>(side) * side * 4; }
 using Clock = std::chrono::steady_clock;
 } // namespace
 
@@ -30,65 +30,191 @@ struct StreamReader::Impl {
     spa_hook stream_listener{};
     spa_source* keepalive = nullptr;
     spa_source* first_frame_watch = nullptr; // re-links when a stream stays without a frame (below)
+    spa_source* release_event = nullptr;     // GStreamer released a DMA-BUF frame: give it back to mutter
     std::uint32_t node = 0;
-    int want_width = 0, want_height = 0; // a virtual monitor's size, asked for in the format
-    int relinks = 0;
-    int keepalive_ms = 100;
+    Options options;
     GMainContext* ctx = nullptr;
     std::shared_ptr<bool> alive = std::make_shared<bool>(true); // posts that outlive the reader are dropped
     Shape shape;
     Position position;
     Log log;
     std::function<void()> stalled;
+    std::function<void(bool)> memory_cb;
+    std::function<bool(const std::string&)> memory_changed_cb;
+    std::function<void(const std::string&)> fallback_cb, failed_cb;
+    std::unique_ptr<Frames> frames;
 
-    // Frames: guarded by `mu` (the PipeWire thread pushes, create_bin runs on the core loop).
-    std::mutex mu;
-    GstElement* appsrc = nullptr; // the current pipeline's source, ref held
-    GstBuffer* last = nullptr;    // the newest frame, for the keepalive and a new pipeline
-    GstCaps* caps = nullptr;
-    Clock::time_point last_push{};
+    // What mutter's node offers, asked before linking (docs/23#desktop-capture-memory), PipeWire thread.
+    pw_registry* registry = nullptr;
+    spa_hook registry_listener{};
+    pw_proxy* node_proxy = nullptr;
+    spa_hook node_listener{};
+    spa_hook core_listener{};
+    bool core_listening = false;
+    int sync_seq = -1;
+    int sync_phase = 0;
+    std::vector<spa_pod*> producer_params; // copies of the node's EnumFormat params
+    ProducerFormats producer;              // what was read of them, for the offer and the SHM reason
+    Offer offer;
+
+    // The memory, settled at the first fixed format; read by status() on the core loop.
+    mutable std::mutex state_mu;
+    bool memory_settled = false;
+    bool memory_dmabuf = false;
+    std::string drm_format, shm_reason;
+    bool latest_dmabuf = false;  // the latest fixed format's memory, which a capture that keeps
+    std::string latest_drm;      // its stream after a change adopts (adopt_memory)
+    bool change_pending = false; // a change of memory went to the core loop and is not decided yet
 
     // Touched only on the PipeWire thread:
     int width = 0, height = 0;
     spa_video_format format = SPA_VIDEO_FORMAT_UNKNOWN;
-    std::string last_shape;
+    ReaderCursor cursor; // what each buffer's cursor metadata hands on (desktop/cursor_image.hpp)
     int last_x = -1, last_y = -1;
     bool first_frame = true;
+    bool fallen_back = false; // its DMA-BUF could not be wrapped: restarted on shared memory
     unsigned buffers = 0, empty = 0;
     std::string last_empty; // what the last buffer without pixels looked like, for the log
-    static constexpr int MAX_RELINKS = 3;
     static constexpr long FIRST_FRAME_MS = 500;
 
-    /// Link to the node, asking for any raw format the producer offers.
-    bool connect() {
-        std::uint8_t buf[512];
-        spa_pod_builder b = SPA_POD_BUILDER_INIT(buf, sizeof(buf));
-        const spa_pod* params[1];
-        spa_pod_frame f;
-        spa_pod_builder_push_object(&b, &f, SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat);
-        spa_pod_builder_add(&b, SPA_FORMAT_mediaType, SPA_POD_Id(SPA_MEDIA_TYPE_video), SPA_FORMAT_mediaSubtype, SPA_POD_Id(SPA_MEDIA_SUBTYPE_raw),
-                            SPA_FORMAT_VIDEO_format,
-                            SPA_POD_CHOICE_ENUM_Id(5, SPA_VIDEO_FORMAT_BGRx, SPA_VIDEO_FORMAT_BGRx, SPA_VIDEO_FORMAT_BGRA, SPA_VIDEO_FORMAT_RGBx, SPA_VIDEO_FORMAT_RGBA), 0);
-        if (want_width > 0 && want_height > 0) {
-            const spa_rectangle size{static_cast<std::uint32_t>(want_width), static_cast<std::uint32_t>(want_height)};
-            spa_pod_builder_add(&b, SPA_FORMAT_VIDEO_size, SPA_POD_Rectangle(&size), 0);
+    bool wants_producer_formats() const {
+        const auto& m = options.memory;
+        return !m.virtual_monitor && !m.force_shm && !m.imports.empty();
+    }
+
+    /// Ask mutter's node for its EnumFormat (the modifiers it can allocate), then link. Two round
+    /// trips on the narrowed connection, which grants the node R and X (docs/23#desktop-descriptor-handover).
+    void ask_producer_formats() {
+        static const pw_registry_events REG = [] {
+            pw_registry_events e{};
+            e.version = PW_VERSION_REGISTRY_EVENTS;
+            e.global = [](void* d, std::uint32_t id, std::uint32_t, const char* type, std::uint32_t, const spa_dict*) { static_cast<Impl*>(d)->on_global(id, type); };
+            return e;
+        }();
+        static const pw_core_events CORE = [] {
+            pw_core_events e{};
+            e.version = PW_VERSION_CORE_EVENTS;
+            e.done = [](void* d, std::uint32_t id, int seq) { static_cast<Impl*>(d)->on_done(id, seq); };
+            e.error = [](void* d, std::uint32_t id, int seq, int res, const char* message) { static_cast<Impl*>(d)->on_core_error(id, seq, res, message); };
+            return e;
+        }();
+        registry = pw_core_get_registry(core, PW_VERSION_REGISTRY, 0);
+        pw_registry_add_listener(registry, &registry_listener, &REG, this);
+        pw_core_add_listener(core, &core_listener, &CORE, this);
+        core_listening = true;
+        sync_phase = 1;
+        sync_seq = pw_core_sync(core, PW_ID_CORE, 0);
+    }
+    void on_global(std::uint32_t id, const char* type) {
+        if (id != node || node_proxy || std::strcmp(type, PW_TYPE_INTERFACE_Node) != 0) return;
+        static const pw_node_events NODE = [] {
+            pw_node_events e{};
+            e.version = PW_VERSION_NODE_EVENTS;
+            e.param = [](void* d, int, std::uint32_t id, std::uint32_t, std::uint32_t, const spa_pod* param) {
+                auto* self = static_cast<Impl*>(d);
+                if (id != SPA_PARAM_EnumFormat || !param) return;
+                auto* copy = static_cast<spa_pod*>(std::malloc(SPA_POD_SIZE(param)));
+                std::memcpy(copy, param, SPA_POD_SIZE(param));
+                self->producer_params.push_back(copy);
+            };
+            return e;
+        }();
+        node_proxy = static_cast<pw_proxy*>(pw_registry_bind(registry, id, type, PW_VERSION_NODE, 0));
+        if (!node_proxy) return;
+        pw_proxy_add_object_listener(node_proxy, &node_listener, &NODE, this);
+        pw_node_enum_params(reinterpret_cast<pw_node*>(node_proxy), 0, SPA_PARAM_EnumFormat, 0, UINT32_MAX, nullptr);
+    }
+    void on_done(std::uint32_t id, int seq) {
+        if (id != PW_ID_CORE || seq != sync_seq || sync_phase == 0) return;
+        if (sync_phase == 1 && node_proxy) {
+            sync_phase = 2; // the params asked for after the first sync arrive before this one's done
+            sync_seq = pw_core_sync(core, PW_ID_CORE, 0);
+            return;
         }
-        params[0] = static_cast<const spa_pod*>(spa_pod_builder_pop(&b, &f));
-        return pw_stream_connect(stream, PW_DIRECTION_INPUT, node, static_cast<pw_stream_flags>(PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS), params, 1) >=
-               0;
+        if (!node_proxy) {
+            // docs/23#desktop-capture-memory: the whole import list goes out, and the mini-PC run
+            // must be able to see that it did.
+            post([this] { log(2, "capture of " + options.name + ": mutter's formats could not be read: node " + std::to_string(node) + " is not in the registry"); });
+        }
+        finish_asking(node_proxy != nullptr);
+    }
+    void on_core_error(std::uint32_t id, int, int res, const char* message) {
+        if (sync_phase == 0) return;
+        post([this, id, res, m = std::string(message ? message : "")] {
+            log(2, "capture of " + options.name + ": mutter's formats could not be read (" + std::to_string(id) + ": " + std::to_string(res) + " " + m + ")");
+        });
+        finish_asking(false);
+    }
+    void finish_asking(bool known) {
+        sync_phase = 0;
+        ProducerFormats pf;
+        if (known && producer_params.empty()) {
+            post([this] { log(2, "capture of " + options.name + ": mutter's formats could not be read: its node listed none"); });
+        } else if (known) {
+            std::vector<const spa_pod*> params(producer_params.begin(), producer_params.end());
+            pf = parse_producer_formats(params);
+        }
+        for (spa_pod* p : producer_params) std::free(p);
+        producer_params.clear();
+        drop_asking();
+        // Linked from here, not from start(): a failure has no caller to return to, and a stream
+        // never linked never streams, so no first-frame watch would ever notice it.
+        if (!link(pf)) post([this] { fail("the stream reader could not link to the display server's stream"); });
+    }
+    /// The capture cannot go on (core loop): the backend marks its source lost, by name.
+    void fail(const std::string& why) {
+        auto cb = failed_cb; // the backend drops this reader in it
+        if (cb) cb(why);
+    }
+    void drop_asking() {
+        if (node_proxy) {
+            spa_hook_remove(&node_listener);
+            pw_proxy_destroy(node_proxy);
+            node_proxy = nullptr;
+        }
+        if (registry) {
+            spa_hook_remove(&registry_listener);
+            pw_proxy_destroy(reinterpret_cast<pw_proxy*>(registry));
+            registry = nullptr;
+        }
+        if (core_listening) {
+            spa_hook_remove(&core_listener);
+            core_listening = false;
+        }
+    }
+
+    /// Link to the node with the offer (docs/23#desktop-capture-memory, Negotiation).
+    bool link(const ProducerFormats& pf) {
+        producer = pf;
+        offer = plan_offer(options.memory, producer);
+        std::uint8_t buf[4096];
+        spa_pod_builder b = SPA_POD_BUILDER_INIT(buf, sizeof(buf));
+        auto params = build_enum_formats(offer, &b, options.width, options.height);
+        if (params.size() < offer.dmabuf.size() + (offer.shm.empty() ? 0 : 1))
+            post([this] { log(2, "capture of " + options.name + ": the format offer did not fit its 4 KiB builder; some formats were left out"); });
+        // PipeWire maps shared memory for us, but a stream that offers DMA-BUF maps nothing:
+        // Frames maps a MemFd itself should mutter pick shared memory after all.
+        const auto flags = static_cast<pw_stream_flags>(PW_STREAM_FLAG_AUTOCONNECT | (offer.dmabuf_offered() ? 0 : PW_STREAM_FLAG_MAP_BUFFERS));
+        const int res = pw_stream_connect(stream, PW_DIRECTION_INPUT, node, flags, params.data(), static_cast<std::uint32_t>(params.size()));
+        if (res < 0) post([this, res] { log(3, "capture of " + options.name + ": the stream reader could not link to node " + std::to_string(node) + " (" + std::to_string(res) + ")"); });
+        return res >= 0;
     }
 
     /// A stream that streams without ever giving a frame: mutter sometimes does not send a freshly
     /// plugged monitor's first frame to a consumer that links the moment its node appears, and on a
     /// still screen no other comes (seen in 3 of 6 hot-plugs, 2026-10-03). A consumer that links later
     /// is sent one, so the reader links again — at most three times.
-    void on_state(pw_stream_state state) {
+    void on_state(pw_stream_state state, const char* error) {
+        if (state == PW_STREAM_STATE_ERROR) {
+            const std::string why = error ? error : "?";
+            post([this, why] { log(2, "capture of " + options.name + ": the stream failed: " + why); });
+        }
         if (state != PW_STREAM_STATE_STREAMING || !first_frame) return;
         timespec value{0, FIRST_FRAME_MS * 1'000'000L}, none{0, 0};
         pw_loop_update_timer(pw_thread_loop_get_loop(thread), first_frame_watch, &value, &none, false);
     }
     void on_first_frame_watch() {
-        if (!first_frame) return;
+        if (!first_frame || fallen_back) return; // fallen back: restarted on shared memory already
         const std::string note = "no frame " + std::to_string(FIRST_FRAME_MS) + " ms into streaming (" + std::to_string(buffers) + " buffer(s), " +
                                  std::to_string(empty) + " without pixels, the last " + last_empty + ")";
         post([this, note] {
@@ -100,14 +226,13 @@ struct StreamReader::Impl {
     ~Impl() {
         *alive = false;
         if (thread) pw_thread_loop_stop(thread);
-        if (stream) pw_stream_destroy(stream);
+        if (stream) pw_stream_destroy(stream); // its remove_buffer events still reach `frames`
+        drop_asking();
+        for (spa_pod* p : producer_params) std::free(p);
+        frames.reset(); // buffers GStreamer still holds keep their own descriptors
         if (core) pw_core_disconnect(core);
         if (context) pw_context_destroy(context);
         if (thread) pw_thread_loop_destroy(thread);
-        std::lock_guard<std::mutex> lk(mu);
-        if (appsrc) gst_object_unref(appsrc); // the source's, not ours: no end-of-stream, a new reader may follow
-        if (last) gst_buffer_unref(last);
-        if (caps) gst_caps_unref(caps);
     }
 
     /// Run `fn` on the core loop, unless the reader is gone by then.
@@ -123,40 +248,128 @@ struct StreamReader::Impl {
         }, new Job{alive, std::move(fn)}, [](gpointer d) { delete static_cast<Job*>(d); });
     }
 
-    /// Push `buf` (a ref is taken) into the current appsrc, if there is one. Holds `mu`.
-    void push_locked(GstBuffer* buf) {
-        last_push = Clock::now();
-        if (!appsrc) return;
-        // A shallow copy: appsrc's do-timestamp stamps it, and the same frame may go out again.
-        gst_app_src_push_buffer(GST_APP_SRC(appsrc), gst_buffer_copy(buf));
-    }
-
     void on_param_changed(std::uint32_t id, const spa_pod* param) {
         if (!param || id != SPA_PARAM_Format) return;
-        spa_video_info_raw info{};
-        if (spa_format_video_raw_parse(param, &info) < 0) return;
-        width = static_cast<int>(info.size.width);
-        height = static_cast<int>(info.size.height);
-        format = info.format;
-        const char* fmt = format == SPA_VIDEO_FORMAT_BGRA ? "BGRA" : format == SPA_VIDEO_FORMAT_RGBx ? "RGBx" : format == SPA_VIDEO_FORMAT_RGBA ? "RGBA" : "BGRx";
-        {
-            std::lock_guard<std::mutex> lk(mu);
-            if (caps) gst_caps_unref(caps);
-            caps = gst_caps_new_simple("video/x-raw", "format", G_TYPE_STRING, fmt, "width", G_TYPE_INT, width, "height", G_TYPE_INT, height, "framerate",
-                                       GST_TYPE_FRACTION, 0, 1, nullptr);
-            if (appsrc) gst_app_src_set_caps(GST_APP_SRC(appsrc), caps);
-        }
-        // Shared memory we can map (not DMA-BUF: it failed on the spike machine, ADR-0006), and the cursor.
-        std::uint8_t buf[512];
+        const auto nf = parse_format(param);
+        if (!nf) return;
+        // The buffers for that memory, and the cursor. Never SyncTimeline (ADR-0041: implicit sync).
+        std::uint8_t buf[1024];
         spa_pod_builder b = SPA_POD_BUILDER_INIT(buf, sizeof(buf));
-        const spa_pod* params[2];
-        params[0] = static_cast<const spa_pod*>(spa_pod_builder_add_object(
-            &b, SPA_TYPE_OBJECT_ParamBuffers, SPA_PARAM_Buffers, SPA_PARAM_BUFFERS_dataType,
-            SPA_POD_CHOICE_FLAGS_Int((1 << SPA_DATA_MemFd) | (1 << SPA_DATA_MemPtr))));
-        params[1] = static_cast<const spa_pod*>(spa_pod_builder_add_object(
-            &b, SPA_TYPE_OBJECT_ParamMeta, SPA_PARAM_Meta, SPA_PARAM_META_type, SPA_POD_Id(SPA_META_Cursor), SPA_PARAM_META_size,
-            SPA_POD_CHOICE_RANGE_Int(static_cast<int>(meta_size(64)), static_cast<int>(meta_size(1)), static_cast<int>(meta_size(MAX_SIDE)))));
-        pw_stream_update_params(stream, params, 2);
+        auto params = build_buffer_params(nf->dmabuf, &b);
+        pw_stream_update_params(stream, params.data(), static_cast<std::uint32_t>(params.size()));
+        if (!nf->fixed) return; // mutter, which allocates, fixates the modifier and sends the format again
+        width = nf->width;
+        height = nf->height;
+        format = nf->format;
+        MemorySettle kind;
+        {
+            std::lock_guard<std::mutex> lk(state_mu);
+            latest_dmabuf = nf->dmabuf;
+            latest_drm = nf->dmabuf ? nf->drm_format() : "";
+            kind = settle_kind(memory_settled ? std::optional<bool>(memory_dmabuf) : std::nullopt, nf->dmabuf);
+        }
+        if (kind == MemorySettle::Changed) {
+            // spec: docs/23-agent-core-architecture.md#desktop-capture-memory (a capture keeps its memory)
+            // The track's pipeline was built for the old memory: nothing more goes into it until
+            // the core loop has decided, restarting the capture or adopting the new memory.
+            frames->suspend();
+            frames->set_format(*nf);
+            memory_changed(*nf);
+            return;
+        }
+        frames->set_format(*nf);
+        settle_memory(*nf, kind);
+    }
+
+    /// The first fixed format settles the capture's memory; logged once, with the reason for SHM.
+    /// A later one in the same memory only follows a change of DMA-BUF modifier in /sources.
+    void settle_memory(const NegotiatedFormat& nf, MemorySettle kind) {
+        std::unique_lock<std::mutex> lk(state_mu);
+        if (kind == MemorySettle::Same) {
+            if (!nf.dmabuf || nf.drm_format() == drm_format) return;
+            drm_format = nf.drm_format();
+            lk.unlock();
+            const std::string line = "capture of " + options.name + ": DMA-BUF " + nf.drm_format() + " from now on (renegotiated)";
+            post([this, line] { log(1, line); });
+            return;
+        }
+        memory_settled = true;
+        memory_dmabuf = nf.dmabuf;
+        std::string line;
+        int level = 1;
+        if (nf.dmabuf) {
+            drm_format = nf.drm_format();
+            line = "capture of " + options.name + ": DMA-BUF " + drm_format + ", into the encoder without a copy";
+        } else {
+            shm_reason = settled_shm_reason(offer, producer);
+            line = "capture of " + options.name + ": shared memory (" + shm_reason + ")";
+            if (!options.memory.virtual_monitor) {
+                // A physical monitor on SHM still freezes behind a window scanned out directly (ADR-0041).
+                level = 2;
+                line += "; a fullscreen window scanned out directly will freeze this capture";
+            }
+        }
+        lk.unlock();
+        const bool dmabuf = nf.dmabuf;
+        post([this, level, line, dmabuf] {
+            log(level, line);
+            if (memory_cb) memory_cb(dmabuf);
+        });
+    }
+
+    /// A renegotiation changed the memory: the backend restarts the capture (true), or this reader
+    /// adopts the latest memory and feeds the track again (docs/23#desktop-capture-memory).
+    void memory_changed(const NegotiatedFormat& nf) {
+        {
+            std::lock_guard<std::mutex> lk(state_mu);
+            if (change_pending) return; // one decision at a time; adopt_memory takes the latest
+            change_pending = true;
+        }
+        const std::string why = std::string("its memory changed to ") + (nf.dmabuf ? "DMA-BUF " + nf.drm_format() : "shared memory");
+        post([this, why] {
+            auto cb = memory_changed_cb;
+            if (cb && cb(why)) return; // restarted: a new reader replaces this one, which feeds nothing meanwhile
+            adopt_memory();
+        });
+    }
+    /// Core loop: the capture keeps this stream in its new memory. The source's caps follow it,
+    /// and the producer built for the old memory fails to negotiate and is rebuilt from them.
+    void adopt_memory() {
+        bool dmabuf;
+        std::string line;
+        {
+            std::lock_guard<std::mutex> lk(state_mu);
+            change_pending = false;
+            dmabuf = latest_dmabuf;
+            memory_dmabuf = dmabuf;
+            if (dmabuf) {
+                drm_format = latest_drm;
+                shm_reason.clear();
+                line = "DMA-BUF " + drm_format;
+            } else {
+                drm_format.clear();
+                shm_reason = "mutter moved the stream to shared memory in a renegotiation";
+                line = "shared memory (" + shm_reason + ")";
+            }
+        }
+        log(2, "capture of " + options.name + ": goes on in " + line + "; the track's pipeline is rebuilt for it");
+        if (memory_cb) memory_cb(dmabuf);
+        frames->resume();
+    }
+
+    /// mutter's buffer arrived. One that cannot be wrapped as DMA-BUF moves the capture to shared
+    /// memory: the backend restarts it with that reason (docs/23#desktop-capture-memory).
+    void on_add_buffer(pw_buffer* b) {
+        frames->add_buffer(b);
+        auto why = frames->take_unwrappable();
+        if (!why) return;
+        fallen_back = true;
+        frames->suspend();
+        post([this, why = *why] {
+            log(2, "capture of " + options.name + ": " + why + "; restarting it on shared memory");
+            auto cb = fallback_cb;
+            if (cb) cb(why);
+        });
     }
 
     void on_process() {
@@ -164,50 +377,48 @@ struct StreamReader::Impl {
         if (!b) return;
         spa_buffer* sb = b->buffer;
         buffers++;
-        // The frame: a chunk with pixels (a cursor-only buffer has none, or is flagged corrupted).
-        if (sb->n_datas > 0 && sb->datas[0].data && sb->datas[0].chunk && sb->datas[0].chunk->size > 0 &&
-            !(sb->datas[0].chunk->flags & SPA_CHUNK_FLAG_CORRUPTED) && width > 0 && height > 0) {
-            const spa_data& d = sb->datas[0];
-            const int stride = d.chunk->stride > 0 ? d.chunk->stride : width * 4;
-            const std::size_t row = static_cast<std::size_t>(width) * 4;
-            GstBuffer* frame = gst_buffer_new_allocate(nullptr, row * height, nullptr);
-            GstMapInfo map;
-            if (gst_buffer_map(frame, &map, GST_MAP_WRITE)) {
-                const auto* src = static_cast<const std::uint8_t*>(d.data) + d.chunk->offset;
-                for (int y = 0; y < height; y++) std::memcpy(map.data + row * y, src + static_cast<std::size_t>(stride) * y, row);
-                gst_buffer_unmap(frame, &map);
-                std::lock_guard<std::mutex> lk(mu);
-                if (last) gst_buffer_unref(last);
-                last = frame;
-                push_locked(last);
-                if (first_frame) {
-                    first_frame = false;
-                    const std::string note = "first frame " + std::to_string(width) + "x" + std::to_string(height) + " after " + std::to_string(buffers) +
-                                             " buffer(s), " + std::to_string(empty) + " without pixels";
-                    post([this, note] { log(1, note); });
-                }
-            } else {
-                gst_buffer_unref(frame);
+        // The cursor first: a buffer queued back below is mutter's again.
+        if (auto* mc = static_cast<spa_meta_cursor*>(spa_buffer_find_meta_data(sb, SPA_META_Cursor, sizeof(spa_meta_cursor)))) {
+            if (spa_meta_cursor_is_valid(mc)) read_cursor(mc);
+            else hidden_cursor();
+        }
+        // Pixels or only the cursor, from the chunk alone: a DMA-BUF is never mapped. A frame
+        // counts for the first-frame watch only once one was made (pushed or held).
+        const Delivery delivered = frames->on_buffer(b);
+        if (made_frame(delivered)) {
+            if (first_frame) {
+                first_frame = false;
+                const std::string note = "first frame " + std::to_string(width) + "x" + std::to_string(height) + " after " + std::to_string(buffers) +
+                                         " buffer(s), " + std::to_string(empty) + " without a frame";
+                post([this, note] { log(1, note); });
             }
         } else {
             empty++;
             if (sb->n_datas > 0) {
                 const spa_data& d = sb->datas[0];
-                last_empty = "type " + std::to_string(d.type) + ", data " + (d.data ? "mapped" : "null") + ", chunk " +
-                             (d.chunk ? std::to_string(d.chunk->size) + " bytes flags " + std::to_string(d.chunk->flags) : std::string("none")) +
+                last_empty = std::string(delivered == Delivery::Dropped ? "pixels but no frame made of them, " : "") + "type " + std::to_string(d.type) +
+                             ", chunk " + (d.chunk ? std::to_string(d.chunk->size) + " bytes flags " + std::to_string(d.chunk->flags) : std::string("none")) +
                              ", size " + std::to_string(width) + "x" + std::to_string(height) + ", format " + std::to_string(format);
             } else {
                 last_empty = "no datas";
             }
         }
-        auto* mc = static_cast<spa_meta_cursor*>(spa_buffer_find_meta_data(sb, SPA_META_Cursor, sizeof(spa_meta_cursor)));
-        if (mc && spa_meta_cursor_is_valid(mc)) read_cursor(mc);
-        pw_stream_queue_buffer(stream, b); // straight back: the producer must never wait on us
+        if (requeue_now(delivered)) pw_stream_queue_buffer(stream, b); // straight back: the producer must never wait on us
     }
 
-    void on_keepalive() {
-        std::lock_guard<std::mutex> lk(mu);
-        if (last && Clock::now() - last_push >= std::chrono::milliseconds(keepalive_ms)) push_locked(last);
+    void send_shape(std::optional<CursorImage> img) {
+        if (!img) return;
+        post([this, img = std::move(*img)] {
+            if (shape) shape(img);
+        });
+    }
+
+    /// An invalid cursor id (0): the robot's application hid the pointer, or it is not on this
+    /// monitor. Sent on as a hidden shape marked as such (docs/22#cursor-strategy); the backend
+    /// tells the two apart by where the pointer was last seen (CursorArbiter).
+    void hidden_cursor() {
+        last_x = last_y = -1; // its next position is news, wherever it reappears
+        send_shape(cursor.invalid_id());
     }
 
     void read_cursor(const spa_meta_cursor* mc) {
@@ -229,15 +440,9 @@ struct StreamReader::Impl {
                                         ", format " + std::to_string(bm->format) + ")";
                 post([this, why] { log(2, why); });
             }
-            if (!img.visible || img.width > 0) {
-                img.shape_id = shape_id(img);
-                if (img.shape_id != last_shape) {
-                    last_shape = img.shape_id;
-                    post([this, img = std::move(img)] {
-                        if (shape) shape(img);
-                    });
-                }
-            }
+            if (!img.visible || img.width > 0) send_shape(cursor.bitmap(std::move(img)));
+        } else {
+            send_shape(cursor.no_bitmap()); // back from an invalid id: the shape before it, if any
         }
         const int x = mc->position.x, y = mc->position.y;
         if (width > 0 && height > 0 && x >= 0 && y >= 0 && x < width && y < height && (x != last_x || y != last_y)) {
@@ -256,14 +461,15 @@ const pw_stream_events EVENTS = [] {
     pw_stream_events e{};
     e.version = PW_VERSION_STREAM_EVENTS;
     e.param_changed = [](void* d, std::uint32_t id, const spa_pod* param) { static_cast<StreamReader::Impl*>(d)->on_param_changed(id, param); };
-    e.state_changed = [](void* d, pw_stream_state, pw_stream_state state, const char*) { static_cast<StreamReader::Impl*>(d)->on_state(state); };
+    e.state_changed = [](void* d, pw_stream_state, pw_stream_state state, const char* error) { static_cast<StreamReader::Impl*>(d)->on_state(state, error); };
+    e.add_buffer = [](void* d, pw_buffer* b) { static_cast<StreamReader::Impl*>(d)->on_add_buffer(b); };
+    e.remove_buffer = [](void* d, pw_buffer* b) { static_cast<StreamReader::Impl*>(d)->frames->remove_buffer(b); };
     e.process = [](void* d) { static_cast<StreamReader::Impl*>(d)->on_process(); };
     return e;
 }();
 } // namespace
 
-std::unique_ptr<StreamReader> StreamReader::start(GMainContext* ctx, int fd, std::uint32_t node, int keepalive_ms, Shape shape, Position position, Log log,
-                                                   int width, int height) {
+std::unique_ptr<StreamReader> StreamReader::start(GMainContext* ctx, int fd, std::uint32_t node, Options options, Shape shape, Position position, Log log) {
     static const bool initialized = [] {
         pw_init(nullptr, nullptr);
         return true;
@@ -272,9 +478,8 @@ std::unique_ptr<StreamReader> StreamReader::start(GMainContext* ctx, int fd, std
     auto impl = std::make_unique<Impl>();
     impl->ctx = ctx;
     impl->node = node;
-    impl->want_width = width;
-    impl->want_height = height;
-    impl->keepalive_ms = keepalive_ms > 0 ? keepalive_ms : 100;
+    impl->options = std::move(options);
+    if (impl->options.keepalive_ms <= 0) impl->options.keepalive_ms = 100;
     impl->shape = std::move(shape);
     impl->position = std::move(position);
     impl->log = std::move(log);
@@ -291,21 +496,32 @@ std::unique_ptr<StreamReader> StreamReader::start(GMainContext* ctx, int fd, std
         return nullptr;
     }
     pw_thread_loop_lock(impl->thread);
+    pw_loop* loop = pw_thread_loop_get_loop(impl->thread);
+    // A released DMA-BUF frame is posted from whichever GStreamer thread let go of it, and given back
+    // to mutter here, on the PipeWire thread (docs/23#desktop-capture-memory, Held while GStreamer holds the frame).
+    impl->release_event = pw_loop_add_event(loop, [](void* d, std::uint64_t) { static_cast<Impl*>(d)->frames->drain_releases(); }, impl.get());
+    Impl* raw = impl.get();
+    impl->frames = std::make_unique<Frames>([raw](pw_buffer* b) { pw_stream_queue_buffer(raw->stream, b); },
+                                            [loop, ev = impl->release_event] { pw_loop_signal_event(loop, ev); });
     impl->core = pw_context_connect_fd(impl->context, fd, nullptr, 0); // takes the fd
     bool ok = impl->core != nullptr;
     if (ok) {
         impl->stream = pw_stream_new(impl->core, "fjarr-capture",
                                      pw_properties_new(PW_KEY_MEDIA_TYPE, "Video", PW_KEY_MEDIA_CATEGORY, "Capture", PW_KEY_MEDIA_ROLE, "Screen", nullptr));
         pw_stream_add_listener(impl->stream, &impl->stream_listener, &EVENTS, impl.get());
-        impl->first_frame_watch = pw_loop_add_timer(pw_thread_loop_get_loop(impl->thread),
-                                                    [](void* d, std::uint64_t) { static_cast<Impl*>(d)->on_first_frame_watch(); }, impl.get());
-        ok = impl->connect();
+        impl->first_frame_watch = pw_loop_add_timer(loop, [](void* d, std::uint64_t) { static_cast<Impl*>(d)->on_first_frame_watch(); }, impl.get());
+        // A physical monitor with an import list: ask mutter's node what it can allocate first, so
+        // the offer is the intersection (and an empty one is named). Otherwise link at once.
+        if (impl->wants_producer_formats()) impl->ask_producer_formats();
+        else ok = impl->link(ProducerFormats{});
         if (ok) {
             // The keepalive: mutter is silent on a still screen, and the encoder must keep producing.
-            impl->keepalive = pw_loop_add_timer(pw_thread_loop_get_loop(impl->thread), [](void* d, std::uint64_t) { static_cast<Impl*>(d)->on_keepalive(); },
-                                                impl.get());
-            timespec value{0, static_cast<long>(impl->keepalive_ms) * 1'000'000L}, interval = value;
-            pw_loop_update_timer(pw_thread_loop_get_loop(impl->thread), impl->keepalive, &value, &interval, false);
+            impl->keepalive = pw_loop_add_timer(loop, [](void* d, std::uint64_t) {
+                auto* self = static_cast<Impl*>(d);
+                self->frames->keepalive(self->options.keepalive_ms);
+            }, impl.get());
+            timespec value{0, static_cast<long>(impl->options.keepalive_ms) * 1'000'000L}, interval = value;
+            pw_loop_update_timer(loop, impl->keepalive, &value, &interval, false);
         }
     }
     pw_thread_loop_unlock(impl->thread);
@@ -316,17 +532,26 @@ std::unique_ptr<StreamReader> StreamReader::start(GMainContext* ctx, int fd, std
     return std::unique_ptr<StreamReader>(new StreamReader(std::move(impl)));
 }
 
-void StreamReader::attach(GstElement* appsrc) {
-    std::lock_guard<std::mutex> lk(impl_->mu);
-    if (impl_->appsrc == appsrc) return;
-    if (impl_->appsrc) gst_object_unref(impl_->appsrc);
-    impl_->appsrc = appsrc ? GST_ELEMENT(gst_object_ref(appsrc)) : nullptr;
-    if (!impl_->appsrc) return;
-    if (impl_->caps) gst_app_src_set_caps(GST_APP_SRC(impl_->appsrc), impl_->caps);
-    if (impl_->last) impl_->push_locked(impl_->last); // a new viewer's first frame now, not at the next damage
-}
-
+void StreamReader::attach(GstElement* appsrc) { impl_->frames->attach(appsrc); }
 void StreamReader::on_stalled(std::function<void()> cb) { impl_->stalled = std::move(cb); }
+void StreamReader::on_memory(std::function<void(bool)> cb) { impl_->memory_cb = std::move(cb); }
+void StreamReader::on_memory_changed(std::function<bool(const std::string&)> cb) { impl_->memory_changed_cb = std::move(cb); }
+void StreamReader::on_fallback(std::function<void(const std::string&)> cb) { impl_->fallback_cb = std::move(cb); }
+void StreamReader::on_failed(std::function<void(const std::string&)> cb) { impl_->failed_cb = std::move(cb); }
+
+nlohmann::json StreamReader::status() const {
+    const FrameCounts c = impl_->frames->counts();
+    nlohmann::json frames{{"new", c.fresh}, {"repeated", c.repeated}, {"cursor_only", c.cursor_only}, {"newest_age_ms", nullptr}};
+    if (c.newest) frames["newest_age_ms"] = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - *c.newest).count();
+    nlohmann::json memory = nullptr;
+    {
+        std::lock_guard<std::mutex> lk(impl_->state_mu);
+        if (impl_->memory_settled)
+            memory = impl_->memory_dmabuf ? nlohmann::json{{"kind", "dmabuf"}, {"drm_format", impl_->drm_format}}
+                                          : nlohmann::json{{"kind", "shm"}, {"reason", impl_->shm_reason}};
+    }
+    return {{"frames", frames}, {"memory", memory}};
+}
 
 StreamReader::StreamReader(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 StreamReader::~StreamReader() = default;

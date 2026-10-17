@@ -183,9 +183,34 @@ verify() {
       --timeout 120 --desktop-oracle "http://127.0.0.1:8090/testwin.log" >"$STATE/$scenario.log" 2>&1 || rc=1
     grep -E '^(PASS|FAIL|SUMMARY)' "$STATE/$scenario.log"
   done
+  # The scanout check (ADR-0041, docs/15#the-desktop-test-lab): the same window, fullscreen and GPU
+  # rendered, changing colour by itself with the pointer hidden. The decoded video must follow every
+  # change while debugfs shows the window scanned out directly. This machine has a KMS CRTC, so
+  # none readable fails (--require-kms); too few changes under scanout is a NOTE, and the verdict
+  # names it. cleanup stops this window with the oracle's.
+  local scanout_note=""
+  pkill -f "$ORACLE/testwin.py" 2>/dev/null || true
+  rm -f "$ORACLE/scanout.log"
+  # shellcheck disable=SC2024  # as above
+  sudo -u "$ACCOUNT" setsid env XDG_RUNTIME_DIR="/run/user/$uid" WAYLAND_DISPLAY=wayland-0 \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" GDK_BACKEND=wayland FJARR_FIXTURE_LOG="$ORACLE/scanout.log" \
+    FJARR_TESTWIN_BLINK_MS=2000 FJARR_TESTWIN_CURSOR=none python3 "$ORACLE/testwin.py" >"$ORACLE/scanout-app.log" 2>&1 </dev/null &
+  if wait_for 20 grep -q ' start ' "$ORACLE/scanout.log"; then
+    FJARR_OPSIM_DUMP_DIR="$STATE" "$STATE/fjarr-opsim" --server "ws://127.0.0.1:$PORT/ws" --robot "$ROBOT" --grant-secret "$GRANT" --scenario desktop-scanout \
+      --timeout 120 --require-kms --desktop-oracle "http://127.0.0.1:8090/scanout.log" >"$STATE/desktop-scanout.log" 2>&1 || rc=1
+    grep -E '^(PASS|FAIL|NOTE|SUMMARY)' "$STATE/desktop-scanout.log"
+    scanout_note=$(grep -m1 -E '^NOTE desktop-scanout: ' "$STATE/desktop-scanout.log" | sed -E 's/^NOTE desktop-scanout: not run: //' || true)
+  else
+    echo "FAIL desktop-scanout: the blinking window did not start: $(tail -3 "$ORACLE/scanout-app.log")"
+    rc=1
+  fi
   [ $rc -eq 0 ] || fail stream "an opsim scenario failed (above; full logs in $STATE)"
-  echo "SUMMARY unattended-access: passed"
-  if [ -n "$VERDICT" ]; then echo "passed" > "$VERDICT"; fi
+  # A passing night without the scanout check says so in its verdict: the M3 gate needs its PASS
+  # line (docs/15#the-desktop-test-lab), and a NOTE alone in result.log reads as a pass (docs/30).
+  local verdict="passed"
+  [ -z "$scanout_note" ] || verdict="passed (desktop-scanout not run: $scanout_note)"
+  echo "SUMMARY unattended-access: $verdict"
+  if [ -n "$VERDICT" ]; then echo "$verdict" > "$VERDICT"; fi
   return 0
 }
 
@@ -217,7 +242,11 @@ report() {
   fi
   cat "$STATE/result.log" 2>/dev/null || true # a missing log must not swallow the verdict (set -e)
   echo "unattended: verdict for prepare run $(cat "$STATE/prepare-run" 2>/dev/null): $(cat "$STATE/result")"
-  [ "$(cat "$STATE/result")" = "passed" ]
+  case "$(cat "$STATE/result")" in
+    passed) return 0 ;;
+    "passed ("*) return 0 ;; # green, named; result.log above carries its NOTE line, which lab-desktop-verify warns about
+    *) return 1 ;;
+  esac
 }
 
 case "${1:-}" in

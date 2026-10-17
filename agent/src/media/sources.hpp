@@ -5,9 +5,11 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <gio/gio.h>
 
+#include <fjarr/desktop_backend.hpp>
 #include <fjarr/video_source.hpp>
 
 #include "core/glib/raii.hpp"
@@ -150,9 +152,20 @@ class SourceRegistry final : public SourceFactory {
     std::vector<std::string> types() const override;
     /// The core loop's context (null for tools without a loop): what capabilities hand modules.
     GMainContext* context() const { return ctx_; }
+    /// The media plane's import list and its encoder family (ADR-0041), set when the plane starts,
+    /// which is after capabilities are configured: a capability reads it when it starts a capture.
+    /// spec: docs/23-agent-core-architecture.md#desktop-capture-memory
+    void set_dmabuf_imports(std::vector<DmaBufFormat> list, std::string encoder) {
+        imports_ = std::move(list);
+        encoder_ = std::move(encoder);
+    }
+    const std::vector<DmaBufFormat>& dmabuf_imports() const { return imports_; }
+    const std::string& encoder() const { return encoder_; }
 
   private:
     GMainContext* ctx_;
+    std::vector<DmaBufFormat> imports_;
+    std::string encoder_;
     std::map<std::string, SourceType> types_;
 };
 

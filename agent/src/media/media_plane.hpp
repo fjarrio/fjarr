@@ -36,6 +36,7 @@ struct SourceStatus {
     std::string caps; // negotiated, when a producer runs
     std::vector<std::string> tiers;
     bool playing = false;
+    nlohmann::json source_status; // VideoSource::status(): a capture's frame counts and memory (docs/24)
 };
 
 class MediaPlane {

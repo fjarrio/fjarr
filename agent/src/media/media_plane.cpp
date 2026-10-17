@@ -3,11 +3,18 @@
 #include <algorithm>
 
 #include "core/log.hpp"
+#include "frame_repeat.hpp"
 
 namespace fjarr::media {
 
 MediaPlane::MediaPlane(CoreLoop& loop, const AgentConfig::MediaSection& config, EncoderChoice encoder, SourceRegistry& sources)
     : loop_(loop), config_(config), encoder_(std::move(encoder)), hub_(static_cast<std::size_t>(config.gop_seconds * 30 + 1)), sources_(sources) {
+    // The import list (ADR-0041): asked of the encoder family once, at startup, and handed to every
+    // capture through the registry. spec: docs/23-agent-core-architecture.md#desktop-capture-memory
+    auto imports = dmabuf_imports(encoder_.kind);
+    log::info("media", "DMA-BUF import list", {{"encoder", encoder_.name}, {"formats", describe_imports(imports)}});
+    sources_.set_dmabuf_imports(std::move(imports), encoder_.name);
+    frame_repeat_meta_info(); // registered here first, before any capture's thread adds it
     // Hub hooks fire on the delivery thread; the plane may be gone by the time the post runs (shutdown).
     hub_.on_keyframe_request([this, alive = std::weak_ptr<bool>(alive_)](const HubKey& key) {
         loop_.post_guarded([alive] { return !alive.expired(); }, [this, key] { request_keyframe(key); });
@@ -334,6 +341,7 @@ std::vector<SourceStatus> MediaPlane::source_status() const {
             s.available = false; // the device is there but its stream failed (an unreachable camera): the reason is the bus error
             s.reason = r.source_error;
         }
+        if (r.reg.spec.source.source) s.source_status = r.reg.spec.source.source->status(); // docs/24#capture-frame-counts
         if (r.producer) {
             s.caps = r.producer->source_caps();
             s.playing = r.producer->playing();

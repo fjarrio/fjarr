@@ -30,7 +30,14 @@ bool Producer::build() {
             passthrough_ = o.declared_caps.rfind("video/x-h26", 0) == 0;
             audio_ = o.kind == TrackKind::Audio;
             music_ = audio_ && o.audio == AudioContent::Music;
+            memory_ = passthrough_ || audio_ ? SourceMemory::System : memory_of_caps(o.declared_caps);
         }
+    if (memory_ == SourceMemory::DmaBuf && config_.encoder.kind != EncoderKind::VaApi) {
+        // The capability never asks for one (its import list is empty): a source that declares
+        // DMA-BUF anyway cannot be encoded here without a download nobody built (ADR-0041).
+        error_ = "the source delivers DMA-BUF and the " + config_.encoder.name + " encoder imports none (docs/23#desktop-capture-memory)";
+        return false;
+    }
     GstBin* bin = source_.source->create_bin();
     if (!bin) {
         error_ = "source bin failed to build";
@@ -70,6 +77,8 @@ bool Producer::build() {
         bus_watch_ = glib::SourceGuard::attached(pwatch);
         return true;
     }
+    const std::string pad_name = source_.output == "src" ? "src" : "src_" + source_.output;
+    if (memory_ == SourceMemory::DmaBuf) return build_device_head(pad_name);
     // Audio (docs/23#audio): converted and resampled to what Opus takes, 48 kHz mono.
     convert_ = glib::make_element(audio_ ? "audioconvert" : "videoconvert", name() + "/convert");
     rawcaps_ = glib::make_element("capsfilter", name() + "/rawcaps");
@@ -82,7 +91,6 @@ bool Producer::build() {
         resample_ = glib::make_element("audioresample", name() + "/resample");
         gst_bin_add(GST_BIN(pipeline_.get()), resample_.get());
     }
-    const std::string pad_name = source_.output == "src" ? "src" : "src_" + source_.output;
     glib::GstPadPtr src_pad = glib::adopt_pad(gst_element_get_static_pad(source_bin_.get(), pad_name.c_str()));
     if (!src_pad) {
         error_ = "source bin has no pad " + pad_name;
@@ -100,6 +108,7 @@ bool Producer::build() {
         return false;
     }
     source_pad_ = glib::adopt_pad(gst_element_get_static_pad(rawcaps_.get(), "src"));
+    if (!audio_) source_counter_ = std::make_unique<PadCounter>(source_pad_.get(), name() + "/rawcaps:src");
     if (stamp_ && !audio_) {
         stamp_probe_ = glib::PadProbe(source_pad_.get(),
                                       static_cast<GstPadProbeType>(GST_PAD_PROBE_TYPE_BUFFER | GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM),
@@ -118,12 +127,58 @@ bool Producer::build() {
             },
             nullptr, nullptr);
     }
+    watch_bus();
+    return true;
+}
+
+// spec: docs/23-agent-core-architecture.md#encoders-and-tiers (The device-memory head; ADR-0041)
+bool Producer::build_device_head(const std::string& pad_name) {
+    // No videoconvert and no I420: the frames stay on the GPU. The head is a capsfilter on the
+    // DMA-BUF feature, keeping the `rawcaps` role name, then ONE vapostproc that imports each
+    // DMA-BUF as a VA surface and converts it to NV12 in VA memory, then the tee. One importer, not
+    // one per tier: two vapostprocs importing the same foreign DMA-BUF at once race in GStreamer's
+    // VA import (the second replaces the surface the first is using) and crashed the driver
+    // (iHD, 2026-10-17, EncoderMemory.aVaDmaBufGoesThroughFramesAndTheDeviceHeadIntoTheEncoder).
+    // No stamp painter either: it would map every frame.
+    if (stamp_) log::warn("producer", "a DMA-BUF source is never stamped (docs/25): the painter would map every frame", {{"producer", name()}});
+    rawcaps_ = glib::make_element("capsfilter", name() + "/rawcaps");
+    glib::GstCapsPtr raw(gst_caps_from_string("video/x-raw(memory:DMABuf),format=DMA_DRM"));
+    g_object_set(rawcaps_.get(), "caps", raw.get(), nullptr);
+    GstElement* import = gst_element_factory_make("vapostproc", (name() + "/import").c_str());
+    if (!import) {
+        error_ = "vapostproc is missing: a DMA-BUF source needs GStreamer's VA plugin (docs/23#encoders-and-tiers)";
+        return false;
+    }
+    convert_ = glib::sink_element(import);
+    vacaps_ = glib::make_element("capsfilter", name() + "/vacaps");
+    glib::GstCapsPtr va(gst_caps_from_string("video/x-raw(memory:VAMemory),format=NV12"));
+    g_object_set(vacaps_.get(), "caps", va.get(), nullptr);
+    tee_ = glib::make_element("tee", name() + "/tee");
+    g_object_set(tee_.get(), "allow-not-linked", TRUE, nullptr);
+    gst_bin_add_many(GST_BIN(pipeline_.get()), source_bin_.get(), rawcaps_.get(), convert_.get(), vacaps_.get(), tee_.get(), nullptr);
+    glib::GstPadPtr src_pad = glib::adopt_pad(gst_element_get_static_pad(source_bin_.get(), pad_name.c_str()));
+    if (!src_pad) {
+        error_ = "source bin has no pad " + pad_name;
+        return false;
+    }
+    glib::GstPadPtr caps_sink = glib::adopt_pad(gst_element_get_static_pad(rawcaps_.get(), "sink"));
+    if (gst_pad_link(src_pad.get(), caps_sink.get()) != GST_PAD_LINK_OK || !gst_element_link_many(rawcaps_.get(), convert_.get(), vacaps_.get(), tee_.get(), nullptr)) {
+        error_ = "cannot link the DMA-BUF source ! rawcaps ! vapostproc ! vacaps ! tee";
+        return false;
+    }
+    source_pad_ = glib::adopt_pad(gst_element_get_static_pad(rawcaps_.get(), "src"));
+    source_counter_ = std::make_unique<PadCounter>(source_pad_.get(), name() + "/rawcaps:src");
+    log::info("producer", "device-memory head", {{"producer", name()}, {"memory", "DMA-BUF imported by one vapostproc into NV12 VA memory, no copy"}});
+    watch_bus();
+    return true;
+}
+
+void Producer::watch_bus() {
     glib::GstBusPtr bus(gst_pipeline_get_bus(GST_PIPELINE(pipeline_.get())));
     GSource* watch = gst_bus_create_watch(bus.get());
     g_source_set_callback(watch, G_SOURCE_FUNC(&Producer::on_bus), this, nullptr);
     g_source_attach(watch, bus_context_);
     bus_watch_ = glib::SourceGuard::attached(watch);
-    return true;
 }
 
 gboolean Producer::on_bus(GstBus*, GstMessage* msg, gpointer user) {
@@ -168,12 +223,11 @@ TierProfile Producer::profile_for(const std::string& tier) const {
             for (const auto& o : source_.source->describe().outputs)
                 if (o.name == source_.output && !o.declared_caps.empty()) caps.reset(gst_caps_from_string(o.declared_caps.c_str()));
         }
-        if (caps && gst_caps_is_fixed(caps.get())) {
-            GstVideoInfo info;
-            if (gst_video_info_from_caps(&info, caps.get())) {
-                w = GST_VIDEO_INFO_WIDTH(&info);
-                h = GST_VIDEO_INFO_HEIGHT(&info);
-            }
+        if (caps && gst_caps_get_size(caps.get()) > 0) {
+            // Read from the structure: DMA_DRM caps are not a GstVideoInfo (docs/23, the device-memory head).
+            const GstStructure* st = gst_caps_get_structure(caps.get(), 0);
+            gst_structure_get_int(st, "width", &w);
+            gst_structure_get_int(st, "height", &h);
         }
     }
     if (tier == "thumbnail") {
@@ -234,7 +288,7 @@ bool Producer::start_tier(const std::string& tier) {
         // Passthrough: parse and hand over, byte-stream/au as every consumer's appsrc expects.
         t->encode = audio_         ? glib::sink_element(make_opus_bin(prefix, music_))
                     : passthrough_ ? glib::sink_element(make_passthrough_bin(prefix))
-                                   : glib::sink_element(make_encode_bin(config_.encoder, profile, prefix));
+                                   : glib::sink_element(make_encode_bin(config_.encoder, profile, prefix, memory_));
     } catch (const std::exception& e) {
         error_ = e.what();
         return false;
@@ -459,8 +513,10 @@ void Producer::stop() {
     tiers_.clear();
     bus_watch_.cancel();
     stamp_probe_.remove();
+    source_counter_.reset();
     source_pad_.reset();
     tee_.reset();
+    vacaps_.reset();
     rawcaps_.reset();
     resample_.reset();
     convert_.reset();

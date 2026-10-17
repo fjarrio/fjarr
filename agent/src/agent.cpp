@@ -108,8 +108,15 @@ struct Agent::Impl {
                         // tier has none — the camera sets its own rate (docs/06).
                         if (p->current_kbps(t) > 0) kbps[t] = p->current_kbps(t);
                     }
-                producers.push_back({{"name", p->name()}, {"playing", p->playing()}, {"tiers", tiers}, {"kbps", kbps},
-                                     {"passthrough", p->passthrough()}, {"error", p->error()}});
+                nlohmann::json item{{"name", p->name()}, {"playing", p->playing()}, {"tiers", tiers}, {"kbps", kbps},
+                                    {"passthrough", p->passthrough()}, {"error", p->error()}};
+                // Buffers at the source pad, repeats (FjarrFrameRepeat) apart (docs/23#desktop-capture-memory).
+                if (const auto* c = p->source_counters()) {
+                    // Repeats first: the probe counts a buffer before its repeat, so this pair never underflows.
+                    const std::uint64_t repeated = c->repeats.load(), buffers = c->buffers.load();
+                    item["source_buffers"] = {{"new", buffers >= repeated ? buffers - repeated : 0}, {"repeated", repeated}};
+                }
+                producers.push_back(std::move(item));
             }
         }
         return nlohmann::json{{"robot_id", config.agent.robot_id}, {"sessions", sessions ? sessions->stats() : nlohmann::json::array()},
@@ -168,6 +175,9 @@ struct Agent::Impl {
                 it->second["caps"] = s.caps;
                 it->second["tiers"] = s.tiers;
                 it->second["playing"] = s.playing;
+                // What the source says of itself: a desktop capture's frame counts and memory (docs/24#capture-frame-counts).
+                if (s.source_status.is_object())
+                    for (const auto& [k, v] : s.source_status.items()) it->second[k] = v;
             }
         nlohmann::json arr = nlohmann::json::array();
         for (const auto& id : order) arr.push_back(by_track[id]);

@@ -52,6 +52,7 @@ struct DesktopCapability::Impl {
     std::string chosen;      // the display server serving us, empty when none
     std::string unavailable; // why not, when chosen is empty
     nlohmann::json helper = nlohmann::json::object(); // the backend's own config (the session helper's socket and account)
+    const media::SourceRegistry* registry = nullptr;   // the media plane's import list, read when a capture starts (ADR-0041)
     std::unique_ptr<DesktopBackend> driver; // the live backend from the module
     std::shared_ptr<VideoSource> sound;     // the desktop's sound (docs/23#desktop-audio); null without one
     std::map<SessionId, SessionContext*> sessions;
@@ -317,6 +318,13 @@ struct DesktopCapability::Impl {
         // and the shape and position arrive beside it.
         CaptureOptions options;
         options.cursor_in_video = !driver->features().local_cursor;
+        // The import list (ADR-0041): what the encoder takes as DMA-BUF without a copy. Set by the
+        // media plane at startup, which comes after configure().
+        // spec: docs/23-agent-core-architecture.md#desktop-capture-memory
+        if (registry) {
+            options.dmabuf = registry->dmabuf_imports();
+            options.encoder = registry->encoder();
+        }
         auto source = driver->start_capture(m.id, options);
         if (source) {
             const std::string id = "desk-" + m.wire_id;
@@ -443,7 +451,9 @@ CapabilityManifest DesktopCapability::manifest() const {
               {"uid", {{"type", "integer"}}},
               {"group", {{"type", "string"}}},
               {"gid", {{"type", "integer"}}}, // a container's (docs/26#a-desktop-in-a-container)
-              {"keepalive_ms", {{"type", "integer"}, {"minimum", 20}, {"maximum", 1000}}}}}}}}}};
+              {"keepalive_ms", {{"type", "integer"}, {"minimum", 20}, {"maximum", 1000}}},
+              // docs/23#desktop-capture-memory: "auto" takes DMA-BUF where the encoder imports it; "shm" never does.
+              {"capture_memory", {{"type", "string"}, {"enum", {"auto", "shm"}}}}}}}}}}};
     return m;
 }
 
@@ -474,6 +484,7 @@ void DesktopCapability::configure(const nlohmann::json& config, const SourceFact
     const auto* registry = dynamic_cast<const media::SourceRegistry*>(&sources);
     GMainContext* loop = registry ? registry->context() : nullptr;
     if (!loop) return;
+    impl_->registry = registry;
     // The backend's own settings: the session helper's (module E), the X display (backend A).
     nlohmann::json backend_config = impl_->helper;
     if (config.contains("display")) backend_config["display"] = config["display"];

@@ -309,8 +309,16 @@ changes nothing for the client: the cursor metadata arrives on DMA-BUF buffers
 exactly as on shared memory (position, shape and hotspot, measured on the
 mini-PC 2026-10-17), and metadata mode stays the default. A pointer that a
 robot application hides arrives as an invalid cursor id (0); the agent sends it
-as a `hidden` shape, and the view draws nothing, which the DMA-BUF change's
-tests check.
+as a `hidden` shape, and the view draws nothing. mutter sends the same id to a
+monitor the pointer is not on (by mutter's source, not measured), so the agent
+takes it only from the monitor the pointer was last seen on, and restores that
+monitor's shape when the pointer moves to it
+([docs/23](23-agent-core-architecture.md#desktop-capture-memory)). The DMA-BUF
+change's unit tests check those rules (`ReaderCursor.*` and `CursorArbiter.*`
+in `agent/tests/test_cursor_image.cpp`). Neither CI fixture can hide the pointer
+from an application; the mini-PC's scanout check runs with it hidden and
+asserts the hidden shape arrives
+([docs/15](15-testing-strategy.md#the-desktop-test-lab)).
 
 ## Virtual monitors (slice 3.5)
 

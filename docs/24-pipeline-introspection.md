@@ -49,7 +49,9 @@ in three renderings from the same walk:
 - **Addressing.** Elements are named by the core with a stable grammar
   used everywhere (DOT node ids, JSON `name`, test assertions):
   `producer:<track_id>/<role>` for the shared head of a producer (roles:
-  `source`, `convert`, `rawcaps`, `tee`) and `producer:<track_id>:<tier>/<role>`
+  `source`, `convert`, `rawcaps`, `tee`; the device-memory head of a DMA-BUF
+  source has no `convert` and is `source`, `rawcaps`, `import`, `vacaps`, `tee`,
+  [docs/23](23-agent-core-architecture.md#encoders-and-tiers)) and `producer:<track_id>:<tier>/<role>`
   for each tier branch (roles: `queue`, `encode` — the encoder bin, whose
   children are `encoder`, `parser`, `caps` — and `sink`), and `session:<sid8>/<track_id>/<role>`
   (roles: `appsrc`, `queue`, `valve`, `payloader`) plus
@@ -134,9 +136,19 @@ so `GET /sources` shows, per capture and since it started:
   keepalive on a still screen, and the frame given to a newly built
   pipeline);
 - `frames.cursor_only`: buffers that carried only cursor metadata;
-- `frames.newest_age_ms`: how long ago the newest new frame arrived;
-- `memory`: `dmabuf` with its `drm-format`, or `shm` with the reason
-  ([docs/23](23-agent-core-architecture.md#desktop-capture-memory)).
+- `frames.newest_age_ms`: how long ago the newest new frame arrived (`null`
+  before the first);
+- `memory`: `{"kind": "dmabuf", "drm_format": "XR24:0x0200000000000901"}`, or
+  `{"kind": "shm", "reason": "a virtual monitor"}` with the reason
+  ([docs/23](23-agent-core-architecture.md#desktop-capture-memory)); `null`
+  until the stream's format is settled.
+
+These come from the source itself (`VideoSource::status()`,
+[docs/09](09-interfaces.md#the-video-source-contract)), counted since the capture
+started, so a restarted capture starts again from zero. Independently of the
+source, `GET /stats` lists per producer the buffers at the source's output
+(`rawcaps:src`, before any conversion or import), `source_buffers: {new,
+repeated}`, repeats told apart by the meta, since that producer was built.
 
 A picture frozen behind healthy counters shows as `repeated` rising while
 `new` stands still and `newest_age_ms` grows. That is also what a still

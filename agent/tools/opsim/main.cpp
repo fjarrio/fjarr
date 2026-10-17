@@ -82,6 +82,9 @@ struct Options {
     std::string introspect_token; // --introspect-token, else $FJARR_INTROSPECT_TOKEN (the demo exposes the endpoint with one, docs/24)
     std::string desktop_oracle;   // desktop-control: the fixture's test-window log, http://desktop-fixture:8090/testwin.log
     std::string desktop_plug;     // the fixture's plug service, http://desktop-fixture:8091: hot-plug, clipboard, sound, desktop-control's mode change
+    /// desktop-scanout on a machine that has a KMS CRTC (the mini-PC): none readable fails the
+    /// check instead of leaving it not run (docs/15#the-desktop-test-lab).
+    bool require_kms = false;
     int timeout_s = 60;
     int cycles = 200; // soak: connect/stream/close cycles
     /// `smoke --hold N`: keep every track subscribed for N seconds before closing — a viewer that
@@ -105,10 +108,11 @@ void usage() {
                  "                   [--json out.json] [--timeout 60] [--ice-policy all|relay] [--cycles 200] [--hold 0]\n"
                  "                   [--introspect http://127.0.0.1:7381] [--introspect-token <t>] [--verbose]\n"
                  "                   [--exec '<command>'] (tunnel: run it with the link up, $FJARR_ADDR set)\n"
-                 "                   [--desktop-oracle <url of the fixture's test-window log>] (desktop-control)\n"
+                 "                   [--desktop-oracle <url of the fixture's test-window log>] (desktop-control, desktop-scanout)\n"
+                 "                   [--require-kms] (desktop-scanout: no KMS CRTC fails instead of not running)\n"
                  "                   [--desktop-plug <url of the fixture's plug service>] (desktop-hotplug, desktop-clipboard, desktop-audio;\n"
                  "                    desktop-control's mode change, reported as not run without it)\n"
-                 "scenarios: smoke toggle hotplug rejected-track desktop-see desktop-control desktop-hotplug desktop-clipboard desktop-cursor desktop-virtual silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer tunnel\n"
+                 "scenarios: smoke toggle hotplug rejected-track desktop-see desktop-control desktop-hotplug desktop-clipboard desktop-cursor desktop-virtual desktop-scanout silent-operator no-answer socket-drop ice-restart deadman relay-only congested-viewer tunnel\n"
                  "           soak (--cycles N, needs --introspect)\n"
                  "           netem-{lan,wifi-ok,4g,lossy,bad} (the profile is applied externally: docker/lab/netem.sh)\n"
                  "exit: 0 all assertions pass, 1 any fail, 2 usage, 3 timeout\n");
@@ -160,6 +164,8 @@ bool parse_args(int argc, char** argv, Options& o) {
                 std::fprintf(stderr, "--cycles must be a positive integer\n");
                 return false;
             }
+        } else if (a == "--require-kms") {
+            o.require_kms = true;
         } else if (a == "--verbose" || a == "-v") {
             o.verbose = true;
         } else if (a == "--help" || a == "-h") {
@@ -1850,6 +1856,22 @@ class Operator {
     const std::string& introspect() const { return opts_.introspect; }
     const std::string& desktop_oracle() const { return opts_.desktop_oracle; }
     const std::string& desktop_plug() const { return opts_.desktop_plug; }
+    bool require_kms() const { return opts_.require_kms; }
+    /// A track's monitor in the latest offer's manifest (docs/08 `monitor`): its connector, as mutter
+    /// names it, and whether its cursor is drawn into the video. Empty and false when not offered.
+    std::pair<std::string, bool> desk_monitor(const std::string& track_id) {
+        return locked<std::pair<std::string, bool>>([&]() -> std::pair<std::string, bool> {
+            for (auto it = sh_.sig_in.rbegin(); it != sh_.sig_in.rend(); ++it) {
+                if (it->value("type", "") != "offer") continue;
+                for (const auto& t : it->value("tracks", json::array())) {
+                    if (t.value("track_id", std::string()) != track_id || !t.contains("monitor") || !t["monitor"].is_object()) continue;
+                    return {t["monitor"].value("connector", std::string()), t["monitor"].value("cursor", std::string()) == "embedded"};
+                }
+                return {};
+            }
+            return {};
+        });
+    }
     /// The desk-* track of the primary monitor in the latest offer's manifest (docs/08 `monitor`),
     /// else the first desk-* track; empty when there is none. A robot with several monitors offers
     /// several, and the test window opens on the primary one.
@@ -2972,6 +2994,116 @@ void scenario_desktop_control(Operator& op) {
     r.check("desktop-release-on-close", released, released ? "Shift held at session-close was released by the agent" : "Shift was still held after the session closed: " + since(mark));
 }
 
+/// The scanout check (ADR-0041, docs/15#the-desktop-test-lab), on the mini-PC: the test window runs
+/// fullscreen, rendered through the GPU, changing colour by itself with the pointer hidden
+/// (testwin.py, FJARR_TESTWIN_BLINK_MS and FJARR_TESTWIN_CURSOR=none, its log at --desktop-oracle).
+/// The decoded video must follow every change while the machine's KMS state (debugfs, so run as
+/// root) shows the window scanned out directly; without a KMS CRTC, or with too few changes under
+/// direct scanout, the check reports itself not run. The verdict is opsim::scanout_verdict.
+void scenario_desktop_scanout(Operator& op) {
+    Report& r = op.report();
+    if (op.desktop_oracle().empty()) {
+        r.check("desktop-oracle", false, "--desktop-oracle not given: nothing can read the blinking window's log");
+        return;
+    }
+    const std::size_t start = op.inbox_mark();
+    connect_and_report(op);
+    const std::string desk = op.primary_desk();
+    r.check("desktop-track", !desk.empty(), desk.empty() ? "no desk-* track in the manifest (is the session helper connected?)" : "the manifest carries " + desk);
+    if (desk.empty()) return;
+    // The screen judged is the CRTC that drives the captured monitor: the mini-PC has a ghost
+    // screen beside a real monitor, two CRTCs of one size (docs/15#the-desktop-test-lab).
+    const auto [connector, embedded] = op.desk_monitor(desk);
+    std::string dri_state;
+    auto read_kms = [&]() -> std::optional<opsim::KmsSample> {
+        auto read = [](const std::string& path) -> std::optional<std::string> {
+            gchar* text = nullptr;
+            if (!g_file_get_contents(path.c_str(), &text, nullptr, nullptr)) return std::nullopt;
+            std::string out(text);
+            g_free(text);
+            return out;
+        };
+        if (!dri_state.empty()) {
+            if (auto t = read(dri_state)) return opsim::kms_sample(*t, connector);
+            return std::nullopt;
+        }
+        // The DRM device whose CRTC drives the monitor, else the first with a plane on a CRTC.
+        std::optional<opsim::KmsSample> any;
+        std::string any_path;
+        for (int n = 0; n < 8; n++) {
+            const std::string path = "/sys/kernel/debug/dri/" + std::to_string(n) + "/state";
+            if (auto t = read(path)) {
+                auto k = opsim::kms_sample(*t, connector);
+                if (k.matched) {
+                    dri_state = path;
+                    return k;
+                }
+                if (k.crtc && !any) {
+                    any = k;
+                    any_path = path;
+                }
+            }
+        }
+        if (any) dri_state = any_path;
+        return any;
+    };
+    const std::uint64_t f0 = op.frames(desk);
+    if (!op.select(desk, true, "active", 5000, "fjarr.desktop") || !op.wait_frames(desk, f0, 5, 10000)) {
+        r.check("desktop-frames", false, "no frames from " + desk + why_no_frames(op));
+        return;
+    }
+    // An idle session keeps a notification banner up until there is input, and a banner stops
+    // direct scanout: move the pointer first (it stays hidden over the window).
+    std::uint64_t seq = 0;
+    for (const double x : {0.5, 0.52, 0.48, 0.5}) {
+        op.event("fjarr:realtime", "fjarr.desktop", "pointer", json{{"track_id", desk}, {"x", x}, {"y", 0.5}, {"seq", ++seq}});
+        op.sleep_ms(100);
+    }
+    op.sleep_ms(1500);
+    const auto first = read_kms();
+    if (!first) {
+        const opsim::ScanoutVerdict v = opsim::scanout_verdict({}, {}, {}, false, op.require_kms());
+        if (v.kind == opsim::ScanoutVerdict::Kind::NotRun) r.not_run("desktop-scanout", v.detail);
+        else r.check("desktop-scanout", false, v.detail);
+        close_and_assert(op);
+        return;
+    }
+    logf("scanout check: KMS state from %s for %s: %s (%s)", dri_state.c_str(), connector.empty() ? "an unnamed monitor" : connector.c_str(), first->detail.c_str(),
+         first->direct ? "direct scanout" : "composited");
+    const double t_start = static_cast<double>(g_get_real_time()) / 1000.0;
+    std::vector<opsim::ScanoutFrame> frames;
+    std::vector<opsim::ScanoutKms> kms;
+    constexpr int RUN_MS = 20000;
+    std::string last_kms = first->detail;
+    for (int i = 0; i * 10 < RUN_MS; i++) {
+        const double now = static_cast<double>(g_get_real_time()) / 1000.0;
+        frames.push_back({now, op.centre_luma(desk)});
+        if (i % 5 == 0)
+            if (auto k = read_kms()) {
+                kms.push_back({now, k->direct});
+                if (k->detail != last_kms) logf("scanout check: KMS %s (%s)", k->detail.c_str(), k->direct ? "direct scanout" : "composited");
+                last_kms = k->detail;
+            }
+        op.sleep_ms(10);
+    }
+    auto log = op.http_get_url(op.desktop_oracle());
+    const auto blinks = opsim::parse_blinks(log.status == 200 ? log.body : std::string(), t_start);
+    const opsim::ScanoutVerdict v = opsim::scanout_verdict(blinks, frames, kms, true, op.require_kms());
+    if (v.kind == opsim::ScanoutVerdict::Kind::NotRun) r.not_run("desktop-scanout", v.detail);
+    else r.check("desktop-scanout", v.kind == opsim::ScanoutVerdict::Kind::Pass, v.detail);
+    // The hidden pointer (docs/22#cursor-strategy): the window hides it, mutter sends an invalid
+    // cursor id, and the agent sends a hidden shape. The only check of that path against real mutter.
+    if (embedded) {
+        r.not_run("scanout-hidden-pointer", "the capture fell back to drawing the cursor into its video: no cursor shapes are sent");
+    } else {
+        auto hidden = op.wait_envelope(start, "fjarr.desktop", "cursor", "event", 1000, [](const Envelope& e) { return e.payload.value("hidden", false); });
+        r.check("scanout-hidden-pointer", hidden.has_value(),
+                hidden ? "a hidden cursor shape arrived while the window hid the pointer: " + hidden->payload.dump()
+                       : "no hidden cursor shape while the window hid the pointer over " + desk);
+    }
+    close_and_assert(op);
+}
+
 /// M3 3.4: monitor hot-plug against the fixture's virtual monitors (docs/06 hot-plug criteria,
 /// docs/23#desktop-monitors): a plugged monitor becomes a track within 2 s while the first keeps
 /// flowing, an unplugged one leaves, and a re-plugged one returns under the same track_id.
@@ -3992,6 +4124,7 @@ const std::map<std::string, ScenarioFn> kScenarios = {
     {"audio", scenario_audio}, {"audio-unlistened", scenario_audio_unlistened}, {"audio-talk", scenario_audio_talk},
     {"audio-untalked", scenario_audio_untalked},
     {"desktop-see", scenario_desktop_see}, {"desktop-control", scenario_desktop_control}, {"desktop-hotplug", scenario_desktop_hotplug}, {"desktop-clipboard", scenario_desktop_clipboard}, {"desktop-cursor", scenario_desktop_cursor}, {"desktop-virtual", scenario_desktop_virtual}, {"desktop-audio", scenario_desktop_audio},
+    {"desktop-scanout", scenario_desktop_scanout},
     {"relay-only", scenario_relay_only}, {"tunnel", scenario_tunnel}, {"soak", scenario_soak},
     // netem-<profile>: one function, the profile is read from the scenario name (unknown profile → usage, exit 2).
     {"netem-lan", scenario_netem},     {"netem-wifi-ok", scenario_netem}, {"netem-4g", scenario_netem},     {"netem-lossy", scenario_netem},

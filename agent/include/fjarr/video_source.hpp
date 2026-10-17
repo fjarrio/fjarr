@@ -44,6 +44,11 @@ class VideoSource {
     virtual void on_unavailable(std::function<void(std::string reason)> /*cb*/) {} // permanent failure
     /// Why available() is false right now, in words ("no such device: …", "element missing: …"); "" when available.
     virtual std::string unavailable_reason() const { return ""; }
+    /// What the source reports about itself in GET /sources beside the media plane's view, as a JSON
+    /// object merged into its entry: a desktop capture's frame counts and memory (`frames`,
+    /// `memory`). Null: nothing to add. Called on the core loop.
+    /// spec: docs/24-pipeline-introspection.md#capture-frame-counts
+    virtual nlohmann::json status() const { return nullptr; }
 };
 
 /// What a capability resolves `source = …` config with: the agent's registry of source types,

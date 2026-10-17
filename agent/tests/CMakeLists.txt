@@ -16,6 +16,9 @@ add_executable(fjarr-tests
   test_ghost_primary.cpp
   test_default_sink.cpp
   test_cursor_image.cpp
+  test_capture_memory.cpp
+  test_encoder_memory.cpp
+  ${CMAKE_SOURCE_DIR}/agent/modules/desktop-mutter/capture_memory.cpp
   ${CMAKE_SOURCE_DIR}/agent/src/desktop/monitor_identity.cpp
   ${CMAKE_SOURCE_DIR}/agent/src/desktop/keymap.cpp
   ${CMAKE_SOURCE_DIR}/agent/src/desktop/helper_protocol.cpp
@@ -49,8 +52,9 @@ add_executable(fjarr-tests
   test_camera.cpp
 )
 # ../tools: the parts of fjarr-opsim's checks that need no session (opsim/checks.hpp), tested like the agent's own.
-target_include_directories(fjarr-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src ${CMAKE_CURRENT_SOURCE_DIR}/../tools)
-target_link_libraries(fjarr-tests PRIVATE fjarr::fjarr GTest::gtest PkgConfig::GST PkgConfig::SOUP PkgConfig::XKBCOMMON)
+# ../modules: module E's capture memory (ADR-0041), tested against hand-made PipeWire buffers.
+target_include_directories(fjarr-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src ${CMAKE_CURRENT_SOURCE_DIR}/../tools ${CMAKE_CURRENT_SOURCE_DIR}/../modules)
+target_link_libraries(fjarr-tests PRIVATE fjarr::fjarr GTest::gtest PkgConfig::GST PkgConfig::GSTALLOC PkgConfig::LIBPIPEWIRE PkgConfig::SOUP PkgConfig::XKBCOMMON)
 target_compile_definitions(fjarr-tests PRIVATE FJARR_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/protocol/fixtures")
 # The supervision probe spawns the real daemon under a fake systemd notify socket (docs/15).
 target_compile_definitions(fjarr-tests PRIVATE FJARR_AGENT_BINARY="$<TARGET_FILE:fjarr-agent>")

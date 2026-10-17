@@ -204,11 +204,13 @@ public:
   // handed the stream over, then available, so the capability declares the
   // track at once and the core adds it when it is ready. Null for an unknown
   // monitor. (Changed 2026-09-30 from an opaque CaptureSource, M3 3.1.)
-  // CaptureOptions {cursor_in_video, dmabuf}: `dmabuf` is the media plane's
-  // import list, the DMA-BUF formats the encoder takes without a copy as
-  // {drm_fourcc, modifier} pairs; empty means system memory only. A backend
-  // that can hand over device memory picks from it and declares the memory in
-  // its source's caps; others ignore it (ADR-0041, docs/23#desktop-capture-memory).
+  // CaptureOptions {cursor_in_video, dmabuf, encoder}: `dmabuf` is the media
+  // plane's import list, the DMA-BUF formats the encoder takes without a copy as
+  // DmaBufFormat {drm_fourcc, modifier} pairs (<drm_fourcc.h> names, modifier 0
+  // is LINEAR); empty means system memory only. `encoder` names the family the
+  // list came from, for the backend's log. A backend that can hand over device
+  // memory picks from it and declares the memory in its source's caps; others
+  // ignore it (ADR-0041, docs/23#desktop-capture-memory).
   virtual std::shared_ptr<VideoSource> start_capture(MonitorId, CaptureOptions) = 0;
   virtual void stop_capture(MonitorId) = 0;             // never disturbs other captures
   // Virtual monitors: headless robots, or a monitor sized to the operator's
@@ -314,6 +316,10 @@ public:
   virtual void on_availability_changed(std::function<void(bool)> cb) = 0;   // hot-plug
   virtual void on_unavailable(std::function<void(std::string reason)> cb) {} // permanent failure
   virtual std::string unavailable_reason() const { return ""; }              // why, in words, for /sources and --check
+  // What the source says of itself in GET /sources, a JSON object merged into its
+  // entry: a desktop capture's frame counts and memory (docs/24#capture-frame-counts).
+  // Null: nothing to add. Called on the core loop. (Added 2026-10-17, ADR-0041.)
+  virtual nlohmann::json status() const { return nullptr; }
 };
 
 // What a capability resolves `source = …` config with (the agent's registry behind it).

@@ -251,3 +251,156 @@ TEST(OpsimPhoton, noCentreLumaPressesNothing) {
     // -1 is also a track with no decoded frame yet (it stopped after step 2b): the message says both.
     EXPECT_NE(v.detail.find("no centre luma to watch (no decoded frame on the track yet, or frames without 8-bit luma)"), std::string::npos) << v.detail;
 }
+
+// ------------------------------------------------------------ the scanout check (ADR-0041)
+
+namespace {
+/// A DRM debugfs state file, trimmed to what kms_sample reads: the screen's plane and the cursor's.
+std::string dri_state(const std::string& screen_alloc, const char* screen_format = "XR24", bool on_crtc = true) {
+    const std::string crtc = on_crtc ? "crtc-0" : "(null)";
+    return "plane[31]: plane-0\n\tcrtc=" + crtc + "\n\tfb=" + (on_crtc ? "117" : "0") + "\n\t\tallocated by = " + screen_alloc +
+           "\n\t\trefcount=2\n\t\tformat=" + screen_format + " little-endian (0x34325258)\n\t\tmodifier=0x200000000000901\n\t\tsize=1920x1080\n" +
+           "\t\tlayers:\n\t\t\tsize[0]=1920x1080\n\tcrtc-pos=1920x1080+0+0\n" +
+           "plane[40]: plane-5\n\tcrtc=" + crtc + "\n\tfb=" + (on_crtc ? "130" : "0") + "\n\t\tallocated by = gnome-shell\n\t\tformat=AR24 little-endian (0x34325241)\n\t\tsize=256x256\n" +
+           "crtc[57]: crtc-0\n\tenable=1\n\tactive=1\n";
+}
+
+/// The window blinking every 2 s from t=1000 ms, and a capture that shows each change `delay` ms later,
+/// until `frozen_after` changes (-1: never).
+struct ScanoutRun {
+    std::vector<fjarr::opsim::ScanoutBlink> blinks;
+    std::vector<fjarr::opsim::ScanoutFrame> frames;
+    std::vector<fjarr::opsim::ScanoutKms> kms;
+    ScanoutRun(int changes, int delay, int frozen_after = -1, bool direct = true) {
+        for (int i = 0; i < changes; i++) blinks.push_back({1000.0 + 2000.0 * i, i % 2 == 0});
+        int shown = 0;
+        bool green = false;
+        for (double t = 0; t <= 1000.0 + 2000.0 * changes + 1500; t += 10) {
+            for (const auto& b : blinks)
+                if (b.t_ms + delay <= t && b.t_ms + delay > t - 10 && (frozen_after < 0 || shown < frozen_after)) {
+                    green = b.green;
+                    shown++;
+                }
+            frames.push_back({t, green ? 145 : 78});
+            if (static_cast<int>(t) % 50 == 0) kms.push_back({t, direct});
+        }
+    }
+};
+} // namespace
+
+TEST(OpsimScanout, theKmsStateTellsADirectlyScannedOutWindowFromTheCompositedScreen) {
+    const auto composited = fjarr::opsim::kms_sample(dri_state("gnome-shell", "XR30"));
+    EXPECT_TRUE(composited.crtc);
+    EXPECT_FALSE(composited.direct) << composited.detail;
+    const auto direct = fjarr::opsim::kms_sample(dri_state("KMS thread"));
+    EXPECT_TRUE(direct.crtc);
+    EXPECT_TRUE(direct.direct) << direct.detail;
+    EXPECT_NE(direct.detail.find("plane-0 fb=117 1920x1080 XR24 by 'KMS thread'"), std::string::npos) << direct.detail;
+    // The cursor plane (small, gnome-shell's) is never mistaken for the screen.
+    const auto none = fjarr::opsim::kms_sample(dri_state("KMS thread", "XR24", false));
+    EXPECT_FALSE(none.crtc) << "no plane on a CRTC: a virtual display";
+    EXPECT_FALSE(fjarr::opsim::kms_sample("").crtc);
+}
+
+TEST(OpsimScanout, theWindowsBlinksAreReadFromItsLogSinceTheRunStarted) {
+    const auto b = fjarr::opsim::parse_blinks("1760000000.100 start pid=1\n1760000001.000 blink green\n1760000003.000 blink magenta\nnoise\n", 1760000000500.0);
+    ASSERT_EQ(b.size(), 2u);
+    EXPECT_TRUE(b[0].green);
+    EXPECT_FALSE(b[1].green);
+    EXPECT_DOUBLE_EQ(b[1].t_ms, 1760000003000.0);
+}
+
+TEST(OpsimScanout, everyChangeFollowedUnderDirectScanoutPasses) {
+    const ScanoutRun run(8, 150);
+    const auto v = fjarr::opsim::scanout_verdict(run.blinks, run.frames, run.kms, true);
+    EXPECT_EQ(v.kind, fjarr::opsim::ScanoutVerdict::Kind::Pass) << v.detail;
+    EXPECT_EQ(v.followed, v.changes);
+    EXPECT_GE(v.under_scanout, fjarr::opsim::kScanoutMinUnderScanout);
+}
+
+TEST(OpsimScanout, aPictureFrozenBehindTheScannedOutWindowFails) {
+    // The 2026-10-17 freeze: the first frame, then nothing, while the counters stayed green.
+    const ScanoutRun run(8, 150, 1);
+    const auto v = fjarr::opsim::scanout_verdict(run.blinks, run.frames, run.kms, true);
+    EXPECT_EQ(v.kind, fjarr::opsim::ScanoutVerdict::Kind::Fail) << v.detail;
+    EXPECT_LT(v.followed, v.changes);
+    EXPECT_NE(v.detail.find("while scanned out directly"), std::string::npos) << v.detail;
+    // Slower than the bound is not following either.
+    const ScanoutRun slow(8, fjarr::opsim::kScanoutFollowMs + 200);
+    EXPECT_EQ(fjarr::opsim::scanout_verdict(slow.blinks, slow.frames, slow.kms, true).kind, fjarr::opsim::ScanoutVerdict::Kind::Fail);
+}
+
+TEST(OpsimScanout, withoutDirectScanoutOrAKmsCrtcTheCheckDidNotRun) {
+    const ScanoutRun composited(8, 150, -1, false);
+    const auto v = fjarr::opsim::scanout_verdict(composited.blinks, composited.frames, composited.kms, true);
+    EXPECT_EQ(v.kind, fjarr::opsim::ScanoutVerdict::Kind::NotRun) << v.detail;
+    const ScanoutRun ci(8, 150);
+    const auto none = fjarr::opsim::scanout_verdict(ci.blinks, ci.frames, ci.kms, false);
+    EXPECT_EQ(none.kind, fjarr::opsim::ScanoutVerdict::Kind::NotRun);
+    EXPECT_NE(none.detail.find("no KMS CRTC"), std::string::npos) << none.detail;
+    // A window that hardly changed proves nothing: a failure, so a broken window is noticed.
+    const ScanoutRun few(3, 150);
+    EXPECT_EQ(fjarr::opsim::scanout_verdict(few.blinks, few.frames, few.kms, true).kind, fjarr::opsim::ScanoutVerdict::Kind::Fail);
+    // Composited and frozen: a failure all the same.
+    const ScanoutRun frozen(8, 150, 1, false);
+    EXPECT_EQ(fjarr::opsim::scanout_verdict(frozen.blinks, frozen.frames, frozen.kms, true).kind, fjarr::opsim::ScanoutVerdict::Kind::Fail);
+}
+
+namespace {
+/// One CRTC's screen plane, and a connector block that names its CRTC.
+std::string screen_plane(int id, const std::string& crtc, const std::string& alloc, const char* format) {
+    return "plane[" + std::to_string(id) + "]: plane-" + std::to_string(id) + "\n\tcrtc=" + crtc + "\n\tfb=" + std::to_string(100 + id) +
+           "\n\t\tallocated by = " + alloc + "\n\t\tformat=" + format + " little-endian (0x34325258)\n\t\tsize=1920x1080\n";
+}
+std::string connector_block(int id, const std::string& name, const std::string& crtc) {
+    return "connector[" + std::to_string(id) + "]: " + name + "\n\tcrtc=" + crtc + "\n\tself_refresh_aware=0\n";
+}
+} // namespace
+
+TEST(OpsimScanout, theScreenJudgedIsTheCrtcThatDrivesTheCapturedMonitorInEitherOrder) {
+    // The mini-PC: a ghost screen composited by gnome-shell beside the monitor whose window is
+    // scanned out, two CRTCs of one size. The strict largest-wins rule took the first listed.
+    const std::string ghost = screen_plane(31, "crtc-0", "gnome-shell", "XR30"), window = screen_plane(47, "crtc-1", "KMS thread", "XR24");
+    const std::string conns = connector_block(95, "HDMI-A-1", "crtc-0") + connector_block(103, "DP-2", "crtc-1") + connector_block(110, "DP-3", "(null)");
+    for (const std::string& state : {ghost + window + "crtc[57]: crtc-0\n" + conns, window + ghost + "crtc[57]: crtc-0\n" + conns}) {
+        const auto k = fjarr::opsim::kms_sample(state, "DP-2");
+        EXPECT_TRUE(k.crtc);
+        EXPECT_TRUE(k.matched) << k.detail;
+        EXPECT_TRUE(k.direct) << k.detail;
+        EXPECT_NE(k.detail.find("DP-2 crtc-1: plane-47"), std::string::npos) << k.detail;
+        // The ghost, as mutter names its HDMI-A connector: composited, whichever comes first.
+        const auto g = fjarr::opsim::kms_sample(state, "HDMI-1");
+        EXPECT_TRUE(g.matched) << g.detail;
+        EXPECT_FALSE(g.direct) << g.detail;
+        EXPECT_NE(g.detail.find("HDMI-A-1 crtc-0: plane-31"), std::string::npos) << g.detail;
+    }
+}
+
+TEST(OpsimScanout, aMonitorNoCrtcDrivesFallsBackToTheLargestPlaneAndSaysSo) {
+    const std::string state = screen_plane(31, "crtc-0", "KMS thread", "XR24") + connector_block(95, "HDMI-A-1", "crtc-0") + connector_block(103, "DP-3", "(null)");
+    const auto off = fjarr::opsim::kms_sample(state, "DP-3");
+    EXPECT_TRUE(off.crtc);
+    EXPECT_FALSE(off.matched);
+    EXPECT_NE(off.detail.find("no CRTC drives DP-3, the largest on any: plane-31"), std::string::npos) << off.detail;
+    const auto unnamed = fjarr::opsim::kms_sample(state);
+    EXPECT_FALSE(unnamed.matched);
+    EXPECT_EQ(unnamed.detail.find("no CRTC drives"), std::string::npos) << "no connector asked about: " << unnamed.detail;
+}
+
+TEST(OpsimScanout, mutterNamesTheKernelsHdmiAConnectorsHdmi) {
+    EXPECT_TRUE(fjarr::opsim::same_connector("HDMI-A-1", "HDMI-1"));
+    EXPECT_TRUE(fjarr::opsim::same_connector("DP-2", "DP-2"));
+    EXPECT_TRUE(fjarr::opsim::same_connector("HDMI-A-1", "HDMI-A-1"));
+    EXPECT_FALSE(fjarr::opsim::same_connector("HDMI-A-1", "HDMI-2"));
+    EXPECT_FALSE(fjarr::opsim::same_connector("DP-1", "DP-10"));
+    EXPECT_FALSE(fjarr::opsim::same_connector("eDP-1", "DP-1"));
+}
+
+TEST(OpsimScanout, withoutAKmsCrtcWhereOneIsRequiredTheCheckFails) {
+    // The mini-PC (--require-kms): no CRTC readable means debugfs or root went missing, which a
+    // NOTE would have hidden behind a green night (docs/30 principle 8).
+    const auto v = fjarr::opsim::scanout_verdict({}, {}, {}, false, true);
+    EXPECT_EQ(v.kind, fjarr::opsim::ScanoutVerdict::Kind::Fail);
+    EXPECT_NE(v.detail.find("--require-kms"), std::string::npos) << v.detail;
+    EXPECT_EQ(fjarr::opsim::scanout_verdict({}, {}, {}, false, false).kind, fjarr::opsim::ScanoutVerdict::Kind::NotRun);
+}

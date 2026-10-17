@@ -49,7 +49,11 @@ class MonitorSource final : public VideoSource {
         if (appsrc_) gst_object_unref(appsrc_);
     }
 
-    SourceInfo describe() const override { return {identity_, {{"src", TrackKind::Video, "video/x-raw"}}}; }
+    /// DMA-BUF caps once the capture settled on it: the producer then builds its device-memory head
+    /// (docs/23#encoders-and-tiers), and system memory gets today's.
+    SourceInfo describe() const override {
+        return {identity_, {{"src", TrackKind::Video, memory_ == Memory::DmaBuf ? "video/x-raw(memory:DMABuf),format=DMA_DRM" : "video/x-raw"}}};
+    }
 
     /// An appsrc fed by the reader, starting with the last frame; the producer may build the bin
     /// more than once, and the newest appsrc is the one fed.
@@ -70,29 +74,50 @@ class MonitorSource final : public VideoSource {
         return GST_BIN(bin);
     }
 
-    bool available() const override { return reader_ != nullptr; }
+    /// Available once the reader is linked and the capture's memory is known: the producer's head
+    /// depends on it (docs/23#desktop-capture-memory). A restarted capture keeps the memory it had.
+    bool available() const override { return reader_ != nullptr && memory_ != Memory::Unknown; }
     void on_availability_changed(std::function<void(bool)> cb) override { availability_ = std::move(cb); }
-    std::string unavailable_reason() const override { return reader_ ? "" : reason_; }
+    std::string unavailable_reason() const override {
+        if (!reader_) return reason_;
+        return memory_ == Memory::Unknown ? "negotiating the stream's format with the display server" : "";
+    }
+    /// docs/24#capture-frame-counts: the reader's counts and memory, since this capture started.
+    nlohmann::json status() const override { return reader_ ? reader_->status() : nullptr; }
 
     /// The helper handed the stream over and the reader is linked. A restarted capture's reader takes
     /// over the appsrc a pipeline already has.
     void ready(std::unique_ptr<desktop::mutter::StreamReader> reader) {
-        const bool was = reader_ != nullptr;
+        const bool was = available();
         reader_ = std::move(reader);
         reason_.clear();
-        if (reader_ && appsrc_) reader_->attach(appsrc_);
-        if (availability_ && was != (reader_ != nullptr)) availability_(reader_ != nullptr);
+        if (reader_) {
+            reader_->on_memory([this](bool dmabuf) { set_memory(dmabuf ? Memory::DmaBuf : Memory::Shm); });
+            if (appsrc_) reader_->attach(appsrc_);
+        }
+        if (availability_ && was != available()) availability_(available());
     }
     /// The stream ended (monitor gone, stream stopped, helper gone).
     void lost(const std::string& why) {
-        const bool was = reader_ != nullptr;
+        const bool was = available();
         reader_.reset();
         reason_ = why;
         if (was && availability_) availability_(false);
     }
 
   private:
+    enum class Memory { Unknown, Shm, DmaBuf };
+    /// The reader settled the memory (core loop): at a capture's first fixed format, and again when
+    /// a restarted capture, or one that adopted a renegotiation, is in another memory. A pipeline
+    /// built for the old one then fails to negotiate, and the media plane rebuilds it from
+    /// describe(), which says the new one (docs/23#desktop-capture-memory).
+    void set_memory(Memory m) {
+        const bool was = available();
+        memory_ = m;
+        if (availability_ && was != available()) availability_(available());
+    }
     std::string identity_;
+    Memory memory_ = Memory::Unknown;
     std::unique_ptr<desktop::mutter::StreamReader> reader_;
     GstElement* appsrc_ = nullptr; // the newest pipeline's source, which every reader of this capture feeds
     std::string reason_ = "waiting for the desktop session to hand the stream over";
@@ -103,7 +128,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
   public:
     explicit MutterBackend(const desktop::ModuleHost& host, const json& config)
         : ctx_(host.context), log_(host.log), socket_path_(config.value("socket", std::string{"/run/fjarr/desktop.sock"})),
-          keepalive_ms_(config.value("keepalive_ms", 100)), input_(host.context, [this](int level, const std::string& msg) { say(level, msg); }) {
+          keepalive_ms_(config.value("keepalive_ms", 100)), force_shm_(config.value("capture_memory", std::string{"auto"}) == "shm"), input_(host.context, [this](int level, const std::string& msg) { say(level, msg); }) {
         input_.on_disconnected([this] { input_requested_ = false; });
         sound_ = std::make_unique<desktop::DesktopSound>(
             ctx_, [this](const json& m) { send(m); }, [this](int level, const std::string& msg) { say(level, msg); });
@@ -175,8 +200,15 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         if (!m) return nullptr;
         auto& c = captures_[monitor];
         if (!c.source) c.source = std::make_shared<MonitorSource>("desktop:" + m->wire_id);
+        c.memory.fallback.clear(); // a new capture tries DMA-BUF again
         c.id = next_id_++;
         c.connector = m->connector;
+        // docs/23#desktop-capture-memory: the import list, and what kind of monitor it is (mutter's
+        // Meta- monitors have no KMS CRTC and are read through shared memory).
+        c.memory.imports = options.dmabuf;
+        c.memory.encoder = options.encoder;
+        c.memory.virtual_monitor = m->kind == MonitorKind::Virtual;
+        c.memory.force_shm = force_shm_;
         // A monitor whose metadata capture gave no frame stays embedded (docs/23, The stream reader).
         c.cursor = options.cursor_in_video || embedded_.count(monitor) ? "embedded" : "metadata";
         send_start(monitor, c);
@@ -190,6 +222,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         if (conn_ >= 0) send({{"type", "stop-capture"}, {"id", it->second.id}});
         it->second.source->lost("capture stopped");
         captures_.erase(it);
+        cursor_.forget(monitor);
         embedded_.erase(monitor); // a new capture of it tries metadata again
     }
 
@@ -201,6 +234,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         c.id = next_id_++;
         c.cursor = "metadata";
         c.is_virtual = true;
+        c.memory.virtual_monitor = true; // RecordVirtual: no KMS CRTC, shared memory (docs/23#desktop-capture-memory)
         c.want_width = width;
         c.want_height = height;
         send({{"type", "add-virtual"}, {"id", c.id}, {"width", width}, {"height", height}, {"cursor", c.cursor}});
@@ -214,6 +248,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         it->second.source->lost("the virtual monitor was removed");
         if (!it->second.connector.empty()) virtual_by_connector_.erase(it->second.connector);
         captures_.erase(it);
+        cursor_.forget(monitor);
     }
     // The speakers, through the helper (docs/23#desktop-audio); captured only while someone listens.
     std::shared_ptr<VideoSource> start_audio_capture() override { return sound_->source(); }
@@ -300,6 +335,18 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
     }
 
   private:
+    struct Capture {
+        int id = 0;
+        int x = 0, y = 0, width = 0, height = 0; // the stream's logical rectangle, from capture-started
+        std::string connector, cursor;
+        std::shared_ptr<MonitorSource> source;
+        int restarts = 0; // after a capture that never gave a frame
+        int memory_restarts = 0; // after a renegotiation that changed its memory
+        bool is_virtual = false;            // made by RecordVirtual for a session (docs/23, Virtual monitors)
+        int want_width = 0, want_height = 0; // its size, asked for in the reader's format
+        desktop::mutter::MemoryRequest memory; // DMA-BUF or shared memory (docs/23#desktop-capture-memory)
+    };
+
     /// A capture that streamed without a frame: a new ScreenCast session for the same monitor, whose
     /// start asks mutter for a frame again (docs/23, The stream reader). At most three times.
     void restart_capture(MonitorId monitor) {
@@ -333,25 +380,76 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         }
     }
 
-    std::unique_ptr<desktop::mutter::StreamReader> start_reader(MonitorId monitor, int fd, std::uint32_t node, int width = 0, int height = 0) {
-        return desktop::mutter::StreamReader::start(
-            ctx_, fd, node, keepalive_ms_,
-            [this](const desktop::mutter::CursorImage& img) {
-                if (have_shape_ && img.shape_id == shape_.shape_id) return; // another monitor's reader, same shape
-                shape_.shape_id = img.shape_id;
-                shape_.visible = img.visible;
-                shape_.width = img.width;
-                shape_.height = img.height;
-                shape_.hot_x = img.hot_x;
-                shape_.hot_y = img.hot_y;
-                shape_.rgba = img.rgba;
-                have_shape_ = true;
-                if (cursor_shape_cb_) cursor_shape_cb_(shape_);
-            },
-            [this, monitor](double nx, double ny) {
-                if (cursor_position_cb_) cursor_position_cb_(monitor, nx, ny);
-            },
-            [this](int level, const std::string& msg) { say(level, msg); }, width, height);
+    /// A capture whose memory changed in a renegotiation: started again, so it negotiates afresh
+    /// (docs/23#desktop-capture-memory: a capture keeps its memory for its life). At most
+    /// MAX_MEMORY_RESTARTS times, and never a virtual monitor's; false: the reader adopts the new memory.
+    bool restart_for_memory(MonitorId monitor, const std::string& why) {
+        auto it = captures_.find(monitor);
+        if (it == captures_.end()) return false;
+        Capture& c = it->second;
+        if (!desktop::mutter::restart_for_memory_change(c.is_virtual, c.memory_restarts)) {
+            say(2, "capture of " + c.connector + ": " + why + "; not restarted again (" + std::to_string(c.memory_restarts) + " restart(s))");
+            return false;
+        }
+        c.memory_restarts++;
+        say(2, "capture of " + c.connector + " restarted (" + std::to_string(c.memory_restarts) + "): " + why);
+        if (conn_ >= 0) send({{"type", "stop-capture"}, {"id", c.id}});
+        c.id = next_id_++;
+        send_start(monitor, c);
+        return true;
+    }
+
+    /// mutter's DMA-BUF buffers could not be wrapped: the capture starts again on shared memory,
+    /// with that reason (docs/23#desktop-capture-memory). It stays there until the capture is stopped.
+    void fall_back_to_shm(MonitorId monitor, const std::string& why) {
+        auto it = captures_.find(monitor);
+        if (it == captures_.end() || !it->second.memory.fallback.empty()) return;
+        Capture& c = it->second;
+        c.memory.fallback = why;
+        if (conn_ >= 0) send({{"type", "stop-capture"}, {"id", c.id}});
+        c.id = next_id_++;
+        send_start(monitor, c);
+    }
+
+    /// The cursor's shape from one monitor's reader, and the pointer seen on one: CursorArbiter
+    /// decides which shape is shown (docs/22#cursor-strategy).
+    void on_reader_shape(MonitorId monitor, const desktop::mutter::CursorImage& img) {
+        if (auto s = cursor_.on_shape(monitor, img)) apply_shape(*s);
+    }
+    void on_reader_position(MonitorId monitor, double nx, double ny) {
+        if (auto s = cursor_.on_position(monitor)) apply_shape(*s);
+        if (cursor_position_cb_) cursor_position_cb_(monitor, nx, ny);
+    }
+    void apply_shape(const desktop::mutter::CursorImage& img) {
+        shape_.shape_id = img.shape_id;
+        shape_.visible = img.visible;
+        shape_.width = img.width;
+        shape_.height = img.height;
+        shape_.hot_x = img.hot_x;
+        shape_.hot_y = img.hot_y;
+        shape_.rgba = img.rgba;
+        have_shape_ = true;
+        if (cursor_shape_cb_) cursor_shape_cb_(shape_);
+    }
+
+    std::unique_ptr<desktop::mutter::StreamReader> start_reader(MonitorId monitor, const Capture& c, int fd, std::uint32_t node) {
+        desktop::mutter::StreamReader::Options o;
+        o.keepalive_ms = keepalive_ms_;
+        o.width = c.want_width;
+        o.height = c.want_height;
+        o.name = c.connector.empty() ? "a virtual monitor" : c.connector;
+        o.memory = c.memory;
+        auto reader = desktop::mutter::StreamReader::start(
+            ctx_, fd, node, std::move(o), [this, monitor](const desktop::mutter::CursorImage& img) { on_reader_shape(monitor, img); },
+            [this, monitor](double nx, double ny) { on_reader_position(monitor, nx, ny); }, [this](int level, const std::string& msg) { say(level, msg); });
+        if (reader) {
+            reader->on_memory_changed([this, monitor](const std::string& why) { return restart_for_memory(monitor, why); });
+            reader->on_fallback([this, monitor](const std::string& why) { fall_back_to_shm(monitor, why); });
+            reader->on_failed([this, monitor](const std::string& why) {
+                if (auto it = captures_.find(monitor); it != captures_.end()) it->second.source->lost(why);
+            });
+        }
+        return reader;
     }
 
     /// One read of the robot's clipboard: the descriptor mutter handed over, drained as it fills.
@@ -407,15 +505,6 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
         done(std::move(bytes), std::move(error));
     }
 
-    struct Capture {
-        int id = 0;
-        int x = 0, y = 0, width = 0, height = 0; // the stream's logical rectangle, from capture-started
-        std::string connector, cursor;
-        std::shared_ptr<MonitorSource> source;
-        int restarts = 0; // after a capture that never gave a frame
-        bool is_virtual = false;            // made by RecordVirtual for a session (docs/23, Virtual monitors)
-        int want_width = 0, want_height = 0; // its size, asked for in the reader's format
-    };
 
     void say(int level, const std::string& msg) {
         if (log_) log_(level, COMPONENT, msg.c_str());
@@ -503,8 +592,12 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
                     c.height = m.body.value("height", 0);
                     // The node's only consumer, linked now: mutter sends the cursor's shape, and on a
                     // still screen the only frame, to whoever is linked when it is produced (spikes).
-                    auto reader = start_reader(monitor, m.fds[0].release(), m.body.value("node", 0u), c.want_width, c.want_height);
-                    if (reader) reader->on_stalled([this, monitor] { restart_capture(monitor); });
+                    auto reader = start_reader(monitor, c, m.fds[0].release(), m.body.value("node", 0u));
+                    if (!reader) {
+                        c.source->lost("the stream reader could not link to the display server's stream");
+                        continue;
+                    }
+                    reader->on_stalled([this, monitor] { restart_capture(monitor); });
                     c.source->ready(std::move(reader));
                     request_input();
                     sound_->pause(false, {}); // a capture after a stop is the resume: the sound comes back with it
@@ -638,7 +731,14 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
             if (lost_cb_) lost_cb_(monitor, CaptureLost::SessionEnded);
         }
         // Virtual monitors die with the helper's ScreenCast sessions: nothing to record again later.
-        for (auto it = captures_.begin(); it != captures_.end();) it = it->second.is_virtual ? captures_.erase(it) : std::next(it);
+        for (auto it = captures_.begin(); it != captures_.end();) {
+            if (!it->second.is_virtual) {
+                ++it;
+                continue;
+            }
+            cursor_.forget(it->first);
+            it = captures_.erase(it);
+        }
         virtual_by_connector_.clear();
         sound_->helper(false);
         monitors_.clear();
@@ -650,6 +750,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
     void (*log_)(int, const char*, const char*);
     std::string socket_path_;
     int keepalive_ms_;
+    bool force_shm_ = false; // helper.capture_memory = "shm" (docs/23#desktop-capture-memory)
     int desktop_uid_ = -1;
     int socket_gid_ = -1;
     int listen_fd_ = -1;
@@ -673,6 +774,7 @@ class MutterBackend final : public DesktopBackend, public ClipboardHandle {
     std::function<void(MonitorId, double, double)> cursor_position_cb_;
     CursorShape shape_; // the latest, for a capability that subscribes later
     bool have_shape_ = false;
+    desktop::mutter::CursorArbiter cursor_; // which monitor's shape is shown (the hidden pointer)
     std::vector<std::string> robot_types_; // what the robot's clipboard offers, in the compositor's names
     std::function<void(std::vector<std::string>)> clipboard_changed_;
     std::map<int, std::unique_ptr<ClipRead>> reads_;

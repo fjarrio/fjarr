@@ -723,20 +723,48 @@ On the mini-PC (radeonsi, Mesa 26.0.8) it holds one modifier for RGB,
 offering mutter's whole list would have negotiated a buffer VA cannot import.
 
 **Negotiation.** For a physical monitor, with a non-empty import list and
-`helper.capture_memory` not `"shm"`, the reader's `EnumFormat` offers come in
-order of preference: one per format in the import list, with
-`SPA_FORMAT_VIDEO_modifier` set to that format's modifiers (flagged mandatory,
-and left for mutter, which allocates, to fixate), then the same formats
-without a modifier, which is SHM. mutter picks one. When the fixed `Format` carries a
-modifier, the reader asks for `SPA_DATA_DmaBuf` buffers; otherwise for
-`MemFd | MemPtr`, as before. The capture keeps that memory for its life: a
-size change renegotiates within it, and a change of memory restarts the
-capture. The reader logs the outcome once per capture, at info:
+`helper.capture_memory` not `"shm"` (it is `"auto"` by default; `"shm"` keeps
+every capture on shared memory), the reader first asks mutter's node for its
+`EnumFormat` params on the handed connection, which grants the node R and X
+(two round trips: a registry sync, then one after `enum_params`), and only then
+links. Its `EnumFormat` offers come in order of preference: one per format in
+the import list, with `SPA_FORMAT_VIDEO_modifier` set to that format's
+modifiers that mutter also lists (flagged mandatory, and left for mutter,
+which allocates, to fixate), then the same formats without a modifier, then
+the other formats the reader takes over SHM (`BGRx`, `BGRA`, `RGBx`, `RGBA`),
+which is SHM. When mutter's params cannot be read, the import list goes out
+whole and PipeWire intersects it; the reader logs a warning saying why (the
+node not in the registry, an error, or a node that lists no formats). mutter
+picks one. A `Format` whose modifier
+is still a choice is not fixed yet: the reader sets its buffer params and waits
+for mutter to send the fixed one. When the fixed `Format` carries a modifier,
+the reader asks for `SPA_DATA_DmaBuf` buffers; otherwise for `MemFd | MemPtr`,
+as before. A stream that offers DMA-BUF links without
+`PW_STREAM_FLAG_MAP_BUFFERS` (nothing of a DMA-BUF is mapped), so should mutter
+pick SHM after all, the reader maps a `MemFd` itself. The track's source is
+available once that first fixed format has settled the memory, because the
+producer's head depends on it ([below](#encoders-and-tiers)). The capture keeps
+that memory for its life. A size change renegotiates within it, and a new
+DMA-BUF modifier then shows in `/sources`. A change of memory stops the reader
+feeding the track at once, since the track's pipeline was built for the old
+memory, and restarts the capture, at most three times and never a virtual
+monitor's (a restart would make another monitor). Past that the reader adopts
+the new memory: the source's caps follow it, and the reader feeds the track
+again. Either way the producer built for the old memory fails to negotiate
+inside its source bin and is rebuilt from the source's new caps on the slow
+source ladder ([below](#media-plane-recovery), about 1 s), not through a
+re-offer, which would take the track away from its viewers. The reader logs the
+outcome once per capture, at info:
 `capture of HDMI-1: DMA-BUF XR24:0x0200000000000901, into the encoder without a
-copy`, or `capture of Meta-0: shared memory (a virtual monitor)`. The reasons
-for SHM are named: a virtual monitor, `capture_memory = "shm"`, an encoder that
-imports no DMA-BUF (naming the family), no modifier in common (both lists
-printed), or mutter offering no DMA-BUF (no GPU it can allocate on, as in CI).
+copy`, or `capture of Meta-0: shared memory (a virtual monitor)` (a
+`RecordVirtual` monitor's connector is known only after its stream has
+negotiated, so its line names it `a virtual monitor`). The reasons for SHM are
+named: a virtual monitor, `capture_memory = "shm"`, an encoder that imports no
+DMA-BUF (naming the family), no modifier in common (both lists printed), mutter
+offering no DMA-BUF (no GPU it can allocate on, as in CI), mutter choosing SHM
+over the DMA-BUF offered (saying so when its formats could not be read first),
+a DMA-BUF buffer the reader could not wrap (below, naming why), or mutter moving
+a stream the reader adopted to SHM in a renegotiation.
 SHM on a physical monitor is logged as a warning, because that capture can
 still freeze behind a scanned-out window. The negotiated caps also show in
 `/sources` ([docs/24](24-pipeline-introspection.md#capture-frame-counts)).
@@ -753,17 +781,30 @@ DMA-BUF path has not been measured.
   first chunk is non-empty and not flagged `SPA_CHUNK_FLAG_CORRUPTED`, whatever
   its memory; a cursor-only buffer is told apart that way, as over SHM, never
   by mapping it.
-- **Wrapped, not copied.** Each plane of the buffer (`n_datas`, more than one
-  for some modifiers) becomes a `GstMemory` from GStreamer's DMA-BUF
-  allocator, on a duplicate of its descriptor, with its offset and stride in a
-  `GstVideoMeta`. The `appsrc` caps are `video/x-raw(memory:DMABuf),
-  format=DMA_DRM, drm-format=<fourcc>:<modifier>`, with the size and
-  `framerate=0/1`. Each of mutter's buffers is wrapped once and reused, as
-  `pipewiresrc`'s pool does, so VA can keep its import of it.
+- **Wrapped, not copied.** The buffer's plane becomes a `GstMemory` from
+  GStreamer's DMA-BUF allocator, on a duplicate of its descriptor, with its
+  offset and stride in a `GstVideoMeta`. The `appsrc` caps are
+  `video/x-raw(memory:DMABuf), format=DMA_DRM, drm-format=<fourcc>:<modifier>`,
+  with the size and `framerate=0/1`. Each of mutter's buffers is wrapped once
+  and reused, as `pipewiresrc`'s pool does, so VA can keep its import of it. A
+  buffer is wrapped whole or not at all. One with more than one plane (`n_datas`
+  above 1: an auxiliary or compression plane, Intel CCS or AMD DCC) is not taken
+  yet, because GStreamer 1.28's VA import counts planes from the `DMA_DRM` format
+  and maps a buffer with more, which would copy tiled or compressed bytes; no
+  such buffer has been through the chain on any hardware, and the mini-PC's
+  modifier has one plane. Such a capture, and one whose descriptor would not
+  duplicate or wrap, feeds nothing more and restarts on SHM with that reason.
+  A new format, size or modifier drops the held frame, which was made for the
+  old one.
 - **Held while GStreamer holds the frame.** Over SHM the reader copies and
   queues the buffer back at once. A DMA-BUF buffer goes back to mutter only
   when the last `GstBuffer` referencing it is released; the release is posted to
-  the PipeWire thread, which queues it. The reader holds the newest one for the
+  the PipeWire thread, which queues it. Each delivery gets a token, an empty
+  `GstBuffer` that every pushed buffer over it references through a
+  `GstParentBufferMeta`, which a copy of the buffer carries too; the token's
+  end (a weak reference) posts the release, through a PipeWire loop event, so
+  it never runs inside the thread that let go. A release for a buffer PipeWire
+  removed meanwhile (a renegotiation) is dropped. The reader holds the newest one for the
   keepalive, so mutter never writes into a frame the encoder may still read or
   send again. It asks mutter for enough buffers (at least 8) that one held
   frame and a full `appsrc` queue still leave mutter one to record into. With
@@ -777,7 +818,20 @@ DMA-BUF path has not been measured.
   with a `Buffers` param naming it, acquire waits only for buffers with pixels,
   and the release only after VA is done.
 - **The cursor** is unchanged: `SPA_META_Cursor` arrives on DMA-BUF buffers,
-  pixel and cursor-only alike, exactly as over SHM (measured 2026-10-17).
+  pixel and cursor-only alike, exactly as over SHM (measured 2026-10-17). A
+  pointer the robot's application hides arrives as an invalid cursor id (0),
+  which the reader hands on as a hidden shape
+  ([docs/22](22-remote-desktop-client.md#cursor-strategy)). mutter sends the same
+  id 0 to every other monitor's stream while the pointer is on one (by mutter's
+  source, not measured), so module E takes a hidden shape from an invalid id
+  only from the monitor the pointer was last seen on, and the pointer arriving
+  on a monitor brings back that monitor's latest shape unless that shape came
+  from an invalid id (it may only say the pointer was elsewhere; the shape shown
+  stays). A valid id without a bitmap after an invalid id brings back the shape
+  shown before it, since mutter sends a bitmap only when the shape changes;
+  after mutter's own empty shape it does not. Both rules are pure code
+  (`ReaderCursor`, `CursorArbiter` in `src/desktop/cursor_image.hpp`) with unit
+  tests (`test_cursor_image.cpp`).
 
 **The keepalive with GPU buffers.** On a still screen the reader pushes the
 held buffer again every keepalive interval, as a new `GstBuffer` over the same
@@ -787,11 +841,13 @@ built pipeline gets it at once, as before.
 **New frames and repeats.** The reader counts per capture the buffers mutter
 delivered with pixels (**new frames**), the buffers it pushed again (**repeats**:
 keepalive re-sends and the frame given to a newly built pipeline), and the
-cursor-only buffers. Every repeat carries a GStreamer custom meta,
+cursor-only buffers, which is what `GET /sources` shows per capture through the
+source's `status()` ([docs/09](09-interfaces.md#the-video-source-contract),
+[docs/24](24-pipeline-introspection.md#capture-frame-counts)). Every repeat carries a GStreamer custom meta,
 `FjarrFrameRepeat` (`gst_meta_register_custom_simple`), which any source may
 add to a buffer that repeats content it already sent. The producer's source
-pad counter counts buffers with and without it, which is what
-[docs/24](24-pipeline-introspection.md#capture-frame-counts) shows. A new frame is
+pad counter counts buffers with and without it, for any source, which
+`GET /stats` shows per producer (`source_buffers`). A new frame is
 only "new from mutter": mutter records one duplicate into every running
 DMA-BUF stream whenever another screencast starts, and occasionally redraws
 the same picture, and the reader cannot tell those apart from a change. Over
@@ -799,17 +855,27 @@ SHM a still screen and a scanned-out window both give no new frames, so only
 the scanout check on real hardware tells them apart
 ([docs/15](15-testing-strategy.md#the-desktop-test-lab)).
 
-**Into the encoder.** A DMA-BUF capture's frames go to `vapostproc` and
-`vah264enc` with no system-memory step ([below](#encoders-and-tiers)). System
+**Into the encoder.** A DMA-BUF capture's frames go to one `vapostproc`, which
+imports them, and on to `vah264enc` with no system-memory step
+([below](#encoders-and-tiers)). System
 memory is only for an encoder family that imports no DMA-BUF: it gets SHM
 from the reader, as today, and is then exposed to the scanout freeze; a GPU
 download for it (`vapostproc` to system memory, or GL at 17 to 30 % of a core)
 is not built until a GNOME robot without VA needs it.
 
 **Tests.** Unit tests cover the offer for an import list (intersection, order,
-the SHM tail), every fallback reason, the pixels-or-cursor-only rule without
-mapping, the buffer hold and release, and the repeat marking, against a fake
-`pw_stream`. The CI fixture has no GPU and only virtual monitors, so it keeps
+the SHM tail), every fallback reason, including the one settled when mutter
+chooses SHM, the pixels-or-cursor-only rule without mapping, the buffer hold and
+release, a format change dropping the held frame, a multi-plane buffer refused,
+a suspended capture feeding nothing, the restart-or-adopt rule for a change of
+memory, and the repeat marking, against hand-made PipeWire buffers in place of
+a `pw_stream` (`agent/tests/test_capture_memory.cpp`). The import list, the
+producer's head, the software encoder's refusal of DMA-BUF and the rebuild of a
+running producer whose source changed memory have their own
+(`test_encoder_memory.cpp`). Where the machine running the
+tests has VA-API (a developer's workstation, never CI), that file also sends
+DMA-BUFs rendered by VA through the reader's frames and the device-memory head
+into `vah264enc`, both tiers. The CI fixture has no GPU and only virtual monitors, so it keeps
 covering the SHM path. The DMA-BUF path is covered on the mini-PC, by the
 nightly's scanout check ([docs/15](15-testing-strategy.md#the-desktop-test-lab)).
 
@@ -998,12 +1064,21 @@ was in system memory, and a producer's shared head was `videoconvert` and an
 I420 capsfilter before the tee. A source whose caps carry `memory:DMABuf` gets
 no `videoconvert`: its head is a capsfilter on that memory feature
 (`video/x-raw(memory:DMABuf), format=DMA_DRM`), keeping the `rawcaps` role
-name, and the tee. Each tier branch is `videorate drop-only=true` with its
-rate filter stated on the same feature, then `vapostproc`, which imports the
-buffer as a VA surface, converts it to NV12 and, for the thumbnail, scales it
-on the GPU, then a capsfilter `video/x-raw(memory:VAMemory), format=NV12` with
-the tier's size where it has one, then `vah264enc` as before. No
-`videoscale`, no system-memory caps and no download anywhere on that path.
+name, then **one** `vapostproc` (`/import`), which imports each buffer as a VA
+surface and converts it to NV12, a capsfilter
+`video/x-raw(memory:VAMemory), format=NV12` (`/vacaps`), and the tee. Each tier
+branch is `videorate drop-only=true` with its rate filter stated on VA memory,
+then, for the thumbnail only, a second `vapostproc` that scales it on the GPU
+to the tier's size, then `vah264enc` as before. No `videoscale`, no
+system-memory caps and no download anywhere on that path. One importer, not one
+per tier (as first designed): two `vapostproc` elements importing the same
+foreign DMA-BUF at once race in GStreamer 1.28's VA import, whose second
+import replaces the surface the first is using, and crashed Intel's iHD driver
+inside `vaEndPicture` (measured on a workstation, 2026-10-17); the import is
+also done once instead of per tier. A DMA-BUF source is never stamped: the
+frame-stamp painter ([docs/25](25-browser-lab.md#frame-stamp-the-latency-harnesss-oracle))
+maps every frame, which a DMA-BUF never is, and only `fjarr.test` sources are
+stamped (the producer logs a warning should one be).
 Measured at 1920×1080 and 30 fps on the mini-PC: about 6 % of one core for
 the pipeline, against about 28 % for the copy, `videoconvert` and
 `vapostproc` chain it replaces. A `software` or `nvcodec` producer never

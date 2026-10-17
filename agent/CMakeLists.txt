@@ -104,10 +104,14 @@ target_link_libraries(fjarr-desktop-session PRIVATE PkgConfig::GIO PkgConfig::LI
 # dependencies, not libfjarr's.
 pkg_check_modules(LIBEI REQUIRED IMPORTED_TARGET libei-1.0)
 pkg_check_modules(XKBCOMMON REQUIRED IMPORTED_TARGET xkbcommon)
-add_library(fjarr-desktop-mutter MODULE modules/desktop-mutter/backend.cpp modules/desktop-mutter/eis_input.cpp modules/desktop-mutter/stream_reader.cpp modules/common/audio_reader.cpp modules/common/desktop_sound.cpp
+# DMA-BUF capture (ADR-0041): GStreamer's DMA-BUF allocator wraps mutter's buffers (gstreamer-allocators,
+# part of plugins-base like the rest of GStreamer here, docs/14).
+pkg_check_modules(GSTALLOC REQUIRED IMPORTED_TARGET gstreamer-allocators-1.0)
+add_library(fjarr-desktop-mutter MODULE modules/desktop-mutter/backend.cpp modules/desktop-mutter/eis_input.cpp modules/desktop-mutter/stream_reader.cpp
+  modules/desktop-mutter/capture_memory.cpp modules/common/audio_reader.cpp modules/common/desktop_sound.cpp
   src/desktop/helper_protocol.cpp src/desktop/monitor_identity.cpp src/desktop/keymap.cpp src/desktop/clipboard_types.cpp src/desktop/cursor_image.cpp)
 target_include_directories(fjarr-desktop-mutter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/modules)
-target_link_libraries(fjarr-desktop-mutter PRIVATE PkgConfig::GST PkgConfig::GIO PkgConfig::LIBEI PkgConfig::XKBCOMMON PkgConfig::LIBPIPEWIRE nlohmann_json::nlohmann_json)
+target_link_libraries(fjarr-desktop-mutter PRIVATE PkgConfig::GST PkgConfig::GSTALLOC PkgConfig::GIO PkgConfig::LIBEI PkgConfig::XKBCOMMON PkgConfig::LIBPIPEWIRE nlohmann_json::nlohmann_json)
 set_target_properties(fjarr-desktop-mutter PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/desktop-modules" PREFIX "lib" CXX_VISIBILITY_PRESET hidden)
 

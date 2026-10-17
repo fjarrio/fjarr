@@ -1,6 +1,7 @@
 #include "pad_counter.hpp"
 
 #include "core/log.hpp"
+#include "frame_repeat.hpp"
 
 namespace fjarr::media {
 
@@ -36,6 +37,7 @@ GstPadProbeReturn PadCounter::probe(GstPad*, GstPadProbeInfo* info, gpointer use
     auto& c = self->counters_;
     c.buffers++;
     c.bytes += gst_buffer_get_size(b);
+    if (is_repeat(b)) c.repeats++;
     if (GST_BUFFER_PTS_IS_VALID(b)) c.last_pts_ns = static_cast<std::int64_t>(GST_BUFFER_PTS(b));
     const std::int64_t now = g_get_monotonic_time();
     const std::int64_t last = c.last_wall_us.exchange(now);

@@ -71,10 +71,27 @@ enum class CaptureLost : std::uint8_t {
     SharingStopped,
 };
 
+/// One DMA-BUF layout an encoder imports without a copy: a DRM fourcc and format modifier, as
+/// <drm_fourcc.h> names them (XR24 = DRM_FORMAT_XRGB8888; modifier 0 is LINEAR).
+/// spec: docs/23-agent-core-architecture.md#desktop-capture-memory
+struct DmaBufFormat {
+    std::uint32_t drm_fourcc = 0;
+    std::uint64_t modifier = 0;
+    bool operator==(const DmaBufFormat&) const = default;
+};
+
 struct CaptureOptions {
     /// false = local-cursor mode: the cursor is left out of the video and its shape arrives
     /// through on_cursor_shape. spec: docs/22-remote-desktop-client.md#cursor-strategy
     bool cursor_in_video = true;
+    /// The media plane's import list (ADR-0041): the DMA-BUF formats its encoder takes without a
+    /// copy. Empty means system memory only. A backend that can hand over device memory picks from
+    /// it and declares the memory in its source's caps; others ignore it.
+    /// spec: docs/23-agent-core-architecture.md#desktop-capture-memory
+    std::vector<DmaBufFormat> dmabuf;
+    /// The encoder family the list came from ("vaapi", "software"), for the backend's log: a capture
+    /// on system memory names it when the list is empty.
+    std::string encoder;
 };
 
 /// One cursor image, delivered whenever the shape changes.

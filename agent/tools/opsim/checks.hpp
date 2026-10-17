@@ -85,4 +85,64 @@ struct PhotonVerdict {
 /// The check: kPhotonPresses timed presses, and a p95 at most kPhotonCeilingMs.
 PhotonVerdict photon_verdict(const PhotonRun& run);
 
+// ------------------------------------------------------------ scanout check
+
+/// The mini-PC's scanout check (ADR-0041, docs/15#the-desktop-test-lab): a fullscreen GPU window
+/// changes colour by itself with the pointer hidden, and the decoded video must follow every change,
+/// while the machine's KMS state shows the window scanned out directly.
+constexpr int kScanoutFollowMs = 1000;    // a change must show in the decoded video within this
+constexpr int kScanoutMinChanges = 6;     // the window must have changed at least this often
+constexpr int kScanoutMinUnderScanout = 4; // ... this many of them while scanned out, or the check did not run
+constexpr int kScanoutLumaGreen = 135;    // decoded centre luma at or above: the window's green
+constexpr int kScanoutLumaMagenta = 115;  // ... at or below: its magenta (BT.601 and BT.709 alike)
+
+/// One read of a DRM debugfs `state` file (/sys/kernel/debug/dri/<n>/state).
+struct KmsSample {
+    bool crtc = false;    // some plane is on an enabled CRTC with a framebuffer: a real display
+    bool matched = false; // the screen judged is the CRTC that drives the connector asked about
+    bool direct = false;  // the screen's full-screen plane scans out a buffer the compositor did not composite
+    std::string detail;   // "HDMI-A-1 crtc-0: plane-3 fb=123 1920x1080 XR24 by 'KMS thread'"
+};
+/// The screen is the CRTC that drives `connector` (the captured monitor, as mutter names it): the
+/// plane with the largest framebuffer on it (the cursor plane's is small). Without a connector, or
+/// when none matches, the largest framebuffer on any CRTC, and `detail` says so: a machine with a
+/// ghost screen beside a real monitor has two CRTCs of one size. It is scanned out directly when
+/// that framebuffer was not made by `compositor`'s own thread: mutter 50.1 on amdgpu allocates its
+/// composited onscreen buffers from `gnome-shell` and imports a client's buffer for direct scanout
+/// from its `KMS thread` (kmsmon.py, spikes/capture-scanout, 2026-10-17).
+KmsSample kms_sample(const std::string& dri_state, const std::string& connector = "", const std::string& compositor = "gnome-shell");
+/// Whether the kernel's connector name and mutter's name one connector: the same, but for HDMI-A,
+/// which mutter calls HDMI (the kernel's "HDMI-A-1" is mutter's "HDMI-1").
+bool same_connector(const std::string& kernel_name, const std::string& mutter_name);
+
+struct ScanoutBlink {
+    double t_ms = 0; // wall clock, from the window's log
+    bool green = false;
+};
+/// The window's own log ("<epoch seconds> blink green|magenta" lines), from `since_ms` on.
+std::vector<ScanoutBlink> parse_blinks(const std::string& window_log, double since_ms);
+
+struct ScanoutFrame {
+    double t_ms = 0; // wall clock when the decoded centre luma was read
+    int luma = -1;
+};
+struct ScanoutKms {
+    double t_ms = 0;
+    bool direct = false;
+};
+
+struct ScanoutVerdict {
+    enum class Kind { Pass, Fail, NotRun };
+    Kind kind = Kind::NotRun;
+    int changes = 0, followed = 0, under_scanout = 0;
+    std::string detail;
+};
+/// Every change of the window followed by the decoded video within kScanoutFollowMs; not run when
+/// the machine has no KMS CRTC (CI's fixtures) or too few changes happened under direct scanout (a
+/// banner, a menu or the overview stops it). A change not followed fails, scanned out or not.
+/// `require_kms` (opsim --require-kms, the mini-PC's nightly): a machine that must have a KMS CRTC
+/// and shows none has lost debugfs or root, which fails the check instead of leaving it not run.
+ScanoutVerdict scanout_verdict(const std::vector<ScanoutBlink>& blinks, const std::vector<ScanoutFrame>& frames, const std::vector<ScanoutKms>& kms,
+                               bool kms_crtc, bool require_kms = false);
+
 } // namespace fjarr::opsim

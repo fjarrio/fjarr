@@ -623,7 +623,13 @@ counters. Erik chose DMA-BUF capture without a copy into VA
 side in 50.5, which Ubuntu 26.04 does not have
 ([open question #49](18-open-questions.md)). The M3 gate waits for that
 change and a green night with the new scanout check
-([docs/15](15-testing-strategy.md#the-desktop-test-lab)).
+([docs/15](15-testing-strategy.md#the-desktop-test-lab)). The change is built
+(2026-10-17): the import list, module E's DMA-BUF reader with SHM as the
+fallback, the device-memory head with one importing `vapostproc`, the frame
+counts in `/sources`, the hidden pointer, and `fjarr-opsim desktop-scanout` in
+the unattended verify. CI covers the SHM path and the unit tests, a VA
+workstation the DMA-BUF chain into `vah264enc`; mutter's DMA-BUF stream inside
+the agent is first exercised on the mini-PC.
 
 ## M3.5 — Hear the robot {#m35}
 

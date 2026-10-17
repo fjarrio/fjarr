@@ -3,12 +3,17 @@
 # it), and a log of every focus change, key press and release (name and text) and click (button
 # and position), so input is proven by reading the log back. While F9 is held the window turns
 # green: the "photon" the input-to-photon harness times (docs/15#latency-harness).
+# The scanout check (ADR-0041) runs it changing colour by itself with the pointer hidden, ported
+# from spikes/capture-scanout/tools/blinkwin.py: fullscreen, GTK 4 renders through the GPU into
+# dma-bufs, so mutter can scan it out directly.
+#   FJARR_TESTWIN_BLINK_MS=N   toggle magenta and green every N ms, logging "blink green|magenta"
+#   FJARR_TESTWIN_CURSOR=NAME  the pointer over the window; "none" hides it
 # spec: docs/15-testing-strategy.md#the-desktop-test-lab
 import os, sys, time
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gdk, Gtk
+from gi.repository import Gdk, GLib, Gtk
 
 LOG = os.environ.get("FJARR_FIXTURE_LOG", "/run/desktop/testwin.log")
 COLOUR = os.environ.get("FIXTURE_COLOUR", "#ff00ff")  # magenta: nothing else on the desktop is
@@ -60,8 +65,23 @@ def activate(app):
     win.add_controller(drag)
     win.connect("notify::is-active", lambda w, _p: log(f"focus active={w.is_active()}"))
     win.fullscreen()
+    cursor = os.environ.get("FJARR_TESTWIN_CURSOR")
+    if cursor:
+        win.set_cursor_from_name(cursor)
     win.present()
-    log(f"start pid={os.getpid()} colour={COLOUR}")
+    log(f"start pid={os.getpid()} colour={COLOUR} cursor={cursor or 'default'}")
+
+    blink = int(os.environ.get("FJARR_TESTWIN_BLINK_MS", "0"))
+    if blink > 0:
+        state = {"green": False}
+
+        def tick():
+            state["green"] = not state["green"]
+            paint(PHOTON if state["green"] else COLOUR)
+            log("blink " + ("green" if state["green"] else "magenta"))
+            return True
+
+        GLib.timeout_add(blink, tick)
 
 
 app = Gtk.Application(application_id="io.fjarr.FixtureWindow")
