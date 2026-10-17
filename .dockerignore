@@ -6,6 +6,7 @@ node_modules/
 **/dist/
 web/e2e/out/
 inspiration/
+fjarr-private-research/
 website/.astro/
 .env
 *.log

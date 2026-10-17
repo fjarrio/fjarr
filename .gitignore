@@ -2,6 +2,9 @@
 .env
 # prior-project reference material (mined into docs/11-prior-art.md)
 inspiration/
+# a separate private repository checked out here (vendor research, correspondence);
+# its contents never enter this repository
+fjarr-private-research/
 
 # --- build outputs ---
 build/
