@@ -1,0 +1,28 @@
+# The carrier changes: what Fjarr's tree changes in NVIDIA's own for the module on the P3768
+# carrier, as board/dtbdiff.py prints it (NVIDIA's DTB first, phandle numbering ignored). The
+# same on L4T 36.4.4 and 36.5.2, and what Stereolabs' 36.4.4 tree changes in NVIDIA's 36.4.4
+# one. board/check-dtb.sh compares against it, these comment lines aside.
+# spec: docs/32-fleet-ota.md#jetson-test-image ("The board package")
++ node /bus@0/padctl@3520000/ports/usb2-0/connector
+    compatible = "usb-b-connector", "gpio-usb-b-connector"
+    label = "micro-USB"
+    type = "micro"
+    vbus-gpio = <&{/bus@0/gpio@2200000} 0x99 0x1>
++ node /bus@0/pps
+    compatible = "pps-gpio"
+    gpios = <&{/bus@0/gpio@2200000} 0x6 0x0>
+    status = "okay"
++ node /gpio-keys/key-suspend
+    gpios = <&{/bus@0/gpio@2200000} 0x32 0x1>
+    label = "Suspend"
+    linux,code = <0x8e>
+    linux,input-type = <0x1>
+~ /bus@0/padctl@3520000/pads/usb3/lanes/usb3-2: status = "disabled" -> "okay"
+~ /bus@0/padctl@3520000/ports/usb3-0: nvidia,usb2-companion = <0x1> -> <0x2>
+~ /bus@0/padctl@3520000/ports/usb3-1: nvidia,usb2-companion = <0x0> -> <0x1>
++ /bus@0/padctl@3520000/ports/usb3-2: nvidia,usb2-companion = <0x1>
+~ /bus@0/padctl@3520000/ports/usb3-2: status = "disabled" -> "okay"
+~ /bus@0/usb@3550000: phy-names = "usb2-0", "usb3-0" -> "usb2-0"
+~ /bus@0/usb@3550000: phys = <&{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-0} &{/bus@0/padctl@3520000/pads/usb3/lanes/usb3-1}> -> <&{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-0}>
+~ /bus@0/usb@3610000: phy-names = "usb2-0", "usb2-1", "usb2-2", "usb3-0", "usb3-1" -> "usb2-1", "usb2-2", "usb2-3", "usb3-0", "usb3-1", "usb3-2"
+~ /bus@0/usb@3610000: phys = <&{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-0} &{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-1} &{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-2} &{/bus@0/padctl@3520000/pads/usb3/lanes/usb3-0} &{/bus@0/padctl@3520000/pads/usb3/lanes/usb3-1}> -> <&{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-1} &{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-2} &{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-3} &{/bus@0/padctl@3520000/pads/usb3/lanes/usb3-0} &{/bus@0/padctl@3520000/pads/usb3/lanes/usb3-1} &{/bus@0/padctl@3520000/pads/usb3/lanes/usb3-2}>

@@ -1,0 +1,38 @@
+{
+  "l4t-36.4.4-bsp": {
+    "note": "NVIDIA's L4T 36.4.4 BSP: the bootloader files the patch applies to, and NVIDIA's kernel DTB",
+    "url": "https://developer.download.nvidia.com/embedded/L4T/r36_Release_v4.4/release/Jetson_Linux_R36.4.4_aarch64.tbz2",
+    "sha256": "a6ce11c22100ab0976e419959182417c83d62f4272501bc8714f2e076e010f3b",
+    "size": 746324969
+  },
+  "l4t-36.5.2-bsp": {
+    "note": "NVIDIA's L4T 36.5.2 BSP, the release both Jetson recipes use",
+    "url": "https://developer.download.nvidia.com/embedded/L4T/r36_Release_v5.2/releases/Jetson_Linux_R36.5.2_aarch64.tbz2",
+    "sha256": "752326264c5e16826d3044a78e59ae06109467d37705143b94e664c91a471f47",
+    "size": 749742254
+  },
+  "l4t-36.4.4-public-sources": {
+    "note": "NVIDIA's L4T 36.4.4 public sources: the kernel device-tree sources in kernel_oot_modules_src.tbz2",
+    "url": "https://developer.download.nvidia.com/embedded/L4T/r36_Release_v4.4/sources/public_sources.tbz2",
+    "sha256": "cd4fa3bd2bbd73af7bec6cc4e1e2ec179a8933a217c830d346a0a0c48ea90661",
+    "size": 226164437
+  },
+  "l4t-36.5.2-public-sources": {
+    "note": "NVIDIA's L4T 36.5.2 public sources: the kernel device-tree sources in kernel_oot_modules_src.tbz2",
+    "url": "https://developer.download.nvidia.com/embedded/L4T/r36_Release_v5.2/sources/public_sources.tbz2",
+    "sha256": "4347a718e828edebee0d776d2110870d02a1d5766665d06c0abd3f325b1801d5",
+    "size": 232402561
+  },
+  "stereolabs-device-trees-364": {
+    "note": "Stereolabs' ZED Box Mini files for L4T 36.4.4, which its JetPack 6.2 flash script fetches: the reference the patch and the carrier device tree are checked against, never used in a build",
+    "url": "https://stereolabs.sfo2.cdn.digitaloceanspaces.com/utils/zed_boxes/zedbox_mini_device_trees_364.tar",
+    "sha256": "d17993499723bd63c1287bd482400c43322d2b94cf87073654a3daed87c0c03e",
+    "size": 2917888
+  },
+  "stereolabs-device-trees-365": {
+    "note": "Stereolabs' bootloader files for L4T 36.5 (no published script fetches it): checked to equal the 36.4.4 ones",
+    "url": "https://stereolabs.sfo2.cdn.digitaloceanspaces.com/utils/zed_boxes/zedbox_mini_device_trees_365.tar",
+    "sha256": "b839dd30dfdfc0af970ad0ead1d4ddee25a3d1075f484b54bc6a92b84dde3b56",
+    "size": 81920
+  }
+}

@@ -1,0 +1,28 @@
+/*
+ * MB2 configuration for the ZED Box Mini (Orin NX on Stereolabs' carrier): Fjarr's board
+ * package, in place of NVIDIA's tegra234-mb2-bct-misc-p3767-0000.dts.
+ * spec: docs/32-fleet-ota.md#jetson-test-image ("The board package")
+ *
+ * The carrier has no board EEPROM. With NVIDIA's settings MB2 reads one at I2C address 0xae
+ * (0x57 in 7-bit form), fails, and stops before UEFI, so this file sets the carrier EEPROM's
+ * read size to zero; the address stays NVIDIA's p3767 one. Everything else is NVIDIA's MB2
+ * common configuration, included by name from the BSP at build time (it is NVIDIA's
+ * proprietary file and is never copied here). The module's own EEPROM (0xa0), which
+ * identifies the board, is left as NVIDIA's common file sets it. Compiled from the same
+ * includes, this file and NVIDIA's p3767 file with the read size set to zero give the same
+ * tree, which tegraflash turns into the MB2 BCT (board/check-bct.sh).
+ */
+
+/dts-v1/;
+
+#include "tegra234-mb2-bct-common.dtsi"
+
+/ {
+	mb2-misc {
+		eeprom {
+			cvb_eeprom_i2c_instance = <0x0>;
+			cvb_eeprom_i2c_slave_address = <0xae>;
+			cvb_eeprom_read_size = <0x0>;
+		};
+	};
+};

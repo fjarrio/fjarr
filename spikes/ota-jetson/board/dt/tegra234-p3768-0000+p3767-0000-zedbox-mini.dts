@@ -1,0 +1,93 @@
+// The ZED Box Mini (Orin NX 16 GB on Stereolabs' carrier): Fjarr's carrier device tree,
+// NVIDIA's device tree for the module on its P3768 developer-kit carrier with the carrier's
+// differences applied. The board package's kernel device tree, M8 slice 8.0.
+// spec: docs/32-fleet-ota.md#jetson-test-image ("The board package")
+//
+// NVIDIA's tree is included whole and only the carrier's differences are written here, so
+// NVIDIA's own changes in each L4T release carry through: Stereolabs' prebuilt 36.4 trees are
+// never copied over a newer release. It is a source-level change rather than an overlay
+// because the USB controllers reference NVIDIA's padctl lanes, which carry no labels, by path.
+// Built with NVIDIA's include paths (board/check-dtb.sh), on L4T 36.4.4 it gives the tree on
+// the lab box's kernel-dtb partitions; on 36.5.2, NVIDIA's tree plus exactly the changes in
+// carrier.diff. The node contents follow Stereolabs' tree as the box runs it, including the
+// connector's compatible order and `vbus-gpio` spelling.
+
+#include "tegra234-p3768-0000+p3767-0000-nv.dts"
+
+/ {
+	bus@0 {
+		padctl@3520000 {
+			pads {
+				usb3 {
+					lanes {
+						usb3-2 {
+							status = "okay";
+						};
+					};
+				};
+			};
+
+			ports {
+				/* The recovery port is a micro-USB receptacle; VBUS sensed on PZ1. */
+				usb2-0 {
+					connector {
+						compatible = "usb-b-connector", "gpio-usb-b-connector";
+						label = "micro-USB";
+						type = "micro";
+						vbus-gpio = <&gpio TEGRA234_MAIN_GPIO(Z, 1) GPIO_ACTIVE_LOW>;
+					};
+				};
+
+				usb3-0 {
+					nvidia,usb2-companion = <2>;
+				};
+
+				usb3-1 {
+					nvidia,usb2-companion = <1>;
+				};
+
+				usb3-2 {
+					nvidia,usb2-companion = <1>;
+					status = "okay";
+				};
+			};
+		};
+
+		/* The device controller (the recovery port) is USB 2 only. */
+		usb@3550000 {
+			phys = <&{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-0}>;
+			phy-names = "usb2-0";
+		};
+
+		/*
+		 * The host controller drops the recovery port and takes three USB 3 lanes. NVIDIA's
+		 * usb2-3 lane stays disabled: the PHY core logs "Requested PHY is disabled" and the
+		 * host controller goes on without it, as on the box.
+		 */
+		usb@3610000 {
+			phys = <&{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-1}>,
+			       <&{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-2}>,
+			       <&{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-3}>,
+			       <&{/bus@0/padctl@3520000/pads/usb3/lanes/usb3-0}>,
+			       <&{/bus@0/padctl@3520000/pads/usb3/lanes/usb3-1}>,
+			       <&{/bus@0/padctl@3520000/pads/usb3/lanes/usb3-2}>;
+			phy-names = "usb2-1", "usb2-2", "usb2-3", "usb3-0", "usb3-1", "usb3-2";
+		};
+
+		/* A pulse-per-second input (a GPS receiver's) on PA6. */
+		pps {
+			compatible = "pps-gpio";
+			gpios = <&gpio TEGRA234_MAIN_GPIO(A, 6) GPIO_ACTIVE_HIGH>;
+			status = "okay";
+		};
+	};
+
+	gpio-keys {
+		key-suspend {
+			label = "Suspend";
+			gpios = <&gpio TEGRA234_MAIN_GPIO(G, 2) GPIO_ACTIVE_LOW>;
+			linux,input-type = <EV_KEY>;
+			linux,code = <KEY_SLEEP>;
+		};
+	};
+};

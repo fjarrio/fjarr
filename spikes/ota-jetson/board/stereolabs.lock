@@ -1,0 +1,11 @@
+{
+  "stereolabs-zedbox-mini": {
+    "note": "spec: docs/32-fleet-ota.md#jetson-test-image and docs/18-open-questions.md #45. Stereolabs' driver package for the ZED Box Mini on L4T 36.5.2, fetched at build time by both Jetson recipes and never redistributed. Only data.tar is unpacked; the maintainer scripts never run. The file name stays the same when Stereolabs re-uploads, so a changed file fails the SHA-256 check. board/fetch-check.sh checks the pin.",
+    "version": "1.4.4",
+    "l4t": "36.5.2",
+    "url": "https://download.stereolabs.com/drivers/zedx/1.4.4/R36.5.2/stereolabs-zedbox-mini_1.4.4-SL-MAX9296-ZEDBOX-MINI-L4T36.5.2_arm64.deb",
+    "sha256": "044be09281731c1eea75dc9eb4487ed4f6379fa3124f711cbbe77fe6787c3f51",
+    "sri": "sha256-BEvgkoFzHB7qddyetEh+1PY3n6MST3Ecu+d/5nh8P1E=",
+    "size": 1653336
+  }
+}

@@ -1,0 +1,173 @@
+ZED Box Mini carrier: Stereolabs' MB1 pinmux and GPIO settings, as Fjarr's patch to NVIDIA's
+two BSD-3-Clause files for them: the P3767 module's HDMI pinmux, which the p3509-a02-p3767-0000
+board configuration uses, and the MB1 GPIO file it includes.
+
+spec: docs/32-fleet-ota.md#jetson-test-image ("The board package")
+
+Apply in Linux_for_Tegra/ with `patch -p1 -F0` (no fuzz). The two files are byte-identical in
+L4T 36.4.4 and 36.5.2, and this patch applies to both without offset. Its line endings are LF,
+as meta-tegra holds the files: its tegra-binaries recipe runs dos2unix on *.dts*. NVIDIA ships
+them with CRLF, so on an unconverted tree (jetpack-nixos) either strip the CRs first or apply
+the CRLF form that board/check-bct.sh writes to out/board/ (README.md).
+
+The settings are those in Stereolabs' zedbox_mini_device_trees_364.tar
+(https://stereolabs.sfo2.cdn.digitaloceanspaces.com/utils/zed_boxes/zedbox_mini_device_trees_364.tar,
+SHA-256 d17993499723bd63c1287bd482400c43322d2b94cf87073654a3daed87c0c03e); the generator
+revision comment it also edits stays NVIDIA's. Pinmux, then the MB1 GPIO lists:
+- DAP4 (PA4-PA7) leaves I2S4 for GPIO (function rsvd1): PA4, PA6, PA7 pulled down, tristated
+  inputs; PA5 driven, input off. The four nodes move from the SFIO to the GPIO part.
+- spi1_cs0_pz6: no pull, driven, input off. soc_gpio33_pq6: pulled down, driven.
+  soc_gpio39_pn1: driven.
+- gpio-input gains A4, A6, A7; gpio-output-low gains A5; gpio-output-high gains Z6 and G6
+  (both stay in NVIDIA's gpio-input list too, as Stereolabs ships them).
+
+The patched files keep NVIDIA's copyright notice (2022, NVIDIA CORPORATION & AFFILIATES)
+and its BSD-3-Clause licence text.
+
+--- a/bootloader/generic/BCT/tegra234-mb1-bct-pinmux-p3767-hdmi-a03.dtsi
++++ b/bootloader/generic/BCT/tegra234-mb1-bct-pinmux-p3767-hdmi-a03.dtsi
+@@ -539,42 +539,6 @@
+ 				nvidia,lpdr = <TEGRA_PIN_DISABLE>;
+ 			};
+ 
+-			dap4_sclk_pa4 {
+-				nvidia,pins = "dap4_sclk_pa4";
+-				nvidia,function = "i2s4";
+-				nvidia,pull = <TEGRA_PIN_PULL_NONE>;
+-				nvidia,tristate = <TEGRA_PIN_DISABLE>;
+-				nvidia,enable-input = <TEGRA_PIN_ENABLE>;
+-				nvidia,lpdr = <TEGRA_PIN_DISABLE>;
+-			};
+-
+-			dap4_dout_pa5 {
+-				nvidia,pins = "dap4_dout_pa5";
+-				nvidia,function = "i2s4";
+-				nvidia,pull = <TEGRA_PIN_PULL_NONE>;
+-				nvidia,tristate = <TEGRA_PIN_DISABLE>;
+-				nvidia,enable-input = <TEGRA_PIN_DISABLE>;
+-				nvidia,lpdr = <TEGRA_PIN_DISABLE>;
+-			};
+-
+-			dap4_din_pa6 {
+-				nvidia,pins = "dap4_din_pa6";
+-				nvidia,function = "i2s4";
+-				nvidia,pull = <TEGRA_PIN_PULL_DOWN>;
+-				nvidia,tristate = <TEGRA_PIN_ENABLE>;
+-				nvidia,enable-input = <TEGRA_PIN_ENABLE>;
+-				nvidia,lpdr = <TEGRA_PIN_DISABLE>;
+-			};
+-
+-			dap4_fs_pa7 {
+-				nvidia,pins = "dap4_fs_pa7";
+-				nvidia,function = "i2s4";
+-				nvidia,pull = <TEGRA_PIN_PULL_NONE>;
+-				nvidia,tristate = <TEGRA_PIN_DISABLE>;
+-				nvidia,enable-input = <TEGRA_PIN_ENABLE>;
+-				nvidia,lpdr = <TEGRA_PIN_DISABLE>;
+-			};
+-
+ 			/* GPIO Pin Configuration */
+ 			ao_retention_n_pee2 {
+ 				nvidia,pins = "ao_retention_n_pee2";
+@@ -762,9 +726,9 @@
+ 			spi1_cs0_pz6 {
+ 				nvidia,pins = "spi1_cs0_pz6";
+ 				nvidia,function = "rsvd1";
+-				nvidia,pull = <TEGRA_PIN_PULL_UP>;
+-				nvidia,tristate = <TEGRA_PIN_ENABLE>;
+-				nvidia,enable-input = <TEGRA_PIN_ENABLE>;
++				nvidia,pull = <TEGRA_PIN_PULL_NONE>;
++				nvidia,tristate = <TEGRA_PIN_DISABLE>;
++				nvidia,enable-input = <TEGRA_PIN_DISABLE>;
+ 				nvidia,io-high-voltage = <TEGRA_PIN_DISABLE>;
+ 				nvidia,lpdr = <TEGRA_PIN_DISABLE>;
+ 			};
+@@ -812,8 +776,8 @@
+ 			soc_gpio33_pq6 {
+ 				nvidia,pins = "soc_gpio33_pq6";
+ 				nvidia,function = "rsvd0";
+-				nvidia,pull = <TEGRA_PIN_PULL_UP>;
+-				nvidia,tristate = <TEGRA_PIN_ENABLE>;
++				nvidia,pull = <TEGRA_PIN_PULL_DOWN>;
++				nvidia,tristate = <TEGRA_PIN_DISABLE>;
+ 				nvidia,enable-input = <TEGRA_PIN_ENABLE>;
+ 				nvidia,io-high-voltage = <TEGRA_PIN_DISABLE>;
+ 				nvidia,lpdr = <TEGRA_PIN_DISABLE>;
+@@ -851,7 +815,7 @@
+ 				nvidia,pins = "soc_gpio39_pn1";
+ 				nvidia,function = "rsvd1";
+ 				nvidia,pull = <TEGRA_PIN_PULL_DOWN>;
+-				nvidia,tristate = <TEGRA_PIN_ENABLE>;
++				nvidia,tristate = <TEGRA_PIN_DISABLE>;
+ 				nvidia,enable-input = <TEGRA_PIN_ENABLE>;
+ 				nvidia,lpdr = <TEGRA_PIN_DISABLE>;
+ 			};
+@@ -1002,6 +966,43 @@
+ 				nvidia,enable-input = <TEGRA_PIN_DISABLE>;
+ 				nvidia,lpdr = <TEGRA_PIN_DISABLE>;
+ 			};
++
++			dap4_sclk_pa4 {
++				nvidia,pins = "dap4_sclk_pa4";
++				nvidia,function = "rsvd1";
++				nvidia,pull = <TEGRA_PIN_PULL_DOWN>;
++				nvidia,tristate = <TEGRA_PIN_ENABLE>;
++				nvidia,enable-input = <TEGRA_PIN_ENABLE>;
++				nvidia,lpdr = <TEGRA_PIN_DISABLE>;
++			};
++
++			dap4_dout_pa5 {
++				nvidia,pins = "dap4_dout_pa5";
++				nvidia,function = "rsvd1";
++				nvidia,pull = <TEGRA_PIN_PULL_NONE>;
++				nvidia,tristate = <TEGRA_PIN_DISABLE>;
++				nvidia,enable-input = <TEGRA_PIN_DISABLE>;
++				nvidia,io-high-voltage = <TEGRA_PIN_DISABLE>;
++				nvidia,lpdr = <TEGRA_PIN_DISABLE>;
++			};
++
++			dap4_din_pa6 {
++				nvidia,pins = "dap4_din_pa6";
++				nvidia,function = "rsvd1";
++				nvidia,pull = <TEGRA_PIN_PULL_DOWN>;
++				nvidia,tristate = <TEGRA_PIN_ENABLE>;
++				nvidia,enable-input = <TEGRA_PIN_ENABLE>;
++				nvidia,lpdr = <TEGRA_PIN_DISABLE>;
++			};
++
++			dap4_fs_pa7 {
++				nvidia,pins = "dap4_fs_pa7";
++				nvidia,function = "rsvd1";
++				nvidia,pull = <TEGRA_PIN_PULL_DOWN>;
++				nvidia,tristate = <TEGRA_PIN_ENABLE>;
++				nvidia,enable-input = <TEGRA_PIN_ENABLE>;
++				nvidia,lpdr = <TEGRA_PIN_DISABLE>;
++			};
+ 		};
+ 
+ 		pinmux_unused_lowpower: unused_lowpower {
+--- a/bootloader/tegra234-mb1-bct-gpio-p3767-hdmi-a03.dtsi
++++ b/bootloader/tegra234-mb1-bct-gpio-p3767-hdmi-a03.dtsi
+@@ -68,6 +68,9 @@
+ 				TEGRA234_MAIN_GPIO(I, 2)
+ 				TEGRA234_MAIN_GPIO(AC, 6)
+ 				TEGRA234_MAIN_GPIO(L, 2)
++				TEGRA234_MAIN_GPIO(A, 4)
++				TEGRA234_MAIN_GPIO(A, 6)
++				TEGRA234_MAIN_GPIO(A, 7)
+ 				>;
+ 			gpio-output-low = <
+ 				TEGRA234_MAIN_GPIO(H, 6)
+@@ -75,9 +78,12 @@
+ 				TEGRA234_MAIN_GPIO(AC, 0)
+ 				TEGRA234_MAIN_GPIO(K, 4)
+ 				TEGRA234_MAIN_GPIO(K, 5)
++				TEGRA234_MAIN_GPIO(A, 5)
+ 				>;
+ 			gpio-output-high = <
++				TEGRA234_MAIN_GPIO(Z, 6)
+ 				TEGRA234_MAIN_GPIO(Q, 3)
++				TEGRA234_MAIN_GPIO(G, 6)
+ 				TEGRA234_MAIN_GPIO(A, 0)
+ 				>;
+ 		};
