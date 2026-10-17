@@ -67,6 +67,9 @@ jobs:
               for i in {1..18}; do
                 rc=0; out=$(sudo -n tools/fjarr-lab/unattended.sh report --prepare-run "$prep" 2>&1) || rc=$?
                 echo "$out"
+                # A check that did not run is green but named (docs/30 principle 8): the scanout
+                # check's NOTE is a warning nightly-alert and the M3 gate can see.
+                if [ "$rc" -ne 75 ]; then grep -E '^NOTE ' <<<"$out" | sed 's/^/::warning::/' || true; fi
                 if [ "$rc" -ne 75 ] || [ "$i" -eq 18 ] || [[ "$out" == *"not rebooted since prepare"* ]]; then break; fi
                 sleep 10
               done ;;
