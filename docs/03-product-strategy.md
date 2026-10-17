@@ -111,12 +111,36 @@ on it.
 | Protocol spec, SDKs, docs, demos | SSO/SCIM, audit export, support/SLA |
 | Pipeline introspection on the robot + in the dashboard ([docs/24](24-pipeline-introspection.md)) | fleet-wide pipeline history, search and retention in Cloud (M7) |
 | The [network tunnel](27-network-tunnel.md) and `fjarr-connect`, unlimited, self-hosted | **Access governance** around it: time-boxed and approval-gated grants, per-user policy, session recording, audit export (M5+) |
+| Building the OTA recipes yourself, with your own Yocto shared-state cache or Nix binary cache | **Hosted build caches** for Fjarr's board packages (candidate, 2026-10-17; [below](#build-caches)) |
 | | **Commercial license** for companies that can't ship AGPL |
 
 Principles: the open core must be *genuinely usable alone* (a company can run
 everything themselves); paid features are things that are **inherently
 hosted-value** (aggregation, retention, campaigns, TURN capacity) or
 enterprise process (SSO, SLA) — never artificial crippling.
+
+### Hosted build caches (candidate) {#build-caches}
+
+Surfaced in slice 8.0 (2026-10-17): the first Yocto build of the ZED Box Mini
+image compiles everything from source, the cross toolchain, about 150 host
+tools including Rust and LLVM, NVIDIA's kernel and out-of-tree modules, the
+firmware: over 5,000 tasks, most of a day on a laptop and about an hour on a
+large build server. Later builds reuse Yocto's shared-state cache and take
+minutes, but every new CI machine and every new customer pays the first
+build once, and a jetpack-nixos build has the same shape without a binary
+cache.
+
+The offer: Fjarr hosts a Yocto shared-state mirror and a Nix binary cache
+for its board packages (ZED Box Mini, x86) and pinned releases, so a
+customer's first OS build downloads the toolchain and the board's kernel
+instead of compiling them, and their CI rebuilds only their own layers. It
+is inherently hosted value (storage and bandwidth, kept warm for every
+pinned release) and cripples nothing: the recipes stay free, and anyone can
+build and host their own cache. Most robot releases need no OS build at all,
+since the customer's software ships as `app` components
+([docs/32](32-fleet-ota.md#updater)); the cache matters for OS releases and
+onboarding. A natural meter is cache GB served. Revisit with the Yocto and
+NixOS recipes in 8.4.
 
 ## Revenue streams
 
