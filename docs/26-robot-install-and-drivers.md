@@ -461,14 +461,24 @@ What it writes, each change recorded for `setup --undo desktop` (specified
 | `/etc/gdm3/custom.conf` | `[daemon]` `AutomaticLoginEnable=true`, `AutomaticLogin=<account>`; the file's other keys are kept |
 | `/etc/dconf/db/local.d/00-fjarr-desktop` and `/etc/dconf/profile/user` | no screen lock and no idle blanking (`org/gnome/desktop/screensaver lock-enabled=false`, `org/gnome/desktop/session idle-delay=0`), then `dconf update`. An auto-login account has no password, so a lock screen would strand the robot. This applies to every account on the machine, which suits an appliance and is said in the prompt |
 | `~<account>/.config/systemd/user/graphical-session.target.wants/fjarr-desktop-session.service` | the helper's user unit, enabled for that account only. It starts with the graphical session, restarts on failure, and connects to `/run/fjarr/desktop.sock` |
-| `~<account>/.config/gnome-initial-setup-done` | `yes`: GNOME's first-login "Welcome to Ubuntu" wizard (`gnome-initial-setup --existing-user`) does not start for the account. It sat in the middle of a freshly set-up robot's screen, over whatever the robot shows, and over the nightly's test window (found by the M3 gate review, 2026-10-11). Left alone when the file exists |
+| `~<account>/.config/systemd/user/gnome-initial-setup-first-login.service` and `…/gnome-initial-setup-upgrade-login.service` | links to `/dev/null`: GNOME's "Welcome to Ubuntu" wizard is masked for the account. Unmasked, it starts in the middle of the robot's screen, over whatever the robot shows, and stays until someone at the machine clicks through it (found by the M3 gate review, 2026-10-11). Ubuntu starts it from `gnome-session.target`, one unit per mode: `--existing-user` while the account has no `~/.config/gnome-initial-setup-done`, and `--upgrade-user` once it has one, until `~/.config/gnome-initial-setup/upgrade-<release>-done` exists. Masking both keeps it off whatever the done file says, and after a release upgrade, where writing this release's marker would not. The masks apply from the account's next login. A file already at either path, the account's own mask or override, is left alone and not recorded, and setup names an override, as the wizard can start through it |
+| `~<account>/.config/gnome-initial-setup-done` | `yes`, as GNOME's wizard leaves it when finished. On its own (2026-10-11 to 10-17) it only traded the first-login mode for the upgrade mode, which then started at every boot of the mini-PC's account, recreated each night (found 2026-10-17). Kept beside the masks because GNOME's copy worker (`gnome-initial-setup-copy-worker.service`) runs at every login while it is missing, with nothing to copy into a robot's account. Left alone when the file exists |
 | `fjarr-desktop-watchdog.timer` | enabled. Every 30 s it runs `fjarr-setup desktop watchdog`. When GDM is active and two checks in a row find **no user session at all** on `seat0`, only GDM's own greeter, the watchdog restarts GDM, which logs the account in again, and says so in the journal ([ADR-0006](adr/0006-desktop-backend-selection.md)). A person logged in at the machine holds the seat and is never logged out by it (found on the mini-PC, 2026-10-01: the first version watched for the account's own session, and would have ended the session of whoever was at the machine) |
 | `/etc/fjarr/fjarr.toml` | `[capabilities."fjarr.desktop"]` `helper.user = "<account>"`, `helper.group = "fjarr-desktop"`; then the agent restarts |
 
 **Built 2026-10-01** (`fjarr-setup`'s `desktop.rs`): the package install test
 runs `setup desktop` and `--undo desktop` on a clean Ubuntu, and checks each file,
-the account and the keys. The automatic login, the watchdog and the reboot are
-proven on the mini-PC in 3.L.
+the account and the keys; since 2026-10-17 also for an existing account, whose
+home keeps everything setup did not add. The automatic login, the watchdog and
+the reboot are proven on the mini-PC in 3.L.
+
+The wizard did not cause the nightly's input-to-photon 0/10 (corrected
+2026-10-17 from "over the nightly's test window"). The first-login wizard
+also ran on 2026-10-02 and 10-04, nights with ten real samples, and on 10-13
+and 10-14, with the upgrade-mode wizard running, the clicks and the closing
+Shift release still reached the test window. The 10-14 frame dump is the
+full-screen test window, not the wizard
+([M3 gate review](reviews/m3-gate-review.md), finding 2).
 
 The group applies at the account's next login, so the command ends by offering
 a reboot. `--check` adds rows for the module, the account and its group, the

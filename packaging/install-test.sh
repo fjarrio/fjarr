@@ -147,11 +147,18 @@ grep -q '^system-db:local' /etc/dconf/profile/user || fail "the dconf profile do
 link=/home/desktop/.config/systemd/user/graphical-session.target.wants/fjarr-desktop-session.service
 [ "$(readlink "$link")" = /usr/lib/systemd/user/fjarr-desktop-session.service ] || fail "the helper's user unit is not enabled for desktop: $(ls -la "$link" 2>&1)"
 [ "$(cat /home/desktop/.config/gnome-initial-setup-done 2>/dev/null)" = yes ] && [ "$(stat -c %U /home/desktop/.config/gnome-initial-setup-done)" = desktop ] || fail "GNOME's first-login wizard is not skipped for desktop (~/.config/gnome-initial-setup-done)"
+# The done file alone traded the first-login wizard for the upgrade one, at every boot (the mini-PC,
+# 2026-10-17): both of its units are masked for the account.
+wizard="gnome-initial-setup-first-login gnome-initial-setup-upgrade-login"
+for u in $wizard; do
+    m=/home/desktop/.config/systemd/user/$u.service
+    [ "$(readlink "$m")" = /dev/null ] && [ "$(stat -c %U "$m")" = desktop ] || fail "GNOME's welcome wizard ($u) is not masked for desktop: $(ls -la "$m" 2>&1)"
+done
 [ "$(stat -c %U /home/desktop/.config/systemd)" = desktop ] || fail "setup made ~desktop/.config/systemd owned by $(stat -c %U /home/desktop/.config/systemd), not desktop"
 [ -z "$(find /etc/systemd/user -name 'fjarr-desktop-session.service' 2>/dev/null)" ] || fail "the helper got enabled for every account"
 grep -A3 '^\[capabilities."fjarr.desktop".helper\]' /etc/fjarr/fjarr.toml | grep -q '^user = "desktop"' || { cat /etc/fjarr/fjarr.toml; fail "the agent's config does not name the desktop account"; }
 grep -q '^check: OK' /tmp/desktop.log || { cat /tmp/desktop.log; fail "setup desktop did not end with a passing --check"; }
-ok "setup desktop: account (locked, in fjarr-desktop), GDM auto-login, no screen lock, helper for that account only, agent config; --check passed"
+ok "setup desktop: account (locked, in fjarr-desktop), GDM auto-login, no screen lock, welcome wizard masked and helper enabled for that account only, agent config; --check passed"
 fjarr-agent setup --undo desktop >/tmp/undo-desktop.log 2>&1 || { cat /tmp/undo-desktop.log; fail "setup --undo desktop failed"; }
 ! getent passwd desktop >/dev/null || fail "--undo desktop left the account it created"
 cmp -s /etc/gdm3/custom.conf /tmp/custom.conf.orig || { diff /tmp/custom.conf.orig /etc/gdm3/custom.conf; fail "--undo desktop did not restore custom.conf"; }
@@ -159,6 +166,28 @@ cmp -s /etc/gdm3/custom.conf /tmp/custom.conf.orig || { diff /tmp/custom.conf.or
 ! grep -q 'fjarr.desktop' /etc/fjarr/fjarr.toml || { cat /etc/fjarr/fjarr.toml; fail "--undo desktop left the desktop keys in the config"; }
 grep -q '^robot_id = "test-device"' /etc/fjarr/fjarr.toml || fail "--undo desktop touched setup's own keys"
 ok "setup --undo desktop removed the account, restored custom.conf, removed the dconf files and the config keys, kept the rest"
+# An existing account is only added to: --undo desktop takes back what setup put in its home, the
+# wizard's masks included, and keeps what it had there (its done file, its own unit).
+useradd --create-home robot
+mkdir -p /home/robot/.config/systemd/user
+printf 'yes' >/home/robot/.config/gnome-initial-setup-done
+printf '[Service]\nExecStart=/usr/bin/true\n' >/home/robot/.config/systemd/user/robot-ui.service
+chown -R robot:robot /home/robot/.config
+fjarr-agent setup desktop --yes --account robot --reboot no >/tmp/desktop-existing.log 2>&1 || { cat /tmp/desktop-existing.log; fail "setup desktop --account robot failed"; }
+for u in $wizard; do
+    [ "$(readlink /home/robot/.config/systemd/user/$u.service)" = /dev/null ] || fail "GNOME's welcome wizard ($u) is not masked for an existing account"
+done
+fjarr-agent setup --undo desktop >/tmp/undo-existing.log 2>&1 || { cat /tmp/undo-existing.log; fail "setup --undo desktop (existing account) failed"; }
+getent passwd robot >/dev/null && [ -d /home/robot ] || fail "--undo desktop removed an account it did not create"
+for u in $wizard; do
+    [ ! -L /home/robot/.config/systemd/user/$u.service ] || fail "--undo desktop left GNOME's welcome wizard ($u) masked for robot"
+done
+[ ! -L /home/robot/.config/systemd/user/graphical-session.target.wants/fjarr-desktop-session.service ] || fail "--undo desktop left the helper enabled for robot"
+[ "$(cat /home/robot/.config/gnome-initial-setup-done 2>/dev/null)" = yes ] && [ -f /home/robot/.config/systemd/user/robot-ui.service ] || fail "--undo desktop removed what robot had before setup"
+! id -nG robot | tr ' ' '\n' | grep -qx fjarr-desktop || fail "--undo desktop left robot in fjarr-desktop"
+cmp -s /etc/gdm3/custom.conf /tmp/custom.conf.orig || { diff /tmp/custom.conf.orig /etc/gdm3/custom.conf; fail "--undo desktop (existing account) did not restore custom.conf"; }
+userdel -r robot 2>/dev/null || true
+ok "setup desktop for an existing account: wizard masked; --undo desktop took back the masks, the helper and the group, and kept the account, its done file and its own unit"
 # setup desktop --x11 (docs/26#fjarr-agent-setup-desktop): the kiosk session's autostart entry and
 # the agent's backend; the display manager and its automatic login stay the operator's.
 fjarr-agent setup desktop --yes --x11 --display :7 >/tmp/x11.log 2>&1 || { cat /tmp/x11.log; fail "setup desktop --x11 failed"; }

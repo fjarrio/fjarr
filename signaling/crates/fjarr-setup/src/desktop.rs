@@ -2,9 +2,9 @@
 //! the machine (docs/26#fjarr-agent-setup-desktop, ADR-0006, ADR-0028).
 //!
 //! What it writes, each change recorded for `setup --undo desktop`: the account (created when
-//! asked) in the `fjarr-desktop` group, GDM's automatic login, no screen lock or idle blank, the
-//! session helper's user unit enabled for that account only, the watchdog timer, and the agent's
-//! `helper.user` / `helper.group`.
+//! asked) in the `fjarr-desktop` group, GDM's automatic login, no screen lock or idle blank, GNOME's
+//! welcome wizard masked and the session helper's user unit enabled for that account only, the
+//! watchdog timer, and the agent's `helper.user` / `helper.group`.
 use std::os::unix::fs::{chown, symlink};
 use std::path::{Path, PathBuf};
 
@@ -38,7 +38,15 @@ pub const GDM_CONF: &str = "/etc/gdm3/custom.conf";
 pub const DCONF_DB: &str = "/etc/dconf/db/local.d/00-fjarr-desktop";
 pub const DCONF_PROFILE: &str = "/etc/dconf/profile/user";
 pub const HELPER_UNIT: &str = "fjarr-desktop-session.service";
-/// GNOME's first-login wizard runs while this file is missing from the account's config directory.
+/// GNOME's "Welcome to Ubuntu" wizard, one user unit per mode, both wanted by gnome-session.target:
+/// `--existing-user` while the done file is missing, `--upgrade-user` once it exists until the
+/// release's `gnome-initial-setup/upgrade-<release>-done` does. Masked for the account.
+pub const INITIAL_SETUP_UNITS: [&str; 2] = [
+    "gnome-initial-setup-first-login.service",
+    "gnome-initial-setup-upgrade-login.service",
+];
+/// What GNOME's wizard leaves when finished. Kept beside the masks: GNOME's copy worker runs at
+/// every login while it is missing (docs/26#fjarr-agent-setup-desktop).
 pub const INITIAL_SETUP_DONE: &str = ".config/gnome-initial-setup-done";
 pub const HELPER_UNIT_PATH: &str = "/usr/lib/systemd/user/fjarr-desktop-session.service";
 pub const WATCHDOG_TIMER: &str = "fjarr-desktop-watchdog.timer";
@@ -142,6 +150,52 @@ pub fn dconf_profile(existing: Option<&str>) -> Option<String> {
 pub fn helper_wants_link(home: &Path) -> PathBuf {
     home.join(".config/systemd/user/graphical-session.target.wants")
         .join(HELPER_UNIT)
+}
+
+/// Where masking a user unit for one account puts its link to /dev/null (`systemctl --user mask`).
+pub fn user_unit_mask(home: &Path, unit: &str) -> PathBuf {
+    home.join(".config/systemd/user").join(unit)
+}
+
+/// A link to /dev/null or an empty file: the unit is masked (systemd.unit(5)).
+fn masks_unit(path: &Path) -> bool {
+    std::fs::read_link(path).is_ok_and(|t| t == Path::new("/dev/null"))
+        || std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file() && m.len() == 0)
+}
+
+/// Mask GNOME's welcome wizard in both its modes for the account (docs/26#fjarr-agent-setup-desktop),
+/// each link saved to the record as it is made. What the account already has at a unit's path is
+/// its own and left alone; the paths that do not mask their unit are returned, as the wizard can
+/// still start through them.
+pub fn mask_initial_setup(
+    record: &mut Record,
+    state: &Path,
+    home: &Path,
+    uid: libc::uid_t,
+    gid: libc::gid_t,
+) -> Result<Vec<PathBuf>> {
+    let mut unmasked = Vec::new();
+    for unit in INITIAL_SETUP_UNITS {
+        let mask = user_unit_mask(home, unit);
+        if std::fs::symlink_metadata(&mask).is_ok() {
+            if !masks_unit(&mask) {
+                unmasked.push(mask);
+            }
+            continue;
+        }
+        create_owned_dirs(mask.parent().expect("a parent"), uid, gid)?;
+        symlink("/dev/null", &mask).with_context(|| format!("masking {}", mask.display()))?;
+        let _ = std::os::unix::fs::lchown(&mask, Some(uid), Some(gid));
+        record.add(
+            FEATURE,
+            Change::Symlink {
+                path: mask,
+                target: "/dev/null".into(),
+            },
+        );
+        record.save(state)?;
+    }
+    Ok(unmasked)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -633,12 +687,24 @@ pub async fn setup(config_path: &Path, state: &Path, args: DesktopArgs) -> Resul
     // 3. The helper for that account only, and the watchdog.
     let link = helper_wants_link(&home);
     create_owned_dirs(link.parent().expect("a parent"), uid, gid)?;
-    // No "Welcome to Ubuntu" over the robot's screen at the account's first login (docs/26).
+    // No "Welcome to Ubuntu" over the robot's screen: the done file alone only traded the
+    // first-login wizard for the upgrade one, at every boot (the mini-PC, 2026-10-17; docs/26).
     let done = home.join(INITIAL_SETUP_DONE);
     if !done.exists() {
         write_recorded(&mut record, &done, "yes")?;
         let _ = std::os::unix::fs::lchown(&done, Some(uid), Some(gid));
-        log::success("GNOME's first-login welcome wizard skipped for the account")?;
+    }
+    let unmasked = mask_initial_setup(&mut record, state, &home, uid, gid)?;
+    if unmasked.is_empty() {
+        log::success(format!(
+            "GNOME's welcome wizard masked for {account}: not at its first login, not after an upgrade"
+        ))?;
+    }
+    for path in &unmasked {
+        log::warning(format!(
+            "{} is {account}'s own, left alone: GNOME's welcome wizard can start through it",
+            path.display()
+        ))?;
     }
     if std::fs::symlink_metadata(&link).is_err() {
         symlink(HELPER_UNIT_PATH, &link).with_context(|| format!("linking {}", link.display()))?;
@@ -917,6 +983,82 @@ mod tests {
         assert_eq!(
             watchdog_decide("not json", true, 0),
             WatchdogAction::Missing(1)
+        );
+    }
+
+    /// The mini-PC, 2026-10-17: the done file alone traded the first-login wizard for the upgrade
+    /// one, which then started at every boot. Both modes are masked, as the account's, and recorded.
+    #[test]
+    fn the_welcome_wizard_is_masked_in_both_its_modes_and_recorded_for_undo() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (home, state) = (
+            dir.path().join("home"),
+            dir.path().join("setup-changes.json"),
+        );
+        std::fs::create_dir(&home).unwrap();
+        let me = std::fs::metadata(&home).unwrap();
+        let mut record = Record::default();
+        let unmasked = mask_initial_setup(&mut record, &state, &home, me.uid(), me.gid()).unwrap();
+        assert!(unmasked.is_empty(), "{unmasked:?}");
+        let units = home.join(".config/systemd/user");
+        let masks = [
+            units.join("gnome-initial-setup-first-login.service"),
+            units.join("gnome-initial-setup-upgrade-login.service"),
+        ];
+        for m in &masks {
+            assert_eq!(std::fs::read_link(m).unwrap(), Path::new("/dev/null"));
+        }
+        assert_eq!(std::fs::metadata(&units).unwrap().uid(), me.uid());
+        assert!(
+            mask_initial_setup(&mut record, &state, &home, me.uid(), me.gid())
+                .unwrap()
+                .is_empty(),
+            "a rerun"
+        );
+        let mask = |path: &PathBuf| Change::Symlink {
+            path: path.clone(),
+            target: "/dev/null".into(),
+        };
+        assert_eq!(
+            Record::load(&state).unwrap().take(FEATURE),
+            vec![mask(&masks[1]), mask(&masks[0])],
+            "saved once each, newest first as --undo takes them"
+        );
+    }
+
+    /// What the account already has at a unit's path is its own: kept, and not recorded. An override
+    /// is named, as the wizard can start through it.
+    #[test]
+    fn what_the_account_already_has_at_the_wizards_paths_is_left_alone() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (home, state) = (
+            dir.path().join("home"),
+            dir.path().join("setup-changes.json"),
+        );
+        let units = home.join(".config/systemd/user");
+        std::fs::create_dir_all(&units).unwrap();
+        let me = std::fs::metadata(&home).unwrap();
+        let first = units.join("gnome-initial-setup-first-login.service");
+        let own = "[Service]\nExecStart=/usr/local/bin/robot-welcome\n";
+        std::fs::write(&first, own).unwrap();
+        symlink(
+            "/dev/null",
+            units.join("gnome-initial-setup-upgrade-login.service"),
+        )
+        .unwrap();
+        let mut record = Record::default();
+        let unmasked = mask_initial_setup(&mut record, &state, &home, me.uid(), me.gid()).unwrap();
+        assert_eq!(unmasked, vec![first.clone()]);
+        assert_eq!(std::fs::read_to_string(&first).unwrap(), own);
+        assert!(record.changes.is_empty(), "{:?}", record.changes);
+        // An empty unit file is a mask too (systemd.unit(5)).
+        std::fs::write(&first, "").unwrap();
+        assert!(
+            mask_initial_setup(&mut record, &state, &home, me.uid(), me.gid())
+                .unwrap()
+                .is_empty()
         );
     }
 

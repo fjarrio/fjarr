@@ -33,12 +33,15 @@ getent passwd desktop >/dev/null || fail "no desktop account"
 id -nG desktop | tr ' ' '\n' | grep -qx fjarr-desktop || fail "desktop is not in fjarr-desktop"
 grep -q '^AutomaticLogin=desktop$' /etc/gdm3/custom.conf || fail "no automatic login for desktop"
 [ -L /home/desktop/.config/systemd/user/graphical-session.target.wants/fjarr-desktop-session.service ] || fail "the helper is not enabled for desktop"
+for u in gnome-initial-setup-first-login gnome-initial-setup-upgrade-login; do
+    [ "$(readlink /home/desktop/.config/systemd/user/$u.service)" = /dev/null ] || fail "GNOME's welcome wizard ($u) is not masked for desktop"
+done
 grep -q '^d /run/fjarr 0755 10001 10001' /etc/tmpfiles.d/fjarr-container.conf || fail "no /run/fjarr for the container's agent: $(cat /etc/tmpfiles.d/fjarr-container.conf 2>&1)"
 [ "$(stat -c '%u' /run/fjarr 2>/dev/null)" = 10001 ] || fail "/run/fjarr is not uid 10001's: $(stat -c '%u %a' /run/fjarr 2>&1)"
 [ ! -e /etc/fjarr/fjarr.toml ] || fail "setup wrote an agent configuration on a host with no agent"
 uid=$(id -u desktop); gid=$(getent group fjarr-desktop | cut -d: -f3)
 grep -q -- "--helper-uid $uid --helper-gid $gid" /tmp/host.log || { cat /tmp/host.log; fail "the container's command (--helper-uid $uid --helper-gid $gid) was not printed"; }
-ok "setup desktop --container: account, automatic login, helper, /run/fjarr for uid 10001, no agent config; printed --helper-uid $uid --helper-gid $gid"
+ok "setup desktop --container: account, automatic login, welcome wizard masked, helper, /run/fjarr for uid 10001, no agent config; printed --helper-uid $uid --helper-gid $gid"
 
 # The watchdog names the account from GDM: there is no agent configuration to read it from.
 fjarr-setup desktop watchdog >/tmp/watchdog.log 2>&1 || true

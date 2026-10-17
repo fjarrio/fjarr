@@ -217,3 +217,47 @@ fn end_session(user: &str) -> bool {
     }
     false
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `--undo desktop` takes back the welcome wizard's masks setup made in an account's home, and
+    /// nothing the account had there (docs/26#fjarr-agent-setup-desktop).
+    #[tokio::test]
+    async fn undoing_the_desktop_removes_the_wizards_masks_and_nothing_else() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (home, state) = (
+            dir.path().join("home"),
+            dir.path().join("setup-changes.json"),
+        );
+        let units = home.join(".config/systemd/user");
+        std::fs::create_dir_all(&units).unwrap();
+        let own = units.join("robot-ui.service");
+        std::fs::write(&own, "[Service]\nExecStart=/usr/local/bin/robot-ui\n").unwrap();
+        let me = std::fs::metadata(&home).unwrap();
+        let mut record = Record::default();
+        crate::desktop::mask_initial_setup(&mut record, &state, &home, me.uid(), me.gid()).unwrap();
+        let changes = Record::load(&state).unwrap().take(crate::desktop::FEATURE);
+        assert_eq!(changes.len(), 2, "{changes:?}");
+        let mut flags = Flags::default();
+        for c in &changes {
+            undo_one(c, &mut flags).await.unwrap();
+        }
+        for unit in [
+            "gnome-initial-setup-first-login.service",
+            "gnome-initial-setup-upgrade-login.service",
+        ] {
+            assert!(
+                std::fs::symlink_metadata(units.join(unit)).is_err(),
+                "{unit} is still masked"
+            );
+        }
+        assert!(own.exists(), "the account's own unit went too");
+        // Already gone (a second --undo, or removed by hand): not an error.
+        for c in &changes {
+            undo_one(c, &mut flags).await.unwrap();
+        }
+    }
+}
