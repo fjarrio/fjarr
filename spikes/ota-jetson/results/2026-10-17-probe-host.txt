@@ -1,0 +1,315 @@
+# The lab mini-PC as the ZED Box Mini's flashing host, read-only probe: 2026-10-17 21:32 Europe/Stockholm
+# spec: docs/32-fleet-ota.md#jetson-test-image (phase B2). Written by probe-host.sh. MACs,
+# serial numbers, disk and partition GUIDs and machine IDs are replaced by <kind>.
+
+## Digest
+
+Ubuntu 26.04.1 LTS
+Timezone=Europe/Stockholm
+NTPSynchronized=yes
+box: 1-1, 0955:7020, link 480 Mbit/s, USB 2.10, bus 1, device path 1
+box: root hub usb1, 480 Mbit/s
+box: the same port's SuperSpeed side is usb2-port1, on root hub usb2, 5000 Mbit/s
+usb1: 480 Mbit/s, USB 2.00, controller 0000:01:00.0, authorized_default 1
+usb2: 5000 Mbit/s, USB 3.00, controller 0000:01:00.0, authorized_default 1
+usb3: 480 Mbit/s, USB 2.00, controller 0000:05:00.3, authorized_default 1
+usb4: 10000 Mbit/s, USB 3.10, controller 0000:05:00.3, authorized_default 1
+usb5: 480 Mbit/s, USB 2.00, controller 0000:05:00.4, authorized_default 1
+usb6: 10000 Mbit/s, USB 3.10, controller 0000:05:00.4, authorized_default 1
+the lab's USB isolation of the box (lib/lab.sh): none
+filename:       /lib/modules/7.0.0-38-generic/kernel/drivers/net/usb/rndis_host.ko.zst
+filename:       /lib/modules/7.0.0-38-generic/kernel/drivers/net/usb/cdc_ether.ko.zst
+CONFIG_IA32_EMULATION=y
+# CONFIG_IA32_EMULATION_DEFAULT_DISABLED is not set
+net.ipv6.conf.all.disable_ipv6 = 0
+net.ipv6.conf.default.disable_ipv6 = 0
+Status: inactive
+unit docker.service: inactive
+unit docker.socket: inactive
+unit containerd.service: inactive
+unit nfs-server.service: inactive
+dnsmasq-base 2.92-1ubuntu0.4 installed
+unit dnsmasq.service: inactive
+DHCP4.OPTION[4]:                        dhcp_server_identifier = 192.168.10.1
+DHCP4.OPTION[10]:                       next_server = 192.168.10.1
+DHCP4.OPTION[28]:                       routers = 192.168.10.1
+DHCP requests seen: 0, replies seen: 0
+PXEClient vendor class: 0, boot file: 0, TFTP server option: 0, port 4011 packets: 0
+nmap is not installed: no DHCP discover sent
+/dev/nvme0n1p2  233G   14G  208G   7% /
+/dev/nvme0n1p1  1.1G  6.4M  1.1G   1% /boot/efi
+/dev/sda         16M   84K   16M   1% /run/media/desktop/L4T-README
+the desktop's user: desktop
+org.gnome.desktop.media-handling automount: true
+org.gnome.desktop.media-handling automount-open: true
+org.gnome.desktop.media-handling autorun-never: true
+nmap: -
+
+## The dump
+
+===== identity
+
+$ date -u
+Sat Oct 17 07:31:53 PM UTC 2026
+
+$ uptime
+ 21:31:53 up 19:01,  2 users,  load average: 0.00, 0.00, 0.00
+
+$ sh -c . /etc/os-release; echo "$PRETTY_NAME"
+Ubuntu 26.04.1 LTS
+
+$ uname -r -m
+7.0.0-38-generic x86_64
+
+$ timedatectl show -p Timezone -p NTPSynchronized -p TimeUSec
+Timezone=Europe/Stockholm
+NTPSynchronized=yes
+TimeUSec=Sat 2026-10-17 21:31:54 CEST
+
+===== USB: the box's port (NVIDIA known issue 4695663: initrd flashing fails on ports of 10 Gbps or more)
+
+$ lsusb -d 0955:
+Bus 001 Device 002: ID 0955:7020 NVIDIA Corp. L4T (Linux for Tegra) running on Tegra
+
+$ lsusb -t
+/:  Bus 001.Port 001: Dev 001, Class=root_hub, Driver=xhci_hcd/2p, 480M
+    |__ Port 001: Dev 002, If 0, Class=Communications, Driver=rndis_host, 480M
+    |__ Port 001: Dev 002, If 1, Class=CDC Data, Driver=rndis_host, 480M
+    |__ Port 001: Dev 002, If 2, Class=Communications, Driver=cdc_acm, 480M
+    |__ Port 001: Dev 002, If 3, Class=CDC Data, Driver=cdc_acm, 480M
+    |__ Port 001: Dev 002, If 4, Class=Mass Storage, Driver=usb-storage, 480M
+    |__ Port 001: Dev 002, If 5, Class=Communications, Driver=cdc_ncm, 480M
+    |__ Port 001: Dev 002, If 6, Class=CDC Data, Driver=cdc_ncm, 480M
+/:  Bus 002.Port 001: Dev 001, Class=root_hub, Driver=xhci_hcd/2p, 5000M
+/:  Bus 003.Port 001: Dev 001, Class=root_hub, Driver=xhci_hcd/4p, 480M
+    |__ Port 004: Dev 002, If 0, Class=Vendor Specific Class, Driver=rtsx_usb, 480M
+/:  Bus 004.Port 001: Dev 001, Class=root_hub, Driver=xhci_hcd/2p, 10000M
+/:  Bus 005.Port 001: Dev 001, Class=root_hub, Driver=xhci_hcd/4p, 480M
+    |__ Port 003: Dev 002, If 0, Class=Wireless, Driver=btusb, 12M
+    |__ Port 003: Dev 002, If 1, Class=Wireless, Driver=btusb, 12M
+/:  Bus 006.Port 001: Dev 001, Class=root_hub, Driver=xhci_hcd/2p, 10000M
+
+box: 1-1, 0955:7020, link 480 Mbit/s, USB 2.10, bus 1, device path 1
+box: root hub usb1, 480 Mbit/s
+box: the same port's SuperSpeed side is usb2-port1, on root hub usb2, 5000 Mbit/s
+
+$ lspci -nn -s 0000:01:00.0
+01:00.0 USB controller [0c03]: ASMedia Technology Inc. ASM1042A USB 3.0 Host Controller [1b21:1142]
+
+every root hub:
+usb1: 480 Mbit/s, USB 2.00, controller 0000:01:00.0, authorized_default 1
+usb2: 5000 Mbit/s, USB 3.00, controller 0000:01:00.0, authorized_default 1
+usb3: 480 Mbit/s, USB 2.00, controller 0000:05:00.3, authorized_default 1
+usb4: 10000 Mbit/s, USB 3.10, controller 0000:05:00.3, authorized_default 1
+usb5: 480 Mbit/s, USB 2.00, controller 0000:05:00.4, authorized_default 1
+usb6: 10000 Mbit/s, USB 3.10, controller 0000:05:00.4, authorized_default 1
+the lab's USB isolation of the box (lib/lab.sh): none
+
+===== kernel: USB networking (RNDIS, CDC Ethernet) and 32-bit x86 emulation
+
+$ sh -c modinfo rndis_host cdc_ether | grep -E "^(filename|name|description|license|depends|intree|vermagic):"
+filename:       /lib/modules/7.0.0-38-generic/kernel/drivers/net/usb/rndis_host.ko.zst
+license:        GPL
+description:    USB Host side RNDIS driver
+depends:        cdc_ether,usbnet
+intree:         Y
+name:           rndis_host
+vermagic:       7.0.0-38-generic SMP preempt mod_unload modversions 
+filename:       /lib/modules/7.0.0-38-generic/kernel/drivers/net/usb/cdc_ether.ko.zst
+license:        GPL
+description:    USB CDC Ethernet devices
+depends:        usbnet
+intree:         Y
+name:           cdc_ether
+vermagic:       7.0.0-38-generic SMP preempt mod_unload modversions 
+
+$ sh -c lsmod | grep -E "^(rndis_host|cdc_ether|cdc_ncm|cdc_acm|usbnet) "
+rndis_host             24576  0
+cdc_ncm                57344  1 cdc_mbim
+cdc_ether              28672  2 cdc_ncm,rndis_host
+usbnet                 65536  4 cdc_mbim,cdc_ncm,rndis_host,cdc_ether
+cdc_acm                53248  0
+
+$ sh -c grep -E "^(# )?CONFIG_IA32_EMULATION" "/boot/config-$(uname -r)"
+CONFIG_IA32_EMULATION=y
+# CONFIG_IA32_EMULATION_DEFAULT_DISABLED is not set
+
+$ cat /proc/cmdline
+BOOT_IMAGE=/boot/vmlinuz-7.0.0-38-generic root=UUID=<uuid> ro quiet splash video=HDMI-A-1:1920x1080@60e drm.edid_firmware=HDMI-A-1:edid/fjarr-ghost-1.bin crashkernel=2G-4G:320M,4G-32G:512M,32G-64G:1024M,64G-128G:2048M,128G-:4096M
+(NVIDIA's flashing tools tegrabct_v2 and tegrahost_v2 are 32-bit x86 executables)
+
+===== network: links, IPv6
+
+$ sysctl net.ipv6.conf.all.disable_ipv6 net.ipv6.conf.default.disable_ipv6
+net.ipv6.conf.all.disable_ipv6 = 0
+net.ipv6.conf.default.disable_ipv6 = 0
+
+$ ip -br link
+lo               UNKNOWN        <mac> <LOOPBACK,UP,LOWER_UP> 
+enx<mac>  UP             <mac> <BROADCAST,MULTICAST,UP,LOWER_UP> 
+enx<mac>  UNKNOWN        <mac> <BROADCAST,MULTICAST,UP,LOWER_UP> 
+enp2s0           DOWN           <mac> <NO-CARRIER,BROADCAST,MULTICAST,UP> 
+wlp3s0           UP             <mac> <BROADCAST,MULTICAST,UP,LOWER_UP> 
+fjarr0           UP             <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> 
+
+$ ip -4 -br addr
+lo               UNKNOWN        127.0.0.1/8 
+enx<mac>  UNKNOWN        192.168.55.100/24 
+wlp3s0           UP             192.168.10.108/24 
+fjarr0           UP             100.77.176.22 peer 100.64.0.1/32 
+
+$ ip -6 -o addr show
+1: lo    inet6 ::1/128 scope host noprefixroute \       valid_lft forever preferred_lft forever
+3: enx<mac>    inet6 <ipv6>/64 scope link noprefixroute \       valid_lft forever preferred_lft forever
+5: wlp3s0    inet6 <ipv6>/64 scope global temporary dynamic \       valid_lft 104325sec preferred_lft 17676sec
+5: wlp3s0    inet6 <ipv6>/64 scope global mngtmpaddr noprefixroute \       valid_lft forever preferred_lft forever
+5: wlp3s0    inet6 <ipv6>/64 scope link noprefixroute \       valid_lft forever preferred_lft forever
+
+$ ip route
+default via 192.168.10.1 dev wlp3s0 proto dhcp src 192.168.10.108 metric 600 
+100.64.0.1 dev fjarr0 proto kernel scope link src 100.77.176.22 
+192.168.10.0/24 dev wlp3s0 proto kernel scope link src 192.168.10.108 metric 600 
+192.168.55.0/24 dev enx<mac> proto kernel scope link src 192.168.55.100 metric 100 
+
+$ ip -6 route
+<ipv6>/64 dev wlp3s0 proto ra metric 600 pref medium
+<ipv6>/48 via <ipv6> dev wlp3s0 proto ra metric 600 pref medium
+<ipv6>/64 dev enx<mac> proto kernel metric 1024 pref medium
+<ipv6>/64 dev wlp3s0 proto kernel metric 1024 pref medium
+
+===== firewall
+
+$ ufw status verbose
+Status: inactive
+
+===== Docker
+
+$ sh -c command -v docker || echo "docker: no such command"
+docker: no such command
+unit docker.service: inactive
+unit docker.socket: inactive
+unit containerd.service: inactive
+
+$ dpkg-query docker.io docker-ce docker-ce-cli containerd containerd.io
+dpkg-query: no packages found matching docker.io
+dpkg-query: no packages found matching docker-ce
+dpkg-query: no packages found matching docker-ce-cli
+dpkg-query: no packages found matching containerd
+dpkg-query: no packages found matching containerd.io
+
+===== NFS
+
+$ dpkg-query nfs-kernel-server nfs-common
+nfs-common  not-installed
+nfs-kernel-server  not-installed
+unit nfs-server.service: inactive
+
+$ sh -c cat /etc/exports 2>&1
+cat: /etc/exports: No such file or directory
+[exit 1]
+
+===== dnsmasq, and DHCP, DNS, TFTP and PXE listeners on this host
+
+$ dpkg-query dnsmasq dnsmasq-base
+dnsmasq  not-installed
+dnsmasq-base 2.92-1ubuntu0.4 installed
+unit dnsmasq.service: inactive
+
+$ ps -C dnsmasq -o pid=,user=,args=
+[exit 1]
+
+$ ss -H -lunp ( sport = :53 or sport = :67 or sport = :69 or sport = :547 or sport = :4011 )
+UNCONN 0      0         127.0.0.54:53 0.0.0.0:* users:(("systemd-resolve",pid=547,fd=18))
+UNCONN 0      0      127.0.0.53%lo:53 0.0.0.0:* users:(("systemd-resolve",pid=547,fd=16))
+
+$ ip -br link show type bridge
+
+$ sh -c snap list lxd 2>&1 | tail -n +2 || true
+
+===== the LAN's DHCP server, from this host's own lease on wlp3s0
+
+$ nmcli -f DHCP4 device show wlp3s0
+DHCP4.OPTION[1]:                        broadcast_address = 192.168.10.255
+DHCP4.OPTION[2]:                        dhcp_client_identifier = 01:<mac>
+DHCP4.OPTION[3]:                        dhcp_lease_time = 43200
+DHCP4.OPTION[4]:                        dhcp_server_identifier = 192.168.10.1
+DHCP4.OPTION[5]:                        domain_name = lan
+DHCP4.OPTION[6]:                        domain_name_servers = 192.168.10.1
+DHCP4.OPTION[7]:                        expiry = 1792302746
+DHCP4.OPTION[8]:                        host_name = <hostname>
+DHCP4.OPTION[9]:                        ip_address = 192.168.10.108
+DHCP4.OPTION[10]:                       next_server = 192.168.10.1
+DHCP4.OPTION[11]:                       requested_broadcast_address = 1
+DHCP4.OPTION[12]:                       requested_domain_name = 1
+DHCP4.OPTION[13]:                       requested_domain_name_servers = 1
+DHCP4.OPTION[14]:                       requested_domain_search = 1
+DHCP4.OPTION[15]:                       requested_host_name = 1
+DHCP4.OPTION[16]:                       requested_interface_mtu = 1
+DHCP4.OPTION[17]:                       requested_ms_classless_static_routes = 1
+DHCP4.OPTION[18]:                       requested_nis_domain = 1
+DHCP4.OPTION[19]:                       requested_nis_servers = 1
+DHCP4.OPTION[20]:                       requested_ntp_servers = 1
+DHCP4.OPTION[21]:                       requested_rfc3442_classless_static_routes = 1
+DHCP4.OPTION[22]:                       requested_root_path = 1
+DHCP4.OPTION[23]:                       requested_routers = 1
+DHCP4.OPTION[24]:                       requested_static_routes = 1
+DHCP4.OPTION[25]:                       requested_subnet_mask = 1
+DHCP4.OPTION[26]:                       requested_time_offset = 1
+DHCP4.OPTION[27]:                       requested_wpad = 1
+DHCP4.OPTION[28]:                       routers = 192.168.10.1
+DHCP4.OPTION[29]:                       subnet_mask = 255.255.255.0
+
+===== other DHCP or PXE servers on the LAN: 60 s of listening on wlp3s0, nothing sent
+DHCP requests seen: 0, replies seen: 0
+PXEClient vendor class: 0, boot file: 0, TFTP server option: 0, port 4011 packets: 0
+nmap is not installed: no DHCP discover sent
+
+===== NVIDIA's host setup for flashing (phase C0): present?
+
+$ sh -c ls -la /etc/udev/rules.d/ | grep -iE "l4t|nv" || echo "no NVIDIA udev rules"
+no NVIDIA udev rules
+
+$ sh -c ls -la /run/nvidia_initrd_flash 2>&1
+ls: cannot access '/run/nvidia_initrd_flash': No such file or directory
+[exit 2]
+
+===== free disk
+
+$ df -h -x tmpfs -x devtmpfs -x squashfs -x overlay -x efivarfs
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/nvme0n1p2  233G   14G  208G   7% /
+/dev/nvme0n1p1  1.1G  6.4M  1.1G   1% /boot/efi
+/dev/sda         16M   84K   16M   1% /run/media/desktop/L4T-README
+
+===== GNOME automount (read only, as the desktop's user)
+the desktop's user: desktop
+org.gnome.desktop.media-handling automount: true
+org.gnome.desktop.media-handling automount-open: true
+org.gnome.desktop.media-handling autorun-never: true
+
+===== the lab lock
+
+$ sh -c ls -la /run/lock/fjarr-zedbox.lock 2>&1
+-rw-r--r-- 1 robot robot 0 Oct 17 11:14 /run/lock/fjarr-zedbox.lock
+
+$ sh -c lslocks -o PID,COMMAND,TYPE,MODE,PATH | grep -E "PATH|fjarr-zedbox" || true
+   PID COMMAND          TYPE MODE  PATH
+
+===== tools
+lsusb: /usr/bin/lsusb
+flock: /usr/bin/flock
+lslocks: /usr/bin/lslocks
+jq: /usr/bin/jq
+curl: /usr/bin/curl
+rsync: /usr/bin/rsync
+zstd: /usr/bin/zstd
+sha256sum: /usr/bin/sha256sum
+sgdisk: /usr/sbin/sgdisk
+tcpdump: /usr/bin/tcpdump
+nmap: -
+arp-scan: -
+fping: -
+python3: /usr/bin/python3
+docker: -
+dnsmasq: /usr/sbin/dnsmasq
+exportfs: -

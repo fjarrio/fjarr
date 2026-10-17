@@ -1,0 +1,944 @@
+# ZED Box Mini, read-only probe "stock": 2026-10-17 21:35 Europe/Stockholm
+# spec: docs/32-fleet-ota.md#jetson-test-image (phase B1). Written by probe.sh. Host names,
+# MACs, serial numbers, disk and partition GUIDs and machine IDs are replaced by <kind>.
+
+## Seen from the lab
+
+plug: output=true, 10.5 W
+the mini-PC USB sees the box as: l4t (0955:7020 = L4T running, 0955:7323 = RCM)
+
+## Digest
+
+# R36 (release), REVISION: 4.4, GCID: 41062509, BOARD: generic, EABI: aarch64, DATE: Mon Jun 16 16:07:13 UTC 2025
+nvidia-l4t-bootloader 36.4.4-20250616085344
+nvidia-l4t-core 36.4.4-20250616085344
+stereolabs-zedbox-mini 1.3.1-SL-MAX9296-all-ZEDBOX-MINI-L4T36.4.0
+$ nvbootctrl dump-slots-info
+Current version: 36.4.4
+Capsule update status: 0
+Current bootloader slot: A
+Active bootloader slot: A
+num_slots: 2
+slot: 0,             status: normal
+slot: 1,             status: normal
+$ nvbootctrl -t rootfs dump-slots-info
+RootFS A/B is not enabled.
+is-rootfs-ab-enabled exit status: 0 (0 disabled, 1 enabled on A, 2 enabled on B)
+L4TDefaultBootMode       07 00 00 00 01 00 00 00
+RootfsRedundancyLevel    06 00 00 00 00 00 00 00
+RootfsRetryCountMax      06 00 00 00 03 00 00 00
+RootfsStatusSlotA        07 00 00 00 00 00 00 00
+RootfsStatusSlotB        07 00 00 00 00 00 00 00
+BootChainFwCurrent       06 00 00 00 00 00 00 00
+BootChainFwNext          absent
+BootChainFwStatus        absent
+BootChainFwPrevious      absent
+BootChainFwResetCount    absent
+BootChainOsCurrent       06 00 00 00 00 00 00 00
+BootCurrent              06 00 00 00 01 00
+BootNext                 absent
+OsIndications            absent
+SecureBoot               06 00 00 00 00
+entry0 fw_version: 2360324
+entry0 lowest_supported_fw_version: 2360324
+entry0 last_attempt_version: 0
+entry0 last_attempt_status: 0
+bios_version: 36.4.4-gcid-41062509
+boot_chain_current: 0x0
+boot_chain_status_a: 0x0
+boot_chain_status_b: 0x0
+rootfs_current: 0x0
+rootfs_retry_count_a: 0x0
+rootfs_retry_count_b: 0x0
+reset_reason: SYS_RESET_N
+reset_level: L0
+watchdog0 driver: tegra186-timer
+RuntimeWatchdogUSec=2min
+RebootWatchdogUSec=10min
+kernel.panic = 0
+kernel.panic_on_oops = 1
+unit nv_update_verifier: load=not-found enabled= active=inactive/dead result=success started=n/a
+unit nv-l4t-bootloader-config: load=loaded enabled=enabled active=inactive/dead result=success started=Fri 2026-10-16 22:43:06 CEST
+unit l4t-rootfs-validation-config: load=loaded enabled=enabled active=inactive/dead result=success started=Fri 2026-10-16 22:43:06 CEST
+running
+
+## The dump
+
+===== identity and versions
+
+$ date -u
+Sat Oct 17 07:35:02 PM UTC 2026
+
+$ uptime
+ 21:35:02 up 22:52,  2 users,  load average: 0.23, 0.14, 0.11
+
+$ cat /etc/nv_tegra_release
+# R36 (release), REVISION: 4.4, GCID: 41062509, BOARD: generic, EABI: aarch64, DATE: Mon Jun 16 16:07:13 UTC 2025
+# KERNEL_VARIANT: oot
+TARGET_USERSPACE_LIB_DIR=nvidia
+TARGET_USERSPACE_LIB_DIR_PATH=usr/lib/aarch64-linux-gnu/nvidia
+
+$ sh -c tr -d "\000" </proc/device-tree/model; echo
+NVIDIA Jetson Orin NX Engineering Reference Developer Kit
+
+$ sh -c tr "\000" " " </proc/device-tree/compatible; echo
+nvidia,p3768-0000+p3767-0000 nvidia,p3767-0000 nvidia,tegra234 
+
+$ uname -r -v -m
+5.15.148-tegra #1 SMP PREEMPT Mon Jun 16 08:24:48 PDT 2025 aarch64
+
+$ dpkg-query -W -f ${Package} ${Version}\n nvidia-l4t-core nvidia-l4t-bootloader nvidia-l4t-kernel nvidia-l4t-init nvidia-l4t-tools stereolabs-zedbox-mini
+nvidia-l4t-bootloader 36.4.4-20250616085344
+nvidia-l4t-core 36.4.4-20250616085344
+nvidia-l4t-init 36.4.4-20250616085344
+nvidia-l4t-kernel 5.15.148-tegra-36.4.4-20250616085344
+nvidia-l4t-tools 36.4.4-20250616085344
+stereolabs-zedbox-mini 1.3.1-SL-MAX9296-all-ZEDBOX-MINI-L4T36.4.0
+
+$ cat /etc/nv_boot_control.conf
+TNSPEC 3767-303-0000-C.1-1-1-p3509-a02-p3767-0000-
+COMPATIBLE_SPEC 3767-000-0000--1--p3509-a02-p3767-0000-
+TEGRA_BOOT_STORAGE nvme0n1
+TEGRA_CHIPID 0x23
+TEGRA_OTA_BOOT_DEVICE /dev/mtdblock0
+TEGRA_OTA_GPT_DEVICE /dev/mtdblock0
+
+===== slots (nvbootctrl, read only)
+
+$ nvbootctrl dump-slots-info
+Current version: 36.4.4
+Capsule update status: 0
+Current bootloader slot: A
+Active bootloader slot: A
+num_slots: 2
+slot: 0,             status: normal
+slot: 1,             status: normal
+
+$ nvbootctrl -t rootfs dump-slots-info
+RootFS A/B is not enabled.
+
+is-rootfs-ab-enabled exit status: 0 (0 disabled, 1 enabled on A, 2 enabled on B)
+
+$ nvbootctrl get-number-slots
+2
+
+$ nvbootctrl get-current-slot
+0
+
+$ nvbootctrl -t rootfs get-number-slots
+1
+
+$ nvbootctrl -t rootfs get-current-slot
+0
+
+===== NVIDIA UEFI variables (781e084c-a330-417c-b678-38e696380cb9): attributes, then data, hex
+L4TDefaultBootMode       07 00 00 00 01 00 00 00
+RootfsRedundancyLevel    06 00 00 00 00 00 00 00
+RootfsRetryCountMax      06 00 00 00 03 00 00 00
+RootfsStatusSlotA        07 00 00 00 00 00 00 00
+RootfsStatusSlotB        07 00 00 00 00 00 00 00
+BootChainFwCurrent       06 00 00 00 00 00 00 00
+BootChainFwNext          absent
+BootChainFwStatus        absent
+BootChainFwPrevious      absent
+BootChainFwResetCount    absent
+BootChainOsCurrent       06 00 00 00 00 00 00 00
+TegraPlatformSpec        07 00 00 00 33 37 36 37 2d 33 30 33 2d 30 30 30 30 2d 43 2e 31 2d 31 2d 31 2d 70 33 35 30 39 2d 61 30 32 2d 70 33 37 36 37 2d 30 30 30 30 2d
+TegraPlatformCompatSpec  07 00 00 00 33 37 36 37 2d 30 30 30 2d 30 30 30 30 2d 2d 31 2d 2d 70 33 35 30 39 2d 61 30 32 2d 70 33 37 36 37 2d 30 30 30 30 2d
+TegraPlatformSpec as text: 3767-303-0000-C.1-1-1-p3509-a02-p3767-0000-
+TegraPlatformCompatSpec as text: 3767-000-0000--1--p3509-a02-p3767-0000-
+
+every variable under NVIDIA's GUID:
+BoardRecoveryBoot BootChainFwCurrent BootChainOsCurrent DgpuDtEfifbSupport ExposeRtRtcService IpmiNetworkBootMode L4TDefaultBootMode MemoryTestControl NewDeviceHierarchy RootfsRedundancyLevel RootfsRetryCountMax RootfsStatusSlotA RootfsStatusSlotB SocDisplayHandoffMode SystemFwVersions TegraPlatformCompatSpec TegraPlatformSpec 
+
+===== UEFI global variables (8be4df61-93ca-11d2-aa0d-00e098032b8c)
+BootCurrent              06 00 00 00 01 00
+BootNext                 absent
+BootOrder                07 00 00 00 01 00 04 00 03 00 02 00 05 00 00 00 06 00 07 00
+Timeout                  07 00 00 00 05 00
+OsIndications            absent
+OsIndicationsSupported   06 00 00 00 45 00 00 00 00 00 00 00
+SecureBoot               06 00 00 00 00
+SetupMode                06 00 00 00 01
+
+===== boot entries
+
+$ efibootmgr -v
+BootCurrent: 0001
+Timeout: 5 seconds
+BootOrder: 0001,0004,0003,0002,0005,0000,0006,0007
+Boot0000* Enter Setup	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(462caa21-7614-4503-836e-8ab6f4662331)
+Boot0001* UEFI PCIe SSD <serial> 1	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x14160000,0x1417ffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/NVMe(0x1,<serial>)N.....YM....R,Y.
+Boot0002* UEFI PXEv4 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv4(0.0.0.00.0.0.0,0,0)N.....YM....R,Y.
+Boot0003* UEFI PXEv6 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv6([::]:<->[::]:,0,0)N.....YM....R,Y.
+Boot0004* UEFI HTTPv4 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv4(0.0.0.00.0.0.0,0,0)/Uri()N.....YM....R,Y.
+Boot0005* UEFI HTTPv6 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv6([::]:<->[::]:,0,0)/Uri()N.....YM....R,Y.
+Boot0006* BootManagerMenuApp	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(eec25bdc-67f2-4d95-b1d5-f81b2039d11d)
+Boot0007* UEFI Shell	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(7c04a583-9e3e-4f1c-ad65-e05268d0b4d1)
+
+===== partitions, and both ESPs (from the raw partitions, read only)
+
+$ lsblk -o NAME,SIZE,TYPE,PARTLABEL,PARTTYPE,FSTYPE,MOUNTPOINTS /dev/nvme0n1
+NAME           SIZE TYPE PARTLABEL          PARTTYPE                             FSTYPE MOUNTPOINTS
+nvme0n1      238.5G disk                                                                
+├─nvme0n1p1    237G part APP                ebd0a0a2-b9e5-4433-87c0-68b6b72699c7 ext4   /
+├─nvme0n1p2    128M part A_kernel           ebd0a0a2-b9e5-4433-87c0-68b6b72699c7        
+├─nvme0n1p3    768K part A_kernel-dtb       ebd0a0a2-b9e5-4433-87c0-68b6b72699c7        
+├─nvme0n1p4   31.6M part A_reserved_on_user ebd0a0a2-b9e5-4433-87c0-68b6b72699c7        
+├─nvme0n1p5    128M part B_kernel           ebd0a0a2-b9e5-4433-87c0-68b6b72699c7        
+├─nvme0n1p6    768K part B_kernel-dtb       ebd0a0a2-b9e5-4433-87c0-68b6b72699c7        
+├─nvme0n1p7   31.6M part B_reserved_on_user ebd0a0a2-b9e5-4433-87c0-68b6b72699c7        
+├─nvme0n1p8     80M part recovery           ebd0a0a2-b9e5-4433-87c0-68b6b72699c7        
+├─nvme0n1p9    512K part recovery-dtb       ebd0a0a2-b9e5-4433-87c0-68b6b72699c7        
+├─nvme0n1p10    64M part esp                c12a7328-f81f-11d2-ba4b-00a0c93ec93b vfat   /boot/efi
+├─nvme0n1p11    80M part recovery_alt       ebd0a0a2-b9e5-4433-87c0-68b6b72699c7        
+├─nvme0n1p12   512K part recovery-dtb_alt   ebd0a0a2-b9e5-4433-87c0-68b6b72699c7        
+├─nvme0n1p13    64M part esp_alt            ebd0a0a2-b9e5-4433-87c0-68b6b72699c7        
+├─nvme0n1p14   400M part UDA                ebd0a0a2-b9e5-4433-87c0-68b6b72699c7        
+└─nvme0n1p15 479.5M part reserved           ebd0a0a2-b9e5-4433-87c0-68b6b72699c7        
+
+--- esp
+
+$ blkid -p -o export /dev/disk/by-partlabel/esp
+DEVNAME=/dev/disk/by-partlabel/esp
+UUID=<uuid>
+VERSION=FAT32
+BLOCK_SIZE=512
+TYPE=vfat
+USAGE=filesystem
+PART_ENTRY_SCHEME=gpt
+PART_ENTRY_NAME=esp
+PART_ENTRY_UUID=<uuid>
+PART_ENTRY_TYPE=c12a7328-f81f-11d2-ba4b-00a0c93ec93b
+PART_ENTRY_NUMBER=10
+PART_ENTRY_OFFSET=821800
+PART_ENTRY_SIZE=131072
+PART_ENTRY_DISK=259:0
+mounted at: /boot/efi
+
+$ fsck.vfat -n -l -v /dev/disk/by-partlabel/esp
+fsck.fat 4.2 (2021-01-31)
+Checking we can access the last sector of the filesystem
+There are differences between boot sector and its backup.
+This is mostly harmless. Differences: (offset:original/backup)
+  65:01/00
+  Not automatically fixing this.
+Boot sector contents:
+System ID "mkfs.fat"
+Media byte 0xf8 (hard disk)
+       512 bytes per logical sector
+       512 bytes per cluster
+        32 reserved sectors
+First FAT starts at byte 16384 (sector 32)
+         2 FATs, 32 bit entries
+    516608 bytes per FAT (= 1009 sectors)
+Root directory start at cluster 2 (arbitrary size)
+Data area starts at byte 1049600 (sector 2050)
+    129022 data clusters (66059264 bytes)
+32 sectors/track, 8 heads
+         0 hidden sectors
+    131072 sectors total
+Checking file /
+Checking file /EFI
+Checking file /EFI/BOOT
+Checking file /EFI/BOOT/BOOTAA64.efi (BOOTAA64.EFI)
+Checking for unused clusters.
+Dirty bit is set. Fs was not properly unmounted and some data may be corrupt.
+ Automatically removing dirty bit.
+Checking free cluster summary.
+
+Leaving filesystem unchanged.
+/dev/disk/by-partlabel/esp: 3 files, 219/129022 clusters
+[exit 1]
+
+$ sha256sum /dev/disk/by-partlabel/esp
+35dd73eaf155312e6da77b6c23e2f47e992809037542568187186d76039bca6e  /dev/disk/by-partlabel/esp
+
+--- esp_alt
+
+$ blkid -p -o export /dev/disk/by-partlabel/esp_alt
+DEVNAME=/dev/disk/by-partlabel/esp_alt
+PART_ENTRY_SCHEME=gpt
+PART_ENTRY_NAME=esp_alt
+PART_ENTRY_UUID=<uuid>
+PART_ENTRY_TYPE=ebd0a0a2-b9e5-4433-87c0-68b6b72699c7
+PART_ENTRY_NUMBER=13
+PART_ENTRY_OFFSET=1117736
+PART_ENTRY_SIZE=131072
+PART_ENTRY_DISK=259:0
+mounted at: 
+no file system: all 67108864 bytes are zero
+
+===== ESRT and firmware version
+entry0 fw_class: bf0d4599-20d4-414e-b2c5-3595b1cda402
+entry0 fw_type: 1
+entry0 fw_version: 2360324
+entry0 lowest_supported_fw_version: 2360324
+entry0 capsule_flags: 0x0
+entry0 last_attempt_version: 0
+entry0 last_attempt_status: 0
+bios_vendor: EDK II
+bios_version: 36.4.4-gcid-41062509
+bios_release: 0.0
+bios_date: 06/16/2025
+
+===== PMC: boot chain and root slot retry state (read only)
+PMC: /sys/devices/platform/bus@0/c360000.pmc
+boot_chain_current: 0x0
+boot_chain_status_a: 0x0
+boot_chain_status_b: 0x0
+rootfs_current: 0x0
+rootfs_retry_count_a: 0x0
+rootfs_retry_count_b: 0x0
+rootfs_sr_magic: 0x0
+reset_reason: SYS_RESET_N
+reset_level: L0
+
+===== /proc/mtd (is the QSPI visible to Linux?)
+
+$ cat /proc/mtd
+dev:    size   erasesize  name
+
+===== watchdog (sysfs only: /dev/watchdog is never opened)
+
+$ sh -c ls -la /dev/watchdog*
+crw------- 1 root root  10, 130 Aug 26  2025 /dev/watchdog
+crw------- 1 root root 246,   0 Aug 26  2025 /dev/watchdog0
+watchdog0 attributes: dev device power subsystem uevent
+watchdog0 driver: tegra186-timer
+
+who holds a watchdog device open (fuser exits 1 when nobody does):
+
+$ fuser -v /dev/watchdog /dev/watchdog0
+                     USER        PID ACCESS COMMAND
+/dev/watchdog:       root          1 F.... systemd
+
+$ systemctl show -p RuntimeWatchdogUSec -p RuntimeWatchdogPreUSec -p RebootWatchdogUSec -p KExecWatchdogUSec -p WatchdogDevice
+RuntimeWatchdogUSec=2min
+RebootWatchdogUSec=10min
+KExecWatchdogUSec=0
+
+$ sh -c dmesg | grep -iE "watchdog|wdt|tegra186-timer|tegra-wdt"
+[    6.366281] systemd[1]: Using hardware watchdog 'NVIDIA Tegra186 WDT', version 0, device /dev/watchdog
+[    6.366299] systemd[1]: Set hardware watchdog to 2min.
+
+$ sh -c lsmod | grep -iE "wdt|watchdog|timer"
+[exit 1]
+
+===== kernel configuration (watchdog, panic, lockups, QSPI, EFI)
+
+$ sh -c zcat /proc/config.gz | grep -E '^(# )?CONFIG_[A-Z0-9_]*(WATCHDOG|WDT|PANIC|LOCKUP|HUNG_TASK|TEGRA186_TIMER|MAGIC_SYSRQ|PSTORE|RAMOOPS|MTD_SPI_NOR|SPI_TEGRA210_QUAD|EFI_VARS|EFIVAR|EFI_ESRT|EFI_CAPSULE)'
+CONFIG_EFI_ESRT=y
+# CONFIG_EFI_VARS_PSTORE is not set
+CONFIG_EFI_CAPSULE_LOADER=y
+# CONFIG_MTD_PSTORE is not set
+CONFIG_MTD_SPI_NOR=y
+CONFIG_MTD_SPI_NOR_USE_4K_SECTORS=y
+# CONFIG_MTD_SPI_NOR_SWP_DISABLE is not set
+CONFIG_MTD_SPI_NOR_SWP_DISABLE_ON_VOLATILE=y
+# CONFIG_MTD_SPI_NOR_SWP_KEEP is not set
+# CONFIG_PVPANIC is not set
+# CONFIG_TOUCHSCREEN_WDT87XX_I2C is not set
+# CONFIG_IPMI_PANIC_EVENT is not set
+# CONFIG_IPMI_WATCHDOG is not set
+# CONFIG_SPI_TEGRA210_QUAD is not set
+CONFIG_WATCHDOG=y
+CONFIG_WATCHDOG_CORE=y
+# CONFIG_WATCHDOG_NOWAYOUT is not set
+CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED=y
+CONFIG_WATCHDOG_OPEN_TIMEOUT=0
+# CONFIG_WATCHDOG_SYSFS is not set
+# CONFIG_WATCHDOG_HRTIMER_PRETIMEOUT is not set
+# CONFIG_WATCHDOG_PRETIMEOUT_GOV is not set
+# CONFIG_SOFT_WATCHDOG is not set
+# CONFIG_GPIO_WATCHDOG is not set
+# CONFIG_WDAT_WDT is not set
+# CONFIG_XILINX_WATCHDOG is not set
+# CONFIG_ZIIRAVE_WATCHDOG is not set
+CONFIG_SL28CPLD_WATCHDOG=m
+CONFIG_ARM_SP805_WATCHDOG=y
+CONFIG_ARM_SBSA_WATCHDOG=y
+# CONFIG_ARMADA_37XX_WATCHDOG is not set
+# CONFIG_CADENCE_WATCHDOG is not set
+CONFIG_S3C2410_WATCHDOG=y
+CONFIG_DW_WATCHDOG=y
+# CONFIG_K3_RTI_WATCHDOG is not set
+CONFIG_SUNXI_WATCHDOG=m
+# CONFIG_MAX63XX_WATCHDOG is not set
+# CONFIG_MAX77620_WATCHDOG is not set
+CONFIG_IMX2_WDT=y
+CONFIG_IMX_SC_WDT=m
+# CONFIG_IMX7ULP_WDT is not set
+# CONFIG_TEGRA_WATCHDOG is not set
+CONFIG_QCOM_WDT=m
+CONFIG_MESON_GXBB_WATCHDOG=m
+CONFIG_MESON_WATCHDOG=m
+# CONFIG_MEDIATEK_WATCHDOG is not set
+CONFIG_ARM_SMC_WATCHDOG=y
+CONFIG_RENESAS_WDT=y
+# CONFIG_RENESAS_RZAWDT is not set
+CONFIG_UNIPHIER_WATCHDOG=y
+# CONFIG_SPRD_WATCHDOG is not set
+# CONFIG_PM8916_WATCHDOG is not set
+# CONFIG_VISCONTI_WATCHDOG is not set
+# CONFIG_ALIM7101_WDT is not set
+# CONFIG_I6300ESB_WDT is not set
+# CONFIG_HP_WATCHDOG is not set
+CONFIG_BCM2835_WDT=y
+# CONFIG_BCM7038_WDT is not set
+# CONFIG_MEN_A21_WDT is not set
+# CONFIG_XEN_WDT is not set
+# CONFIG_PCIPCWATCHDOG is not set
+# CONFIG_WDTPCI is not set
+# CONFIG_USBPCWATCHDOG is not set
+# CONFIG_KEEMBAY_WATCHDOG is not set
+CONFIG_LEDS_TRIGGER_PANIC=y
+# CONFIG_RTC_DRV_M41T80_WDT is not set
+CONFIG_TEGRA186_TIMER=y
+CONFIG_EFIVAR_FS=y
+CONFIG_PSTORE=y
+CONFIG_PSTORE_DEFAULT_KMSG_BYTES=10240
+CONFIG_PSTORE_DEFLATE_COMPRESS=y
+# CONFIG_PSTORE_LZO_COMPRESS is not set
+# CONFIG_PSTORE_LZ4_COMPRESS is not set
+# CONFIG_PSTORE_LZ4HC_COMPRESS is not set
+# CONFIG_PSTORE_842_COMPRESS is not set
+# CONFIG_PSTORE_ZSTD_COMPRESS is not set
+CONFIG_PSTORE_COMPRESS=y
+CONFIG_PSTORE_DEFLATE_COMPRESS_DEFAULT=y
+CONFIG_PSTORE_COMPRESS_DEFAULT="deflate"
+CONFIG_PSTORE_CONSOLE=y
+# CONFIG_PSTORE_PMSG is not set
+# CONFIG_PSTORE_FTRACE is not set
+CONFIG_PSTORE_RAM=m
+CONFIG_PSTORE_ZONE=y
+CONFIG_PSTORE_BLK=y
+CONFIG_PSTORE_BLK_BLKDEV=""
+CONFIG_PSTORE_BLK_KMSG_SIZE=64
+CONFIG_PSTORE_BLK_MAX_REASON=2
+CONFIG_PSTORE_BLK_CONSOLE_SIZE=64
+CONFIG_MAGIC_SYSRQ=y
+CONFIG_MAGIC_SYSRQ_DEFAULT_ENABLE=0x1
+CONFIG_MAGIC_SYSRQ_SERIAL=y
+CONFIG_MAGIC_SYSRQ_SERIAL_SEQUENCE=""
+CONFIG_PANIC_ON_OOPS=y
+CONFIG_PANIC_ON_OOPS_VALUE=1
+CONFIG_PANIC_TIMEOUT=0
+# CONFIG_SOFTLOCKUP_DETECTOR is not set
+# CONFIG_DETECT_HUNG_TASK is not set
+# CONFIG_WQ_WATCHDOG is not set
+# CONFIG_TEST_LOCKUP is not set
+
+===== kernel command line and panic sysctls
+
+$ cat /proc/cmdline
+root=PARTUUID=<uuid> rw rootwait rootfstype=ext4 mminit_loglevel=4 console=ttyTCU0,115200 firmware_class.path=/etc/firmware fbcon=map:0 video=efifb:off console=tty0 bl_prof_dataptr=2031616@0x471E10000 bl_prof_ro_ptr=65536@0x471E00000 
+
+$ sysctl kernel.panic kernel.panic_on_oops kernel.panic_on_warn kernel.softlockup_panic kernel.hardlockup_panic kernel.hung_task_panic kernel.hung_task_timeout_secs kernel.panic_on_rcu_stall kernel.sysrq kernel.watchdog kernel.nmi_watchdog kernel.watchdog_thresh
+kernel.panic = 0
+kernel.panic_on_oops = 1
+kernel.panic_on_warn = 0
+sysctl: cannot stat /proc/sys/kernel/softlockup_panic: No such file or directory
+sysctl: cannot stat /proc/sys/kernel/hardlockup_panic: No such file or directory
+sysctl: cannot stat /proc/sys/kernel/hung_task_panic: No such file or directory
+sysctl: cannot stat /proc/sys/kernel/hung_task_timeout_secs: No such file or directory
+kernel.panic_on_rcu_stall = 0
+kernel.sysrq = 1
+sysctl: cannot stat /proc/sys/kernel/watchdog: No such file or directory
+sysctl: cannot stat /proc/sys/kernel/nmi_watchdog: No such file or directory
+sysctl: cannot stat /proc/sys/kernel/watchdog_thresh: No such file or directory
+[exit 249]
+
+===== boot verification services
+unit nv_update_verifier: load=not-found enabled= active=inactive/dead result=success started=n/a
+unit nv-l4t-bootloader-config: load=loaded enabled=enabled active=inactive/dead result=success started=Fri 2026-10-16 22:43:06 CEST
+unit l4t-rootfs-validation-config: load=loaded enabled=enabled active=inactive/dead result=success started=Fri 2026-10-16 22:43:06 CEST
+
+$ sh -c systemctl cat nv_update_verifier.service 2>&1 | grep -vE '^#'
+No files found for nv_update_verifier.service.
+
+$ sh -c systemctl cat nv-l4t-bootloader-config.service 2>&1 | grep -vE '^#'
+
+[Unit]
+Description=Configure bootloader service
+After=nv.service
+After=nvgetty.service
+After=l4t-rootfs-validation-config.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/nvidia/l4t-bootloader-config/nv-l4t-bootloader-config.sh -v
+
+[Install]
+WantedBy=multi-user.target
+
+$ sh -c systemctl cat l4t-rootfs-validation-config.service 2>&1 | grep -vE '^#'
+
+[Unit]
+Description=Checking root filesystem boot successful
+
+[Service]
+Type=simple
+ExecStart=/opt/nvidia/l4t-rootfs-validation-config/l4t-rootfs-validation-config.sh
+
+[Install]
+WantedBy=multi-user.target
+
+$ sh -c journalctl -b -o cat --no-pager -u nv-l4t-bootloader-config.service -u l4t-rootfs-validation-config.service | tail -n 40
+Started Checking root filesystem boot successful.
+Checking if the root filesystem boots successfully
+l4t-rootfs-validation-config.service: Deactivated successfully.
+Starting Configure bootloader service...
+Warning: Cannot get compatible board name.
+3767-000-0000--1--p3509-a02-p3767-0000-
+TNSPEC 3767-303-0000-C.1-1-1-p3509-a02-p3767-0000-
+COMPATIBLE_SPEC 3767-000-0000--1--p3509-a02-p3767-0000-
+TEGRA_BOOT_STORAGE nvme0n1
+TEGRA_CHIPID 0x23
+TEGRA_OTA_BOOT_DEVICE /dev/mtdblock0
+TEGRA_OTA_GPT_DEVICE /dev/mtdblock0
+Info: Write TegraPlatformCompatSpec with 3767-000-0000--1--p3509-a02-p3767-0000-.
+Info: The esp is already mounted to /boot/efi.
+Info: Verifying bootloader and rootfs status.
+Info: variable BootChainFwStatus is not found.
+nv-l4t-bootloader-config.service: Deactivated successfully.
+Finished Configure bootloader service.
+
+$ grep -n nvbootctrl /opt/nvidia/l4t-bootloader-config/nv-l4t-bootloader-config.sh
+434:	curr_slot=$( nvbootctrl dump-slots-info | grep "Current bootloader slot" | awk '{print $4}' )
+441:	capsule_status=$( nvbootctrl dump-slots-info | grep "Capsule update status" | awk '{print $4}' )
+1004:# If verify_boot_status is set, call nvbootctrl to verify the boot status.
+1010:		nvbootctrl verify-bl
+1014:		nvbootctrl verify
+
+===== board
+tegra-boardspec: not installed; the board spec is TNSPEC in /etc/nv_boot_control.conf and TegraPlatformSpec, above
+
+$ lspci -nnk
+0001:00:00.0 PCI bridge [0604]: NVIDIA Corporation Device [10de:229e] (rev a1)
+	Kernel driver in use: pcieport
+0001:01:00.0 Network controller [0280]: Intel Corporation Wi-Fi 6 AX210/AX211/AX411 160MHz [8086:2725] (rev 1a)
+	Subsystem: Intel Corporation Wi-Fi 6 AX210 160MHz [8086:6024]
+	Kernel driver in use: iwlwifi
+	Kernel modules: iwlwifi
+0004:00:00.0 PCI bridge [0604]: NVIDIA Corporation Device [10de:229c] (rev a1)
+	Kernel driver in use: pcieport
+	Kernel modules: tegra_pcie_dma_test
+0004:01:00.0 Non-Volatile memory controller [0108]: Phison Electronics Corporation PS5013 E13 NVMe Controller [1987:5013] (rev 01)
+	Subsystem: Phison Electronics Corporation PS5013 E13 NVMe Controller [1987:5013]
+	Kernel driver in use: nvme
+	Kernel modules: nvme
+0008:00:00.0 PCI bridge [0604]: NVIDIA Corporation Device [10de:229c] (rev a1)
+	Kernel driver in use: pcieport
+	Kernel modules: tegra_pcie_dma_test
+0008:01:00.0 Ethernet controller [0200]: Realtek Semiconductor Co., Ltd. RTL8111/8168/8411 PCI Express Gigabit Ethernet Controller [10ec:8168] (rev 15)
+	Subsystem: Realtek Semiconductor Co., Ltd. RTL8111/8168 PCI Express Gigabit Ethernet controller [10ec:8168]
+	Kernel driver in use: r8168
+	Kernel modules: r8168
+
+the default route's interface: enP8p1s0
+
+$ ethtool -i enP8p1s0
+driver: r8168
+version: 8.053.00-NAPI
+firmware-version: 
+expansion-rom-version: 
+bus-info: 0008:01:00.0
+supports-statistics: yes
+supports-test: no
+supports-eeprom-access: no
+supports-register-dump: yes
+supports-priv-flags: no
+
+$ ethtool enP8p1s0
+Settings for enP8p1s0:
+	Supported ports: [ TP ]
+	Supported link modes:   10baseT/Half 10baseT/Full
+	                        100baseT/Half 100baseT/Full
+	                        1000baseT/Full
+	Supported pause frame use: Symmetric Receive-only
+	Supports auto-negotiation: Yes
+	Supported FEC modes: Not reported
+	Advertised link modes:  10baseT/Half 10baseT/Full
+	                        100baseT/Half 100baseT/Full
+	                        1000baseT/Full
+	Advertised pause frame use: Symmetric Receive-only
+	Advertised auto-negotiation: Yes
+	Advertised FEC modes: Not reported
+	Link partner advertised link modes:  10baseT/Half 10baseT/Full
+	                                     100baseT/Half 100baseT/Full
+	                                     1000baseT/Full
+	Link partner advertised pause frame use: Symmetric
+	Link partner advertised auto-negotiation: Yes
+	Link partner advertised FEC modes: Not reported
+	Speed: 1000Mb/s
+	Duplex: Full
+	Auto-negotiation: on
+	Port: Twisted Pair
+	PHYAD: 0
+	Transceiver: internal
+	MDI-X: on
+	Supports Wake-on: pumbg
+	Wake-on: g
+        Current message level: 0x00000033 (51)
+                               drv probe ifdown ifup
+	Link detected: yes
+
+$ nmcli -f GENERAL.DEVICE,GENERAL.TYPE,GENERAL.STATE,GENERAL.CONNECTION,IP4.ADDRESS,IP4.GATEWAY,DHCP4 device show enP8p1s0
+GENERAL.DEVICE:                         enP8p1s0
+GENERAL.TYPE:                           ethernet
+GENERAL.STATE:                          100 (connected)
+GENERAL.CONNECTION:                     Wired connection 1
+IP4.ADDRESS[1]:                         192.168.10.115/24
+IP4.GATEWAY:                            192.168.10.1
+DHCP4.OPTION[1]:                        broadcast_address = 192.168.10.255
+DHCP4.OPTION[2]:                        dhcp_lease_time = 43200
+DHCP4.OPTION[3]:                        dhcp_server_identifier = 192.168.10.1
+DHCP4.OPTION[4]:                        domain_name = lan
+DHCP4.OPTION[5]:                        domain_name_servers = 192.168.10.1
+DHCP4.OPTION[6]:                        expiry = 1792289070
+DHCP4.OPTION[7]:                        host_name = <hostname>
+DHCP4.OPTION[8]:                        ip_address = 192.168.10.115
+DHCP4.OPTION[9]:                        next_server = 192.168.10.1
+DHCP4.OPTION[10]:                       requested_broadcast_address = 1
+DHCP4.OPTION[11]:                       requested_domain_name = 1
+DHCP4.OPTION[12]:                       requested_domain_name_servers = 1
+DHCP4.OPTION[13]:                       requested_domain_search = 1
+DHCP4.OPTION[14]:                       requested_host_name = 1
+DHCP4.OPTION[15]:                       requested_interface_mtu = 1
+DHCP4.OPTION[16]:                       requested_ms_classless_static_routes = 1
+DHCP4.OPTION[17]:                       requested_nis_domain = 1
+DHCP4.OPTION[18]:                       requested_nis_servers = 1
+DHCP4.OPTION[19]:                       requested_ntp_servers = 1
+DHCP4.OPTION[20]:                       requested_rfc3442_classless_static_routes = 1
+DHCP4.OPTION[21]:                       requested_root_path = 1
+DHCP4.OPTION[22]:                       requested_routers = 1
+DHCP4.OPTION[23]:                       requested_static_routes = 1
+DHCP4.OPTION[24]:                       requested_subnet_mask = 1
+DHCP4.OPTION[25]:                       requested_time_offset = 1
+DHCP4.OPTION[26]:                       requested_wpad = 1
+DHCP4.OPTION[27]:                       routers = 192.168.10.1
+DHCP4.OPTION[28]:                       subnet_mask = 255.255.255.0
+
+$ gpioinfo
+gpiochip0 - 164 lines:
+	line   0:      "PA.00" "regulator-vdd-3v3-sd" output active-high [used]
+	line   1:      "PA.01"       unused   input  active-high 
+	line   2:      "PA.02"       unused   input  active-high 
+	line   3:      "PA.03"       unused   input  active-high 
+	line   4:      "PA.04"       unused   input  active-high 
+	line   5:      "PA.05"       unused  output  active-high 
+	line   6:      "PA.06"  "bus@0:pps"   input  active-high [used]
+	line   7:      "PA.07"       unused   input  active-high 
+	line   8:      "PB.00"       unused   input  active-high 
+	line   9:      "PC.00"       unused   input  active-high 
+	line  10:      "PC.01"       unused   input  active-high 
+	line  11:      "PC.02"       unused   input  active-high 
+	line  12:      "PC.03"       unused   input  active-high 
+	line  13:      "PC.04"       unused   input  active-high 
+	line  14:      "PC.05"       unused   input  active-high 
+	line  15:      "PC.06"       unused   input  active-high 
+	line  16:      "PC.07"       unused   input  active-high 
+	line  17:      "PD.00"       unused   input  active-high 
+	line  18:      "PD.01"       unused   input  active-high 
+	line  19:      "PD.02"       unused   input  active-high 
+	line  20:      "PD.03"       unused   input  active-high 
+	line  21:      "PE.00"       unused   input  active-high 
+	line  22:      "PE.01"       unused   input  active-high 
+	line  23:      "PE.02"       unused   input  active-high 
+	line  24:      "PE.03"       unused   input  active-high 
+	line  25:      "PE.04"       unused   input  active-high 
+	line  26:      "PE.05"       unused   input  active-high 
+	line  27:      "PE.06"       unused   input  active-high 
+	line  28:      "PE.07"       unused   input  active-high 
+	line  29:      "PF.00"       unused   input  active-high 
+	line  30:      "PF.01"       unused   input  active-high 
+	line  31:      "PF.02"       unused   input  active-high 
+	line  32:      "PF.03"       unused   input  active-high 
+	line  33:      "PF.04"       unused   input  active-high 
+	line  34:      "PF.05"       unused   input  active-high 
+	line  35:      "PG.00" "Force Recovery" input active-low [used]
+	line  36:      "PG.01"       unused   input  active-high 
+	line  37:      "PG.02"    "Suspend"   input   active-low [used]
+	line  38:      "PG.03"       unused   input  active-high 
+	line  39:      "PG.04"       unused   input  active-high 
+	line  40:      "PG.05"       unused   input  active-high 
+	line  41:      "PG.06"       unused  output  active-high 
+	line  42:      "PG.07"       unused   input  active-high 
+	line  43:      "PH.00"       unused   input  active-high 
+	line  44:      "PH.01"       unused   input  active-high 
+	line  45:      "PH.02"       unused   input  active-high 
+	line  46:      "PH.03"       unused   input  active-high 
+	line  47:      "PH.04"       unused   input  active-high 
+	line  48:      "PH.05"       unused   input  active-high 
+	line  49:      "PH.06"       unused  output  active-high 
+	line  50:      "PH.07"       unused   input  active-high 
+	line  51:      "PI.00"       unused   input  active-high 
+	line  52:      "PI.01"       unused   input  active-high 
+	line  53:      "PI.02"       unused   input  active-high 
+	line  54:      "PI.03"       unused   input  active-high 
+	line  55:      "PI.04"       unused   input  active-high 
+	line  56:      "PI.05"       kernel   input  active-high [used]
+	line  57:      "PI.06"       unused   input  active-high 
+	line  58:      "PJ.00"       unused   input  active-high 
+	line  59:      "PJ.01"       unused   input  active-high 
+	line  60:      "PJ.02"       unused   input  active-high 
+	line  61:      "PJ.03"       unused   input  active-high 
+	line  62:      "PJ.04"       unused   input  active-high 
+	line  63:      "PJ.05"       unused   input  active-high 
+	line  64:      "PK.00"       unused   input  active-high 
+	line  65:      "PK.01"       unused   input  active-high 
+	line  66:      "PK.02"       unused   input  active-high 
+	line  67:      "PK.03"       unused   input  active-high 
+	line  68:      "PK.04"       unused  output  active-high 
+	line  69:      "PK.05"       unused  output  active-high 
+	line  70:      "PK.06"       unused   input  active-high 
+	line  71:      "PK.07"       unused   input  active-high 
+	line  72:      "PL.00"       unused   input  active-high 
+	line  73:      "PL.01"       unused   input  active-high 
+	line  74:      "PL.02" "nvidia,pex-wake" input active-high [used]
+	line  75:      "PL.03"       unused   input  active-high 
+	line  76:      "PM.00"       kernel   input  active-high [used]
+	line  77:      "PM.01"       unused   input  active-high 
+	line  78:      "PM.02"       unused   input  active-high 
+	line  79:      "PM.03"       unused   input  active-high 
+	line  80:      "PM.04"       unused   input  active-high 
+	line  81:      "PM.05"       unused   input  active-high 
+	line  82:      "PM.06"       unused   input  active-high 
+	line  83:      "PM.07"       unused   input  active-high 
+	line  84:      "PN.00"       unused   input  active-high 
+	line  85:      "PN.01"       unused   input  active-high 
+	line  86:      "PN.02"       unused   input  active-high 
+	line  87:      "PN.03"       unused   input  active-high 
+	line  88:      "PN.04"       unused   input  active-high 
+	line  89:      "PN.05"       unused   input  active-high 
+	line  90:      "PN.06"       unused   input  active-high 
+	line  91:      "PN.07"       unused   input  active-high 
+	line  92:      "PP.00"       unused   input  active-high 
+	line  93:      "PP.01"       unused   input  active-high 
+	line  94:      "PP.02"       unused   input  active-high 
+	line  95:      "PP.03"       unused   input  active-high 
+	line  96:      "PP.04"       unused   input  active-high 
+	line  97:      "PP.05"       unused   input  active-high 
+	line  98:      "PP.06"       unused   input  active-high 
+	line  99:      "PP.07"       unused   input  active-high 
+	line 100:      "PQ.00"       unused   input  active-high 
+	line 101:      "PQ.01"       unused   input  active-high 
+	line 102:      "PQ.02"       unused   input  active-high 
+	line 103:      "PQ.03"       unused  output  active-high 
+	line 104:      "PQ.04"       unused   input  active-high 
+	line 105:      "PQ.05"       unused   input  active-high 
+	line 106:      "PQ.06"       unused   input  active-high 
+	line 107:      "PQ.07"       unused   input  active-high 
+	line 108:      "PR.00"       unused   input  active-high 
+	line 109:      "PR.01"       unused   input  active-high 
+	line 110:      "PR.02"       unused   input  active-high 
+	line 111:      "PR.03"       unused   input  active-high 
+	line 112:      "PR.04"       unused   input  active-high 
+	line 113:      "PR.05"       unused   input  active-high 
+	line 114:      "PX.00"       kernel   input  active-high [used]
+	line 115:      "PX.01"       kernel   input  active-high [used]
+	line 116:      "PX.02"       unused   input  active-high 
+	line 117:      "PX.03"       unused   input  active-high 
+	line 118:      "PX.04"       unused   input  active-high 
+	line 119:      "PX.05"       unused   input  active-high 
+	line 120:      "PX.06"       unused   input  active-high 
+	line 121:      "PX.07"       unused   input  active-high 
+	line 122:      "PY.00"       unused   input  active-high 
+	line 123:      "PY.01"       unused   input  active-high 
+	line 124:      "PY.02"       unused   input  active-high 
+	line 125:      "PY.03"       unused   input  active-high 
+	line 126:      "PY.04"       unused   input  active-high 
+	line 127:      "PY.05"       unused   input  active-high 
+	line 128:      "PY.06"       unused   input  active-high 
+	line 129:      "PY.07"       unused   input  active-high 
+	line 130:      "PZ.00"       unused   input  active-high 
+	line 131:      "PZ.01"       "vbus"   input   active-low [used]
+	line 132:      "PZ.02"       unused   input  active-high 
+	line 133:      "PZ.03"       unused   input  active-high 
+	line 134:      "PZ.04"       unused   input  active-high 
+	line 135:      "PZ.05"       unused   input  active-high 
+	line 136:      "PZ.06"       unused  output  active-high 
+	line 137:      "PZ.07"       unused   input  active-high 
+	line 138:     "PAC.00"       unused  output  active-high 
+	line 139:     "PAC.01"       unused   input  active-high 
+	line 140:     "PAC.02"       unused   input  active-high 
+	line 141:     "PAC.03"       unused   input  active-high 
+	line 142:     "PAC.04"       unused   input  active-high 
+	line 143:     "PAC.05"       unused   input  active-high 
+	line 144:     "PAC.06"       unused   input  active-high 
+	line 145:     "PAC.07"       unused   input  active-high 
+	line 146:     "PAD.00"       unused   input  active-high 
+	line 147:     "PAD.01"       unused   input  active-high 
+	line 148:     "PAD.02"       unused   input  active-high 
+	line 149:     "PAD.03"       unused   input  active-high 
+	line 150:     "PAE.00"       unused   input  active-high 
+	line 151:     "PAE.01"       unused   input  active-high 
+	line 152:     "PAF.00"       unused   input  active-high 
+	line 153:     "PAF.01"       unused   input  active-high 
+	line 154:     "PAF.02"       unused   input  active-high 
+	line 155:     "PAF.03"       unused   input  active-high 
+	line 156:     "PAG.00"       unused   input  active-high 
+	line 157:     "PAG.01"       unused   input  active-high 
+	line 158:     "PAG.02"       unused   input  active-high 
+	line 159:     "PAG.03"       unused   input  active-high 
+	line 160:     "PAG.04"       unused   input  active-high 
+	line 161:     "PAG.05"       unused   input  active-high 
+	line 162:     "PAG.06"       unused   input  active-high 
+	line 163:     "PAG.07"       unused   input  active-high 
+gpiochip1 - 32 lines:
+	line   0:     "PAA.00"       unused   input  active-high 
+	line   1:     "PAA.01"       unused   input  active-high 
+	line   2:     "PAA.02"       unused   input  active-high 
+	line   3:     "PAA.03"       unused   input  active-high 
+	line   4:     "PAA.04"       unused  output  active-high 
+	line   5:     "PAA.05" "regulator-vdd-3v3-pcie" output active-high [used]
+	line   6:     "PAA.06"       unused   input  active-high 
+	line   7:     "PAA.07"       unused   input  active-high 
+	line   8:     "PBB.00"       unused   input  active-high 
+	line   9:     "PBB.01"       unused   input  active-high 
+	line  10:     "PBB.02"       unused   input  active-high 
+	line  11:     "PBB.03"       unused  output  active-high 
+	line  12:     "PCC.00"       unused  output  active-high 
+	line  13:     "PCC.01"       unused  output  active-high 
+	line  14:     "PCC.02"       unused  output  active-high 
+	line  15:     "PCC.03"       unused  output  active-high 
+	line  16:     "PCC.04"       unused   input  active-high 
+	line  17:     "PCC.05"       unused   input  active-high 
+	line  18:     "PCC.06"       unused   input  active-high 
+	line  19:     "PCC.07"       unused   input  active-high 
+	line  20:     "PDD.00"       unused   input  active-high 
+	line  21:     "PDD.01"       unused   input  active-high 
+	line  22:     "PDD.02"       unused   input  active-high 
+	line  23:     "PEE.00"       unused   input  active-high 
+	line  24:     "PEE.01"       unused   input  active-high 
+	line  25:     "PEE.02"       unused   input  active-high 
+	line  26:     "PEE.03"       unused   input  active-high 
+	line  27:     "PEE.04"      "Power"   input   active-low [used]
+	line  28:     "PEE.05"       unused   input  active-high 
+	line  29:     "PEE.06"       unused   input  active-high 
+	line  30:     "PEE.07"       unused   input  active-high 
+	line  31:     "PGG.00"       unused   input  active-high 
+
+$ i2cdetect -l
+i2c-0	i2c       	3160000.i2c                     	I2C adapter
+i2c-1	i2c       	c240000.i2c                     	I2C adapter
+i2c-2	i2c       	3180000.i2c                     	I2C adapter
+i2c-4	i2c       	Tegra BPMP I2C adapter          	I2C adapter
+i2c-5	i2c       	31b0000.i2c                     	I2C adapter
+i2c-7	i2c       	c250000.i2c                     	I2C adapter
+
+I2C devices bound by the kernel:
+0-0050 24c02 driver=at24
+0-0057 24c02 driver=at24
+1-0025 fusb301 driver=none
+1-0040 ina3221 driver=ina3221
+2-0010 zedx driver=zedx
+2-0011 zedx driver=zedx
+2-001a zedxone_uhd driver=none
+2-0020 zedx driver=none
+2-0021 zedx driver=none
+2-002a zedxone_uhd driver=none
+2-002d zedxpro driver=none
+2-002f zedxpro driver=none
+2-0038 zedx driver=none
+2-0039 zedx driver=none
+2-003d zedxpro driver=none
+2-003f zedxpro driver=none
+2-0040 sl_max9295 driver=none
+2-0041 sl_max9295 driver=none
+2-0042 sl_max9295 driver=sl_max9295
+2-0043 sl_max9295 driver=sl_max9295
+2-0044 sl_max9295 driver=none
+2-0045 sl_max9295 driver=none
+2-0048 sl_max9296 driver=sl_max9296
+2-004e zedxpro driver=none
+2-004f zedxpro driver=none
+2-0060 sl_max9295 driver=none
+2-0061 sl_max9295 driver=none
+2-0062 sl_max9295 driver=none
+2-0063 sl_max9295 driver=none
+4-003c vrs-pseq driver=nvvrs_pseq
+i2c-0 3160000.i2c driver=none
+i2c-1 c240000.i2c driver=none
+i2c-2 3180000.i2c driver=none
+i2c-4 Tegra BPMP I2C adapter driver=none
+i2c-5 31b0000.i2c driver=none
+i2c-7 c250000.i2c driver=none
+
+===== secure boot
+mokutil: not installed; SecureBoot and SetupMode are under the UEFI global variables, above
+
+===== storage
+
+$ df -h /
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/nvme0n1p1  233G   29G  192G  13% /
+
+$ df -B1 /
+Filesystem        1B-blocks        Used    Available Use% Mounted on
+/dev/nvme0n1p1 249366470656 30759653376 205865099264  13% /
+
+$ lsblk -b -o NAME,SIZE,TYPE,PARTLABEL,FSTYPE,MOUNTPOINTS
+NAME                 SIZE TYPE PARTLABEL          FSTYPE   MOUNTPOINTS
+loop0                4096 loop                             /snap/bare/5
+loop1           191037440 loop                             /snap/chromium/3422
+loop2           193335296 loop                             /snap/chromium/3445
+loop3            72294400 loop                             /snap/core22/2340
+loop4            72310784 loop                             /snap/core22/2412
+loop5            64864256 loop                             /snap/core24/1644
+loop6            50196480 loop                             /snap/cups/1198
+loop8            50204672 loop                    squashfs /snap/cups/1208
+loop9           246231040 loop                    squashfs /snap/firefox/8305
+loop10          247611392 loop                    squashfs /snap/firefox/8416
+loop11          517607424 loop                    squashfs /snap/gnome-42-2204/228
+loop12          527392768 loop                    squashfs /snap/gnome-42-2204/245
+loop13          579809280 loop                    squashfs /snap/gnome-46-2404/154
+loop14           96141312 loop                    squashfs /snap/gtk-common-themes/1535
+loop15           46415872 loop                    squashfs /snap/snapd/24724
+loop16           46489600 loop                    squashfs /snap/snapd/25585
+loop17          183046144 loop                    squashfs /snap/mesa-2404/1166
+loop18           16777216 loop                             
+loop19           64839680 loop                             /snap/core24/2125
+zram0          1025982464 disk                             [SWAP]
+zram1          1025982464 disk                             [SWAP]
+zram2          1025982464 disk                             [SWAP]
+zram3          1025982464 disk                             [SWAP]
+zram4          1025982464 disk                             [SWAP]
+zram5          1025982464 disk                             [SWAP]
+zram6          1025982464 disk                             [SWAP]
+zram7          1025982464 disk                             [SWAP]
+nvme0n1      256060514304 disk                             
+├─nvme0n1p1  254498869248 part APP                ext4     /
+├─nvme0n1p2     134217728 part A_kernel                    
+├─nvme0n1p3        786432 part A_kernel-dtb                
+├─nvme0n1p4      33161216 part A_reserved_on_user          
+├─nvme0n1p5     134217728 part B_kernel                    
+├─nvme0n1p6        786432 part B_kernel-dtb                
+├─nvme0n1p7      33161216 part B_reserved_on_user          
+├─nvme0n1p8      83886080 part recovery                    
+├─nvme0n1p9        524288 part recovery-dtb                
+├─nvme0n1p10     67108864 part esp                vfat     /boot/efi
+├─nvme0n1p11     83886080 part recovery_alt                
+├─nvme0n1p12       524288 part recovery-dtb_alt            
+├─nvme0n1p13     67108864 part esp_alt                     
+├─nvme0n1p14    419430400 part UDA                         
+└─nvme0n1p15    502792192 part reserved                    
+
+$ sh -c cat /sys/block/nvme0n1/queue/logical_block_size /sys/block/nvme0n1/queue/physical_block_size
+512
+512
+
+$ swapon --show
+NAME       TYPE        SIZE USED PRIO
+/dev/zram0 partition 978.4M   0B    5
+/dev/zram1 partition 978.4M   0B    5
+/dev/zram2 partition 978.4M   0B    5
+/dev/zram3 partition 978.4M   0B    5
+/dev/zram4 partition 978.4M   0B    5
+/dev/zram5 partition 978.4M   0B    5
+/dev/zram6 partition 978.4M   0B    5
+/dev/zram7 partition 978.4M   0B    5
+
+$ systemctl is-system-running
+running

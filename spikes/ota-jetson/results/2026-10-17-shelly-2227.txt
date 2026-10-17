@@ -1,0 +1,9 @@
+# The ZED Box Mini's Shelly plug (L8), show: 2026-10-17 22:27 Europe/Stockholm
+# spec: docs/32-fleet-ota.md#jetson-test-image. Written by shelly.sh.
+
+device: S3PL-30110EU gen 3, firmware 2.1.0, app PlugMG3, auth true
+switch: initial_state on, auto_on false (60 s), auto_off false (60 s), power_limit 3000 W, current_limit 13 A
+state: output true (last switched by timer), 10.2 W, 239.3 V, 52.3 C
+schedules: 0
+webhooks: 0
+scripts: 0

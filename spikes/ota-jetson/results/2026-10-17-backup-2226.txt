@@ -1,0 +1,18 @@
+# ZED Box Mini, online backup (B3): 2026-10-17 22:26 Europe/Stockholm
+# spec: docs/32-fleet-ota.md#jetson-test-image. Written by backup.sh. The backup itself stays in
+# .lab/zedbox-backup (gitignored); a second line of defence only, never restored.
+
+APP used: 30759 MB
+new in .lab/zedbox-backup/2026-10-17T2226:
+  efivars.tar.zst 2402 bytes
+  nvme0n1.gpt-head.bin 17408 bytes
+  nvme0n1.gpt-tail.bin 16896 bytes
+  nvme0n1.sgdisk 17920 bytes
+  state.txt 10203 bytes
+APP tar: not taken (--no-app)
+QSPI: not dumped. /proc/mtd lists no 64 MiB device: this kernel does not show the QSPI to Linux. C1's QSPI0.img (NVIDIA's backup, over RCM) answers it.
+manifest: 38 files in .lab/zedbox-backup, old and new, 122 MB; sha256sum -c good; zstd -t: 21 of 21 good
+second copy: not made (--no-copy)
+NVIDIA QSPI fix (trimmer2-val):
+  cannot tell yet: no QSPI dump (see above). Run lib/mb1bct.sh check on C1's QSPI0.img.
+took: 1 min
