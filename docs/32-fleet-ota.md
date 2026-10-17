@@ -840,7 +840,9 @@ tegra-demo-distro, jetpack-nixos and NVIDIA's edk2-nvidia source. What it
 found about NVIDIA's A/B scheme is expected from that source and NVIDIA's
 documentation, not measured; the phases below measure it. This section
 states what the test image is and the rules it is tested under; the
-procedures belong in `spikes/ota-jetson/README.md`, not yet written.
+procedures are in [`spikes/ota-jetson/README.md`](../spikes/ota-jetson/README.md),
+and what the applier reads in NVIDIA's source, variable by variable, in
+[`spikes/ota-jetson/applier/README.md`](../spikes/ota-jetson/applier/README.md).
 
 **The lab box** is a Stereolabs ZED Box Mini with an Orin NX 16 GB module
 and an NVMe disk, as delivered: L4T R36.4.4 with Stereolabs'
@@ -933,8 +935,35 @@ until D2 measures it:
   `BootChainFwStatus`, `BootChainFwPrevious`, `BootChainFwResetCount`)
   drive the switch between the two QSPI chains. A stale status or next
   value cancels a capsule, a set `BootNext` makes a chain switch fail, and
-  the reset count stops chain switches at 3; the applier checks all three
-  before it stages anything.
+  the reset count stops chain switches at 3. Before it stages anything the
+  applier checks `BootChainFwStatus`, `BootChainFwNext` and `BootNext`.
+  `BootChainFwResetCount` and `BootChainFwPrevious` cannot be checked from
+  Linux: edk2-nvidia declares them boot-services-only under
+  `gNVIDIATokenSpaceGuid`, so efivarfs never shows them (the stock box's has
+  neither). The applier checks the count only if it ever appears; by the
+  source it is deleted at the end of every switch, so it reaches 3 only
+  within one switch's resets, and D2 checks it during a switch.
+- **Each chain's firmware version** comes from `SystemFwVersions`, which
+  UEFI fills at every boot from both chains' VER partitions, as NVIDIA's own
+  boot scripts read it. The applier decides by it whether the other chain
+  needs the capsule, so a reflash or a capsule outside Fjarr cannot leave a
+  stale record deciding, and a chain it cannot read gets the capsule; its
+  own per-chain marker on `/data` only says whether Fjarr's last write of
+  the chain completed.
+- **A finished switch leaves `BootChainFwStatus` set** to 0 (success), and
+  left set it cancels the next capsule and makes the next chain switch end
+  without switching. `mark-good` and `fjarr-boot-verify` clear a leftover 0
+  once the boot is known good, and `rollback-now` clears any status before
+  it switches; a failure status (such as 12, the new chain failed) is left
+  for a person. D2 measures whether `nvbootctrl` already does either.
+- **The status variable alone does not make a slot unbootable**:
+  L4TLauncher reads `RootfsStatusSlot` only to seed the PMC retry counters
+  when the register is uninitialised, and the register outlives a warm
+  reset. So whenever the applier marks a slot unbootable or bootable again
+  it writes the slot's PMC retry counter too (`rootfs_retry_count_a` or
+  `_b`, NVIDIA's sysfs nodes), next to `RootfsStatusSlot`; without that, a
+  slot rewritten after a failed trial would keep a counter of 0 and fall
+  straight back.
 - **`nvbootctrl`**, NVIDIA's closed tool, reads and writes this state, and
   `nvbootctrl verify` marks a boot good. **`fjarr-boot-verify` replaces
   meta-tegra's `nv_update_verifier`**: it verifies every boot that is not a
@@ -952,10 +981,14 @@ mini-PC then flashes the box over USB: meta-tegra's `initrd-flash` runs
 natively, and NVIDIA's `l4t_initrd_flash.sh`, with its backup and restore
 tools, runs in an Ubuntu 22.04 container, a host NVIDIA supports. NVIDIA's
 known issue 4695663 (L4T 36.4.4: initrd flashing can fail on host USB ports
-of 10 Gbps or more; the workaround is a hub or a slower port) calls for a
-USB 2.0 hub between the two, unless B finds a port on the mini-PC slower
-than 10 Gbps. The lab has no hub yet (2026-10-17; Erik is getting one), so
-flashing waits for it. Every new firmware build first boots from RAM over
+of 10 Gbps or more; the workaround is a hub or a slower port) called for a
+USB 2.0 hub between the two, unless B found a port on the mini-PC slower
+than 10 Gbps. B2 found one: the box is on a port of the mini-PC's ASM1042A
+controller, whose SuperSpeed side is 5 Gbps (the box links at USB 2.0,
+480 Mbit/s), below the issue's 10 Gbps. Whether the USB 2.0 hub is still
+required before the first flash is Erik's call (open, 2026-10-17); the
+recommendation is to keep one at hand as the fallback if an initrd flash
+on that port fails. Every new firmware build first boots from RAM over
 RCM, writing nothing (D0), before it is written to the QSPI.
 
 **Three rescue layers**, each able to end in RCM, from which the mini-PC
@@ -1015,7 +1048,7 @@ confirmation deadline, a warm reboot, so it falls back first.
 
 | # | Rule |
 |---|---|
-| L1 | One lock on the mini-PC for anything that touches the box, its plug or RCM; nothing runs 00:00–06:00, the nightly window |
+| L1 | One lock on the mini-PC for anything that touches the box, its plug or RCM; nothing runs 00:00–06:30, the nightly window and the 30 minutes `fjarr-lab` gives a job still running at its end |
 | L2 | Before any write to the NVMe, the ESP or the UEFI variables: the plug answers, the box answers on its MAC (scripts find it by MAC, not by address), the network rescue is serving, and the latest backup has a verified checksum list |
 | L3 | Every Fjarr Linux can reach RCM: it ships `reboot-recovery`, opens the watchdog from its initrd, runs the dead-man, and passes one RCM round trip before anything relies on it |
 | L4 | No QSPI write of a firmware build that has not booted from RAM over RCM first. No QSPI write at all without Q4, except a capsule byte-identical to firmware this box has already booted from QSPI, once the first capsule passed under Q4 |
@@ -1043,10 +1076,33 @@ backup's index lists the QSPI. Its comment filter matches nothing, so a
 commented-out line still counts: C's restore without Q4 runs from an index
 with that line deleted.
 
-**Measured**, filled in as the phases run:
+**Measured**, filled in as the phases run (the files are in
+[`spikes/ota-jetson/results/`](../spikes/ota-jetson/results/README.md)):
 
+- The stock box's state, read only (B1, 2026-10-17): L4T R36.4.4 with
+  Stereolabs' 1.3.1 package, bootloader chain A current and active, both
+  chains normal, RootFS A/B off (`RootfsRedundancyLevel` 0),
+  `RootfsRetryCountMax` 3, the ESRT at 36.4.4; `BootNext`,
+  `OsIndications`, `BootChainFwNext` and `BootChainFwStatus` absent
+  (`BootChainFwPrevious` and `BootChainFwResetCount` are not visible to
+  Linux by the source, above); `/proc/mtd` empty, so the stock kernel does
+  not show the QSPI.
+- The mini-PC as the flashing host, read only (B2, 2026-10-17): the box's
+  port above (5 Gbps SuperSpeed side); 60 s of listening saw no DHCP or PXE
+  traffic on the lab network; GNOME automount is on for the desktop user,
+  which the lab scripts keep the box away from.
+- The online backup (B3, 2026-10-17): the GPT, sgdisk's backup, the UEFI
+  variables and the state, 38 files with `sha256sum -c` and `zstd -t`
+  good. Not yet: the root partition's stream, which did not fit before the
+  hard stop, and the encrypted second copy, which the workstation's uplink
+  was too slow for; both wait for a morning slot.
+- The plug (B5, 2026-10-17): `initial_state` set from `restore_last` to
+  `on`, auto-on and auto-off off, no schedules, webhooks or scripts: L8
+  holds, unchanged at the re-check.
 - RCM entered by software and left by a power cycle, five times of five
-  (B): pending.
+  (B4): pending. It did not start on 2026-10-17: five trips need up to
+  2 h 44 min, past the 23:00 hard stop; it runs on the next morning after
+  06:30, with the desktop choice made.
 - `BootNext` honoured and consumed; the network rescue by PXE or HTTP boot
   (B): pending.
 - Whether the watchdog fires once userspace stops feeding it, or NVIDIA's
@@ -1054,7 +1110,9 @@ with that line deleted.
   (B): pending.
 - One restore of the full backup (C): pending.
 - Whether the factory QSPI carries NVIDIA's QSPI fix (`trimmer2-val`),
-  read from its dump (B, C): pending.
+  read from its dump (B, C): not answerable in B, since the stock kernel
+  does not show the QSPI to Linux (B3); C's QSPI dump with NVIDIA's backup
+  tool answers it: pending.
 - Fjarr's firmware from RAM: MB2 past its EEPROM step, and the flashing
   gadget with Fjarr's device tree (D0): pending.
 - The first flash: both slots and the rescue written, RCM reached from the
