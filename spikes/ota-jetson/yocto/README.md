@@ -2,9 +2,9 @@
 
 Spike code for the Yocto image of [docs/32#jetson-test-image](../../../docs/32-fleet-ota.md#jetson-test-image)
 ("The image"): a kas configuration, and the layer `meta-fjarr-spike` with the ZED Box Mini
-machine, a small distro, the slot image and its initrd. Recipes are productised later; nothing
-here ships, and M8 publishes recipes, not images ([docs/32](../../../docs/32-fleet-ota.md#x86-test-image),
-"Recipes, not images").
+machine, a small distro, the slot image, its initrd and the rescue in `recovery` (A5). Recipes
+are productised later; nothing here ships, and M8 publishes recipes, not images
+([docs/32](../../../docs/32-fleet-ota.md#x86-test-image), "Recipes, not images").
 
 Run on the host, never inside `dev`:
 
@@ -33,6 +33,8 @@ is under `spikes/ota-jetson/out/yocto/` (gitignored): the layer checkouts, `down
 | `fjarr-spike-image-zedbox-mini-orin-nx16.rootfs-<v>.ext4` | the slot image, 16 GiB, labelled `fjarr_<v>`, the raw image a release writes to `APP` or `APP_b` |
 | `zedbox-mini-orin-nx16-tegra-bl.cap` (`tegra-bl.cap`) | the bootloader capsule from the same inputs, signed with meta-tegra's EDK2 test certificates (Q11) |
 | `fjarr-spike-initramfs-zedbox-mini-orin-nx16.cpio.gz` | the initrd, also in each slot's `/boot` |
+| `fjarr-recovery-rescue.img`, `fjarr-recovery-rescue.dtb` | the recovery-partition rescue (A5) for `recovery` and `recovery-dtb`, also in the flash package; with `fjarr-recovery-rescue.manifest`, `SHA256SUMS-recovery` and `known_hosts-recovery` |
+| `fjarr-recovery-rescue-initramfs-zedbox-mini-orin-nx16.cpio.xz` | the rescue's initramfs, inside `fjarr-recovery-rescue.img` |
 
 **Never flash a build made with `FJARR_BOARD_BCT = "0"`**: its MB2 reads a carrier EEPROM the ZED
 Box Mini does not have and stops before UEFI. Every new firmware build boots from RAM over RCM
@@ -46,7 +48,9 @@ less than 20 GB is free.
 `build.sh` makes the lab identity once, in `spikes/ota-jetson/.lab/` (gitignored):
 `.lab/yocto/authorized_keys` (the operator's key, `FJARR_LAB_PUBKEY`, default
 `~/.ssh/id_rsa.pub`; append the mini-PC's key when lab scripts reach the box from there),
-`.lab/yocto/ssh/` (SSH host keys shared by every slot image), and the SWUpdate test key
+`.lab/yocto/ssh/` (SSH host keys shared by every slot image), `.lab/yocto/recovery-ssh/` (the
+recovery-partition rescue's own ed25519 host key and its `known_hosts` line for
+`HostKeyAlias=fjarr-recovery-rescue`, rewritten on every run), and the SWUpdate test key
 `.lab/swu.key` and `.lab/swu.crt` (made only if absent; the image trusts `swu.crt`).
 
 ## The pins
@@ -86,8 +90,9 @@ so `/data` takes the rest of the disk, about 205 GiB on the lab box. It writes t
 `mkfs` without `-F`, which stops at an old signature on any reflash): the slot's
 `fjarr-data-format` creates ext4 on first boot, only when `blkid -p` finds nothing and no backup
 superblock exists, then mounts it at `/data` (not required for boot, so the box stays
-reachable). `recovery` and `recovery-dtb` stay empty, as meta-tegra leaves them (the rescue in
-`recovery` is phase A5).
+reachable). meta-tegra leaves `recovery` and `recovery-dtb` empty; this image's flash package
+fills them with Fjarr's recovery-partition rescue (A5, [below](#the-recovery-partition-rescue-a5)).
+`recovery_alt` and `recovery-dtb_alt` stay empty, as in NVIDIA's own layout.
 
 **The boot state.** `RootfsRetryCountMax` is 3 (Q5) through `TEGRA_BOOTCONTROL_OVERLAYS`, still
 meta-tegra's mechanism for UEFI variable defaults: `fjarr-l4t-config` deploys
@@ -158,6 +163,75 @@ links an automount instead), `reboot-recovery` (meta-tegra's `tegra-flash-reboot
 and `oe4t-set-uefi-OSIndications`, `efibootmgr`, `efivar`, the disk tools, and `os-release`
 with `IMAGE_ID=fjarr` and `IMAGE_VERSION`.
 
+## The recovery-partition rescue (A5)
+
+The first of the three rescue layers ([docs/32](../../../docs/32-fleet-ota.md#jetson-test-image),
+"Three rescue layers", item 1), built from the network rescue's own files in
+[`../rescue/`](../rescue/README.md): the same `/init`, inittab, dead-man, DHCP, console and sshd
+configuration from `rescue/rootfs/` and `reboot-recovery` from `rescue/reboot-recovery.c`, renamed
+`fjarr-recovery-rescue` as `rescue/build.sh --recovery` does, written by the same `mkbootimg.py`.
+The shared files work unchanged under Yocto: the distro is merged-`/usr` (systemd's `usrmerge`),
+so every path they name exists; the image only links `/usr/lib/openssh/sftp-server` to
+`/usr/libexec/sftp-server`.
+
+- **`fjarr-recovery-rescue-initramfs`** (cpio, xz with CRC32): poky's BusyBox 1.36.1 with init,
+  `cttyhack` and `watchdog` added (`fjarr-rescue-busybox`, the rescue's own recipe: the slots'
+  BusyBox stays poky's), OpenSSH 9.6p1 `sshd` and `sftp-server`, e2fsprogs 1.47.0 (`mke2fs`,
+  `e2fsck`, `resize2fs`, `tune2fs`, `chattr`), util-linux 2.39.3 (`fdisk`, `sfdisk`, `lsblk`,
+  `blkid`, `wipefs`, `blkdiscard`, `findmnt`, `partx`), gptfdisk 1.0.9 (`sgdisk`), nvme-cli 2.8,
+  efibootmgr 18, dosfstools, zstd 1.5.5, and the modules `/init` loads, all modules in the slot's
+  36.5.2 kernel: `phy-tegra194-p2u`, `pcie-tegra194`, `nvme` (with `nvme-core`),
+  `tegra-bpmp-thermal`, `pwm-tegra`, `pwm-fan` and NVIDIA's out-of-tree `r8168`
+  (`nv-kernel-module-r8168`). Root's `authorized_keys` is the slots' (`.lab/yocto/authorized_keys`);
+  the host key is the rescue's own (`.lab/yocto/recovery-ssh/`), neither the slots' nor the 36.4.4
+  rescues'. The rescue's `/etc` files (accounts, hosts, profile, motd) replace those of base-files,
+  base-passwd and shadow, which sshd brings with it; the tree is staged in the sysroot by
+  `fjarr-recovery-rescue-files` and laid over the root after the packages. The build checks what
+  `rescue/build.sh` checks: every program inittab and `/init` start exists, the shell finds the
+  real `mke2fs`, `fdisk`, `sfdisk`, `lsblk` and `blkdiscard` rather than BusyBox applets, and the
+  modules are in `modules.dep`. No postinst is left for a first boot that would never run it
+  (nvme-cli's NVMe-over-Fabrics host ids are dropped). It fails above the plan's budget of 37 MiB
+  unpacked.
+- **`fjarr-recovery-rescue`**: the Android boot image (header v0, page 2048, NVIDIA's load
+  addresses) with meta-tegra's deployed `Image`, byte for byte the slot's `/boot/Image`, that
+  initramfs, and the slot's command line without its root and initrd arguments
+  (`FJARR_KERNEL_ARGS`) plus `panic=10`: NVIDIA's arguments for the board as the slot passes
+  them, consoles on the TCU and the display (the last, `tty0`, is `/dev/console`, where the
+  rescue's shell runs), `efi=runtime` for `efibootmgr` and efivarfs. The device tree is Fjarr's
+  carrier tree from the sysroot, the file the slot's extlinux `FDT` line names. The build refuses
+  a boot image larger than `recovery` (80 MiB) or a device tree larger than `recovery-dtb`
+  (512 KiB). With UEFI signing keys set, both files get the signature meta-tegra attaches to the
+  slot's `boot.img`; without them (the lab) they stay as written.
+- **The flash package**: `fjarr-spike-image` appends to meta-tegra's `tegraflash_custom_post`
+  (it runs after the flash scripts are written, before signing and packing): it copies both files
+  into the package after checking them against `SHA256SUMS-recovery`, and adds their
+  `<filename>` to the `recovery` and `recovery-dtb` entries of `external-flash.xml.in`, checking
+  each size against the partition's and reading the names back with `nvflashxmlparse`.
+  `initrd-flash` copies `external-flash.xml.in` unchanged when it carries no `oem_sign` (this one
+  has none), and `make-sdcard` writes each file raw into its partition, so the box gets the
+  files byte for byte: no signing step wraps them, as on the stock box, whose `recovery` starts
+  with `ANDROID!`.
+
+Measured (2026-10-19, the build of this layer): initramfs 32,006,144 bytes unpacked (30.5 MiB),
+7.1 MiB with xz; `Image` 42,787,328 bytes; boot image 50,278,400 bytes (48 MiB of 80); device tree
+262,833 bytes (of 512 KiB); command line 185 of the header's 511 bytes. The largest parts are
+OpenSSL's `libcrypto` (5.8 MB), `libstdc++` (2.4 MB, for gptfdisk and zstd), glibc and nvme-cli.
+Under qemu-user every binary finds its libraries and `sshd -t` accepts the configuration (it
+notes that this sshd has no `UsePAM`). In the unpacked flash package, `nvflashxmlparse` lists
+partition 9 `recovery` with `fjarr-recovery-rescue.img` and 10 `recovery-dtb` with
+`fjarr-recovery-rescue.dtb`, the files matching `SHA256SUMS-recovery`; `recovery_alt` and
+`recovery-dtb_alt` have none.
+
+**Not yet seen on the box**: it boots there with D1, which writes it on the first Fjarr flash.
+Writing it into the stock box's `recovery` beforehand (B6 T6 with the variables below) is not
+planned: the stock box runs 36.4.4 firmware, and the 36.5.2 kernel with Fjarr's device tree
+belongs to the 36.5.2 firmware D1 brings. Should it be needed, `b6.sh t6` takes this build with
+`B6_A5_DIR=spikes/ota-jetson/out/yocto/build/tmp/deploy/images/zedbox-mini-orin-nx16` (or
+`B6_A5_IMG` and `B6_A5_DTB` naming the two files) and
+`B6_A5_HOSTKEY_PUB=spikes/ota-jetson/.lab/yocto/recovery-ssh/ssh_host_ed25519_key.pub`; the
+defaults stay on the 36.4.4 build. Lab scripts reach the rescue with
+`-o UserKnownHostsFile=.lab/yocto/recovery-ssh/known_hosts -o HostKeyAlias=fjarr-recovery-rescue`.
+
 ## The kernel's watchdog fixes
 
 NVIDIA's 36.5.2 kernel (linux-jammy `l4t-r36.5.2`, `e6b364044e43`, the source meta-tegra
@@ -193,8 +267,8 @@ resets after 120 s even while userspace's watchdog is stopped.
   so in the build itself: without `fjarr-lab-deadman.service` in the root it warns (`bbwarn`) and
   writes `/etc/fjarr/NOT-FOR-THE-BOX` into the root, which the flash scripts (D0, D1) must refuse.
   The port is `rescue/rootfs/usr/sbin/fjarr-lab-deadman` plus a systemd unit.
-- **The rescues** (A5 in `recovery`, which meta-tegra leaves empty; A8 on the network), the
-  flash container, the `.swu` packaging (its `sw-description` with `fjarr,slot-a|b` and
+- **The network rescue** (A8) on 36.5.2 (`rescue/build.sh --l4t 36.5.2` after D1), the flash
+  container, the `.swu` packaging (its `sw-description` with `fjarr,slot-a|b` and
   `hardware-compatibility` `1.0`) and the flash itself (D0, then D1) are other tasks.
 - **Capsule signing** stays on meta-tegra's EDK2 test certificates until the ADR after phase E
   (Q11). `TEGRA_UEFI_LOWEST_SUPPORTED_VERSION` is meta-tegra's default, the L4T version.
@@ -215,7 +289,10 @@ resets after 120 s even while userspace's watchdog is stopped.
 | `meta-fjarr-spike/recipes-bsp/devicetree/` | the board package's device tree (skipped with `FJARR_BOARD_DT = "0"`) |
 | `meta-fjarr-spike/recipes-kernel/linux/` | the watchdog backport |
 | `meta-fjarr-spike/recipes-support/swupdate/` | SWUpdate's defconfig |
-| `meta-fjarr-spike/recipes-core/images/` | `fjarr-spike-image`, `fjarr-spike-initramfs` |
+| `meta-fjarr-spike/recipes-core/images/` | `fjarr-spike-image` (with the hook that fills `recovery`), `fjarr-spike-initramfs`, `fjarr-recovery-rescue-initramfs` |
+| `meta-fjarr-spike/recipes-core/fjarr-recovery-rescue-files/` | the rescue's own files from `../rescue/rootfs/`, `reboot-recovery`, its lab key and host key |
+| `meta-fjarr-spike/recipes-core/fjarr-rescue-busybox/` | poky's BusyBox plus init, `cttyhack` and `watchdog`, for the rescue only |
+| `meta-fjarr-spike/recipes-bsp/recovery/` | `fjarr-recovery-rescue`: the boot image for `recovery` and the device tree for `recovery-dtb` |
 | `meta-fjarr-spike/recipes-core/fjarr-slot-root/` | `/dev/fjarr/root` |
 | `meta-fjarr-spike/recipes-core/fjarr-spike-base/` | network, sshd, watchdog, emergency reboot, `/data`, the trial's health gate and deadline |
 | `meta-fjarr-spike/recipes-core/fjarr-spike-initrd-config/` | the initrd's systemd settings |

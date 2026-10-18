@@ -58,6 +58,8 @@ get_kas() {
 
 # The lab identity, made once (as on x86): the operator's key may log in as root, the host keys
 # stay the same across every image, and SWUpdate checks packages against the lab's test key.
+# The recovery-partition rescue's own host key sits in .lab/yocto/recovery-ssh/, with its
+# known_hosts line.
 # Other 8.0 tasks write elsewhere in .lab/; this one owns .lab/yocto/ and creates .lab/swu.*
 # only if nobody has.
 lab_identity() {
@@ -72,6 +74,12 @@ lab_identity() {
     [ -f "$lab/yocto/ssh/ssh_host_${t}_key" ] || \
       ssh-keygen -q -N '' -t "$t" -C fjarr-lab-zedbox -f "$lab/yocto/ssh/ssh_host_${t}_key"
   done
+  # The recovery-partition rescue (A5) has a host key of its own, so the lab scripts tell it from
+  # the slots and from the network rescue at the same address (HostKeyAlias=fjarr-recovery-rescue).
+  local rk=$lab/yocto/recovery-ssh/ssh_host_ed25519_key
+  install -d -m 0700 "$lab/yocto/recovery-ssh"
+  [ -f "$rk" ] || ssh-keygen -q -N '' -t ed25519 -C fjarr-recovery-rescue -f "$rk"
+  printf 'fjarr-recovery-rescue %s\n' "$(cut -d' ' -f1,2 "$rk.pub")" > "$lab/yocto/recovery-ssh/known_hosts"
   if [ ! -f "$lab/swu.key" ] && [ ! -f "$lab/swu.crt" ]; then
     (umask 077
      openssl req -x509 -newkey rsa:3072 -nodes -days 3650 -subj /CN=fjarr-swu-lab-jetson \

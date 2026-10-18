@@ -137,8 +137,13 @@ xz-compressed initramfs, the command line the UKI's (NVIDIA's `CMDLINE_ADD`, `pa
 **The device tree** is the stock `recovery-dtb` from the backup, cut to the tree's own size
 (244 KiB). It matches none of the BSP's device trees (it is the box's, as Stereolabs flashed it),
 and it is what this kernel already boots with in the stock recovery, so A5 on the stock box
-changes only the image. Fjarr's own device tree goes into `recovery-dtb` with the Yocto recipe
-(D1), which builds A5 again on 36.5.2 with the slot's kernel.
+changes only the image.
+
+**The Yocto build is the D1 version** ([the Yocto spike's README](../yocto/README.md#the-recovery-partition-rescue-a5)):
+the layer builds A5 again from these same files (`rootfs/`, `reboot-recovery.c`, `mkbootimg.py`),
+with the slot's 36.5.2 kernel, Yocto's userland and Fjarr's carrier device tree in
+`recovery-dtb`, and the slot image's flash package writes both partitions on the first Fjarr
+flash (D1). This build, on 36.4.4, stays the one for the stock box (B6 T6).
 
 ## Serving it from the mini-PC: `net-rescue.sh`
 
@@ -238,8 +243,9 @@ through to HTTPv4 first, then PXEv6, then PXEv4.
   modules from the BSP tarball) and serve that.
 - **The lab lock**: `--undo` checks `/run/lock/fjarr-zedbox.lock`, the lock `../lib/lab.sh` takes
   (`LAB_LOCK_FILE`, L1); `FJARR_ZEDBOX_LOCK` follows it if that ever moves.
-- **The recovery-partition rescue** (A5) could carry this initramfs in an Android boot image
-  (23.3 MB unpacked, 7.1 MB with xz, inside its 37 MB budget); it is the Yocto recipe's to build.
+- **The recovery-partition rescue** (A5) on 36.5.2 is the Yocto layer's (30.5 MiB unpacked,
+  7.1 MiB with xz, inside its 37 MB budget; [its README](../yocto/README.md#the-recovery-partition-rescue-a5));
+  it boots on the box with D1.
 
 ## Licences
 

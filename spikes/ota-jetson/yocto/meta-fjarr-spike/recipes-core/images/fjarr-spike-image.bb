@@ -45,6 +45,47 @@ IMAGE_FSTYPES = "ext4 tegraflash"
 TEGRA_EXT4_OPTIONS = "-L fjarr_${FJARR_IMAGE_VERSION}"
 IMAGE_VERSION_SUFFIX = "-${FJARR_IMAGE_VERSION}"
 
+# The recovery-partition rescue (A5) in recovery and recovery-dtb, which meta-tegra leaves empty:
+# its tegraflash_create_flash_config deletes the RECFILE and RECDTB-FILE lines. The package
+# carries fjarr-recovery-rescue's two files and external-flash.xml.in names them for those two
+# partitions (not recovery_alt and recovery-dtb_alt, which NVIDIA's layout leaves empty too), so
+# the first flash (initrd-flash, make-sdcard) writes them as they are. An :append, because
+# image_types_tegra, which defines the empty hook, is inherited after this recipe is parsed.
+FJARR_RECOVERY_FILES = "fjarr-recovery-rescue.img fjarr-recovery-rescue.dtb"
+do_image_tegraflash[depends] += "fjarr-recovery-rescue:do_deploy"
+tegraflash_custom_post:append() {
+    fjarr_recovery_fill external-flash.xml.in
+}
+fjarr_recovery_fill() {
+    local layout="$1" img dtb
+    [ "${TEGRAFLASH_ROOTFS_EXTERNAL}" = "1" ] && [ -f "$layout" ] || \
+        bbfatal "no external flash layout: recovery is on the NVMe in this machine's layout"
+    set -- ${FJARR_RECOVERY_FILES}
+    img=$1
+    dtb=$2
+    (cd ${DEPLOY_DIR_IMAGE} && sha256sum -c --quiet SHA256SUMS-recovery) || \
+        bbfatal "the rescue's files in ${DEPLOY_DIR_IMAGE} do not match SHA256SUMS-recovery"
+    cp ${DEPLOY_DIR_IMAGE}/$img ${DEPLOY_DIR_IMAGE}/$dtb .
+    [ "$(head -c 8 $img)" = "ANDROID!" ] || bbfatal "$img is not an Android boot image"
+    awk -v img="$img" -v dtb="$dtb" -v imgsize=$(stat -c %s $img) -v dtbsize=$(stat -c %s $dtb) '
+        /<partition name="recovery"[ >]/ { want = img; size = imgsize; nimg++ }
+        /<partition name="recovery-dtb"[ >]/ { want = dtb; size = dtbsize; ndtb++ }
+        want != "" && /<filename>/ { bad = "already has a file" }
+        want != "" && /<size>/ { if (size > $2 + 0) bad = want " is larger than its partition (" $2 ")" }
+        want != "" && /<\/partition>/ { print "            <filename> " want " </filename>"; want = "" }
+        { print }
+        END {
+            if (nimg != 1 || ndtb != 1) bad = "expected one recovery and one recovery-dtb partition"
+            if (bad != "") { print bad > "/dev/stderr"; exit 1 }
+        }
+    ' "$layout" > "$layout.fjarr" || bbfatal "could not name the rescue's files in $layout"
+    mv "$layout.fjarr" "$layout"
+    [ "$(${STAGING_BINDIR_NATIVE}/${FLASHTOOLS_DIR}/nvflashxmlparse --get-filename recovery "$layout")" = "$img" ] && \
+        [ "$(${STAGING_BINDIR_NATIVE}/${FLASHTOOLS_DIR}/nvflashxmlparse --get-filename recovery-dtb "$layout")" = "$dtb" ] || \
+        bbfatal "nvflashxmlparse does not read the rescue's files from $layout"
+    bbnote "recovery: $img, recovery-dtb: $dtb"
+}
+
 # meta-tegra's nv_update_verifier marks every boot good at multi-user.target. The applier's
 # fjarr-boot-verify replaces it (it verifies every boot that is not a trial). Masking the
 # verifier with nothing in its place would let a committed slot use up its three retries in
