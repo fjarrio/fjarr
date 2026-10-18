@@ -229,6 +229,44 @@ Rules for every command:
   desktop` created is removed only after its session has ended; when it does
   not end (a display manager's automatic login logs it straight back in), the
   undo says so and keeps the account in the record.
+- **A replaced file's previous contents are kept** under
+  `/var/lib/fjarr/setup-backups/`, and a rerun keeps the first run's copy. A
+  copy can be gone while the record still names it: an undo before 2026-10-05
+  that was stopped between restoring a file and saving the record left the
+  mini-PC's `/etc/gdm3/custom.conf` that way ([M3 gate review, finding
+  18](reviews/m3-gate-review.md)). Then:
+  - **`--undo` names the file and the missing copy, and what to do.** It leaves
+    the file as it is and keeps the entry, like any change it cannot reverse,
+    and exits non-zero. Its last line lists every change it did not undo. The
+    entry is kept so that the record still says the file is not the original.
+    Dropped, the entry would be forgotten, and the next `setup` would copy its
+    own earlier output and let `--undo` "restore" that without a word.
+  - **The next `setup` of that feature heals the entry** before it changes the
+    file. It keeps a new copy of the file as it is at that moment and says so,
+    so `--undo` puts that version back.
+  - **When the file holds setup's own output**, a copy would let `--undo`
+    "restore" setup's output, so setup takes none. It says the original is
+    lost and leaves the entry as it is. Setup's own output is what this run
+    would write, or what an earlier run wrote with other settings, which each
+    file is told by:
+
+    | File | An earlier setup's output when |
+    |---|---|
+    | `/etc/gdm3/custom.conf` | its automatic login names an account the record says `setup desktop` created |
+    | the dconf database `00-fjarr-desktop` | it starts with setup's header |
+    | the dconf profile `/etc/dconf/profile/user` | it has `system-db:local` (setup writes the profile only when that line is missing) |
+    | `/etc/default/grub.d/fjarr-ghosts.cfg` | it has a `# fjarr-ghosts:` line |
+    | `net setup`'s drop-ins and Cyclone DDS file | they say ``Written by `fjarr-agent net setup` `` |
+    | `/etc/tmpfiles.d/fjarr-container.conf` | it starts with setup's header |
+    | `/etc/fjarr/fjarr.toml` | never: it is the customer's file, edited in place, so only this run's output counts |
+
+    The way out is the person's, never setup's guess. Either put the original
+    back by hand (for a package's file, the version it shipped) and run that
+    `setup` again, which copies it; or, when the file as it is now **is** its
+    original (an automatic login set up by hand exactly as setup writes it,
+    say), copy it to the kept copy's name with the command both setup and
+    `--undo` print, `sudo cp -p <file> <kept copy>`. Either way, `--undo`
+    restores it afterwards. No flag does this, so `--yes` never can.
 - **The configuration file stays the customer's.** Setup adds and removes only
   its own keys, prunes the tables they leave empty, and takes a table written
   inline (`"fjarr.desktop" = {}`) like any other.

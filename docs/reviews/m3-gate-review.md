@@ -19,8 +19,8 @@ description: The robot's desktop, promise by promise — met in CI on every push
 > (clipboard non-ASCII under GNOME, separate windows in Firefox, two ghosts plus a real
 > monitor on the new build); and **Erik's answer to the proposed amendments**
 > below, for the criteria this hardware or these browsers cannot meet as
-> written; the backend E mode change on the ghost, finding 18's fix with a
-> clean second `--undo`, and finding 20's spec corrections
+> written; the backend E mode change on the ghost and finding 20's spec
+> corrections
 > ([what closes the gate](#what-closes-the-gate)). No release until then ([docs/17](../17-roadmap.md#m3)); the last tag
 > is still v0.1.2.
 
@@ -47,7 +47,7 @@ on a scheduled night); **not met**; **unverified**; **amendment proposed**.
 | … the same on Firefox | **unverified; amendment proposed** | one line in docs/17 ("and in Firefox", 4b620f8, 2026-10-04) with no record of what was tried. Firefox has no Keyboard Lock, and docs/22's own test plan gives it the degraded path. Needs Erik (below) and amendment 3 |
 | clipboard both ways, non-ASCII, in the fixture and on the mini-PC | met in CI; **unverified on the mini-PC under GNOME** | both fixtures every push: "robot says åäö" read, "operator says ÅÄÖ" pasted, PNG both ways; the lab browser through the real clipboard. The mini-PC under GNOME: copying from the robot failed on 10-03 and was fixed (bf7f427), with no recorded re-test. Under the X11 kiosk (10-05) text and images both ways, non-ASCII not stated. Needs Erik (below). The image write's intermittent timeout stays open (finding 23) |
 | `apt install fjarr-desktop-wayland` plus `setup desktop`, unattended after a reboot | met by hand | the prepare installs the five CI-built packages and runs `setup desktop --ghost-screens 1`, then reboots (`tools/fjarr-lab/unattended.sh`); by hand 2026-10-18 (the debs of c5dba78 from CI run 39076827413's `debs-amd64` artifact, installed by `unattended.sh prepare` from `~/fjarr-byhand-build`) it passed from install to `desktop-scanout`; the workflow's own download and install is what the scheduled night adds. `fjarr-desktop-wayland` depends on the agent and recommends the session package, so `apt install` resolves to the same set. The signed repository has not served M3 packages (no release since v0.1.2, by the rule) |
-| `--undo desktop` restores it | **not met on the mini-PC**; met in the install test | **run by the review** on the mini-PC 2026-10-18 (below): every change setup made was reversed except one: `/etc/gdm3/custom.conf` still logs in the account the undo deleted, because its backup has been gone since 2026-10-05 and the nightly discards the undo's exit status (finding 18). The install test in a clean container passes every push (39110004862), including `--x11` and `--container` |
+| `--undo desktop` restores it | **met by hand on the mini-PC** after finding 18's fix; met in the install test | **run by the review** on the mini-PC 2026-10-18 (below): at first every change setup made was reversed except one: `/etc/gdm3/custom.conf` still logged in the account the undo deleted, because its backup had been gone since 2026-10-05 and the nightly discarded the undo's exit status (finding 18). **After the fix, 11:28 to 11:31** ([below](#undo-repair)): `--undo desktop` exit 0 with nothing left in the record, `custom.conf` byte for byte gdm3's conffile (md5 `fca2d9e8…`, as `dpkg-query` records it), the account, ghosts, dconf files and watchdog gone; a second `--undo desktop` "nothing recorded for desktop", exit 0. The nightly prepare undoes with the `fjarr-setup` the previous night installed, so the heal and the undo's new messages reach a night only once a build with the fix is installed (by the first night's prepare after the push; the night after undoes with it). `FAIL undo` is the checkout's `unattended.sh` and applies from the first night. The install test in a clean container passes every push (39110004862), including `--x11` and `--container` |
 | the mini-PC headless with two ghosts plus a real monitor, all streaming with distinct ids | met by hand on 2026-10-11; **not repeated since ADR-0041** | **run by the review** (2026-10-11, after finding 1): ghost 1, ghost 2 and a Dell, three pictures, distinct ids, one primary, GPU memory flat at ~70 MB. The nightly uses one ghost, and today only HDMI-1 (the ghost) is connected. The capture path has changed since (c5dba78: DMA-BUF for physical monitors), so a re-run needs a Dell connected: Erik (below) |
 | slice 3.4 done-when: the hot-plug criteria with a real monitor, the DisplayPort chain and two ghosts | **not met as written; amendment proposed** | impossible on this machine: its GPU has four display pipes, and two ghosts plus the three-monitor chain is five; mutter lit one monitor, a ghost (finding 7). What hardware has shown is in the rows above. Amendment 1 |
 | an X11 kiosk from `fjarr-desktop-x11` | met | the mini-PC by hand, 2026-10-05: LightDM's automatic login into Openbox from the packages and `setup desktop --x11`; every monitor with its GNOME id, input with åäö, the local cursor, clipboard text and images, unplug and re-plug. `make x11-e2e` every push (39110004862), against the dev build rather than the package; the install test covers the package's setup and undo. Backend A is untouched by ADR-0041 |
@@ -80,6 +80,33 @@ setup desktop --yes --account desktop --ghost-screens 1`, then a reboot; at
 11:07 the desktop held seat0 and the agent logged "capture of HDMI-1: DMA-BUF
 AR24:0x0200000000000901, into the encoder without a copy".
 
+### Repaired with finding 18's fix (2026-10-18) {#undo-repair}
+
+**Run by the review**, 11:28 to 11:31 CEST, with `fjarr-setup` built from the
+fix as the packaging builds it (`cargo build --release --locked -p
+fjarr-setup` in the `fjarr-deb-builder` image, on c5dba78 plus the fix only)
+and copied over `/usr/lib/fjarr/fjarr-setup`; the package's binary was put
+back before the reboot (`dpkg --verify fjarr-setup` clean).
+
+1. `setup desktop --yes --account desktop --ghost-screens 1 --reboot no` on
+   the stranded record: setup warned that `custom.conf`'s kept copy is gone
+   and the file already holds what setup writes, so its original is lost and
+   no copy was taken. It also added a second ghost on DP-1:
+   `--ghost-screens N` adds N on every run (carried forward).
+2. `custom.conf` put back by hand from gdm3 50.1-0ubuntu0.1's package
+   (`apt-get download`, md5 equal to dpkg's conffile record), then `setup
+   desktop --yes --account desktop --reboot no`: "kept a fresh copy of the file
+   as it is now, before changing it". The copy is the conffile.
+3. `--undo desktop`: every entry reversed, `custom.conf` restored to the
+   conffile, `update-grub`, `--check` OK, exit 0.
+4. `--undo desktop` again: "nothing recorded for desktop", exit 0.
+5. `setup desktop --yes --account desktop --ghost-screens 1 --reboot no`
+   (one ghost, on HDMI-A-1; the copy of `custom.conf` is the conffile), the
+   package's `fjarr-setup` back, a reboot at 11:30:10. By 11:30:47 `desktop`
+   held seat0 and the agent logged "hello sent robot_id=demo-robot-03" and
+   "capture of HDMI-1: DMA-BUF AR24:0x0200000000000901, into the encoder
+   without a copy".
+
 ## What the review found
 
 | # | Severity | Finding | Resolution |
@@ -101,7 +128,7 @@ AR24:0x0200000000000901, into the encoder without a copy".
 | 15 | medium | **Desktop notifications kept the test window from being scanned out.** NetworkManager tried DHCP on the ZED Box Mini's USB gadget network (its recovery cable on the mini-PC) every few minutes and posted "Connection failed" banners, which composite over the fullscreen window, so the scanout check could not exercise the path it exists for | on the mini-PC, by hand 2026-10-18: `/etc/NetworkManager/conf.d/90-fjarr-lab-zedbox-usb.conf` leaves those two MACs unmanaged. It is not in the repository's lab setup: carried forward |
 | 16 | medium | **The desktop fixtures' intermittent "no frames"**, about 2 % of fixture starts in CI from 10-03 to 10-14. It was not ICE (the `selected_pair=""` opsim printed is a field the agent never fills); the capture's PipeWire stream was never linked because no session manager worked. The fixtures started WirePlumber and PipeWire at the same instant, and WirePlumber 0.5.13 exits for good when its one connect fails; starting it first reproduces the whole signature | WirePlumber starts once PipeWire accepts connections, restarts with each exit logged, and the fixture fails readiness without a default output; "no frames" now says whether the robot sent RTP at all (5b864a3, `docker/lab/fixture-startup-test.sh`). The race cannot happen on the new start, so the hypothesis holds if the signature and every WirePlumber exit stay absent over ~150 fixture starts: 8 CI runs with the desktop jobs since, "no WirePlumber exit logged" in each. Carried forward until the count is reached |
 | 17 | medium | **Two nights lost to a power cut.** The mini-PC was off from 10-14 21:17 to 10-16 21:50 with no shutdown in its journal: its firmware does not power on when power returns | [docs/12](../12-development-environment.md#lab-machines-and-fjarr-lab) (91a550d): lab machines power on after AC loss; the mini-PC's firmware setting is pending (Erik) |
-| 18 | medium | **`--undo desktop` leaves GDM logging in a deleted account on the mini-PC.** On 2026-10-05 an undo interrupted during `update-grub` (Ctrl-C) had already restored `custom.conf` and removed its backup without saving the record. 26453b3 made the undo save the record after each change, but did not repair the entry already stranded. Since then `setup desktop`'s `write_file` sees the existing record entry and never takes a new backup, so every undo fails on it, unseen because `unattended.sh prepare` discards the undo's output and status (`>/dev/null 2>&1 \|\| true`). Shown by the review's run above: exit 1, `AutomaticLogin=desktop` with no `desktop` | open (fix in `fjarr-setup` and in `unattended.sh`'s handling of the undo's status, then a clean second `--undo`) |
+| 18 | medium | **`--undo desktop` leaves GDM logging in a deleted account on the mini-PC.** On 2026-10-05 an undo interrupted during `update-grub` (Ctrl-C) had already restored `custom.conf` and removed its backup without saving the record. 26453b3 made the undo save the record after each change, but did not repair the entry already stranded. Since then `setup desktop`'s `write_file` sees the existing record entry and never takes a new backup, so every undo fails on it, unseen because `unattended.sh prepare` discards the undo's output and status (`>/dev/null 2>&1 \|\| true`). Shown by the review's run above: exit 1, `AutomaticLogin=desktop` with no `desktop` | **fixed 2026-10-18** ([docs/26](../26-robot-install-and-drivers.md#the-setup-tool)): setup heals an entry whose copy is gone, taking a fresh copy of the file before changing it and saying so, or, when the file already holds setup's output, taking none and saying the original is lost; `--undo` names a missing copy and what to do, and its last line lists what it did not undo. `unattended.sh prepare` logs the undo to `undo-desktop.log` and fails as `FAIL undo` when it exits non-zero ([docs/15](../15-testing-strategy.md#the-desktop-test-lab)). A file holding an earlier setup's output, not only this run's, is never kept as the original: each file says how an earlier output is told (docs/26's table), and a person who knows the file is its original copies it to the kept copy's name with the command both messages print. Unit tests reproduce the stranded entry: a fresh copy taken before the write; none for this run's or an earlier run's output; a file that is gone; the undo naming the missing copy; a person's copy then restored; an intact entry left alone. The two that run the heal through `write_file` fail without it. `tools/fjarr-lab/test.sh` runs the prepare against a stubbed undo: `FAIL undo` and exit 1 on a failed one, `PASS undo` on a clean one. On the mini-PC, repaired and undone twice cleanly ([above](#undo-repair)), with a build of the fix before the earlier-output check and the way out were added. The nightly prepare undoes with the `fjarr-setup` the previous night installed, so the heal and the new messages reach a night only once a build with the fix is installed; `FAIL undo` (the checkout's) applies from the first night |
 | 19 | low | The undo removes `/etc/dconf/db/local.d/00-fjarr-desktop` and the profile, and runs `dconf update`, which leaves the compiled `/etc/dconf/db/local` it built earlier. Inert, as no profile names it any more, but a file setup made that undo does not remove | open: record the compiled database as a file setup created when it did not exist before |
 | 20 | medium | **The specs claim more than the tests do.** [docs/15](../15-testing-strategy.md#the-desktop-test-lab) says the mini-PC nightly covers ghosts beside a real monitor, the three-monitor chain, hot-plug on real connectors and input-to-photon against the budgets; it runs see, control and scanout on one ghost, and its photon is not a number of record by docs/15's own rule. docs/15's fault table says the fixture recovers from zero monitors; `desktop-hotplug` never removes its first. [docs/16](../16-performance-budgets.md)'s "no frames dropped on the others" rests on a GNOME gap measurement | open: correct the three texts to what runs, or build what they claim |
 | 21 | low | **The Nightly's netem `wifi-ok` verdict depends on when the agent demotes.** opsim expects the active tier for the whole 5 s window (≥ 100 encoded units); the agent demotes to the 5 fps thumbnail tier when opsim's receiver over-reports loss under jitter, which the table's own comment calls right. Demoted at 3.0 s on 10-17: 90 units, red; at 4.2 s on 10-15: 126 units, wifi-ok green (that night was red on `lossy`); 10-18 (39106826888): 149 units, green. Not an M3 criterion, but it reds the night and keeps #1 open | open |
@@ -190,8 +217,7 @@ Proposals only: docs/17 and docs/06 are unchanged until Erik accepts them.
   Nightly green (finding 21).
 
 **Needs no person, not yet done:** the backend E mode change on the ghost
-(amendment 5); finding 18's fix and a second `--undo` run that leaves nothing
-behind; the corrections of finding 20. When the gate is met, docs/17's
+(amendment 5); the corrections of finding 20. When the gate is met, docs/17's
 status table gets its M3 row linking this review.
 
 **Done 2026-10-18, no person needed:**
@@ -201,6 +227,10 @@ status table gets its M3 row linking this review.
   (the promise's row above). Met for c5dba78; if amendment 6 is accepted and
   the gate closes on a later build that changes the capture, encode or input
   path, repeat this run.
+- Finding 18's fix, and on the mini-PC an `--undo desktop` that left
+  nothing behind, then a second with nothing to do
+  ([the repair](#undo-repair)). The nightly reaches the fix's `fjarr-setup`
+  only once a build with it is installed (finding 18).
 
 ## Carried forward
 
@@ -213,6 +243,12 @@ status table gets its M3 row linking this review.
   fixture starts in CI.
 - **The offer a browser never answered** (2026-10-05): the trigger is gone and
   the page recovers on its own; the cause is not known.
+- **`setup desktop --ghost-screens N` adds N ghosts on every run** (found
+  2026-10-18 in [the repair](#undo-repair): a rerun on a set-up machine added
+  DP-1 beside HDMI-A-1). The nightly is not affected, because it undoes first.
+  A person rerunning setup gets one more ghost each time.
+  [docs/26](../26-robot-install-and-drivers.md#ghost-screens) should say
+  whether N is a count to reach or a number to add.
 - **An X11 kiosk with the agent in a container** is specified, not built; the
   X11 fixture runs the dev build, not the package.
 - **`display add-ghost` does not count display pipes** (finding 7).

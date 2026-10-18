@@ -409,8 +409,38 @@ fn print_options() -> Result<()> {
     Ok(())
 }
 
-fn write_recorded(record: &mut Record, path: &Path, contents: &str) -> Result<()> {
-    record.write_file(FEATURE, path, contents, Path::new(crate::changes::BACKUPS))
+/// Write `path`, keeping what was there for `--undo`; `ours` says which earlier contents are an
+/// earlier setup's output, never kept as the original (docs/26#the-setup-tool).
+fn write_recorded(
+    record: &mut Record,
+    path: &Path,
+    contents: &str,
+    ours: &dyn Fn(&str) -> bool,
+) -> Result<()> {
+    record.write_file(
+        FEATURE,
+        path,
+        contents,
+        Path::new(crate::changes::BACKUPS),
+        ours,
+    )
+}
+
+/// GDM's configuration as an earlier `setup desktop` left it: it logs in an account the record
+/// says setup created. No original names one, since setup made it later.
+pub fn gdm_conf_is_ours(conf: &str, created: &[String]) -> bool {
+    gdm_autologin_user(conf).is_some_and(|u| created.contains(&u))
+}
+
+/// Setup's own dconf database, whatever its settings: its header.
+fn dconf_db_is_ours(text: &str) -> bool {
+    text.starts_with("# Written by `fjarr-agent setup desktop`")
+}
+
+/// The dconf profile as setup leaves it. Setup writes it only when `system-db:local` is missing, so
+/// an original never has that line.
+fn dconf_profile_is_ours(text: &str) -> bool {
+    text.lines().any(|l| l.trim() == "system-db:local")
 }
 
 fn set_value(
@@ -665,15 +695,27 @@ pub async fn setup(config_path: &Path, state: &Path, args: DesktopArgs) -> Resul
 
     // 2. GDM logs it in at boot; nothing locks or blanks its screen.
     let gdm = std::fs::read_to_string(GDM_CONF).unwrap_or_default();
+    let created = record.accounts_created(FEATURE);
     write_recorded(
         &mut record,
         Path::new(GDM_CONF),
         &gdm_autologin(&gdm, &account),
+        &|t| gdm_conf_is_ours(t, &created),
     )?;
     log::success(format!("Auto-login enabled for {account} in GDM"))?;
-    write_recorded(&mut record, Path::new(DCONF_DB), dconf_db_text())?;
+    write_recorded(
+        &mut record,
+        Path::new(DCONF_DB),
+        dconf_db_text(),
+        &dconf_db_is_ours,
+    )?;
     if let Some(p) = dconf_profile(std::fs::read_to_string(DCONF_PROFILE).ok().as_deref()) {
-        write_recorded(&mut record, Path::new(DCONF_PROFILE), &p)?;
+        write_recorded(
+            &mut record,
+            Path::new(DCONF_PROFILE),
+            &p,
+            &dconf_profile_is_ours,
+        )?;
     }
     record.add(FEATURE, Change::DconfUpdate);
     if let Err(e) = system::run("dconf", &["update"]) {
@@ -691,7 +733,7 @@ pub async fn setup(config_path: &Path, state: &Path, args: DesktopArgs) -> Resul
     // first-login wizard for the upgrade one, at every boot (the mini-PC, 2026-10-17; docs/26).
     let done = home.join(INITIAL_SETUP_DONE);
     if !done.exists() {
-        write_recorded(&mut record, &done, "yes")?;
+        write_recorded(&mut record, &done, "yes", &crate::changes::only_its_output)?;
         let _ = std::os::unix::fs::lchown(&done, Some(uid), Some(gid));
     }
     let unmasked = mask_initial_setup(&mut record, state, &home, uid, gid)?;
@@ -769,6 +811,7 @@ pub async fn setup(config_path: &Path, state: &Path, args: DesktopArgs) -> Resul
                  # socket directory, bind-mounted into the agent's container, belongs to its uid.\n\
                  d /run/fjarr 0755 {CONTAINER_AGENT_UID} {CONTAINER_AGENT_UID} -\n"
             ),
+            &|t| t.starts_with("# fjarr-setup setup desktop --container"),
         )?;
         let _ = system::run("systemd-tmpfiles", &["--create", CONTAINER_TMPFILES]);
         log::success(format!(
@@ -887,6 +930,35 @@ mod tests {
             Some(""),
             "switched off: an empty value wins too"
         );
+    }
+
+    /// A stranded entry's file is never kept as the original when an earlier `setup desktop` wrote
+    /// it, whichever account it named then (docs/26#the-setup-tool).
+    #[test]
+    fn an_earlier_setups_files_are_told_from_originals() {
+        let created = vec!["desktop".to_string()];
+        let ubuntu = "[daemon]\n#  AutomaticLoginEnable = true\n#  AutomaticLogin = user1\n";
+        assert!(!gdm_conf_is_ours(ubuntu, &created), "gdm3's conffile");
+        assert!(gdm_conf_is_ours(
+            &gdm_autologin(ubuntu, "desktop"),
+            &created
+        ));
+        assert!(
+            !gdm_conf_is_ours(&gdm_autologin(ubuntu, "erik"), &created),
+            "an account setup did not create may be the customer's own automatic login"
+        );
+        assert!(!gdm_conf_is_ours(
+            &gdm_autologin(ubuntu, "desktop"),
+            &["kiosk".to_string()]
+        ));
+        assert!(dconf_db_is_ours(dconf_db_text()));
+        assert!(!dconf_db_is_ours(
+            "[org/gnome/desktop/screensaver]\nlock-enabled=true\n"
+        ));
+        assert!(dconf_profile_is_ours(
+            &dconf_profile(Some("user-db:user\n")).unwrap()
+        ));
+        assert!(!dconf_profile_is_ours("user-db:user\n"));
     }
 
     #[test]

@@ -137,27 +137,42 @@ impl Record {
         f
     }
 
+    /// The accounts `feature` recorded as created: what an earlier run's files may name.
+    pub fn accounts_created(&self, feature: &str) -> Vec<String> {
+        self.changes
+            .iter()
+            .filter(|e| e.feature == feature)
+            .filter_map(|e| match &e.change {
+                Change::AccountCreated { user } => Some(user.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Write `path`, keeping what was there under `backups` for `--undo`, and record it. On a
     /// rerun the first run's backup is the one kept, on disk as in the record (see `add`): the
-    /// second run must not replace the customer's file with the first run's output.
+    /// second run must not replace the customer's file with the first run's output. A recorded
+    /// backup that is gone is healed first (`heal_backup`), and what it did is said. `ours` says
+    /// whether contents other than `contents` are an earlier setup's output (its header, an
+    /// account the record created): such a file is never kept as the original.
     pub fn write_file(
         &mut self,
         feature: &str,
         path: &Path,
         contents: &str,
         backups: &Path,
+        ours: &dyn Fn(&str) -> bool,
     ) -> Result<()> {
+        if let Some(note) = self.heal_backup(feature, path, contents, ours)? {
+            cliclack::log::warning(note)?;
+        }
         let already = self.changes.iter().any(|e| {
             e.feature == feature && matches!(&e.change, Change::File { path: p, .. } if p == path)
         });
         let backup = match std::fs::read(path) {
             Ok(_) if already => None,
             Ok(old) => {
-                let name = path
-                    .to_string_lossy()
-                    .trim_start_matches('/')
-                    .replace('/', "%");
-                let b = backups.join(name);
+                let b = backups.join(backup_name(path));
                 std::fs::create_dir_all(backups)?;
                 std::fs::write(&b, old)
                     .with_context(|| format!("keeping a copy of {}", path.display()))?;
@@ -178,6 +193,124 @@ impl Record {
             },
         );
         Ok(())
+    }
+
+    /// A recorded file whose kept copy is gone: an undo before 26453b3 (2026-10-05) stopped
+    /// between restoring the file and saving the record, and every rerun since saw the entry and
+    /// took no copy, so `--undo` could never restore it (M3 gate review, finding 18). Before `path`
+    /// is written over, keep a fresh copy of it as it is now under the recorded name, or, when it
+    /// is gone, record that there was none. When it already holds `contents` or what `ours` takes
+    /// for an earlier setup's output, a copy would let `--undo` "restore" setup's output, so none
+    /// is taken and the entry stays as it is until the original is put back by hand (or the file
+    /// is copied to the kept copy's name by a person who knows it is the original). The note says
+    /// which; none when the entry is not stranded.
+    /// spec: docs/26-robot-install-and-drivers.md#the-setup-tool
+    pub fn heal_backup(
+        &mut self,
+        feature: &str,
+        path: &Path,
+        contents: &str,
+        ours: &dyn Fn(&str) -> bool,
+    ) -> Result<Option<String>> {
+        let Some(entry) = self.changes.iter_mut().find(|e| {
+            e.feature == feature && matches!(&e.change, Change::File { path: p, .. } if p == path)
+        }) else {
+            return Ok(None);
+        };
+        let Change::File {
+            backup: Some(b), ..
+        } = &entry.change
+        else {
+            return Ok(None);
+        };
+        if !copy_is_gone(b)? {
+            return Ok(None);
+        }
+        let b = b.clone();
+        let gone = format!(
+            "{}: the copy of its previous contents that setup kept for `--undo` ({}) is gone",
+            path.display(),
+            b.display()
+        );
+        match std::fs::read(path) {
+            Ok(now) if now == contents.as_bytes() || std::str::from_utf8(&now).is_ok_and(ours) => {
+                Ok(Some(format!(
+                    "{gone}, and the file already holds {}, so its original is lost. No copy \
+                     taken: `--undo {feature}` leaves the file as it is and says so. Put its \
+                     original back by hand (a package's file: the version it shipped), then run \
+                     this setup again, which keeps a copy of it. If the file as it is now is its \
+                     original, `{}` makes it the copy `--undo` restores",
+                    if now == contents.as_bytes() {
+                        "what setup writes"
+                    } else {
+                        "an earlier setup's output"
+                    },
+                    keep_as_original(path, &b)
+                )))
+            }
+            Ok(now) => {
+                if let Some(dir) = b.parent() {
+                    std::fs::create_dir_all(dir)?;
+                }
+                std::fs::write(&b, now)
+                    .with_context(|| format!("keeping a copy of {}", path.display()))?;
+                Ok(Some(format!(
+                    "{gone}: kept a fresh copy of the file as it is now, before changing it, so \
+                     `--undo {feature}` puts this version back"
+                )))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                entry.change = Change::File {
+                    path: path.to_path_buf(),
+                    backup: None,
+                };
+                Ok(Some(format!(
+                    "{gone}, and so is the file: recorded as setup's own, so `--undo {feature}` \
+                     removes it"
+                )))
+            }
+            Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
+        }
+    }
+}
+
+/// For a caller whose files carry nothing that marks them as setup's: only `contents` itself is.
+pub fn only_its_output(_: &str) -> bool {
+    false
+}
+
+/// The command a person runs to say a file whose kept copy is gone is its original as it is now:
+/// setup never decides that on its own (docs/26#the-setup-tool).
+pub fn keep_as_original(path: &Path, backup: &Path) -> String {
+    format!("sudo cp -p {} {}", shell_quote(path), shell_quote(backup))
+}
+
+/// A path for a command line: a backup's `%` is harmless to a shell; anything else odd is quoted.
+fn shell_quote(p: &Path) -> String {
+    let s = p.display().to_string();
+    if s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || "/%._-".contains(c))
+    {
+        s
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}
+
+/// Where `path`'s previous contents are kept under the backups directory: the path with `/` as
+/// `%`.
+fn backup_name(path: &Path) -> String {
+    path.to_string_lossy()
+        .trim_start_matches('/')
+        .replace('/', "%")
+}
+
+/// True when a kept copy is gone (not merely unreadable: that is an error, said as one).
+pub fn copy_is_gone(backup: &Path) -> Result<bool> {
+    match std::fs::symlink_metadata(backup) {
+        Ok(_) => Ok(false),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(e) => Err(e).with_context(|| format!("looking for {}", backup.display())),
     }
 }
 
@@ -316,7 +449,8 @@ mod tests {
         let backups = dir.path().join("backups");
         let target = dir.path().join("etc/fjarr/fjarr.toml");
         let mut r = Record::default();
-        r.write_file("setup", &target, "new\n", &backups).unwrap();
+        r.write_file("setup", &target, "new\n", &backups, &only_its_output)
+            .unwrap();
         assert_eq!(
             r.changes[0].change,
             Change::File {
@@ -326,9 +460,9 @@ mod tests {
         );
         std::fs::write(&target, "customer edit\n").unwrap();
         let mut r2 = Record::default();
-        r2.write_file("setup", &target, "run one\n", &backups)
+        r2.write_file("setup", &target, "run one\n", &backups, &only_its_output)
             .unwrap();
-        r2.write_file("setup", &target, "run two\n", &backups)
+        r2.write_file("setup", &target, "run two\n", &backups, &only_its_output)
             .unwrap();
         let Change::File {
             backup: Some(b), ..
@@ -338,6 +472,188 @@ mod tests {
         };
         assert_eq!(std::fs::read_to_string(b).unwrap(), "customer edit\n");
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "run two\n");
+    }
+
+    /// A recorded file, then an undo stopped between restoring it and saving the record (before
+    /// 26453b3): the file is the original again, its copy is gone, the entry is still there.
+    fn stranded(dir: &Path, original: &str, ours: &str) -> (Record, PathBuf, PathBuf) {
+        let backups = dir.join("backups");
+        let target = dir.join("etc/gdm3/custom.conf");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, original).unwrap();
+        let mut r = Record::default();
+        r.write_file("desktop", &target, ours, &backups, &only_its_output)
+            .unwrap();
+        let Change::File {
+            backup: Some(copy), ..
+        } = r.changes[0].change.clone()
+        else {
+            panic!("{:?}", r.changes);
+        };
+        std::fs::copy(&copy, &target).unwrap();
+        std::fs::remove_file(&copy).unwrap();
+        (r, target, copy)
+    }
+
+    /// M3 gate review, finding 18: before the heal, a rerun saw the entry and took no copy, so the
+    /// original was overwritten with nothing for `--undo` to restore it from.
+    #[test]
+    fn a_rerun_heals_a_stranded_entry_with_a_fresh_copy_before_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut r, target, copy) = stranded(dir.path(), "original\n", "ours\n");
+        let note = r
+            .heal_backup("desktop", &target, "ours\n", &only_its_output)
+            .unwrap();
+        assert!(
+            note.as_deref().is_some_and(|n| n.contains("fresh copy")),
+            "{note:?}"
+        );
+        assert_eq!(std::fs::read_to_string(&copy).unwrap(), "original\n");
+        // Healed: nothing more to say on the next run.
+        assert_eq!(
+            r.heal_backup("desktop", &target, "ours\n", &only_its_output)
+                .unwrap(),
+            None
+        );
+        // The whole rerun, from the stranded state again.
+        let dir = tempfile::tempdir().unwrap();
+        let (mut r, target, copy) = stranded(dir.path(), "original\n", "ours\n");
+        r.write_file(
+            "desktop",
+            &target,
+            "ours\n",
+            &dir.path().join("backups"),
+            &only_its_output,
+        )
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(&copy).unwrap(), "original\n");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "ours\n");
+        assert_eq!(
+            r.changes,
+            vec![Entry {
+                feature: "desktop".into(),
+                change: Change::File {
+                    path: target,
+                    backup: Some(copy)
+                }
+            }]
+        );
+    }
+
+    /// A file that already holds setup's output (the mini-PC since 2026-10-05): a copy would let
+    /// `--undo` "restore" setup's own output, so none is taken and the original is said lost.
+    #[test]
+    fn a_stranded_file_already_holding_setups_output_gets_no_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut r, target, copy) = stranded(dir.path(), "original\n", "ours\n");
+        std::fs::write(&target, "ours\n").unwrap();
+        let before = r.changes.clone();
+        let note = r
+            .heal_backup("desktop", &target, "ours\n", &only_its_output)
+            .unwrap();
+        assert!(
+            note.as_deref()
+                .is_some_and(|n| n.contains("original is lost")),
+            "{note:?}"
+        );
+        assert!(!copy.exists());
+        assert_eq!(
+            r.changes, before,
+            "the entry must still say the file is not the original"
+        );
+        // The way out for a person who knows the file is its original, named in the note.
+        let note = note.unwrap();
+        assert!(note.contains(&keep_as_original(&target, &copy)), "{note}");
+    }
+
+    /// An earlier setup's output, not this run's (another account then, say): byte equality alone
+    /// would take it for the original and let `--undo` restore setup's own earlier output.
+    #[test]
+    fn a_stranded_file_holding_an_earlier_setups_output_gets_no_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut r, target, copy) = stranded(dir.path(), "original\n", "# fjarr: ours, run two\n");
+        std::fs::write(&target, "# fjarr: ours, run one\n").unwrap();
+        let ours = |t: &str| t.starts_with("# fjarr:");
+        let before = r.changes.clone();
+        let note = r
+            .heal_backup("desktop", &target, "# fjarr: ours, run two\n", &ours)
+            .unwrap();
+        assert!(
+            note.as_deref()
+                .is_some_and(|n| n.contains("an earlier setup's output")),
+            "{note:?}"
+        );
+        assert!(!copy.exists());
+        assert_eq!(r.changes, before);
+        // The same file not taken for setup's by the caller: copied, as any other contents are.
+        let note = r
+            .heal_backup(
+                "desktop",
+                &target,
+                "# fjarr: ours, run two\n",
+                &only_its_output,
+            )
+            .unwrap();
+        assert!(note.is_some_and(|n| n.contains("fresh copy")));
+        assert_eq!(
+            std::fs::read_to_string(&copy).unwrap(),
+            "# fjarr: ours, run one\n"
+        );
+    }
+
+    #[test]
+    fn the_keep_as_original_command_quotes_what_a_shell_would_split() {
+        assert_eq!(
+            keep_as_original(
+                Path::new("/etc/gdm3/custom.conf"),
+                Path::new("/var/lib/fjarr/setup-backups/etc%gdm3%custom.conf")
+            ),
+            "sudo cp -p /etc/gdm3/custom.conf /var/lib/fjarr/setup-backups/etc%gdm3%custom.conf"
+        );
+        assert_eq!(
+            keep_as_original(Path::new("/home/a b/it's"), Path::new("/b")),
+            "sudo cp -p '/home/a b/it'\\''s' /b"
+        );
+    }
+
+    #[test]
+    fn a_stranded_file_that_is_gone_is_recorded_as_setups_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut r, target, _) = stranded(dir.path(), "original\n", "ours\n");
+        std::fs::remove_file(&target).unwrap();
+        assert!(r
+            .heal_backup("desktop", &target, "ours\n", &only_its_output)
+            .unwrap()
+            .is_some());
+        assert_eq!(
+            r.changes[0].change,
+            Change::File {
+                path: target,
+                backup: None
+            }
+        );
+    }
+
+    #[test]
+    fn an_entry_with_its_copy_in_place_or_another_features_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let backups = dir.path().join("backups");
+        let target = dir.path().join("f");
+        std::fs::write(&target, "original\n").unwrap();
+        let mut r = Record::default();
+        r.write_file("desktop", &target, "ours\n", &backups, &only_its_output)
+            .unwrap();
+        assert_eq!(
+            r.heal_backup("desktop", &target, "x\n", &only_its_output)
+                .unwrap(),
+            None
+        );
+        std::fs::remove_dir_all(&backups).unwrap();
+        assert_eq!(
+            r.heal_backup("net", &target, "x\n", &only_its_output)
+                .unwrap(),
+            None
+        );
     }
 
     #[test]

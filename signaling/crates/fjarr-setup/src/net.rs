@@ -107,7 +107,19 @@ pub fn cyclone_xml(tunnel: &str, lan: &str, self_addr: Ipv4Addr, operator: Ipv4A
 
 /// Write `path`, keeping what was there for `--undo`, and record it under this feature.
 fn write_recorded(record: &mut Record, path: &Path, contents: &str) -> Result<()> {
-    record.write_file(FEATURE, path, contents, Path::new(crate::changes::BACKUPS))
+    record.write_file(
+        FEATURE,
+        path,
+        contents,
+        Path::new(crate::changes::BACKUPS),
+        &is_ours,
+    )
+}
+
+/// An earlier `net setup`'s file, whatever its settings: the drop-ins and the Cyclone file both
+/// say who wrote them (docs/26#the-setup-tool: never kept as an original).
+fn is_ours(text: &str) -> bool {
+    text.contains("Written by `fjarr-agent net setup`")
 }
 
 /// What `net setup` would do, for a system it does not change (docs/26#the-setup-tool).

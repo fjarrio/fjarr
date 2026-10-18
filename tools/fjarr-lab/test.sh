@@ -126,6 +126,25 @@ contains "report fails on a failed verdict" "$(rep --prepare-run 1111)" "rc=1"
 cat /proc/sys/kernel/random/boot_id > "$U/unattended/boot-id"
 contains "report says 'not yet' before the reboot" "$(rep --prepare-run 1111)" "rc=75"
 
+# unattended.sh prepare: an undo that fails fails the job by name, instead of being discarded as it
+# was until finding 18 (M3 gate review; docs/15#the-desktop-test-lab). Root is faked with `id`; an
+# undo that passes goes on to the install, which fails here on the empty build directory.
+P="$T/prepare"; mkdir -p "$P/bin" "$P/build"
+printf '#!/usr/bin/env bash\necho 0\n' > "$P/bin/id"
+chmod +x "$P/bin/id"
+undo_stub() { printf '#!/usr/bin/env bash\nprintf "%%s\\n" %s\nexit %s\n' "$1" "$2" > "$P/bin/fjarr-agent"; chmod +x "$P/bin/fjarr-agent"; }
+prep() { FJARR_LAB_STATE="$P/state" PATH="$P/bin:$T/bin:$PATH" bash "$(dirname "$0")/unattended.sh" prepare "$P/build" test-run 2>&1; echo "rc=$?"; }
+undo_stub "'│  /etc/gdm3/custom.conf is not restored' $'\e[31m└\e[0m  not undone, each warned about above and kept in /var/lib/fjarr/setup-changes.json: /etc/gdm3/custom.conf'" 1
+out=$(prep)
+contains "prepare fails on a failed undo" "$out" "FAIL undo: setup --undo desktop exited non-zero"
+contains "and stops there" "$out" "rc=1"
+contains "and prints the undo's last line, colours stripped" "$out" "└  not undone, each warned about above"
+if grep -q "FAIL install" <<<"$out"; then bad "prepare went on after a failed undo"; else ok "prepare did not go on after a failed undo"; fi
+undo_stub "$'\e[32m└\e[0m  undone'" 0
+out=$(prep)
+contains "prepare passes a clean undo by name" "$out" "PASS undo: undone · $P/state/unattended/undo-desktop.log"
+contains "and goes on to the install" "$out" "FAIL install"
+
 rm -rf "$T"
 echo "lab-test: $([ $fails -eq 0 ] && echo 'all passed' || echo "$fails failed")"
 exit $((fails > 0))

@@ -384,7 +384,15 @@ pub async fn setup(
     }
     let mut record = Record::load(state)?;
     system::ensure_state_dir(Path::new(STATE_DIR), &account)?;
-    record.write_file(FEATURE, config_path, &doc.to_string(), Path::new(BACKUPS))?;
+    // The configuration is the customer's file, edited in place: any earlier contents are a
+    // version they may want back, so only this run's output is taken for setup's.
+    record.write_file(
+        FEATURE,
+        config_path,
+        &doc.to_string(),
+        Path::new(BACKUPS),
+        &crate::changes::only_its_output,
+    )?;
     record.save(state)?;
     match system::set_owner_mode(config_path, "root", &account, 0o640) {
         Ok(()) => {}

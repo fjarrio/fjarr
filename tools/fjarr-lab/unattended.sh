@@ -51,8 +51,17 @@ prepare() {
   local run=${2:-${GITHUB_RUN_ID:-by hand}}
   mkdir -p "$STATE"
   boot_id > "$STATE/boot-id"
-  # The baseline: whatever the last run or a person set up for the desktop goes first.
-  if command -v fjarr-agent >/dev/null; then fjarr-agent setup --undo desktop >/dev/null 2>&1 || true; fi
+  # The baseline: whatever the last run or a person set up for the desktop goes first. An undo that
+  # fails fails the job, by name: discarded, it left GDM logging in a deleted account unseen for two
+  # weeks (M3 gate review, finding 18; docs/15#the-desktop-test-lab).
+  if command -v fjarr-agent >/dev/null; then
+    if fjarr-agent setup --undo desktop >"$STATE/undo-desktop.log" 2>&1; then
+      pass undo "$(sed 's/\x1b\[[0-9;]*m//g' "$STATE/undo-desktop.log" | grep -m1 -oE 'nothing recorded for desktop|undone' || true) · $STATE/undo-desktop.log"
+    else
+      sed 's/\x1b\[[0-9;]*m//g' "$STATE/undo-desktop.log" | tail -25
+      fail undo "setup --undo desktop exited non-zero: the end of its log above names each change it did not reverse, or the step or check that failed ($STATE/undo-desktop.log)"
+    fi
+  fi
   local debs=()
   for d in "$dir"/fjarr-agent_*.deb "$dir"/fjarr-setup_*.deb "$dir"/fjarr-tools_*.deb "$dir"/fjarr-desktop-session_*.deb "$dir"/fjarr-desktop-wayland_*.deb; do [ -f "$d" ] && debs+=("$(readlink -f "$d")"); done
   [ ${#debs[@]} -eq 5 ] || fail install "expected fjarr-agent, fjarr-setup, fjarr-tools, fjarr-desktop-session and fjarr-desktop-wayland .debs in $dir"

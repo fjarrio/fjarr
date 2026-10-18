@@ -247,6 +247,12 @@ pub fn grub_snippet(ghosts: &[Ghost]) -> String {
     )
 }
 
+/// An earlier `display` or `setup desktop`'s snippet, whatever ghosts it held: its
+/// `# fjarr-ghosts:` line (docs/26#the-setup-tool: never kept as an original).
+pub fn snippet_is_ours(text: &str) -> bool {
+    text.lines().any(|l| l.starts_with("# fjarr-ghosts:"))
+}
+
 /// The ghosts a snippet configures: its `# fjarr-ghosts:` line.
 pub fn parse_snippet(text: &str) -> Vec<Ghost> {
     let Some(line) = text.lines().find_map(|l| l.strip_prefix("# fjarr-ghosts:")) else {
@@ -646,6 +652,7 @@ fn apply(record: &mut Record, state: &Path, ghosts: &[Ghost]) -> Result<()> {
                 Path::new(GRUB_SNIPPET),
                 "# fjarr-ghosts:\n",
                 backups,
+                &snippet_is_ours,
             )?;
         }
     } else {
@@ -654,6 +661,7 @@ fn apply(record: &mut Record, state: &Path, ghosts: &[Ghost]) -> Result<()> {
             Path::new(GRUB_SNIPPET),
             &grub_snippet(ghosts),
             backups,
+            &snippet_is_ours,
         )?;
     }
     record.save(state)?;

@@ -228,7 +228,8 @@ goes down (decided 2026-10-01, on the mini-PC):
   `main`'s newest green CI run — the files CI tested, not a rebuild
   ([docs/30](30-continuous-integration.md#artifacts-built-once)) — and builds
   `fjarr-server` and `fjarr-opsim` from the same commit. On the lab machine, `tools/fjarr-lab/unattended.sh prepare`
-  undoes the previous `setup desktop`, installs the build, runs `setup desktop
+  undoes the previous `setup desktop` (an undo that fails fails the job:
+  [below](#the-desktop-test-lab)), installs the build, runs `setup desktop
   --ghost-screens 1`, and points the agent at a `fjarr-server` on the machine
   itself through a systemd drop-in. The person's own `/etc/fjarr/fjarr.toml` is
   never touched. Then `fjarr-lab reboot` reboots the machine once the runner is
@@ -436,6 +437,28 @@ Every lab job starts from a baseline: `setup --undo desktop`, install the build
 under test, then `setup desktop` with the job's own settings. The machine's
 state after a run is documented, and a person's experiments before it do not
 decide its result.
+
+**An undo that fails fails the job.** The prepare logs the undo's output to
+`undo-desktop.log` beside its other logs and passes `undo` by name. When the
+undo exits non-zero, the job fails as `FAIL undo` and prints the log's end,
+which names each change it did not reverse, or the step or check that failed.
+It does not go on with a warning, for two reasons:
+
+- the baseline would then be whatever the failed undo left behind;
+- `--undo desktop restores it` is an M3 promise that only this step exercises
+  on real hardware.
+
+A record entry whose kept copy is gone
+([docs/26](26-robot-install-and-drivers.md#the-setup-tool)) fails every night
+until a person repairs it, as the undo's message says
+([docs/26](26-robot-install-and-drivers.md#the-setup-tool)): put the named
+file's original back and run `setup desktop` once by hand, which copies it and
+heals the entry; or, when the file is its original, copy it to the kept copy's
+name with the command the message prints.
+Until 2026-10-18 the prepare discarded the undo's output and status
+(`>/dev/null 2>&1 || true`). The mini-PC's GDM kept logging in an account the
+undo had deleted, unseen for two weeks
+([M3 gate review, finding 18](reviews/m3-gate-review.md)).
 
 ## What CI runs
 
