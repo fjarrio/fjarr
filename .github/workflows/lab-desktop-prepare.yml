@@ -96,13 +96,31 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.build.outputs.sha }} # the scripts of the commit under test
+      # The download can end "successfully" with the zip half extracted (2026-10-18, over the
+      # mini-PC's Wi-Fi: 4 of 7 files). So it is checked by name, and fetched once more if short.
       - uses: actions/download-artifact@v4
+        id: download
+        continue-on-error: true
         with:
           name: lab-desktop-build
           path: build-under-test
+      - name: check the download (5 debs, fjarr-server, fjarr-opsim)
+        id: check
+        continue-on-error: true
+        run: tools/ci/lab-artifact-check.sh build-under-test
+      - name: download again when the first was short
+        if: steps.check.outcome != 'success'
+        run: rm -rf build-under-test
+      - uses: actions/download-artifact@v4
+        if: steps.check.outcome != 'success'
+        with:
+          name: lab-desktop-build
+          path: build-under-test
+      - name: the download is complete
+        run: tools/ci/lab-artifact-check.sh build-under-test
       - name: prepare (ends by asking fjarr-lab to reboot once this job has finished)
         run: |
           mkdir -p build-under-test/flat
-          find build-under-test -type f \( -name '*.deb' -o -name 'fjarr-server' -o -name 'fjarr-opsim' \) -exec cp {} build-under-test/flat/ \;
+          find build-under-test -path build-under-test/flat -prune -o -type f \( -name '*.deb' -o -name 'fjarr-server' -o -name 'fjarr-opsim' \) -exec cp {} build-under-test/flat/ \;
           chmod +x build-under-test/flat/fjarr-server build-under-test/flat/fjarr-opsim
           sudo -n tools/fjarr-lab/unattended.sh prepare build-under-test/flat "$GITHUB_RUN_ID"

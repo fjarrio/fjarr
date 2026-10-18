@@ -191,7 +191,11 @@ The rules:
   the build; it builds only the lab binaries the packages do not contain. It
   and `lab-desktop-verify.yml` share the concurrency group `lab-desktop` with
   `queue: max`, so no lab run cancels a waiting one
-  ([docs/15](15-testing-strategy.md#unattended-access-test-the-industrial-gate)).
+  ([docs/15](15-testing-strategy.md#unattended-access-test-the-industrial-gate)). On the machine it checks
+  the downloaded `lab-desktop-build` by name (the five packages, readable, and
+  both binaries; `tools/ci/lab-artifact-check.sh`) and downloads it once more
+  when it is short: on 2026-10-18 the download over the machine's Wi-Fi ended
+  "successfully" with 4 of its 7 files.
 - **`release.yml`** publishes the tagged commit's packages, as
   [above](#releases-reuse-cis-packages).
 - **`nightly-alert.yml`** tells someone when a night is red, [below](#nightly-alert).
