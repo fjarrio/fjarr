@@ -1125,6 +1125,14 @@ with that line deleted.
   where the ramdisk keeps `dhclient`, and its Ethernet port appears only once
   NVIDIA's script has loaded the PCIe driver for the NVMe (the first try
   stopped on both).
+- Fjarr's rescue in `recovery` (B6 T6, 2026-10-18): built for B on the stock
+  box's 36.4.4 kernel and device tree, as the network rescue is (the slot's
+  36.5.2 kernel and Fjarr's device tree come with D1), and written to
+  `recovery`: L4TLauncher booted it through the `bootmode=recovery` entry,
+  it answered ssh 37 s after the reboot with every NVMe partition visible,
+  its dead-man entered RCM 1198 s after its boot, one power cycle brought
+  back the stock system, and `recovery` and `recovery-dtb` were written back
+  to the backup's sha256.
 - The watchdog (B6 T3, 2026-10-18, NVIDIA Tegra186 WDT): held open with a
   10 s timeout and no longer fed, it reset the box 7–9 s after the last feed
   (`reset_reason` `BCCPLEXWDT`); closed without the magic close, it stopped

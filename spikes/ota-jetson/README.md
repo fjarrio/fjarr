@@ -271,10 +271,12 @@ stock recovery has no dead-man: it is reached only under these scripts, which le
 cycle, on a stop too.
 
 **T6** needs A5's rescue: an Android boot image (`*recovery*.img` or `*rescue*.img`) and its
-device tree (`*recovery*.dtb`) in the Yocto deploy directory, or `B6_A5_IMG` and `B6_A5_DTB`, and
-its host key (`B6_A5_HOSTKEY_PUB`). **A5 is not built yet** (2026-10-18: nothing like it under
-`out/yocto/build/tmp/deploy/`), so `t6` records itself as skipped, and T3 may follow T4. When it
-runs, it first checks that `recovery` and `recovery-dtb` on the box hash as the backup's copies,
+device tree (`*recovery*.dtb` or `*rescue*.dtb`) in `B6_A5_DIR`, or `B6_A5_IMG` and `B6_A5_DTB`, and
+its host key (`B6_A5_HOSTKEY_PUB`). Without them `t6` records itself as skipped, and T3 may follow
+T4. For B, A5 is built like the network rescue, on the stock box's own 36.4.4 kernel
+(`rescue/build.sh --recovery`, [rescue/README.md](rescue/README.md#the-recovery-partition-rescue-a5)),
+which is where `B6_A5_DIR` and `B6_A5_HOSTKEY_PUB` point by default; the Yocto recipe that fills
+`recovery` for Fjarr's own image comes with D1. When it runs, it first checks that `recovery` and `recovery-dtb` on the box hash as the backup's copies,
 copies both to `/var/lib/fjarr-b6/` on `APP` and checks those copies against the backup too, then
 writes the A5 files padded to the partitions' sizes and reads them back. The restore writes the
 copies back (uploading from the backup if they are gone) and requires the sha256 of each partition
@@ -333,5 +335,5 @@ an equal one left, an absent one left absent) gave what they should. `b6.sh chec
 box and the mini-PC (read only, 2026-10-18 12:26) and found nothing missing. After the safety
 review's fixes (2026-10-18 12:49 to 13:12): T2 and T5 passed, T4 stopped with the stock recovery
 booted but not answering ssh. With its DHCP fixed (19:52 to 20:40): T4 passed, T6 recorded its skip,
-T3 passed with the held-watchdog step added; `clean` and `net-down` left the box and the
-mini-PC as before ([results/README.md](results/README.md#phase-b6-on-2026-10-18)).
+T3 passed with the held-watchdog step added; with A5 built (21:07 to 21:31), T6 passed; `clean`
+and `net-down` left the box and the mini-PC as before ([results/README.md](results/README.md#phase-b6-on-2026-10-18)).

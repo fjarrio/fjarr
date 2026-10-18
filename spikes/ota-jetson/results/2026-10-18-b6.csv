@@ -36,3 +36,9 @@ run,test,step,start_utc,entry,pmc_before,came_up_as,to_down_s,to_up_s,to_ready_s
 20261018T182749Z,t3,sysrq-c-panic-10,2026-10-18T18:38:54Z,-,magic=0x0/retry_a=0x0,stock,28,50,52,0001,absent,MAINSWRST,0x0,00000000,back 50 s after the panic,ok
 20261018T182749Z,t3,systemd-watchdog-on,2026-10-18T18:39:48Z,,,,,,,,,,,,RuntimeWatchdogUSec=2min holders= 1 ,ok
 20261018T183953Z,clean,clean,2026-10-18T18:39:58Z,,,,,,,,,,,,Boot0008 removed ota_work removed;,ok
+20261018T190725Z,t4,install,2026-10-18T19:07:35Z,0008,,,,,,,,,,,entry Boot0008: HD(10) \EFI\BOOT\BOOTAA64.efi bootmode=recovery; not in BootOrder,ok
+20261018T190725Z,t4,stock-recovery,2026-10-18T19:07:38Z,0008,magic=0x0/retry_a=0x0,rec,2,48,42,0001,absent,SYS_RESET_N,0x0,00000000,efivarfs write ok safety script ran; the entry and the script stay for T6 and T3 (b6.sh clean),ok
+20261018T190924Z,t6,write,2026-10-18T19:09:32Z,,,,,,,,,,,,A5 fjarr-recovery-rescue.img and fjarr-recovery-rescue.dtb written to recovery and recovery-dtb,ok
+20261018T190924Z,t6,a5-rescue,2026-10-18T19:09:39Z,0008,magic=0x0/retry_a=0x0,a5,1,37,42,0001,absent,SYS_RESET_N,0x0,00000000,deadman-rcm=1198s-after-touch,ok
+20261018T190924Z,t6,restore,2026-10-18T19:31:09Z,,,,,,,,,,,,recovery=backup recovery-dtb=backup,ok
+20261018T193115Z,clean,clean,2026-10-18T19:31:20Z,,,,,,,,,,,,Boot0008 removed ota_work removed;,ok

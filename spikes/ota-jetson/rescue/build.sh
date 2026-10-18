@@ -1,11 +1,16 @@
 #!/bin/bash
 # Build the Jetson network rescue: one aarch64 EFI file, a unified kernel image (UKI), that the ZED
-# Box Mini's UEFI loads by PXE or HTTP boot from the mini-PC (net-rescue.sh).
+# Box Mini's UEFI loads by PXE or HTTP boot from the mini-PC (net-rescue.sh). With --recovery, the
+# same system as the recovery-partition rescue instead: an Android boot image for `recovery` and
+# the device tree for `recovery-dtb` (phase A5, for B6's T6).
 #
-#   build.sh [--l4t 36.4.4|36.5.2] [--test]
+#   build.sh [--l4t 36.4.4|36.5.2] [--test | --recovery]
 #
 # Output in out/rescue/<l4t>/: fjarr-net-rescue.efi, its manifest, and known_hosts, a line for
-# HostKeyAlias=fjarr-net-rescue. --test adds test/fjarr-net-rescue-test.efi for the QEMU bench
+# HostKeyAlias=fjarr-net-rescue. --recovery writes fjarr-recovery-rescue.img, .dtb, its manifest
+# and known_hosts-recovery (HostKeyAlias=fjarr-recovery-rescue): the same tree under that name, with
+# a host key of its own (.lab/rescue/recovery/), so the lab scripts tell the two apart; the device
+# tree is the box's own recovery-dtb from the backup (B3), unchanged. --test adds test/fjarr-net-rescue-test.efi for the QEMU bench
 # (test/netboot-test.sh): the same system with a throwaway key added, the dead-man at 180 s and a
 # PL011 console. The kernel and its modules come from NVIDIA's BSP tarball in out/bsp (phase A1),
 # the userland from Ubuntu 22.04 arm64 packages, root's keys from ~/.ssh/id_*.pub (or the file
@@ -16,19 +21,37 @@ here=$(cd "$(dirname "$0")" && pwd)
 jet=$(dirname "$here")
 l4t=36.4.4
 test_variant=0
+recovery=0
 while [ $# -gt 0 ]; do
 	case $1 in
 	--l4t) l4t=${2:?--l4t needs a version}; shift 2 ;;
 	--test) test_variant=1; shift ;;
-	*) sed -n '5p' "$0" >&2; exit 2 ;;
+	--recovery) recovery=1; shift ;;
+	*) sed -n '8p' "$0" >&2; exit 2 ;;
 	esac
 done
+[ "$test_variant$recovery" != 11 ] || { echo "build.sh: --test and --recovery are separate builds" >&2; exit 2; }
 
 bsp_dir=$jet/out/bsp
 bsp=$bsp_dir/$l4t/Linux_for_Tegra
 out=$jet/out/rescue/$l4t
 work=$jet/out/rescue/work/$l4t
+kmod=$work/kmod # the BSP's modules, shared by both variants
 lab=$jet/.lab/rescue
+name=fjarr-net-rescue
+keydir=$lab
+if [ "$recovery" = 1 ]; then
+	name=fjarr-recovery-rescue
+	work=$work-recovery
+	keydir=$lab/recovery
+	# The device tree: the box's own recovery-dtb, as B3 backed it up (it matches no BSP tree).
+	dtb_backup=$jet/.lab/zedbox-backup/nvme0n1p9-recovery-dtb.img.zst
+	[ -f "$dtb_backup" ] || { echo "build.sh: no $dtb_backup (phase B3)" >&2; exit 1; }
+	(cd "$(dirname "$dtb_backup")" && command grep -E "  ${dtb_backup##*/}\$" SHA256SUMS | sha256sum -c --quiet -) || {
+		echo "build.sh: $dtb_backup does not match the backup's SHA256SUMS" >&2
+		exit 1
+	}
+fi
 userland_image=fjarr-jetson-rescue-userland:22.04
 tools_image=fjarr-jetson-rescue-tools:26.04
 user="$(id -u):$(id -g)"
@@ -52,10 +75,10 @@ nvidia_args=$(sed -n 's/^CMDLINE_ADD="\(.*\)"$/\1/p' "$bsp/p3767.conf.common" | 
 [ -n "$nvidia_args" ] || { echo "build.sh: no CMDLINE_ADD in $bsp/p3767.conf.common" >&2; exit 1; }
 
 say "keys"
-if [ ! -f "$lab/ssh_host_ed25519_key" ]; then
-	mkdir -p "$lab"
-	chmod 700 "$lab"
-	ssh-keygen -q -t ed25519 -N '' -C fjarr-net-rescue -f "$lab/ssh_host_ed25519_key"
+if [ ! -f "$keydir/ssh_host_ed25519_key" ]; then
+	mkdir -p "$keydir"
+	chmod 700 "$lab" "$keydir"
+	ssh-keygen -q -t ed25519 -N '' -C "$name" -f "$keydir/ssh_host_ed25519_key"
 fi
 mkdir -p "$work" "$out"
 if [ -n "${FJARR_LAB_PUBKEYS:-}" ]; then
@@ -64,7 +87,8 @@ else
 	cat ~/.ssh/id_*.pub > "$work/authorized_keys"
 fi
 ssh-keygen -l -f "$work/authorized_keys" > /dev/null # every line must be a public key
-printf 'fjarr-net-rescue %s\n' "$(cut -d' ' -f1,2 "$lab/ssh_host_ed25519_key.pub")" > "$out/known_hosts"
+if [ "$recovery" = 1 ]; then known=$out/known_hosts-recovery; else known=$out/known_hosts; fi
+printf '%s %s\n' "$name" "$(cut -d' ' -f1,2 "$keydir/ssh_host_ed25519_key.pub")" > "$known"
 
 say "container images"
 docker build -q --platform linux/arm64 -f "$here/Dockerfile.userland" -t "$userland_image" "$here" > /dev/null
@@ -75,13 +99,16 @@ rm -rf "$work/root"
 docker run --rm --platform linux/arm64 --user "$user" -v "$here:/src:ro" -v "$work:/work" \
 	"$userland_image" bash /src/collect-userland.sh /work /src
 cp -a "$here/rootfs/." "$work/root/"
+if [ "$recovery" = 1 ]; then
+	# The same files under the recovery rescue's name: its hostname, prompt, DHCP name and log tags.
+	(cd "$here/rootfs" && find . -type f -print0) | (cd "$work/root" && xargs -0 sed -i "s/fjarr-net-rescue/$name/g")
+fi
 mkdir -p "$work/root"/{dev,proc,sys,run,tmp,mnt,var/log,root/.ssh}
-install -m 0600 "$lab/ssh_host_ed25519_key" "$work/root/etc/ssh/ssh_host_ed25519_key"
-install -m 0644 "$lab/ssh_host_ed25519_key.pub" "$work/root/etc/ssh/ssh_host_ed25519_key.pub"
+install -m 0600 "$keydir/ssh_host_ed25519_key" "$work/root/etc/ssh/ssh_host_ed25519_key"
+install -m 0644 "$keydir/ssh_host_ed25519_key.pub" "$work/root/etc/ssh/ssh_host_ed25519_key.pub"
 install -m 0600 "$work/authorized_keys" "$work/root/root/.ssh/authorized_keys"
 
 say "kernel modules"
-kmod=$work/kmod
 if [ ! -f "$kmod/.complete" ]; then
 	rm -rf "$kmod"
 	mkdir -p "$kmod"
@@ -112,11 +139,11 @@ docker run --rm --user "$user" -v "$work/root:/r" "$tools_image" depmod -b /r "$
 
 say "os-release and command line"
 cat > "$work/root/etc/os-release" << EOF
-NAME="Fjarr network rescue"
-ID=fjarr-net-rescue
-PRETTY_NAME="Fjarr network rescue (L4T $l4t, kernel $krel)"
+NAME="Fjarr $([ "$recovery" = 1 ] && echo recovery-partition || echo network) rescue"
+ID=$name
+PRETTY_NAME="Fjarr $([ "$recovery" = 1 ] && echo recovery-partition || echo network) rescue (L4T $l4t, kernel $krel)"
 VERSION_ID=$l4t
-IMAGE_ID=fjarr-net-rescue
+IMAGE_ID=$name
 IMAGE_VERSION=$(date -u +%Y%m%d%H%M)
 EOF
 # NVIDIA's own arguments for the board (what L4TLauncher passes), then the rescue's.
@@ -154,6 +181,46 @@ zstd -V
 lsblk --version
 busybox | head -n 1
 EOF
+
+if [ "$recovery" = 1 ]; then
+	say "initramfs, the Android boot image and the device tree"
+	SOURCE_DATE_EPOCH=$(git -C "$here" log -1 --format=%ct 2> /dev/null || echo 0)
+	docker run --rm --user "$user" -e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" -v "$here:/src:ro" -v "$work:/work" \
+		"$tools_image" bash -euo pipefail -c '
+		python3 -I /src/mkcpio.py /work/root /work/initramfs.cpio --mode root=700 --mode root/.ssh=700 \
+			--mode root/.ssh/authorized_keys=600 --mode etc/ssh/ssh_host_ed25519_key=600 --mode etc/shadow=600 \
+			--mode tmp=1777 --dev dev/console=c:5:1:600 --dev dev/null=c:1:3:666
+		xz -9 --check=crc32 --threads=1 -c /work/initramfs.cpio > /work/initramfs.cpio.xz'
+	# The partitions' sizes in NVIDIA's NVMe layout (docs/32): recovery 80 MiB, recovery-dtb 512 KiB.
+	python3 -I "$here/mkbootimg.py" --kernel "$bsp/kernel/Image" --ramdisk "$work/initramfs.cpio.xz" \
+		--cmdline-file "$work/cmdline" --out "$out/$name.img" --max $((80 * 1024 * 1024))
+	zstd -dqc "$dtb_backup" | python3 -I -c '
+import struct, sys
+d = sys.stdin.buffer.read()
+magic, total = struct.unpack(">II", d[:8])
+if magic != 0xD00DFEED or total > len(d) or total > 512 * 1024:
+    sys.exit("build.sh: the backed-up recovery-dtb is not a device tree that fits")
+sys.stdout.buffer.write(d[:total])' > "$out/$name.dtb"
+	{
+		echo "Fjarr recovery-partition rescue, L4T $l4t, built $(date -u +%Y-%m-%dT%H:%MZ)"
+		echo "kernel $krel: Image sha256 $(sha256sum < "$bsp/kernel/Image" | cut -d' ' -f1), from the BSP tarball in out/bsp"
+		echo "modules: $(cd "$mdir" && find . -name '*.ko' | sed 's#.*/##' | sort | tr '\n' ' ')"
+		echo "command line: $cmdline"
+		echo "userland image: $(docker image inspect --format '{{.Id}}' "$userland_image")"
+		echo "packages:"
+		sed 's/^/  /' "$work/packages.txt"
+		echo "initramfs: $(stat -c %s "$work/initramfs.cpio") bytes, $(stat -c %s "$work/initramfs.cpio.xz") with xz"
+		echo "boot image (Android v0, page 2048): $(stat -c %s "$out/$name.img") bytes, sha256 $(sha256sum < "$out/$name.img" | cut -d' ' -f1)"
+		echo "device tree: the box's recovery-dtb from the backup, $(stat -c %s "$out/$name.dtb") bytes, sha256 $(sha256sum < "$out/$name.dtb" | cut -d' ' -f1)"
+		echo "host key: $(ssh-keygen -l -f "$keydir/ssh_host_ed25519_key.pub")"
+		echo "root's authorized keys:"
+		ssh-keygen -l -f "$work/authorized_keys" | sed 's/^/  /'
+	} > "$out/$name.manifest"
+	(cd "$out" && sha256sum "$name.img" "$name.dtb" > SHA256SUMS-recovery)
+	sed -n '1,4p;/^initramfs/,/^host key/p' "$out/$name.manifest"
+	echo "out: $out/$name.img, $out/$name.dtb"
+	exit 0
+fi
 
 say "initramfs and UKI"
 if [ "$test_variant" = 1 ]; then

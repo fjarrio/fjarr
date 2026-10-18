@@ -27,6 +27,7 @@ The box's MAC stays out of the repo, in `.lab/rescue/box-mac`.
 | `Dockerfile.userland`, `collect-userland.sh` | Ubuntu 22.04 arm64, run through qemu-user: copies BusyBox, the tools and every library they load into the tree, compiles `reboot-recovery` |
 | `Dockerfile.tools` | Ubuntu 26.04 amd64: ukify and systemd's arm64 stub, depmod, and the bench (QEMU, AAVMF, dnsmasq, shellcheck) |
 | `mkcpio.py` | writes the tree as a cpio without root: root-owned, fixed timestamps, `/dev/console` |
+| `mkbootimg.py` | `--recovery`: an Android boot image, header version 0, for the `recovery` partition |
 | `reboot-recovery.c` | `reboot(LINUX_REBOOT_CMD_RESTART2, "forced-recovery")`, what `reboot forced-recovery` does |
 | `rootfs/` | the rescue's own files: `/init`, `/etc/inittab`, the dead-man, DHCP, sshd's configuration |
 | `net-rescue.sh`, `net-rescue-http.py` | the mini-PC side: dnsmasq as proxy DHCP and TFTP, and a one-file HTTP server, for one MAC |
@@ -109,6 +110,35 @@ also carries `HttpBootDxe`, `UefiPxeBcDxe` and Realtek's PCIe UNDI driver.
 Size (36.4.4): the UKI is 50.3 MB, of which NVIDIA's uncompressed `Image` is 43.1 MB; the
 initramfs is 23.3 MB, 7.1 MB with xz. sshd's libraries are its largest part (OpenSSL 4 MB, and
 Ubuntu's sshd links systemd and Kerberos); a smaller sshd would save about 2 MB of the 50.
+
+## The recovery-partition rescue (A5)
+
+`build.sh --recovery` builds the first of the three rescue layers from the same tree: the same
+kernel, modules, userland, `/init`, dead-man and DHCP, under the name `fjarr-recovery-rescue`
+(hostname, prompt, DHCP name, log tags, `os-release`) and with its own host key
+(`.lab/rescue/recovery/`, gitignored), so that the lab scripts tell it from the network rescue at
+the same address. Its outputs, in `out/rescue/<l4t>/`:
+
+| File | What |
+|---|---|
+| `fjarr-recovery-rescue.img` | the Android boot image for `recovery` (80 MiB; the build refuses a larger one) |
+| `fjarr-recovery-rescue.dtb` | the device tree for `recovery-dtb`: the box's own, from the B3 backup, unchanged |
+| `fjarr-recovery-rescue.manifest`, `SHA256SUMS-recovery`, `known_hosts-recovery` | as for the network rescue; `HostKeyAlias=fjarr-recovery-rescue` |
+
+**The boot image** is what L4TLauncher boots from `recovery` (with `bootmode=recovery`, or with
+both root slots unbootable): header version 0, page size 2048 and the load addresses of NVIDIA's
+stock recovery image on the box, which L4TLauncher ignores in favour of its own placement.
+`mkbootimg.py` was checked against that image: fed its own kernel, ramdisk and command line, it
+writes it again byte for byte, the SHA-1 id included. The kernel is NVIDIA's `Image` as in the UKI
+(the stock recovery carries the same file, sha256 `a1ffea85…`), the ramdisk the rescue's
+xz-compressed initramfs, the command line the UKI's (NVIDIA's `CMDLINE_ADD`, `panic=10`,
+`efi=runtime`), 136 of the header's 511 bytes. On 36.4.4: 48 MiB, 7 MiB of it the initramfs.
+
+**The device tree** is the stock `recovery-dtb` from the backup, cut to the tree's own size
+(244 KiB). It matches none of the BSP's device trees (it is the box's, as Stereolabs flashed it),
+and it is what this kernel already boots with in the stock recovery, so A5 on the stock box
+changes only the image. Fjarr's own device tree goes into `recovery-dtb` with the Yocto recipe
+(D1), which builds A5 again on 36.5.2 with the slot's kernel.
 
 ## Serving it from the mini-PC: `net-rescue.sh`
 

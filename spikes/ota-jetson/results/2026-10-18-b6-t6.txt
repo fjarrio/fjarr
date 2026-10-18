@@ -1,0 +1,65 @@
+# ZED Box Mini, phase B6 t6: 2026-10-18 21:31 Europe/Stockholm
+# spec: docs/32-fleet-ota.md#jetson-test-image. Written by b6.sh; the steps are in
+# 2026-10-18-b6.csv (run 20261018T190924Z). Host names, MACs, serial numbers, GUIDs and machine IDs are <kind>.
+
+===== A5 rescue: kernel, command line, uptime
+Linux fjarr-recovery-rescue 5.15.148-tegra #1 SMP PREEMPT Mon Jun 16 08:24:48 PDT 2025 aarch64 GNU/Linux
+mminit_loglevel=4 console=ttyTCU0,115200 firmware_class.path=/etc/firmware fbcon=map:0 video=efifb:off console=tty0 panic=10 efi=runtime bl_prof_dataptr=2031616@0x471E10000 bl_prof_ro_ptr=65536@0x471E00000 
+12.57 95.94
+
+===== A5 rescue: disks
+NAME           SIZE TYPE RO PARTLABEL
+nvme0n1      238.5G disk  0 
+|-nvme0n1p1    237G part  0 
+|-nvme0n1p2    128M part  0 
+|-nvme0n1p3    768K part  0 
+|-nvme0n1p4   31.6M part  0 
+|-nvme0n1p5    128M part  0 
+|-nvme0n1p6    768K part  0 
+|-nvme0n1p7   31.6M part  0 
+|-nvme0n1p8     80M part  0 
+|-nvme0n1p9    512K part  0 
+|-nvme0n1p10    64M part  0 
+|-nvme0n1p11    80M part  0 
+|-nvme0n1p12   512K part  0 
+|-nvme0n1p13    64M part  0 
+|-nvme0n1p14   400M part  0 
+`-nvme0n1p15 479.5M part  0 
+
+===== A5 rescue: boot state
+boot_chain_current     0x0
+BootChainFwCurrent     0600000000000000
+BootChainFwNext        absent
+BootChainFwStatus      absent
+BootCurrent            060000000800
+BootNext               absent
+BootOrder              0700000001000400030002000500000006000700
+L4TDefaultBootMode     0700000001000000
+reset_reason           MAINSWRST
+rootfs_current         0x0
+RootfsRedundancyLevel  0600000000000000
+rootfs_retry_count_a   0x0
+rootfs_retry_count_b   0x0
+RootfsRetryCountMax    0600000003000000
+rootfs_sr_magic        0x0
+RootfsStatusSlotA      0700000000000000
+RootfsStatusSlotB      0700000000000000
+
+===== boot state after t6 a5-rescue
+boot_chain_current     0x0
+BootChainFwCurrent     0600000000000000
+BootChainFwNext        absent
+BootChainFwStatus      absent
+BootCurrent            060000000100
+BootNext               absent
+BootOrder              0700000001000400030002000500000006000700
+L4TDefaultBootMode     0700000001000000
+reset_reason           SYS_RESET_N
+rootfs_current         0x0
+RootfsRedundancyLevel  0600000000000000
+rootfs_retry_count_a   0x0
+rootfs_retry_count_b   0x0
+RootfsRetryCountMax    0600000003000000
+rootfs_sr_magic        0x0
+RootfsStatusSlotA      0700000000000000
+RootfsStatusSlotB      0700000000000000
