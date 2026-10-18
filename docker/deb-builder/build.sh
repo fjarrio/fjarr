@@ -5,7 +5,8 @@ set -eu
 WORK="${TMPDIR:-/tmp}/work"   # the builder runs as the caller's uid (Makefile), so not in /
 rm -rf "$WORK" && mkdir -p "$WORK"
 tar -C /src --exclude=./node_modules --exclude='./**/node_modules' --exclude=./build \
-    --exclude=./signaling/target --exclude=./dist --exclude=./inspiration --exclude=./.claude -cf - . | tar -C "$WORK" -xf -
+    --exclude=./signaling/target --exclude=./dist --exclude=./inspiration --exclude=./.claude \
+    --exclude=./spikes --exclude=./fjarr-private-research --exclude=./web/e2e/out -cf - . | tar -C "$WORK" -xf -
 cd "$WORK"
 pnpm install --frozen-lockfile --filter "@fjarr/introspect-viewer..." >/dev/null
 pnpm -r --filter "@fjarr/introspect-viewer..." build >/dev/null
