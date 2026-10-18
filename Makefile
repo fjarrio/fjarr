@@ -624,7 +624,7 @@ lab-artifacts: ## fjarr-server and fjarr-opsim for a lab machine's nightly (Ubun
 	@$(DEB_BUILDER_IMAGE)
 	mkdir -p dist/lab && rm -f dist/lab/fjarr-server dist/lab/fjarr-opsim
 	docker run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp -v "$(CURDIR)":/src:ro -v "$(CURDIR)/dist/lab":/out --entrypoint sh fjarr-deb-builder -euc '\
-	  mkdir -p /tmp/w && tar -C /src --exclude=./node_modules --exclude="./**/node_modules" --exclude=./build --exclude=./signaling/target --exclude=./dist --exclude=./inspiration -cf - . | tar -C /tmp/w -xf - && \
+	  mkdir -p /tmp/w && tar -C /src --exclude=./node_modules --exclude="./**/node_modules" --exclude=./build --exclude=./signaling/target --exclude=./dist --exclude=./inspiration --exclude=./spikes --exclude=./fjarr-private-research --exclude=./web/e2e/out -cf - . | tar -C /tmp/w -xf - && \
 	  cmake -S /tmp/w -B /tmp/w/b -G Ninja -DCMAKE_BUILD_TYPE=Release -DFJARR_BUILD_TESTS=OFF >/dev/null && cmake --build /tmp/w/b --target fjarr-opsim >/dev/null && \
 	  cp /tmp/w/b/agent/tools/fjarr-opsim /out/ && \
 	  cd /tmp/w/signaling && cargo build -q --release --locked -p fjarr-server && cp target/release/fjarr-server /out/'
