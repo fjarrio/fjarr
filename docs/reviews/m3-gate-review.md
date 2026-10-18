@@ -15,9 +15,8 @@ description: The robot's desktop, promise by promise — met in CI on every push
 > whole by hand on 2026-10-18 with the DMA-BUF capture of
 > [ADR-0041](../adr/0041-desktop-capture-dmabuf.md), the first pass since
 > 2026-10-03. What remains: **a green scheduled night** (none yet; 10-18 failed
-> at the prepare's download, fixed in 91455a3); **input-to-photon from another
-> machine** on the DMA-BUF build; **three checks with Erik** (clipboard
-> non-ASCII under GNOME, separate windows in Firefox, two ghosts plus a real
+> at the prepare's download, fixed in 91455a3); **three checks with Erik**
+> (clipboard non-ASCII under GNOME, separate windows in Firefox, two ghosts plus a real
 > monitor on the new build); and **Erik's answer to the proposed amendments**
 > below, for the criteria this hardware or these browsers cannot meet as
 > written; the backend E mode change on the ghost, finding 18's fix with a
@@ -34,7 +33,7 @@ on a scheduled night); **not met**; **unverified**; **amendment proposed**.
 | Promise (docs/06, docs/17) | Verdict | Evidence |
 |---|---|---|
 | the operator controls the desktop end to end (docs/06) | met | CI every push, 39110004862: GNOME fixture `desktop-control` (clicks, Shift, text through the keymap, åäö, Alt+Tab, an untypable `Δ` refused by name); X11 fixture the same; the lab browser, real Chromium typing into the fixture (`dashboard.spec.ts`). The mini-PC by hand 2026-10-18 (build c5dba78, prepare run `by-hand-2026-10-18-dmabuf`): `desktop-control` 12 passed, 1 not run (the mode change, which has no plug there: finding 9) |
-| … input-to-photon within budget (docs/06; docs/17: on the mini-PC) | met in CI; **not shown on the mini-PC** | CI 39110004862: GNOME fixture p50 18 / p95 27 ms, X11 p50 50 / p95 52 ms (budget 150/250; CI asserts its 500 ms ceiling). On the mini-PC, unverified from the LAN: the number of record from another machine ([docs/15](../15-testing-strategy.md#the-desktop-test-lab)), p50 52 / p95 59 ms on 2026-10-01 (3.L), predates the local cursor (232dbbf) and the DMA-BUF capture (c5dba78). The only measurement on the DMA-BUF build, on the robot itself, is **p50 200 / p95 202 ms by hand on 10-18** (nearly constant samples, like 10-03's 159/160), above the 150 ms budget. History on the robot: 159/160 ms on 10-03; 10/10 but p95 769 ms on 10-04 (the first build with 232dbbf, FAIL); nothing valid from 10-05 to 10-17 (findings 10 and 11). Needs a 3.L-style run from the dev machine; amendment 6 |
+| … input-to-photon within budget (docs/06; docs/17: on the mini-PC) | met in CI; **met by hand on the mini-PC from the LAN, for c5dba78** (not yet on a scheduled night, which measures on the robot itself) | CI 39110004862: GNOME fixture p50 18 / p95 27 ms, X11 p50 50 / p95 52 ms (budget 150/250; CI asserts its 500 ms ceiling). **On the mini-PC from the dev machine, 2026-10-18 11:13–11:15, build c5dba78 (DMA-BUF capture), opsim from cbf5490 in the dev container**, the number of record by [docs/15](../15-testing-strategy.md#the-desktop-test-lab): `desktop-control` 5 times, each 12 passed and the mode change not run, each input-to-photon 10/10 samples: p50 42 / p95 61, 50 / 60, 50 / 62, 36 / 84, 58 / 93 ms; **all 50 presses p50 49 / p95 73 ms** (27–93 ms), within 150/250, recorded in [docs/16](../16-performance-budgets.md#measured). The path: a transient `fjarr-server` on the mini-PC on the LAN, the agent pointed at it by a runtime drop-in, the test window as in `unattended.sh`, its log served on the LAN; the session direct (no TURN), both machines on 5 GHz Wi-Fi. The same build measured on the robot itself, p50 200 / p95 202 ms by hand earlier on 10-18, is not a number of record: there the decoder shares the robot's CPU with the encoder (as on 10-01, 162 against 53 ms). `desktop-scanout` from the dev machine once: 10 of 10 changes followed within 1 s, all 10 under direct scanout, the hidden pointer arrived (the mini-PC's debugfs `state` was mirrored over ssh into opsim's container every ~50 ms, since opsim reads KMS locally). Everything was undone after: the agent back on `wss://signal.fjarr.io` as demo-robot-03, capturing by DMA-BUF. History on the robot: 159/160 ms on 10-03; 10/10 but p95 769 ms on 10-04 (the first build with 232dbbf, FAIL); nothing valid from 10-05 to 10-17 (findings 10 and 11). Amendment 6 states what was done here. Met for c5dba78; if amendment 6 is accepted and the gate closes on a later build that changes the capture, encode or input path, repeat this run |
 | a reboot brings the desktop back with no local interaction (docs/06 "reboot of the sim"; unattended access) | met by hand on the mini-PC; as written (the sim), amendment 2 | the mini-PC 2026-10-18: rebooted 09:55:36, GDM's automatic login (`desktop` holds seat0), helper connected, capture of HDMI-1 ready, then `desktop-see` 5/5. The machine's own verdict passed this part every night it ran from 10-04 to 10-17; the night's workflow went red on later steps (findings 9–11). The watchdog brought a killed session back in 51 s (3.L); an out-of-memory kill was recovered by GDM within a minute (finding 1). robot-sim is a container and is never rebooted: amendment 2. A scheduled night is still owed |
 | a stuck modifier never persists after a disconnect | met | `desktop-release-on-close` on both fixtures every push; the lab browser's Esc; the mini-PC by hand 2026-10-18 and in every nightly verdict since 10-04 |
 | hot-plug: with two monitors streaming, a third is shown within 2 s | met in CI, from one monitor to two; by hand on 2026-10-11, **before ADR-0041; not repeated** | GNOME fixture `desk-virtual-2` offered 112 ms after the plug, X11 `desk-right` 409 ms (39110004862). Both scenarios start from exactly one monitor, so two-to-three never runs: amendment 7. CI exercises the shared-memory path only. The mini-PC: a Dell plugged into a live session arrived by renegotiation (2026-10-11), with no time recorded; a plug through the DMA-BUF capture is not yet shown on hardware |
@@ -190,12 +189,18 @@ Proposals only: docs/17 and docs/06 are unchanged until Erik accepts them.
 - `nightly-alert` closing #1 on an all-green night, which also needs the
   Nightly green (finding 21).
 
-**Needs no person, not yet done:** input-to-photon from the dev machine over
-the LAN on the DMA-BUF build, as in 3.L, recorded as a new docs/16 row
-(amendment 6); the backend E mode change on the ghost (amendment 5); finding
-18's fix and a second `--undo` run that leaves nothing behind; the corrections
-of finding 20. When the gate is met, docs/17's status table gets its M3 row
-linking this review.
+**Needs no person, not yet done:** the backend E mode change on the ghost
+(amendment 5); finding 18's fix and a second `--undo` run that leaves nothing
+behind; the corrections of finding 20. When the gate is met, docs/17's
+status table gets its M3 row linking this review.
+
+**Done 2026-10-18, no person needed:**
+
+- Input-to-photon from the dev machine over the LAN on the DMA-BUF build, as
+  in 3.L (amendment 6): p50 49 / p95 73 ms over 50 presses, a new docs/16 row
+  (the promise's row above). Met for c5dba78; if amendment 6 is accepted and
+  the gate closes on a later build that changes the capture, encode or input
+  path, repeat this run.
 
 ## Carried forward
 

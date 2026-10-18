@@ -40,7 +40,7 @@ new, and replace a row (never average it) when a later run supersedes it.
 | Camera glass-to-glass, lossy link | 82 / 100 ms | 200 / 350 | same run |
 | Camera glass-to-glass, through a TURN relay | 69 / 102 ms | 250 / 450 | same run |
 | Terminal interactive round trip | 11 ms | < 150 ms | M2, 2026-09-27 |
-| Desktop input-to-photon, LAN | p50 52 / p95 59 ms | 150 / 250 | mini-PC (Ryzen 7 5700U, GNOME 50), M3 3.L 2026-10-01 |
+| Desktop input-to-photon, LAN | p50 49 / p95 73 ms (50 presses, 5 runs; slowest 93) | 150 / 250 | mini-PC (Ryzen 7 5700U, GNOME 50, DMA-BUF capture, build c5dba78), measured from the dev machine, both on 5 GHz Wi-Fi, [M3 gate review](reviews/m3-gate-review.md) 2026-10-18; replaces 3.L's p50 52 / p95 59 (2026-10-01, before the local cursor and DMA-BUF) |
 | Desktop: monitor plugged in → new track offered | 101 ms, no frames dropped on the others | — | M3 3.4, 2026-10-01 |
 | Desktop: killed session → back, unattended | 51 s | — | M3 3.L, 2026-10-01 |
 | Tunnel: `ssh` to a shell | ~130 ms | — | M4.5 slice 4.5c, 2026-09-26 |

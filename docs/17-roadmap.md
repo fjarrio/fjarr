@@ -637,7 +637,9 @@ through the device-memory head, and the unattended-access test passed whole
 for the first time since 10-03: `desktop-scanout` followed 10 of 10 changes,
 9 of them under direct scanout; a window hiding the pointer gave a `hidden`
 shape; input-to-photon took 10 real samples (p50 200, p95 202 ms on the robot,
-not a number of record). The night's own prepare had failed on a truncated
+not a number of record). From the dev machine over the LAN, the same build:
+p50 49 / p95 73 ms over 50 presses ([docs/16](16-performance-budgets.md#measured),
+[M3 gate review](reviews/m3-gate-review.md)). The night's own prepare had failed on a truncated
 artifact download over the machine's Wi-Fi (fixed in 91455a3), and
 NetworkManager on the mini-PC now ignores the ZED Box's USB network, whose
 "Connection failed" banners stopped scanout.
