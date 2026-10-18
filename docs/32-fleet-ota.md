@@ -1100,9 +1100,11 @@ with that line deleted.
   `on`, auto-on and auto-off off, no schedules, webhooks or scripts: L8
   holds, unchanged at the re-check.
 - RCM entered by software and left by a power cycle, five times of five
-  (B4): pending. It did not start on 2026-10-17: five trips need up to
-  2 h 44 min, past the 23:00 hard stop; it runs on the next morning after
-  06:30, with the desktop choice made.
+  (B4): **5 of 5 on 2026-10-18** (`LAB_DESKTOP_OK=1`): RCM 21 s after
+  `reboot --force forced-recovery` (5.3 W in RCM); after 10 s off, L4T back
+  on USB in 38–39 s, ssh in 39–40 s, started in 39–42 s; the reset reason
+  `SYS_RESET_N` and the slot state unchanged every time
+  (`spikes/ota-jetson/results/2026-10-18-rcm.csv`).
 - `BootNext` honoured and consumed; the network rescue by PXE or HTTP boot
   (B): pending.
 - Whether the watchdog fires once userspace stops feeding it, or NVIDIA's

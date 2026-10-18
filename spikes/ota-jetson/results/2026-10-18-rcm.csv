@@ -1,0 +1,6 @@
+run,trip,start_utc,to_rcm_s,rcm_w,off_s,to_l4t_usb_s,to_ssh_s,to_ready_s,state,reset_reason,slots,result
+20261018T075714Z,1,2026-10-18T07:57:16Z,21,5.3,10,39,39,40,running,SYS_RESET_N,same,ok
+20261018T075714Z,2,2026-10-18T07:58:29Z,21,5.3,10,39,40,41,running,SYS_RESET_N,same,ok
+20261018T075714Z,3,2026-10-18T07:59:42Z,21,5.4,10,39,39,42,running,SYS_RESET_N,same,ok
+20261018T075714Z,4,2026-10-18T08:00:56Z,21,5.3,10,38,39,39,running,SYS_RESET_N,same,ok
+20261018T075714Z,5,2026-10-18T08:02:09Z,21,5.3,11,38,39,40,running,SYS_RESET_N,same,ok
