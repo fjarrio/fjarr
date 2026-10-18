@@ -631,6 +631,17 @@ the unattended verify. CI covers the SHM path and the unit tests, a VA
 workstation the DMA-BUF chain into `vah264enc`; mutter's DMA-BUF stream inside
 the agent is first exercised on the mini-PC.
 
+**Verified on the mini-PC (2026-10-18, by hand, build c5dba78).** The agent
+negotiated `DMA-BUF AR24:0x0200000000000901, into the encoder without a copy`
+through the device-memory head, and the unattended-access test passed whole
+for the first time since 10-03: `desktop-scanout` followed 10 of 10 changes,
+9 of them under direct scanout; a window hiding the pointer gave a `hidden`
+shape; input-to-photon took 10 real samples (p50 200, p95 202 ms on the robot,
+not a number of record). The night's own prepare had failed on a truncated
+artifact download over the machine's Wi-Fi (fixed in 91455a3), and
+NetworkManager on the mini-PC now ignores the ZED Box's USB network, whose
+"Connection failed" banners stopped scanout.
+
 ## M3.5 — Hear the robot {#m35}
 
 **`fjarr.audio`** (robot microphone downlink, push-to-talk uplink through the
