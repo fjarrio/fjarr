@@ -1,0 +1,114 @@
+# ZED Box Mini, phase B6 t4: 2026-10-18 20:03 Europe/Stockholm
+# spec: docs/32-fleet-ota.md#jetson-test-image. Written by b6.sh; the steps are in
+# 2026-10-18-b6.csv (run 20261018T175207Z). Host names, MACs, serial numbers, GUIDs and machine IDs are <kind>.
+
+===== references to ota_work on the stock system
+state=absent
+
+===== boot entries before T4
+BootCurrent: 0001
+Timeout: 5 seconds
+BootOrder: 0001,0004,0003,0002,0005,0000,0006,0007
+Boot0000* Enter Setup	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(462caa21-7614-4503-836e-8ab6f4662331)
+Boot0001* UEFI PCIe SSD <serial> 1	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x14160000,0x1417ffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/NVMe(0x1,<serial>)N.....YM....R,Y.
+Boot0002* UEFI PXEv4 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv4(0.0.0.00.0.0.0,0,0)N.....YM....R,Y.
+Boot0003* UEFI PXEv6 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv6([::]:<->[::]:,0,0)N.....YM....R,Y.
+Boot0004* UEFI HTTPv4 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv4(0.0.0.00.0.0.0,0,0)/Uri()N.....YM....R,Y.
+Boot0005* UEFI HTTPv6 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv6([::]:<->[::]:,0,0)/Uri()N.....YM....R,Y.
+Boot0006* BootManagerMenuApp	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(eec25bdc-67f2-4d95-b1d5-f81b2039d11d)
+Boot0007* UEFI Shell	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(7c04a583-9e3e-4f1c-ad65-e05268d0b4d1)
+
+===== boot entries after the install
+BootCurrent: 0001
+Timeout: 5 seconds
+BootOrder: 0001,0004,0003,0002,0005,0000,0006,0007
+Boot0000* Enter Setup	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(462caa21-7614-4503-836e-8ab6f4662331)
+Boot0001* UEFI PCIe SSD <serial> 1	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x14160000,0x1417ffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/NVMe(0x1,<serial>)N.....YM....R,Y.
+Boot0002* UEFI PXEv4 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv4(0.0.0.00.0.0.0,0,0)N.....YM....R,Y.
+Boot0003* UEFI PXEv6 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv6([::]:<->[::]:,0,0)N.....YM....R,Y.
+Boot0004* UEFI HTTPv4 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv4(0.0.0.00.0.0.0,0,0)/Uri()N.....YM....R,Y.
+Boot0005* UEFI HTTPv6 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv6([::]:<->[::]:,0,0)/Uri()N.....YM....R,Y.
+Boot0006* BootManagerMenuApp	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(eec25bdc-67f2-4d95-b1d5-f81b2039d11d)
+Boot0007* UEFI Shell	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(7c04a583-9e3e-4f1c-ad65-e05268d0b4d1)
+Boot0008* fjarr-recovery	HD(10,GPT,<uuid>,0xc8a28,0x20000)/File(\EFI\BOOT\BOOTAA64.efi)b.o.o.t.m.o.d.e.=.r.e.c.o.v.e.r.y.
+
+===== state at the stop (stock)
+boot_chain_current     0x0
+BootChainFwCurrent     0600000000000000
+BootChainFwNext        absent
+BootChainFwStatus      absent
+BootCurrent            060000000100
+BootNext               absent
+BootOrder              0700000001000400030002000500000006000700
+L4TDefaultBootMode     0700000001000000
+reset_reason           SYS_RESET_N
+rootfs_current         0x0
+RootfsRedundancyLevel  0600000000000000
+rootfs_retry_count_a   0x0
+rootfs_retry_count_b   0x0
+RootfsRetryCountMax    0600000003000000
+rootfs_sr_magic        0x0
+RootfsStatusSlotA      0700000000000000
+RootfsStatusSlotB      0700000000000000
+
+===== the safety script's log on APP, if any
+17.89 start; /proc/cmdline: root=/dev/initrd rw rootwait mminit_loglevel=4 console=ttyTCU0,115200 firmware_class.path=/etc/firmware fbcon=map:0 net.ifnames=0 bl_prof_dataptr=2031616@0x471E10000 bl_prof_ro_ptr=65536@0x471E00000 
+17.91 BootCurrent 060000000800
+17.91 BootNext absent
+17.91 BootOrder 0700000001000400030002000500000006000700
+17.92 RootfsStatusSlotA 0700000000000000: the same value written again: write ok
+17.93 L4TDefaultBootMode 0700000001000000: the same value written again: write ok
+17.94 interfaces: eth0 lo ; with a device: eth0 
+17.95 eth0: driver r8168, mac <mac>
+18.02 sshd started
+108.09 addresses: none; sshd alive
+--- ip addr
+1: lo: <LOOPBACK> mtu 65536 qdisc noop state DOWN group default qlen 1000
+    link/loopback <mac> brd <mac>
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
+    link/ether <mac> brd <mac>
+--- dhclient.log
+timeout: failed to run command 'dhclient': No such file or directory
+--- sshd.log
+Server listening on 0.0.0.0 port 22.
+--- dmesg (net)
+[   15.385088] tegra194-pcie 14100000.pcie:      MEM 0x20a8000000..0x20afffffff -> 0x0040000000
+[   15.385091] tegra194-pcie 14100000.pcie:       IO 0x0030100000..0x00301fffff -> 0x0030100000
+[   15.385368] tegra194-pcie 14100000.pcie: iATU unroll: enabled
+[   15.385371] tegra194-pcie 14100000.pcie: Detected iATU regions: 8 outbound, 2 inbound
+[   15.491242] tegra194-pcie 14100000.pcie: Link up
+[   15.493854] tegra194-pcie 14100000.pcie: Link up
+[   15.493900] tegra194-pcie 14100000.pcie: PCI host bridge to bus 0001:00
+[   15.509912] pcieport 0001:00:00.0: Adding to iommu group 4
+[   15.509984] pcieport 0001:00:00.0: PME: Signaling with IRQ 190
+[   15.510515] pcieport 0001:00:00.0: AER: enabled with IRQ 190
+[   15.510783] tegra194-pcie 14160000.pcie: Adding to iommu group 5
+[   15.513692] tegra194-pcie 14160000.pcie: host bridge /bus@0/pcie@14160000 ranges:
+[   15.513714] tegra194-pcie 14160000.pcie:      MEM 0x2140000000..0x2427ffffff -> 0x2140000000
+[   15.513722] tegra194-pcie 14160000.pcie:      MEM 0x2428000000..0x242fffffff -> 0x0040000000
+[   15.513726] tegra194-pcie 14160000.pcie:       IO 0x0036100000..0x00361fffff -> 0x0036100000
+[   15.514028] tegra194-pcie 14160000.pcie: iATU unroll: enabled
+[   15.514031] tegra194-pcie 14160000.pcie: Detected iATU regions: 8 outbound, 2 inbound
+[   15.619415] tegra194-pcie 14160000.pcie: Link up
+[   15.621268] tegra194-pcie 14160000.pcie: Link up
+[   15.621318] tegra194-pcie 14160000.pcie: PCI host bridge to bus 0004:00
+[   15.637862] pcieport 0004:00:00.0: Adding to iommu group 5
+[   15.637934] pcieport 0004:00:00.0: PME: Signaling with IRQ 192
+[   15.638470] pcieport 0004:00:00.0: AER: enabled with IRQ 192
+[   15.638719] tegra194-pcie 141e0000.pcie: Adding to iommu group 6
+[   15.640400] tegra194-pcie 141e0000.pcie: host bridge /bus@0/pcie@141e0000 ranges:
+[   15.640413] tegra194-pcie 141e0000.pcie:      MEM 0x3000000000..0x3227ffffff -> 0x3000000000
+[   15.640418] tegra194-pcie 141e0000.pcie:      MEM 0x3228000000..0x322fffffff -> 0x0040000000
+[   15.640421] tegra194-pcie 141e0000.pcie:       IO 0x003e100000..0x003e1fffff -> 0x003e100000
+[   15.640720] tegra194-pcie 141e0000.pcie: iATU unroll: enabled
+[   15.640723] tegra194-pcie 141e0000.pcie: Detected iATU regions: 8 outbound, 2 inbound
+[   16.749213] tegra194-pcie 141e0000.pcie: Phy link never came up
+[   17.751023] tegra194-pcie 141e0000.pcie: Phy link never came up
+[   17.751071] tegra194-pcie 141e0000.pcie: PCI host bridge to bus 0007:00
+[   17.756218] pcieport 0007:00:00.0: Adding to iommu group 6
+[   17.756289] pcieport 0007:00:00.0: PME: Signaling with IRQ 194
+[   17.756812] pcieport 0007:00:00.0: AER: enabled with IRQ 194
+[   17.951516] fjarr-safety: interfaces: eth0 lo ; with a device: eth0 
+[   17.955506] fjarr-safety: eth0: driver r8168, mac <mac>
+[   17.958290] eth0: 0xffff800008123000, <mac>, IRQ 232
+[   22.124673] r8168: eth0: link up

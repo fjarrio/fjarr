@@ -1119,13 +1119,24 @@ with that line deleted.
 - The stock recovery through a `bootmode=recovery` entry (B6 T4,
   2026-10-18): L4TLauncher booted it from an entry made with
   `efibootmgr -C` outside `BootOrder`, `BootNext` consumed, `BootOrder`
-  unchanged, and the lab's safety script ran and wrote both variables through
-  efivarfs; but it did not answer ssh within 600 s, so T4 stopped (L7) and one
-  power cycle brought back the stock system. Its networking is open, and T6
-  and T3 wait for it.
-- Whether the watchdog fires once userspace stops feeding it, or NVIDIA's
-  driver keeps feeding it itself, and what a panic does to the retry count
-  (B6 T3): pending, after T4.
+  unchanged; the lab's safety script ran, wrote both variables through
+  efivarfs, and answered ssh 47 s after the reboot; one power cycle brought
+  back the stock system. The recovery's script gets a `PATH` without `/sbin`,
+  where the ramdisk keeps `dhclient`, and its Ethernet port appears only once
+  NVIDIA's script has loaded the PCIe driver for the NVMe (the first try
+  stopped on both).
+- The watchdog (B6 T3, 2026-10-18, NVIDIA Tegra186 WDT): held open with a
+  10 s timeout and no longer fed, it reset the box 7–9 s after the last feed
+  (`reset_reason` `BCCPLEXWDT`); closed without the magic close, it stopped
+  (no reset in 60 s, no "did not stop" in the kernel log; the kernel has no
+  `WATCHDOG_NOWAYOUT`); systemd letting go of it reset nothing. A panic with
+  `kernel.panic=0` and nothing holding the watchdog hung the box until a power
+  cycle; with `kernel.panic=10` it was back in 50 s (`MAINSWRST`). No reset
+  touched the slot state or the retry counters (the stock box runs without
+  rootfs A/B). The stock box's own `watchdog.conf` drop-in sets systemd's
+  watchdog to 120 s. So a Fjarr image on the Jetson keeps the watchdog open
+  from its initrd on (L3) and boots with `panic=10`, as the
+  [x86 test image](#x86-test-image) does: neither alone resets a hung box.
 - One restore of the full backup (C): pending.
 - Whether the factory QSPI carries NVIDIA's QSPI fix (`trimmer2-val`),
   read from its dump (B, C): not answerable in B, since the stock kernel

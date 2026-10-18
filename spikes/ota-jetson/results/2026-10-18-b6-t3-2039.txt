@@ -1,0 +1,141 @@
+# ZED Box Mini, phase B6 t3: 2026-10-18 20:39 Europe/Stockholm
+# spec: docs/32-fleet-ota.md#jetson-test-image. Written by b6.sh; the steps are in
+# 2026-10-18-b6.csv (run 20261018T182749Z). Host names, MACs, serial numbers, GUIDs and machine IDs are <kind>.
+
+===== references to ota_work on the stock system
+state=ours
+
+===== boot state before T3
+boot_chain_current     0x0
+BootChainFwCurrent     0600000000000000
+BootChainFwNext        absent
+BootChainFwStatus      absent
+BootCurrent            060000000100
+BootNext               absent
+BootOrder              0700000001000400030002000500000006000700
+L4TDefaultBootMode     0700000001000000
+reset_reason           SYS_RESET_N
+rootfs_current         0x0
+RootfsRedundancyLevel  0600000000000000
+rootfs_retry_count_a   0x0
+rootfs_retry_count_b   0x0
+RootfsRetryCountMax    0600000003000000
+rootfs_sr_magic        0x0
+RootfsStatusSlotA      0700000000000000
+RootfsStatusSlotB      0700000000000000
+
+===== systemd's watchdog off (/etc/systemd/system.conf.d/zz-fjarr-b6-no-watchdog.conf)
+RuntimeWatchdogUSec=0
+holders=
+[    7.705256] systemd[1]: Using hardware watchdog 'NVIDIA Tegra186 WDT', version 0, device /dev/watchdog
+[    7.705273] systemd[1]: Set hardware watchdog to 2min.
+
+===== watchdog: opened with 10 s, closed without the magic close
+opened /dev/watchdog, timeout set to 10 s, at 1792348234.8
+closed without the magic close at 1792348234.8
+[    7.705256] systemd[1]: Using hardware watchdog 'NVIDIA Tegra186 WDT', version 0, device /dev/watchdog
+[    7.705273] systemd[1]: Set hardware watchdog to 2min.
+
+===== kernel log after 60 s
+[    7.705256] systemd[1]: Using hardware watchdog 'NVIDIA Tegra186 WDT', version 0, device /dev/watchdog
+[    7.705273] systemd[1]: Set hardware watchdog to 2min.
+
+===== watchdog: held open with 10 s, fed once
+held /dev/watchdog, timeout 10 s, last fed at 1792348297.2
+
+===== boot state after t3 wdt-open-hold
+boot_chain_current     0x0
+BootChainFwCurrent     0600000000000000
+BootChainFwNext        absent
+BootChainFwStatus      absent
+BootCurrent            060000000100
+BootNext               absent
+BootOrder              0700000001000400030002000500000006000700
+L4TDefaultBootMode     0700000001000000
+reset_reason           BCCPLEXWDT
+rootfs_current         0x0
+RootfsRedundancyLevel  0600000000000000
+rootfs_retry_count_a   0x0
+rootfs_retry_count_b   0x0
+RootfsRetryCountMax    0600000003000000
+rootfs_sr_magic        0x0
+RootfsStatusSlotA      0700000000000000
+RootfsStatusSlotB      0700000000000000
+
+===== the verifier after t3 wdt-open-hold
+Starting Configure bootloader service...
+Warning: Cannot get compatible board name.
+3767-000-0000--1--p3509-a02-p3767-0000-
+TNSPEC 3767-303-0000-C.1-1-1-p3509-a02-p3767-0000-
+COMPATIBLE_SPEC 3767-000-0000--1--p3509-a02-p3767-0000-
+TEGRA_BOOT_STORAGE nvme0n1
+TEGRA_CHIPID 0x23
+TEGRA_OTA_BOOT_DEVICE /dev/mtdblock0
+TEGRA_OTA_GPT_DEVICE /dev/mtdblock0
+Info: Write TegraPlatformCompatSpec with 3767-000-0000--1--p3509-a02-p3767-0000-.
+Info: The esp is already mounted to /boot/efi.
+Info: Verifying bootloader and rootfs status.
+Info: variable BootChainFwStatus is not found.
+nv-l4t-bootloader-config.service: Deactivated successfully.
+Finished Configure bootloader service.
+RootFS A/B is not enabled.
+
+===== boot state after t3 sysrq-c-panic-0
+boot_chain_current     0x0
+BootChainFwCurrent     0600000000000000
+BootChainFwNext        absent
+BootChainFwStatus      absent
+BootCurrent            060000000100
+BootNext               absent
+BootOrder              0700000001000400030002000500000006000700
+L4TDefaultBootMode     0700000001000000
+reset_reason           SYS_RESET_N
+rootfs_current         0x0
+RootfsRedundancyLevel  0600000000000000
+rootfs_retry_count_a   0x0
+rootfs_retry_count_b   0x0
+RootfsRetryCountMax    0600000003000000
+rootfs_sr_magic        0x0
+RootfsStatusSlotA      0700000000000000
+RootfsStatusSlotB      0700000000000000
+
+===== boot state after t3 sysrq-c-panic-10
+boot_chain_current     0x0
+BootChainFwCurrent     0600000000000000
+BootChainFwNext        absent
+BootChainFwStatus      absent
+BootCurrent            060000000100
+BootNext               absent
+BootOrder              0700000001000400030002000500000006000700
+L4TDefaultBootMode     0700000001000000
+reset_reason           MAINSWRST
+rootfs_current         0x0
+RootfsRedundancyLevel  0600000000000000
+rootfs_retry_count_a   0x0
+rootfs_retry_count_b   0x0
+RootfsRetryCountMax    0600000003000000
+rootfs_sr_magic        0x0
+RootfsStatusSlotA      0700000000000000
+RootfsStatusSlotB      0700000000000000
+
+===== the verifier after t3 sysrq-c-panic-10
+Starting Configure bootloader service...
+Warning: Cannot get compatible board name.
+3767-000-0000--1--p3509-a02-p3767-0000-
+TNSPEC 3767-303-0000-C.1-1-1-p3509-a02-p3767-0000-
+COMPATIBLE_SPEC 3767-000-0000--1--p3509-a02-p3767-0000-
+TEGRA_BOOT_STORAGE nvme0n1
+TEGRA_CHIPID 0x23
+TEGRA_OTA_BOOT_DEVICE /dev/mtdblock0
+TEGRA_OTA_GPT_DEVICE /dev/mtdblock0
+Info: Write TegraPlatformCompatSpec with 3767-000-0000--1--p3509-a02-p3767-0000-.
+Info: The esp is already mounted to /boot/efi.
+Info: Verifying bootloader and rootfs status.
+Info: variable BootChainFwStatus is not found.
+nv-l4t-bootloader-config.service: Deactivated successfully.
+Finished Configure bootloader service.
+RootFS A/B is not enabled.
+
+===== systemd's watchdog back on
+RuntimeWatchdogUSec=2min
+holders= 1

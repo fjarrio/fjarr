@@ -1,0 +1,63 @@
+# ZED Box Mini, phase B6 t3: 2026-10-18 20:09 Europe/Stockholm
+# spec: docs/32-fleet-ota.md#jetson-test-image. Written by b6.sh; the steps are in
+# 2026-10-18-b6.csv (run 20261018T180906Z). Host names, MACs, serial numbers, GUIDs and machine IDs are <kind>.
+
+===== references to ota_work on the stock system
+state=ours
+
+===== boot state before T3
+boot_chain_current     0x0
+BootChainFwCurrent     0600000000000000
+BootChainFwNext        absent
+BootChainFwStatus      absent
+BootCurrent            060000000100
+BootNext               absent
+BootOrder              0700000001000400030002000500000006000700
+L4TDefaultBootMode     0700000001000000
+reset_reason           SYS_RESET_N
+rootfs_current         0x0
+RootfsRedundancyLevel  0600000000000000
+rootfs_retry_count_a   0x0
+rootfs_retry_count_b   0x0
+RootfsRetryCountMax    0600000003000000
+rootfs_sr_magic        0x0
+RootfsStatusSlotA      0700000000000000
+RootfsStatusSlotB      0700000000000000
+
+===== systemd's watchdog off (/etc/systemd/system.conf.d/90-fjarr-b6-no-watchdog.conf)
+RuntimeWatchdogUSec=2min
+holders= 1
+[    6.269425] systemd[1]: Using hardware watchdog 'NVIDIA Tegra186 WDT', version 0, device /dev/watchdog
+[    6.269442] systemd[1]: Set hardware watchdog to 2min.
+[   32.234003] systemd[1]: Using hardware watchdog 'NVIDIA Tegra186 WDT', version 0, device /dev/watchdog
+[   32.234022] systemd[1]: Set hardware watchdog to 2min.
+
+===== state at the stop (stock)
+boot_chain_current     0x0
+BootChainFwCurrent     0600000000000000
+BootChainFwNext        absent
+BootChainFwStatus      absent
+BootCurrent            060000000100
+BootNext               absent
+BootOrder              0700000001000400030002000500000006000700
+L4TDefaultBootMode     0700000001000000
+reset_reason           SYS_RESET_N
+rootfs_current         0x0
+RootfsRedundancyLevel  0600000000000000
+rootfs_retry_count_a   0x0
+rootfs_retry_count_b   0x0
+RootfsRetryCountMax    0600000003000000
+rootfs_sr_magic        0x0
+RootfsStatusSlotA      0700000000000000
+RootfsStatusSlotB      0700000000000000
+
+===== the safety script's log on APP, if any
+16.89 start; /proc/cmdline: root=/dev/initrd rw rootwait mminit_loglevel=4 console=ttyTCU0,115200 firmware_class.path=/etc/firmware fbcon=map:0 net.ifnames=0 bl_prof_dataptr=2031616@0x471E10000 bl_prof_ro_ptr=65536@0x471E00000 
+16.90 BootCurrent 060000000800
+16.90 BootNext absent
+16.91 BootOrder 0700000001000400030002000500000006000700
+16.92 RootfsStatusSlotA 0700000000000000: the same value written again: write ok
+16.93 L4TDefaultBootMode 0700000001000000: the same value written again: write ok
+16.94 interfaces: eth0 lo ; with a device: eth0 
+16.94 eth0: driver r8168, mac <mac>
+17.01 sshd started

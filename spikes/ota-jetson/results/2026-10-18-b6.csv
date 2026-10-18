@@ -6,3 +6,33 @@ run,test,step,start_utc,entry,pmc_before,came_up_as,to_down_s,to_up_s,to_ready_s
 20261018T105829Z,t4,install,2026-10-18T10:58:38Z,0008,,,,,,,,,,,entry Boot0008: HD(10) \EFI\BOOT\BOOTAA64.efi bootmode=recovery; not in BootOrder,ok
 20261018T105829Z,t4,stock-recovery,2026-10-18T10:58:41Z,0008,magic=0x0/retry_a=0x0,,1,,,,,,,,the stock recovery with the safety script did not come up; and the box returned to its stock system after one power cycle (L7),no-stock-recovery
 20261018T111119Z,clean,clean,2026-10-18T11:11:25Z,,,,,,,,,,,,Boot0008 removed ota_work removed;,ok
+20261018T175207Z,t4,install,2026-10-18T17:52:15Z,0008,,,,,,,,,,,entry Boot0008: HD(10) \EFI\BOOT\BOOTAA64.efi bootmode=recovery; not in BootOrder,ok
+20261018T175207Z,t4,stock-recovery,2026-10-18T17:52:18Z,0008,magic=0x0/retry_a=0x0,,2,,,,,,,,the stock recovery with the safety script did not come up; and the box returned to its stock system after one power cycle (L7),no-stock-recovery
+20261018T180359Z,clean,clean,2026-10-18T18:04:04Z,,,,,,,,,,,,Boot0008 removed ota_work removed;,ok
+20261018T180407Z,t4,install,2026-10-18T18:04:15Z,0008,,,,,,,,,,,entry Boot0008: HD(10) \EFI\BOOT\BOOTAA64.efi bootmode=recovery; not in BootOrder,ok
+20261018T180407Z,t4,stock-recovery,2026-10-18T18:04:18Z,0008,magic=0x0/retry_a=0x0,rec,1,47,45,0001,absent,SYS_RESET_N,0x0,00000000,efivarfs write ok safety script ran; the entry and the script stay for T6 and T3 (b6.sh clean),ok
+20261018T180623Z,clean,clean,2026-10-18T18:06:27Z,,,,,,,,,,,,Boot0008 removed ota_work removed;,ok
+20261018T180710Z,t4,install,2026-10-18T18:07:18Z,0008,,,,,,,,,,,entry Boot0008: HD(10) \EFI\BOOT\BOOTAA64.efi bootmode=recovery; not in BootOrder,ok
+20261018T180710Z,t4,stock-recovery,2026-10-18T18:07:21Z,0008,magic=0x0/retry_a=0x0,rec,1,48,39,0001,absent,SYS_RESET_N,0x0,00000000,efivarfs write ok safety script ran; the entry and the script stay for T6 and T3 (b6.sh clean),ok
+20261018T180905Z,t6,skip,2026-10-18T18:09:05Z,,,,,,,,,,,,no A5 rescue image (an Android boot image *recovery*.img and its *.dtb) in out/yocto/build/tmp/deploy/images/zedbox-mini-orin-nx16; B6_A5_IMG and B6_A5_DTB name one,skipped
+20261018T180906Z,t3,systemd-watchdog-off,2026-10-18T18:09:15Z,,magic=0x0/retry_a=0x0,,,,,,,,,,systemd still runs its watchdog (L7),dropin-ignored
+20261018T180922Z,clean,clean,2026-10-18T18:09:27Z,,,,,,,,,,,,Boot0008 removed ota_work removed;drop-in removed;,ok
+20261018T181030Z,t4,install,2026-10-18T18:10:38Z,0008,,,,,,,,,,,entry Boot0008: HD(10) \EFI\BOOT\BOOTAA64.efi bootmode=recovery; not in BootOrder,ok
+20261018T181030Z,t4,stock-recovery,2026-10-18T18:10:41Z,0008,magic=0x0/retry_a=0x0,rec,2,51,42,0001,absent,SYS_RESET_N,0x0,00000000,efivarfs write ok safety script ran; the entry and the script stay for T6 and T3 (b6.sh clean),ok
+20261018T181228Z,t6,skip,2026-10-18T18:12:28Z,,,,,,,,,,,,no A5 rescue image (an Android boot image *recovery*.img and its *.dtb) in out/yocto/build/tmp/deploy/images/zedbox-mini-orin-nx16; B6_A5_IMG and B6_A5_DTB name one,skipped
+20261018T181229Z,t3,systemd-watchdog-off,2026-10-18T18:12:38Z,,magic=0x0/retry_a=0x0,,,,,,,,,,no reset in 150 s,ok
+20261018T181229Z,t3,wdt-open-close,2026-10-18T18:15:12Z,,magic=0x0/retry_a=0x0,,,,,,,,,,no reset in 60 s: the driver feeds the watchdog itself,no-reset
+20261018T181229Z,t3,sysrq-c-panic-0,2026-10-18T18:16:14Z,-,magic=0x0/retry_a=0x0,stock-after-power-cycle,28,,41,0001,absent,SYS_RESET_N,0x0,00000000,no reset within 300 s of the panic with kernel.panic=0: hung; power cycled,hung
+20261018T181229Z,t3,sysrq-c-panic-10,2026-10-18T18:22:37Z,-,magic=0x0/retry_a=0x0,stock,28,49,50,0001,absent,MAINSWRST,0x0,00000000,back 49 s after the panic,ok
+20261018T181229Z,t3,systemd-watchdog-on,2026-10-18T18:23:28Z,,,,,,,,,,,,RuntimeWatchdogUSec=2min holders= 1 ,ok
+20261018T182334Z,clean,clean,2026-10-18T18:23:39Z,,,,,,,,,,,,Boot0008 removed ota_work removed;,ok
+20261018T182555Z,t4,install,2026-10-18T18:26:04Z,0008,,,,,,,,,,,entry Boot0008: HD(10) \EFI\BOOT\BOOTAA64.efi bootmode=recovery; not in BootOrder,ok
+20261018T182555Z,t4,stock-recovery,2026-10-18T18:26:07Z,0008,magic=0x0/retry_a=0x0,rec,1,42,43,0001,absent,SYS_RESET_N,0x0,00000000,efivarfs write ok safety script ran; the entry and the script stay for T6 and T3 (b6.sh clean),ok
+20261018T182748Z,t6,skip,2026-10-18T18:27:48Z,,,,,,,,,,,,no A5 rescue image (an Android boot image *recovery*.img and its *.dtb) in out/yocto/build/tmp/deploy/images/zedbox-mini-orin-nx16; B6_A5_IMG and B6_A5_DTB name one,skipped
+20261018T182749Z,t3,systemd-watchdog-off,2026-10-18T18:27:58Z,,magic=0x0/retry_a=0x0,,,,,,,,,,no reset in 150 s,ok
+20261018T182749Z,t3,wdt-open-close,2026-10-18T18:30:34Z,,magic=0x0/retry_a=0x0,,,,,,,,,,no reset in 60 s: the close stopped the watchdog; or the driver feeds it itself (the kernel log tells),no-reset
+20261018T182749Z,t3,wdt-open-hold,2026-10-18T18:31:36Z,,magic=0x0/retry_a=0x0,stock,,48,48,0001,absent,BCCPLEXWDT,0x0,00000000,reset 7-9 s after the last feed: the watchdog fires when its holder stops feeding,reset
+20261018T182749Z,t3,sysrq-c-panic-0,2026-10-18T18:32:29Z,-,magic=0x0/retry_a=0x0,stock-after-power-cycle,28,,43,0001,absent,SYS_RESET_N,0x0,00000000,no reset within 300 s of the panic with kernel.panic=0: hung; power cycled,hung
+20261018T182749Z,t3,sysrq-c-panic-10,2026-10-18T18:38:54Z,-,magic=0x0/retry_a=0x0,stock,28,50,52,0001,absent,MAINSWRST,0x0,00000000,back 50 s after the panic,ok
+20261018T182749Z,t3,systemd-watchdog-on,2026-10-18T18:39:48Z,,,,,,,,,,,,RuntimeWatchdogUSec=2min holders= 1 ,ok
+20261018T183953Z,clean,clean,2026-10-18T18:39:58Z,,,,,,,,,,,,Boot0008 removed ota_work removed;,ok

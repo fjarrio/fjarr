@@ -1,0 +1,195 @@
+# ZED Box Mini, phase B6 t4: 2026-10-18 20:27 Europe/Stockholm
+# spec: docs/32-fleet-ota.md#jetson-test-image. Written by b6.sh; the steps are in
+# 2026-10-18-b6.csv (run 20261018T182555Z). Host names, MACs, serial numbers, GUIDs and machine IDs are <kind>.
+
+===== references to ota_work on the stock system
+state=absent
+
+===== boot entries before T4
+BootCurrent: 0001
+Timeout: 5 seconds
+BootOrder: 0001,0004,0003,0002,0005,0000,0006,0007
+Boot0000* Enter Setup	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(462caa21-7614-4503-836e-8ab6f4662331)
+Boot0001* UEFI PCIe SSD <serial> 1	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x14160000,0x1417ffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/NVMe(0x1,<serial>)N.....YM....R,Y.
+Boot0002* UEFI PXEv4 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv4(0.0.0.00.0.0.0,0,0)N.....YM....R,Y.
+Boot0003* UEFI PXEv6 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv6([::]:<->[::]:,0,0)N.....YM....R,Y.
+Boot0004* UEFI HTTPv4 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv4(0.0.0.00.0.0.0,0,0)/Uri()N.....YM....R,Y.
+Boot0005* UEFI HTTPv6 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv6([::]:<->[::]:,0,0)/Uri()N.....YM....R,Y.
+Boot0006* BootManagerMenuApp	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(eec25bdc-67f2-4d95-b1d5-f81b2039d11d)
+Boot0007* UEFI Shell	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(7c04a583-9e3e-4f1c-ad65-e05268d0b4d1)
+
+===== boot entries after the install
+BootCurrent: 0001
+Timeout: 5 seconds
+BootOrder: 0001,0004,0003,0002,0005,0000,0006,0007
+Boot0000* Enter Setup	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(462caa21-7614-4503-836e-8ab6f4662331)
+Boot0001* UEFI PCIe SSD <serial> 1	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x14160000,0x1417ffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/NVMe(0x1,<serial>)N.....YM....R,Y.
+Boot0002* UEFI PXEv4 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv4(0.0.0.00.0.0.0,0,0)N.....YM....R,Y.
+Boot0003* UEFI PXEv6 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv6([::]:<->[::]:,0,0)N.....YM....R,Y.
+Boot0004* UEFI HTTPv4 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv4(0.0.0.00.0.0.0,0,0)/Uri()N.....YM....R,Y.
+Boot0005* UEFI HTTPv6 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv6([::]:<->[::]:,0,0)/Uri()N.....YM....R,Y.
+Boot0006* BootManagerMenuApp	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(eec25bdc-67f2-4d95-b1d5-f81b2039d11d)
+Boot0007* UEFI Shell	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(7c04a583-9e3e-4f1c-ad65-e05268d0b4d1)
+Boot0008* fjarr-recovery	HD(10,GPT,<uuid>,0xc8a28,0x20000)/File(\EFI\BOOT\BOOTAA64.efi)b.o.o.t.m.o.d.e.=.r.e.c.o.v.e.r.y.
+
+===== stock recovery: the safety script's log
+14.72 start; /proc/cmdline: root=/dev/initrd rw rootwait mminit_loglevel=4 console=ttyTCU0,115200 firmware_class.path=/etc/firmware fbcon=map:0 net.ifnames=0 bl_prof_dataptr=2031616@0x471E10000 bl_prof_ro_ptr=65536@0x471E00000 
+14.73 BootCurrent 060000000800
+14.73 BootNext absent
+14.74 BootOrder 0700000001000400030002000500000006000700
+14.75 RootfsStatusSlotA 0700000000000000: the same value written again: write ok
+14.75 L4TDefaultBootMode 0700000001000000: the same value written again: write ok
+14.76 interfaces: eth0 lo ; with a device: eth0 
+14.77 eth0: driver r8168, mac <mac>
+14.84 sshd started
+19.85 addresses: eth0 192.168.10.115/24 ; sshd alive
+
+===== stock recovery: DHCP
+Internet Systems Consortium DHCP Client 4.4.1
+Copyright 2004-2018 Internet Systems Consortium.
+All rights reserved.
+For info, please visit https://www.isc.org/software/dhcp/
+
+Listening on LPF/eth0/<mac>
+Sending on   LPF/eth0/<mac>
+Sending on   Socket/fallback
+DHCPDISCOVER on eth0 to 255.255.255.255 port 67 interval 3 (xid=0x1e221f2a)
+DHCPDISCOVER on eth0 to 255.255.255.255 port 67 interval 6 (xid=0x1e221f2a)
+DHCPOFFER of 192.168.10.115 from 192.168.10.1
+DHCPREQUEST for 192.168.10.115 on eth0 to 255.255.255.255 port 67 (xid=0x2a1f221e)
+DHCPACK of 192.168.10.115 from 192.168.10.1 (xid=0x1e221f2a)
+/sbin/dhclient-script: line 140: hostname: command not found
+/sbin/dhclient-script: line 148: hostname: command not found
+bound to 192.168.10.115 -- renewal in 18711 seconds.
+
+===== stock recovery: kernel, command line, mounts
+Linux (none) 5.15.148-tegra #1 SMP PREEMPT Mon Jun 16 08:24:48 PDT 2025 aarch64 aarch64 aarch64 GNU/Linux
+root=/dev/initrd rw rootwait mminit_loglevel=4 console=ttyTCU0,115200 firmware_class.path=/etc/firmware fbcon=map:0 net.ifnames=0 bl_prof_dataptr=2031616@0x471E10000 bl_prof_ro_ptr=65536@0x471E00000 
+20.22 157.32
+/dev/nvme0n1p1 /mnt ext4 ro,relatime 0 0
+efivarfs /sys/firmware/efi/efivars efivarfs rw,relatime 0 0
+
+===== stock recovery: boot state
+boot_chain_current     0x0
+BootChainFwCurrent     0600000000000000
+BootChainFwNext        absent
+BootChainFwStatus      absent
+BootCurrent            060000000800
+BootNext               absent
+BootOrder              0700000001000400030002000500000006000700
+L4TDefaultBootMode     0700000001000000
+reset_reason           MAINSWRST
+rootfs_current         0x0
+RootfsRedundancyLevel  0600000000000000
+rootfs_retry_count_a   0x0
+rootfs_retry_count_b   0x0
+RootfsRetryCountMax    0600000003000000
+rootfs_sr_magic        0x0
+RootfsStatusSlotA      0700000000000000
+RootfsStatusSlotB      0700000000000000
+
+===== boot state after t4 stock-recovery
+boot_chain_current     0x0
+BootChainFwCurrent     0600000000000000
+BootChainFwNext        absent
+BootChainFwStatus      absent
+BootCurrent            060000000100
+BootNext               absent
+BootOrder              0700000001000400030002000500000006000700
+L4TDefaultBootMode     0700000001000000
+reset_reason           SYS_RESET_N
+rootfs_current         0x0
+RootfsRedundancyLevel  0600000000000000
+rootfs_retry_count_a   0x0
+rootfs_retry_count_b   0x0
+RootfsRetryCountMax    0600000003000000
+rootfs_sr_magic        0x0
+RootfsStatusSlotA      0700000000000000
+RootfsStatusSlotB      0700000000000000
+
+===== the safety script's log on APP
+14.72 start; /proc/cmdline: root=/dev/initrd rw rootwait mminit_loglevel=4 console=ttyTCU0,115200 firmware_class.path=/etc/firmware fbcon=map:0 net.ifnames=0 bl_prof_dataptr=2031616@0x471E10000 bl_prof_ro_ptr=65536@0x471E00000 
+14.73 BootCurrent 060000000800
+14.73 BootNext absent
+14.74 BootOrder 0700000001000400030002000500000006000700
+14.75 RootfsStatusSlotA 0700000000000000: the same value written again: write ok
+14.75 L4TDefaultBootMode 0700000001000000: the same value written again: write ok
+14.76 interfaces: eth0 lo ; with a device: eth0 
+14.77 eth0: driver r8168, mac <mac>
+14.84 sshd started
+19.85 addresses: eth0 192.168.10.115/24 ; sshd alive
+--- ip addr
+1: lo: <LOOPBACK> mtu 65536 qdisc noop state DOWN group default qlen 1000
+    link/loopback <mac> brd <mac>
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
+    link/ether <mac> brd <mac>
+    inet 192.168.10.115/24 brd 192.168.10.255 scope global dynamic eth0
+       valid_lft 43199sec preferred_lft 43199sec
+--- dhclient.log
+Internet Systems Consortium DHCP Client 4.4.1
+Copyright 2004-2018 Internet Systems Consortium.
+All rights reserved.
+For info, please visit https://www.isc.org/software/dhcp/
+
+Listening on LPF/eth0/<mac>
+Sending on   LPF/eth0/<mac>
+Sending on   Socket/fallback
+DHCPDISCOVER on eth0 to 255.255.255.255 port 67 interval 3 (xid=0x1e221f2a)
+DHCPDISCOVER on eth0 to 255.255.255.255 port 67 interval 6 (xid=0x1e221f2a)
+DHCPOFFER of 192.168.10.115 from 192.168.10.1
+DHCPREQUEST for 192.168.10.115 on eth0 to 255.255.255.255 port 67 (xid=0x2a1f221e)
+DHCPACK of 192.168.10.115 from 192.168.10.1 (xid=0x1e221f2a)
+/sbin/dhclient-script: line 140: hostname: command not found
+/sbin/dhclient-script: line 148: hostname: command not found
+bound to 192.168.10.115 -- renewal in 18711 seconds.
+--- sshd.log
+Server listening on 0.0.0.0 port 22.
+Connection closed by 192.168.10.188 port 51430 [preauth]
+Connection closed by 192.168.10.188 port 51442 [preauth]
+Accepted publickey for root from 192.168.10.188 port 51452 ssh2: RSA SHA256:kJ9BOtrq/9PjI6otK6R/rqEAc98urI0WU+7WvI9GiDc
+Received disconnect from 192.168.10.188 port 51452:11: disconnected by user
+Disconnected from user root 192.168.10.188 port 51452
+Accepted publickey for root from 192.168.10.188 port 51462 ssh2: RSA SHA256:kJ9BOtrq/9PjI6otK6R/rqEAc98urI0WU+7WvI9GiDc
+Received disconnect from 192.168.10.188 port 51462:11: disconnected by user
+Disconnected from user root 192.168.10.188 port 51462
+--- dmesg (net)
+[   12.221196] tegra194-pcie 14100000.pcie:       IO 0x0030100000..0x00301fffff -> 0x0030100000
+[   12.221461] tegra194-pcie 14100000.pcie: iATU unroll: enabled
+[   12.221464] tegra194-pcie 14100000.pcie: Detected iATU regions: 8 outbound, 2 inbound
+[   12.329137] tegra194-pcie 14100000.pcie: Link up
+[   12.330506] tegra194-pcie 14100000.pcie: Link up
+[   12.330553] tegra194-pcie 14100000.pcie: PCI host bridge to bus 0001:00
+[   12.347850] pcieport 0001:00:00.0: Adding to iommu group 4
+[   12.347928] pcieport 0001:00:00.0: PME: Signaling with IRQ 190
+[   12.348468] pcieport 0001:00:00.0: AER: enabled with IRQ 190
+[   12.348727] tegra194-pcie 14160000.pcie: Adding to iommu group 5
+[   12.350410] tegra194-pcie 14160000.pcie: host bridge /bus@0/pcie@14160000 ranges:
+[   12.350423] tegra194-pcie 14160000.pcie:      MEM 0x2140000000..0x2427ffffff -> 0x2140000000
+[   12.350430] tegra194-pcie 14160000.pcie:      MEM 0x2428000000..0x242fffffff -> 0x0040000000
+[   12.350434] tegra194-pcie 14160000.pcie:       IO 0x0036100000..0x00361fffff -> 0x0036100000
+[   12.350737] tegra194-pcie 14160000.pcie: iATU unroll: enabled
+[   12.350739] tegra194-pcie 14160000.pcie: Detected iATU regions: 8 outbound, 2 inbound
+[   12.457127] tegra194-pcie 14160000.pcie: Link up
+[   12.458582] tegra194-pcie 14160000.pcie: Link up
+[   12.458618] tegra194-pcie 14160000.pcie: PCI host bridge to bus 0004:00
+[   12.475772] pcieport 0004:00:00.0: Adding to iommu group 5
+[   12.475845] pcieport 0004:00:00.0: PME: Signaling with IRQ 192
+[   12.476398] pcieport 0004:00:00.0: AER: enabled with IRQ 192
+[   12.476612] tegra194-pcie 141e0000.pcie: Adding to iommu group 6
+[   12.479599] tegra194-pcie 141e0000.pcie: host bridge /bus@0/pcie@141e0000 ranges:
+[   12.479619] tegra194-pcie 141e0000.pcie:      MEM 0x3000000000..0x3227ffffff -> 0x3000000000
+[   12.479624] tegra194-pcie 141e0000.pcie:      MEM 0x3228000000..0x322fffffff -> 0x0040000000
+[   12.479628] tegra194-pcie 141e0000.pcie:       IO 0x003e100000..0x003e1fffff -> 0x003e100000
+[   12.479939] tegra194-pcie 141e0000.pcie: iATU unroll: enabled
+[   12.479941] tegra194-pcie 141e0000.pcie: Detected iATU regions: 8 outbound, 2 inbound
+[   13.586566] tegra194-pcie 141e0000.pcie: Phy link never came up
+[   14.588363] tegra194-pcie 141e0000.pcie: Phy link never came up
+[   14.588411] tegra194-pcie 141e0000.pcie: PCI host bridge to bus 0007:00
+[   14.593644] pcieport 0007:00:00.0: Adding to iommu group 6
+[   14.593717] pcieport 0007:00:00.0: PME: Signaling with IRQ 194
+[   14.594269] pcieport 0007:00:00.0: AER: enabled with IRQ 194
+[   14.770359] fjarr-safety: interfaces: eth0 lo ; with a device: eth0 
+[   14.773568] fjarr-safety: eth0: driver r8168, mac <mac>
+[   14.776196] eth0: 0xffff800008123000, <mac>, IRQ 232
+[   17.898546] r8168: eth0: link up
+[   19.855738] fjarr-safety: addresses: eth0 192.168.10.115/24 ; sshd alive

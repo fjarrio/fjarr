@@ -99,3 +99,15 @@ script remounts `APP` read-only next. The stock ramdisk (read from the backup's 
 `dhclient`, `dhclient-script` and `r8168`, and its `/init` loads `r8168` and runs no DHCP for
 `root=/dev/initrd`. Before T4 runs again, the safety script should keep its network log on `APP`
 until it has an address (or a minute has passed), so that a stop shows where it ended.
+
+The evening's runs (19:52 to 20:40), with that change:
+
+| Step | Result |
+|---|---|
+| T4 `t4` (19:52) | **stopped again (L7)**, now with the log on `APP` (`2026-10-18-b6-t4-2003.txt`): `eth0` there on `r8168`, link up, sshd listening, no address, and `timeout: failed to run command 'dhclient'`: `nv_recovery.sh` runs the script with a `PATH` without `/sbin`. One power cycle back. The safety script now sets its own `PATH` |
+| T4 `t4` (20:04 to 20:27, three times) | **passed**: the stock recovery on ssh 47 s after the reboot, `write ok` for both variables, one power cycle back to the stock system in 45 s. `2026-10-18-b6-t4-2027.txt` is the pass the last T3 ran on |
+| T6 `t6` | skipped (A5 not built). The skip first failed on the time budget meant for a real T6; it needs none now |
+| T3 `t3` (20:09) | **stopped (L7), `dropin-ignored`** (`2026-10-18-b6-t3-2009.txt`): the stock box's `/etc/systemd/system.conf.d/watchdog.conf` (`RuntimeWatchdogSec=120`) sorts after the lab's `90-` drop-in and won. The drop-in is now `zz-…` |
+| T3 `t3` (20:28 to 20:40) | **passed** (`2026-10-18-b6-t3-2039.txt`): systemd letting go of the watchdog reset nothing in 150 s; opened with 10 s and closed without the magic close, no reset in 60 s and no "watchdog did not stop!" in the kernel log, so the close stopped it; held open with 10 s and fed once, it reset the box 7–9 s after the last feed (`reset_reason` `BCCPLEXWDT`); `sysrq c` with `kernel.panic=0` and nothing holding the watchdog hung the box (no reset in 300 s, one power cycle); with `kernel.panic=10` back in 50 s (`MAINSWRST`). After each reset `BootCurrent` 0001, `RootfsStatusSlotA` 0, the PMC's rootfs register cleared, and the verifier: "RootFS A/B is not enabled". systemd's watchdog back at 2 min at the end |
+| `clean`, `net-down` (20:40) | Boot0008, `/ota_work` and the drop-in removed; the network rescue undone |
+| `probe.sh` | `2026-10-18-probe-stock-after-b6-t3.txt`: stock R36.4.4, `BootCurrent` 0001, `BootNext` absent, entries as in B1, the slot variables at their stock values |

@@ -79,7 +79,9 @@ ENTRY_LABEL=fjarr-recovery
 ENTRY_OPTS=bootmode=recovery
 NET_ALIAS=fjarr-net-rescue REC_ALIAS=zedbox-stock-recovery A5_ALIAS=fjarr-recovery-rescue
 OTA_DIR=/ota_work
-DROPIN=/etc/systemd/system.conf.d/90-fjarr-b6-no-watchdog.conf
+# Last in sort order: the stock box's own watchdog.conf there sets RuntimeWatchdogSec=120 and,
+# sorting after a 90- name, outvoted it (B6 T3 on 2026-10-18).
+DROPIN=/etc/systemd/system.conf.d/zz-fjarr-b6-no-watchdog.conf
 ONBOX=/var/lib/fjarr-b6 # on the box's APP: T6's copies of recovery and recovery-dtb
 PMC=/sys/devices/platform/bus@0/c360000.pmc
 # What must not change across a one-shot boot: the UEFI variables always (T3 included), the PMC's
@@ -105,7 +107,7 @@ case $cmd in
   t5) need=$((1200 + 2 * ($(boot_worst "$B6_NET_TMO") + LAB_RCM_ROUND_WORST) + B6_DEADMAN_S)) mode=lock ;; # net-up's upload: its own lab_need
   t4) need=$(($(boot_worst "$B6_REC_TMO") + 900)) mode=lock ;;
   t6) need=$((3 * B6_UPLOAD_TMO + $(boot_worst "$B6_REC_TMO") + B6_DEADMAN_S + LAB_RCM_ROUND_WORST + 1200)) mode=lock ;;
-  t3) need=$((300 + 3 * $(boot_worst "$B6_HANG_S") + 900)) mode=lock ;;
+  t3) need=$((300 + 4 * $(boot_worst "$B6_HANG_S") + 900)) mode=lock ;;
   serial) need=$(($(boot_worst "$LAB_BACK_TMO") + B6_SERIAL_S + 300)) mode=lock ;;
   clean) need=900 mode=lock ;;
   net-down) need=600 mode=nolock ;;
@@ -117,7 +119,7 @@ case $cmd:$opt in
 esac
 
 TEST=$cmd
-[[ $cmd == t6 && $opt != --restore ]] && ! { [[ -n $B6_A5_IMG ]] || compgen -G "$B6_A5_DIR/*recovery*.img" >/dev/null || compgen -G "$B6_A5_DIR/*rescue*.img" >/dev/null; } && mode=nolock
+[[ $cmd == t6 && $opt != --restore ]] && ! { [[ -n $B6_A5_IMG ]] || compgen -G "$B6_A5_DIR/*recovery*.img" >/dev/null || compgen -G "$B6_A5_DIR/*rescue*.img" >/dev/null; } && mode=nolock need=60 # the skip: no box, no time
 lab_init "b6-$cmd" "$need" "$mode"
 mkdir -p "$B6_DIR" "$B6_DIR/raw"
 chmod 700 "$B6_DIR"
@@ -787,6 +789,9 @@ safety_script() {
 # DHCP and sshd (root, the lab's keys, its own host key); remounts APP read-only, so that the power
 # cycle that ends it cannot hurt APP; and never returns, since the end of PID 1 would panic the
 # kernel. Its log: /run/fjarr/log, and ota_work/fjarr-safety.log on APP until the remount.
+# nv_recovery.sh hands it a PATH without /sbin, where the ramdisk keeps dhclient (B6 T4 on
+# 2026-10-18: "timeout: failed to run command 'dhclient'", the port up and nothing asked for DHCP).
+export PATH=/sbin:/usr/sbin:/bin:/usr/bin
 w=/mnt/ota_work r=/run/fjarr log=/mnt/ota_work/fjarr-safety.log
 nv=781e084c-a330-417c-b678-38e696380cb9 efi=8be4df61-93ca-11d2-aa0d-00e098032b8c
 vars=/sys/firmware/efi/efivars
@@ -825,25 +830,41 @@ reset() { # <name> <the 8 bytes, the attributes then the value, as printf escape
 reset RootfsStatusSlotA '\x07\x00\x00\x00\x00\x00\x00\x00'
 reset L4TDefaultBootMode '\x07\x00\x00\x00\x01\x00\x00\x00'
 sync
-for _ in $(seq 1 20); do
-  for i in /sys/class/net/*; do [ "${i##*/}" = lo ] || break 2; done
+# The ramdisk's init loads r8168 before any PCIe controller is up; the Ethernet port appears only
+# once nv_recovery.sh has loaded pcie_tegra194 for the NVMe, and the kernel's own tunnel and dummy
+# interfaces exist from the start. So wait for interfaces with a device behind them, not for any.
+modprobe r8168 2>/dev/null || say "modprobe r8168 failed"
+nics() { for i in /sys/class/net/*; do [ -e "$i/device" ] && printf '%s ' "${i##*/}"; done; }
+for _ in $(seq 1 60); do
+  [ -n "$(nics)" ] && break
   sleep 1
 done
-for i in /sys/class/net/*; do
-  n=${i##*/}
-  [ "$n" = lo ] && continue
+all=$(for i in /sys/class/net/*; do printf '%s ' "${i##*/}"; done)
+say "interfaces: $all; with a device: $(nics)"
+for n in $(nics); do
+  d=$(cd "/sys/class/net/$n/device/driver" 2>/dev/null && pwd -P) # the ramdisk has no readlink
+  say "$n: driver ${d##*/}, mac $(cat "/sys/class/net/$n/address")"
   ip link set "$n" up
   (timeout 120 dhclient -1 -v -pf "/run/dhclient.$n.pid" -lf "/run/dhclient.$n.leases" "$n" >>"$r/dhclient.log" 2>&1 &)
 done
 cp "$w/ssh_host_ed25519_key" "$w/authorized_keys" "$w/sshd_config" "$r/" && chmod 0600 "$r"/*
 if /bin/sshd -f "$r/sshd_config" -E "$r/sshd.log"; then say "sshd started"; else say "sshd did not start"; fi
-sync
-if mount -o remount,ro /mnt; then say "APP read-only from here"; ro=1; else say "APP: the read-only remount failed"; fi
-for _ in $(seq 1 12); do
+# Keep APP writable until there is an address or 90 s have passed, so that the log on APP shows how
+# the network came up (or did not) after the power cycle that ends this boot clears /run.
+for _ in $(seq 1 18); do
   a=$(ip -4 -o addr show scope global | awk '{ print $2, $4 }' | tr '\n' ' ')
-  [ -n "$a" ] && { say "addresses: $a"; break; }
+  [ -n "$a" ] && break
   sleep 5
 done
+say "addresses: ${a:-none}; sshd $(if [ -s "$r/sshd.pid" ] && kill -0 "$(cat "$r/sshd.pid")" 2>/dev/null; then echo alive; else echo gone; fi)"
+{
+  echo "--- ip addr"; ip addr 2>&1
+  echo "--- dhclient.log"; tail -n 40 "$r/dhclient.log" 2>&1
+  echo "--- sshd.log"; tail -n 20 "$r/sshd.log" 2>&1
+  echo "--- dmesg (net)"; dmesg 2>&1 | grep -iE 'r8168|eth|pcie|link' | tail -n 40
+} >>"$log" 2>&1
+sync
+if mount -o remount,ro /mnt; then say "APP read-only from here"; ro=1; else say "APP: the read-only remount failed"; fi
 while :; do sleep 3600; done
 EOF
 }
@@ -1382,12 +1403,53 @@ dmesg | grep -iE "watchdog|wdt" | tail -n 3' 2>&1) || stop wdt-failed "opening t
   det "watchdog: opened with 10 s, closed without the magic close" "$out"
   grep -q 'timeout set to 10 s' <<<"$out" || stop wdt-timeout "the driver did not take a 10 s timeout"
   if wd_alive "$boot" 60; then
-    note "no reset in 60 s: the driver feeds the watchdog itself"
+    # The kernel says "watchdog did not stop!" when a close leaves it running; without that line,
+    # the close stopped it (a driver without WDIOF_MAGICCLOSE stops on any close).
+    note "no reset in 60 s: the close stopped the watchdog, or the driver feeds it itself (the kernel log tells)"
     det_box "kernel log after 60 s" stock 'sudo -n dmesg | grep -iE "watchdog|wdt" | tail -n 5'
     row no-reset
   else
     warm_add
     note "reset $((ALIVE_LAST - T_CMD))-$((ALIVE_LAST - T_CMD + 2)) s after the close: the driver does not feed it"
+    t3_back "$LAB_BACK_TMO"
+    row reset
+  fi
+
+  # The question the close leaves open: with the device held open and no one feeding it, does
+  # the watchdog reset the box? A holder that feeds once, then sleeps 120 s with it open.
+  step_begin wdt-open-hold
+  lab_lock_check
+  warm_guard
+  lab_desktop_guard
+  lab_need "$((60 + $(boot_worst "$LAB_BACK_TMO")))" "the watchdog test"
+  boot=$BASE_BOOT
+  out=$(lab_box_root -t 30 'fuser /dev/watchdog /dev/watchdog0 >/dev/null 2>&1 && { echo "held by another process"; exit 1; }
+setsid python3 - >/run/fjarr-b6-wdt-hold.log 2>&1 </dev/null <<"PY" &
+import fcntl, os, struct, time
+fd = os.open("/dev/watchdog", os.O_WRONLY)
+t = struct.unpack("i", fcntl.ioctl(fd, 0xC0045706, struct.pack("i", 10)))[0]  # WDIOC_SETTIMEOUT
+fcntl.ioctl(fd, 0x80045705, struct.pack("i", 0))  # WDIOC_KEEPALIVE, the last feed
+print("held /dev/watchdog, timeout %s s, last fed at %.1f" % (t, time.time()), flush=True)
+time.sleep(120)
+os.write(fd, b"V")  # the magic close, if it is still alive after 120 s
+os.close(fd)
+print("released with the magic close at %.1f" % time.time(), flush=True)
+PY
+sleep 2; cat /run/fjarr-b6-wdt-hold.log' 2>&1) || stop wdt-hold-failed "holding the watchdog failed: $out"
+  T_CMD=$SECONDS
+  det "watchdog: held open with 10 s, fed once" "$out"
+  grep -q 'timeout 10 s' <<<"$out" || stop wdt-timeout "the driver did not take a 10 s timeout: $out"
+  if wd_alive "$boot" 60; then
+    note "no reset in 60 s with the watchdog held open and not fed: something feeds it"
+    det_box "kernel log after 60 s" stock 'sudo -n dmesg | grep -iE "watchdog|wdt" | tail -n 5'
+    # The panics next must find the watchdog let go of, as the steps before left it.
+    out=$(lab_box_root -t 120 'sleep 70; cat /run/fjarr-b6-wdt-hold.log; fuser /dev/watchdog /dev/watchdog0 2>&1 || echo "not held"' 2>&1) || true
+    det "the holder at its end" "$out"
+    grep -q 'not held' <<<"$out" || stop wdt-still-held "the holder still holds the watchdog: $out"
+    row no-reset
+  else
+    warm_add
+    note "reset $((ALIVE_LAST - T_CMD))-$((ALIVE_LAST - T_CMD + 2)) s after the last feed: the watchdog fires when its holder stops feeding"
     t3_back "$LAB_BACK_TMO"
     row reset
   fi

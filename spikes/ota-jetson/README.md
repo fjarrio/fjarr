@@ -256,7 +256,10 @@ public keys and a host key `b6.sh` made for it): it mounts efivarfs, sets `Rootf
 to 0 and `L4TDefaultBootMode` back to 1 (the stock values B1 recorded) only where they differ,
 and writes each even when it already holds that value, so that the log proves the write path
 through efivarfs (`write ok`; the firmware stores nothing new for the same value, and still checks
-the call); starts DHCP and its own sshd, remounts `APP` read-only so that the power cycle that ends the test
+the call); waits up to 60 s for a network interface with a device behind it (the Ethernet port appears only
+once `nv_recovery.sh` has loaded `pcie_tegra194` for the NVMe; the kernel's own interfaces are there
+from the start), starts DHCP on it with `/sbin` on its `PATH` (`nv_recovery.sh` leaves it off) and
+its own sshd, keeps its network log on `APP` until it has an address or 90 s have passed, remounts `APP` read-only so that the power cycle that ends the test
 cannot hurt it, and never returns, since the end of PID 1 would panic the kernel. Its log is
 `/run/fjarr/log` and, until the remount, `/ota_work/fjarr-safety.log` on `APP`, which T4 reads back
 from the stock system. Before writing, T4 checks that nothing in the stock system's systemd
@@ -280,17 +283,21 @@ its safety net.
 
 **T3**, last, on the stock box, with the safety script and the entry in place:
 
-1. A drop-in, `/etc/systemd/system.conf.d/90-fjarr-b6-no-watchdog.conf` (`RuntimeWatchdogSec=0`),
+1. A drop-in, `/etc/systemd/system.conf.d/zz-fjarr-b6-no-watchdog.conf` (`RuntimeWatchdogSec=0`; named to sort after the stock `watchdog.conf`, which sets 120 s),
    and `systemctl daemon-reexec`; systemd must report the watchdog off and nothing may hold
    `/dev/watchdog`. 150 s of watching show whether letting go of it reset the box.
 2. `/dev/watchdog` opened, its timeout set to 10 s (`WDIOC_SETTIMEOUT`, from `python3`), closed
-   without the magic close; then 60 s of watching. No reset: the driver feeds the watchdog itself.
-3. `sysrq c` with `kernel.panic=0`: a reset by itself within `B6_HANG_S` (300 s) is recorded, else
+   without the magic close; then 60 s of watching. No reset: the close stopped it, or the driver
+   feeds it itself; the kernel log tells which ("watchdog did not stop!" only in the second case).
+3. `/dev/watchdog` held open by a detached `python3` with a 10 s timeout, fed once
+   (`WDIOC_KEEPALIVE`), then not fed for 120 s; 60 s of watching. A reset: the watchdog fires when
+   its holder stops feeding. No reset: the holder's end (the magic close) is waited for first.
+4. `sysrq c` with `kernel.panic=0`: a reset by itself within `B6_HANG_S` (300 s) is recorded, else
    the box is hung and one power cycle brings it back. Then `sysrq c` with `kernel.panic=10`.
-4. After every reset the stock verifier must have verified the new boot before the next one (L6);
+5. After every reset the stock verifier must have verified the new boot before the next one (L6);
    the details hold the boot state (`RootfsStatusSlotA`, the PMC's `rootfs_retry_count_*` and
    `reset_reason`), the verifier's log and `nvbootctrl -t rootfs dump-slots-info` after each.
-5. The drop-in removed, `daemon-reexec`, and systemd's watchdog must be back on.
+6. The drop-in removed, `daemon-reexec`, and systemd's watchdog must be back on.
 
 **The serial console** (`serial`, `LAB_DESKTOP_OK=1` only: an isolated controller binds no
 driver). The box's micro-USB port shows L4T's USB gadget to the mini-PC, with a CDC ACM serial port
@@ -325,5 +332,6 @@ capture, and the safety script's variable reset on a fake efivars directory (a s
 an equal one left, an absent one left absent) gave what they should. `b6.sh check` ran against the
 box and the mini-PC (read only, 2026-10-18 12:26) and found nothing missing. After the safety
 review's fixes (2026-10-18 12:49 to 13:12): T2 and T5 passed, T4 stopped with the stock recovery
-booted but not answering ssh, T6 and T3 did not run; `clean` and `net-down` left the box and the
+booted but not answering ssh. With its DHCP fixed (19:52 to 20:40): T4 passed, T6 recorded its skip,
+T3 passed with the held-watchdog step added; `clean` and `net-down` left the box and the
 mini-PC as before ([results/README.md](results/README.md#phase-b6-on-2026-10-18)).
