@@ -178,9 +178,12 @@ spends minutes in the firmware under emulation, `neoverse-n1` does not; and a `b
 makes AAVMF drop the network entries. The test UKI adds `earlycon`, since the kernel prints nothing
 on QEMU's UART before its console driver loads.
 
-## T5 on the box (phase B6, waits for Erik)
+## T5 on the box (phase B6)
 
-Under the box lock (L1), never 00:00-06:30, with the stock box running:
+`../b6.sh net-up` and `../b6.sh t5` run these steps under the box lock, with their preconditions,
+checks and results ([B6 in the spike's README](../README.md#b6-one-shot-boot-tests)); `../b6.sh
+net-down` runs `--undo` at the end of B6. By hand, under the box lock (L1), never 00:00-06:30, with
+the stock box running:
 
 1. On the workstation: `build.sh`, then copy `net-rescue.sh`, `net-rescue-http.py` (beside it) and
    `out/rescue/36.4.4/fjarr-net-rescue.efi` to the mini-PC, and there, as root,

@@ -1049,7 +1049,7 @@ confirmation deadline, a warm reboot, so it falls back first.
 | # | Rule |
 |---|---|
 | L1 | One lock on the mini-PC for anything that touches the box, its plug or RCM; nothing runs 00:00–06:30, the nightly window and the 30 minutes `fjarr-lab` gives a job still running at its end |
-| L2 | Before any write to the NVMe, the ESP or the UEFI variables: the plug answers, the box answers on its MAC (scripts find it by MAC, not by address), the network rescue is serving, and the latest backup has a verified checksum list |
+| L2 | Before any write to the NVMe, the ESP or the UEFI variables: the plug answers, the box answers on its MAC (scripts find it by MAC, not by address), the network rescue is serving, and the latest backup has a verified checksum list. One exception, B6's T2: its `BootNext` writes, to entries already in `BootOrder`, come before the network rescue is proven, since its PXE step must find no server |
 | L3 | Every Fjarr Linux can reach RCM: it ships `reboot-recovery`, opens the watchdog from its initrd, runs the dead-man, and passes one RCM round trip before anything relies on it |
 | L4 | No QSPI write of a firmware build that has not booted from RAM over RCM first. No QSPI write at all without Q4, except a capsule byte-identical to firmware this box has already booted from QSPI, once the first capsule passed under Q4 |
 | L5 | `BootNext` is never left set while a capsule or chain switch is pending, and `BOOTAA64.efi` is never written |
@@ -1105,11 +1105,27 @@ with that line deleted.
   on USB in 38–39 s, ssh in 39–40 s, started in 39–42 s; the reset reason
   `SYS_RESET_N` and the slot state unchanged every time
   (`spikes/ota-jetson/results/2026-10-18-rcm.csv`).
-- `BootNext` honoured and consumed; the network rescue by PXE or HTTP boot
-  (B): pending.
+- `BootNext` honoured and consumed (B6 T2, 2026-10-18): consumed on a boot
+  through the NVMe entry, and honoured through `UEFI PXEv4` with no server,
+  whose fall-through to the NVMe took 30 s longer (106 s from the reboot to
+  ssh); the slot state unchanged. T2 set `BootNext` before the network rescue
+  was proven, the exception in L2.
+- The network rescue (B6 T5, 2026-10-18): reached by both PXEv4 (76 s from
+  the reboot to ssh) and HTTPv4 (51 s), served from the mini-PC to the box's
+  MAC only; each time `BootNext` consumed, the NVMe read only (the GPT as the
+  stock system reads it, `APP` mounted `ro,noload`), the Ethernet port up on
+  `r8168`, `reboot-recovery` to RCM in 20 s, and the stock system back 38–41 s
+  after one power cycle.
+- The stock recovery through a `bootmode=recovery` entry (B6 T4,
+  2026-10-18): L4TLauncher booted it from an entry made with
+  `efibootmgr -C` outside `BootOrder`, `BootNext` consumed, `BootOrder`
+  unchanged, and the lab's safety script ran and wrote both variables through
+  efivarfs; but it did not answer ssh within 600 s, so T4 stopped (L7) and one
+  power cycle brought back the stock system. Its networking is open, and T6
+  and T3 wait for it.
 - Whether the watchdog fires once userspace stops feeding it, or NVIDIA's
   driver keeps feeding it itself, and what a panic does to the retry count
-  (B): pending.
+  (B6 T3): pending, after T4.
 - One restore of the full backup (C): pending.
 - Whether the factory QSPI carries NVIDIA's QSPI fix (`trimmer2-val`),
   read from its dump (B, C): not answerable in B, since the stock kernel

@@ -1,0 +1,8 @@
+run,test,step,start_utc,entry,pmc_before,came_up_as,to_down_s,to_up_s,to_ready_s,boot_current,boot_next_after,reset_reason,retry_a,status_a,note,result
+20261018T104921Z,t2,bootnext-nvme,2026-10-18T10:49:26Z,0001,magic=0x0/retry_a=0x0,stock,31,76,79,0001,absent,MAINSWRST,0x0,00000000,consumed,ok
+20261018T104921Z,t2,bootnext-pxe-no-server,2026-10-18T10:50:47Z,0002,magic=0x0/retry_a=0x0,stock,1,106,107,0001,absent,MAINSWRST,0x0,00000000,fall-through to the NVMe; 30 s longer than the boot through Boot0001 (BootNext honoured),ok
+20261018T105314Z,t5,net-pxe,2026-10-18T10:53:20Z,0002,magic=0x0/retry_a=0x0,net,1,76,43,0001,absent,SYS_RESET_N,0x0,00000000,nvme=seen app=mounted-ro nic=eth0/r8168 rcm=20s,ok
+20261018T105314Z,t5,net-http,2026-10-18T10:55:54Z,0004,magic=0x0/retry_a=0x0,net,1,51,41,0001,absent,SYS_RESET_N,0x0,00000000,nvme=seen app=mounted-ro nic=eth0/r8168 rcm=20s,ok
+20261018T105829Z,t4,install,2026-10-18T10:58:38Z,0008,,,,,,,,,,,entry Boot0008: HD(10) \EFI\BOOT\BOOTAA64.efi bootmode=recovery; not in BootOrder,ok
+20261018T105829Z,t4,stock-recovery,2026-10-18T10:58:41Z,0008,magic=0x0/retry_a=0x0,,1,,,,,,,,the stock recovery with the safety script did not come up; and the box returned to its stock system after one power cycle (L7),no-stock-recovery
+20261018T111119Z,clean,clean,2026-10-18T11:11:25Z,,,,,,,,,,,,Boot0008 removed ota_work removed;,ok

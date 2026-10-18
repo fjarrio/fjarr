@@ -1,0 +1,372 @@
+# ZED Box Mini, phase B6 t5: 2026-10-18 12:58 Europe/Stockholm
+# spec: docs/32-fleet-ota.md#jetson-test-image. Written by b6.sh; the steps are in
+# 2026-10-18-b6.csv (run 20261018T105314Z). Host names, MACs, serial numbers, GUIDs and machine IDs are <kind>.
+
+===== rescue (pxe): kernel, command line, uptime
+Linux fjarr-net-rescue 5.15.148-tegra #1 SMP PREEMPT Mon Jun 16 08:24:48 PDT 2025 aarch64 GNU/Linux
+mminit_loglevel=4 console=ttyTCU0,115200 firmware_class.path=/etc/firmware fbcon=map:0 video=efifb:off console=tty0 panic=10 efi=runtime
+13.49 103.34
+
+===== rescue (pxe): boot entries
+BootCurrent: 0002
+Timeout: 5 seconds
+BootOrder: 0001,0004,0003,0002,0005,0000,0006,0007
+Boot0000* Enter Setup	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(462caa21-7614-4503-836e-8ab6f4662331)
+Boot0001* UEFI PCIe SSD <serial> 1	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x14160000,0x1417ffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/NVMe(0x1,<serial>)N.....YM....R,Y.
+Boot0002* UEFI PXEv4 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv4(0.0.0.00.0.0.0,0,0)N.....YM....R,Y.
+Boot0003* UEFI PXEv6 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv6([::]:<->[::]:,0,0)N.....YM....R,Y.
+Boot0004* UEFI HTTPv4 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv4(0.0.0.00.0.0.0,0,0)/Uri()N.....YM....R,Y.
+Boot0005* UEFI HTTPv6 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv6([::]:<->[::]:,0,0)/Uri()N.....YM....R,Y.
+Boot0006* BootManagerMenuApp	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(eec25bdc-67f2-4d95-b1d5-f81b2039d11d)
+Boot0007* UEFI Shell	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(7c04a583-9e3e-4f1c-ad65-e05268d0b4d1)
+
+===== rescue (pxe): kernel log (PCIe, NVMe, Ethernet, EFI, watchdog)
+[    0.000000] efi: EFI v2.70 by EDK II
+[    0.000000] efi: RTPROP=0x46d81f198 TPMFinalLog=0x45e3e0000 SMBIOS=0xffff0000 SMBIOS 3.0=0x46d210000 MEMATTR=0x467164018 ESRT=0x4676cbf18 TPMEventLog=0x45e3f8018 RNG=0x457ab0018 MEMRESERVE=0x45e3fae98 
+[    0.000000] Kernel command line: mminit_loglevel=4 console=ttyTCU0,115200 firmware_class.path=/etc/firmware fbcon=map:0 video=efifb:off console=tty0 panic=10 efi=runtime
+[    0.003610] Remapping and enabling EFI services.
+[    0.084525] Registered efivars operations
+[    1.881077] fjarr-net-rescue: starting on 5.15.148-tegra, command line: mminit_loglevel=4 console=ttyTCU0,115200 firmware_class.path=/etc/firmware fbcon=map:0 video=efifb:off console=tty0 panic=10 efi=runtime
+[    1.881878] fjarr-net-rescue: watchdog armed: 60 s
+[    1.889091] tegra194-pcie 140a0000.pcie: Adding to iommu group 3
+[    1.997970] tegra194-pcie 140a0000.pcie: host bridge /bus@0/pcie@140a0000 ranges:
+[    1.997994] tegra194-pcie 140a0000.pcie:      MEM 0x3240000000..0x3527ffffff -> 0x3240000000
+[    1.998001] tegra194-pcie 140a0000.pcie:      MEM 0x3528000000..0x352fffffff -> 0x0040000000
+[    1.998005] tegra194-pcie 140a0000.pcie:       IO 0x002a100000..0x002a1fffff -> 0x002a100000
+[    1.998328] tegra194-pcie 140a0000.pcie: iATU unroll: enabled
+[    1.998330] tegra194-pcie 140a0000.pcie: Detected iATU regions: 8 outbound, 2 inbound
+[    2.105488] tegra194-pcie 140a0000.pcie: Link up
+[    2.106949] tegra194-pcie 140a0000.pcie: Link up
+[    2.107001] tegra194-pcie 140a0000.pcie: PCI host bridge to bus 0008:00
+[    2.124291] pcieport 0008:00:00.0: Adding to iommu group 3
+[    2.124376] pcieport 0008:00:00.0: PME: Signaling with IRQ 188
+[    2.124654] pcieport 0008:00:00.0: AER: enabled with IRQ 188
+[    2.124892] tegra194-pcie 14100000.pcie: Adding to iommu group 4
+[    2.127680] tegra194-pcie 14100000.pcie: host bridge /bus@0/pcie@14100000 ranges:
+[    2.127696] tegra194-pcie 14100000.pcie:      MEM 0x2080000000..0x20a7ffffff -> 0x2080000000
+[    2.127704] tegra194-pcie 14100000.pcie:      MEM 0x20a8000000..0x20afffffff -> 0x0040000000
+[    2.127709] tegra194-pcie 14100000.pcie:       IO 0x0030100000..0x00301fffff -> 0x0030100000
+[    2.128174] tegra194-pcie 14100000.pcie: iATU unroll: enabled
+[    2.128178] tegra194-pcie 14100000.pcie: Detected iATU regions: 8 outbound, 2 inbound
+[    2.233664] tegra194-pcie 14100000.pcie: Link up
+[    2.236332] tegra194-pcie 14100000.pcie: Link up
+[    2.236384] tegra194-pcie 14100000.pcie: PCI host bridge to bus 0001:00
+[    2.252182] pcieport 0001:00:00.0: Adding to iommu group 4
+[    2.252259] pcieport 0001:00:00.0: PME: Signaling with IRQ 190
+[    2.252548] pcieport 0001:00:00.0: AER: enabled with IRQ 190
+[    2.252796] tegra194-pcie 14160000.pcie: Adding to iommu group 5
+[    2.255601] tegra194-pcie 14160000.pcie: host bridge /bus@0/pcie@14160000 ranges:
+[    2.255623] tegra194-pcie 14160000.pcie:      MEM 0x2140000000..0x2427ffffff -> 0x2140000000
+[    2.255632] tegra194-pcie 14160000.pcie:      MEM 0x2428000000..0x242fffffff -> 0x0040000000
+[    2.255637] tegra194-pcie 14160000.pcie:       IO 0x0036100000..0x00361fffff -> 0x0036100000
+[    2.256136] tegra194-pcie 14160000.pcie: iATU unroll: enabled
+[    2.256141] tegra194-pcie 14160000.pcie: Detected iATU regions: 8 outbound, 2 inbound
+[    2.361663] tegra194-pcie 14160000.pcie: Link up
+[    2.364332] tegra194-pcie 14160000.pcie: Link up
+[    2.364391] tegra194-pcie 14160000.pcie: PCI host bridge to bus 0004:00
+[    2.380150] pcieport 0004:00:00.0: Adding to iommu group 5
+[    2.380231] pcieport 0004:00:00.0: PME: Signaling with IRQ 192
+[    2.380777] pcieport 0004:00:00.0: AER: enabled with IRQ 192
+[    2.381022] tegra194-pcie 141e0000.pcie: Adding to iommu group 6
+[    2.383644] tegra194-pcie 141e0000.pcie: host bridge /bus@0/pcie@141e0000 ranges:
+[    2.383668] tegra194-pcie 141e0000.pcie:      MEM 0x3000000000..0x3227ffffff -> 0x3000000000
+[    2.383677] tegra194-pcie 141e0000.pcie:      MEM 0x3228000000..0x322fffffff -> 0x0040000000
+[    2.383682] tegra194-pcie 141e0000.pcie:       IO 0x003e100000..0x003e1fffff -> 0x003e100000
+[    2.384193] tegra194-pcie 141e0000.pcie: iATU unroll: enabled
+[    2.384198] tegra194-pcie 141e0000.pcie: Detected iATU regions: 8 outbound, 2 inbound
+[    3.491595] tegra194-pcie 141e0000.pcie: Phy link never came up
+[    4.493542] tegra194-pcie 141e0000.pcie: Phy link never came up
+[    4.493603] tegra194-pcie 141e0000.pcie: PCI host bridge to bus 0007:00
+[    4.498808] pcieport 0007:00:00.0: Adding to iommu group 6
+[    4.498887] pcieport 0007:00:00.0: PME: Signaling with IRQ 194
+[    4.500583] pcieport 0007:00:00.0: AER: enabled with IRQ 194
+[    4.509036] nvme 0004:01:00.0: Adding to iommu group 5
+[    4.509215] nvme nvme0: pci function 0004:01:00.0
+[    4.509264] nvme 0004:01:00.0: enabling device (0000 -> 0002)
+[    4.538588] nvme nvme0: allocated 128 MiB host memory buffer.
+[    4.543052] nvme nvme0: 8/0/0 default/read/poll queues
+[    4.545801]  nvme0n1: p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 p15
+[    4.568274] r8168: loading out-of-tree module taints kernel.
+[    4.570037] r8168 0008:01:00.0: Adding to iommu group 3
+[    4.570120] r8168 Gigabit Ethernet driver 8.053.00-NAPI loaded
+[    4.570189] r8168 0008:01:00.0: enabling device (0000 -> 0003)
+[    4.586785] r8168: This product is covered by one or more of the following patents: US6,570,884, US6,115,776, and US6,327,625.
+[    4.588847] r8168  Copyright (C) 2024 Realtek NIC software team <nicfae@realtek.com> 
+[    8.778902] r8168: eth0: link up
+
+===== rescue (pxe): disks
+NAME           SIZE TYPE RO PARTLABEL
+nvme0n1      238.5G disk  0 
+|-nvme0n1p1    237G part  0 
+|-nvme0n1p2    128M part  0 
+|-nvme0n1p3    768K part  0 
+|-nvme0n1p4   31.6M part  0 
+|-nvme0n1p5    128M part  0 
+|-nvme0n1p6    768K part  0 
+|-nvme0n1p7   31.6M part  0 
+|-nvme0n1p8     80M part  0 
+|-nvme0n1p9    512K part  0 
+|-nvme0n1p10    64M part  0 
+|-nvme0n1p11    80M part  0 
+|-nvme0n1p12   512K part  0 
+|-nvme0n1p13    64M part  0 
+|-nvme0n1p14   400M part  0 
+`-nvme0n1p15 479.5M part  0 
+
+===== rescue (pxe): boot state
+boot_chain_current     0x0
+BootChainFwCurrent     0600000000000000
+BootChainFwNext        absent
+BootChainFwStatus      absent
+BootCurrent            060000000200
+BootNext               absent
+BootOrder              0700000001000400030002000500000006000700
+L4TDefaultBootMode     0700000001000000
+reset_reason           MAINSWRST
+rootfs_current         0x0
+RootfsRedundancyLevel  0600000000000000
+rootfs_retry_count_a   0x0
+rootfs_retry_count_b   0x0
+RootfsRetryCountMax    0600000003000000
+rootfs_sr_magic        0x0
+RootfsStatusSlotA      0700000000000000
+RootfsStatusSlotB      0700000000000000
+
+===== rescue (pxe): the NVMe read only, the NIC
+gpt=7a28028439738d216f804f0c9481dade9ea1569b754f287153d73c13ff466230
+app=/dev/nvme0n1p1
+release=# R36 (release), REVISION: 4.4, GCID: 41062509, BOARD: generic, EABI: aarch64, DATE: Mon Jun 16 16:07:13 UTC 2025
+nic=eth0 r8168 up
+addr=eth0 192.168.10.115/24
+
+===== the mini-PC's journal (pxe)
+2026-10-18T12:53:47+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2666386939 available DHCP subnet: 192.168.10.0/255.255.255.0
+2026-10-18T12:53:47+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2666386939 vendor class: PXEClient:Arch:00011:UNDI:003016
+2026-10-18T12:53:47+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2666386939 PXE(wlp3s0) <mac> proxy
+2026-10-18T12:53:47+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2666386939 tags: fjarr-box, wlp3s0
+2026-10-18T12:53:47+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2666386939 next server: 192.168.10.108
+2026-10-18T12:53:47+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2666386939 broadcast response
+2026-10-18T12:53:47+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2666386939 sent size:  1 option: 53 message-type  2
+2026-10-18T12:53:47+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2666386939 sent size:  4 option: 54 server-identifier  192.168.10.108
+2026-10-18T12:53:47+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2666386939 sent size:  9 option: 60 vendor-class  <mac>:65:6e:74
+2026-10-18T12:53:47+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2666386939 sent size: 17 option: 97 client-machine-id  <mac>:<mac>:00:00...
+2026-10-18T12:53:55+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2666386939 available DHCP subnet: 192.168.10.0/255.255.255.0
+2026-10-18T12:53:55+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2666386939 vendor class: PXEClient:Arch:00011:UNDI:003016
+2026-10-18T12:53:55+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2821258893 available DHCP subnet: 192.168.10.0/255.255.255.0
+2026-10-18T12:53:55+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2821258893 vendor class: PXEClient:Arch:00011:UNDI:003016
+2026-10-18T12:53:55+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2821258893 PXE(wlp3s0) <mac> proxy
+2026-10-18T12:53:55+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2821258893 tags: fjarr-box, wlp3s0
+2026-10-18T12:53:55+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2821258893 bootfile name: fjarr-net-rescue.efi
+2026-10-18T12:53:55+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2821258893 server name: 192.168.10.108
+2026-10-18T12:53:55+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2821258893 next server: 192.168.10.108
+2026-10-18T12:53:55+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2821258893 sent size:  1 option: 53 message-type  5
+2026-10-18T12:53:55+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2821258893 sent size:  4 option: 54 server-identifier  192.168.10.108
+2026-10-18T12:53:55+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2821258893 sent size:  9 option: 60 vendor-class  <mac>:65:6e:74
+2026-10-18T12:53:55+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2821258893 sent size: 17 option: 97 client-machine-id  <mac>:<mac>:00:00...
+2026-10-18T12:53:56+02:00 <hostname> dnsmasq[13002]: dnsmasq-tftp[13002]: error 8 User aborted the transfer received from 192.168.10.115
+2026-10-18T12:53:56+02:00 <hostname> dnsmasq[13002]: dnsmasq-tftp[13002]: failed sending /var/lib/fjarr-net-rescue/tftp/<mac>/fjarr-net-rescue.efi to 192.168.10.115
+2026-10-18T12:54:22+02:00 <hostname> dnsmasq[13002]: dnsmasq-tftp[13002]: sent /var/lib/fjarr-net-rescue/tftp/<mac>/fjarr-net-rescue.efi to 192.168.10.115
+2026-10-18T12:54:34+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 604236143 available DHCP subnet: 192.168.10.0/255.255.255.0
+2026-10-18T12:54:34+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 604236143 vendor class: udhcp 1.30.1
+2026-10-18T12:54:34+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 604236143 client provides name: fjarr-net-rescue
+2026-10-18T12:54:34+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 604236143 available DHCP subnet: 192.168.10.0/255.255.255.0
+2026-10-18T12:54:34+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 604236143 vendor class: udhcp 1.30.1
+2026-10-18T12:54:34+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 604236143 client provides name: fjarr-net-rescue
+
+===== boot state after t5 net-pxe
+boot_chain_current     0x0
+BootChainFwCurrent     0600000000000000
+BootChainFwNext        absent
+BootChainFwStatus      absent
+BootCurrent            060000000100
+BootNext               absent
+BootOrder              0700000001000400030002000500000006000700
+L4TDefaultBootMode     0700000001000000
+reset_reason           SYS_RESET_N
+rootfs_current         0x0
+RootfsRedundancyLevel  0600000000000000
+rootfs_retry_count_a   0x0
+rootfs_retry_count_b   0x0
+RootfsRetryCountMax    0600000003000000
+rootfs_sr_magic        0x0
+RootfsStatusSlotA      0700000000000000
+RootfsStatusSlotB      0700000000000000
+
+===== rescue (http): kernel, command line, uptime
+Linux fjarr-net-rescue 5.15.148-tegra #1 SMP PREEMPT Mon Jun 16 08:24:48 PDT 2025 aarch64 GNU/Linux
+mminit_loglevel=4 console=ttyTCU0,115200 firmware_class.path=/etc/firmware fbcon=map:0 video=efifb:off console=tty0 panic=10 efi=runtime
+12.06 91.87
+
+===== rescue (http): boot entries
+BootCurrent: 0004
+Timeout: 5 seconds
+BootOrder: 0001,0004,0003,0002,0005,0000,0006,0007
+Boot0000* Enter Setup	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(462caa21-7614-4503-836e-8ab6f4662331)
+Boot0001* UEFI PCIe SSD <serial> 1	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x14160000,0x1417ffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/NVMe(0x1,<serial>)N.....YM....R,Y.
+Boot0002* UEFI PXEv4 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv4(0.0.0.00.0.0.0,0,0)N.....YM....R,Y.
+Boot0003* UEFI PXEv6 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv6([::]:<->[::]:,0,0)N.....YM....R,Y.
+Boot0004* UEFI HTTPv4 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv4(0.0.0.00.0.0.0,0,0)/Uri()N.....YM....R,Y.
+Boot0005* UEFI HTTPv6 (MAC:<mac>)	VenHw(1e5a432c-0466-4d31-b009-d4d9239271d3)/MemoryMapped(11,0x140a0000,0x140bffff)/PciRoot(0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)/MAC(<mac>,0)/IPv6([::]:<->[::]:,0,0)/Uri()N.....YM....R,Y.
+Boot0006* BootManagerMenuApp	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(eec25bdc-67f2-4d95-b1d5-f81b2039d11d)
+Boot0007* UEFI Shell	FvVol(49a79a15-8f69-4be7-a30c-a172f44abce7)/FvFile(7c04a583-9e3e-4f1c-ad65-e05268d0b4d1)
+
+===== rescue (http): kernel log (PCIe, NVMe, Ethernet, EFI, watchdog)
+[    0.000000] efi: EFI v2.70 by EDK II
+[    0.000000] efi: RTPROP=0x46d81f198 TPMFinalLog=0x45e3e0000 SMBIOS=0xffff0000 SMBIOS 3.0=0x46d210000 MEMATTR=0x467164018 ESRT=0x4676cbf18 TPMEventLog=0x45e3f8018 RNG=0x457ab0018 MEMRESERVE=0x45e3fae98 
+[    0.000000] Kernel command line: mminit_loglevel=4 console=ttyTCU0,115200 firmware_class.path=/etc/firmware fbcon=map:0 video=efifb:off console=tty0 panic=10 efi=runtime
+[    0.003597] Remapping and enabling EFI services.
+[    0.083856] Registered efivars operations
+[    1.887882] fjarr-net-rescue: starting on 5.15.148-tegra, command line: mminit_loglevel=4 console=ttyTCU0,115200 firmware_class.path=/etc/firmware fbcon=map:0 video=efifb:off console=tty0 panic=10 efi=runtime
+[    1.888673] fjarr-net-rescue: watchdog armed: 60 s
+[    1.896605] tegra194-pcie 140a0000.pcie: Adding to iommu group 3
+[    2.005918] tegra194-pcie 140a0000.pcie: host bridge /bus@0/pcie@140a0000 ranges:
+[    2.005938] tegra194-pcie 140a0000.pcie:      MEM 0x3240000000..0x3527ffffff -> 0x3240000000
+[    2.005947] tegra194-pcie 140a0000.pcie:      MEM 0x3528000000..0x352fffffff -> 0x0040000000
+[    2.005950] tegra194-pcie 140a0000.pcie:       IO 0x002a100000..0x002a1fffff -> 0x002a100000
+[    2.006449] tegra194-pcie 140a0000.pcie: iATU unroll: enabled
+[    2.006453] tegra194-pcie 140a0000.pcie: Detected iATU regions: 8 outbound, 2 inbound
+[    2.113011] tegra194-pcie 140a0000.pcie: Link up
+[    2.115652] tegra194-pcie 140a0000.pcie: Link up
+[    2.115709] tegra194-pcie 140a0000.pcie: PCI host bridge to bus 0008:00
+[    2.135638] pcieport 0008:00:00.0: Adding to iommu group 3
+[    2.135727] pcieport 0008:00:00.0: PME: Signaling with IRQ 188
+[    2.136009] pcieport 0008:00:00.0: AER: enabled with IRQ 188
+[    2.136247] tegra194-pcie 14100000.pcie: Adding to iommu group 4
+[    2.139651] tegra194-pcie 14100000.pcie: host bridge /bus@0/pcie@14100000 ranges:
+[    2.139669] tegra194-pcie 14100000.pcie:      MEM 0x2080000000..0x20a7ffffff -> 0x2080000000
+[    2.139675] tegra194-pcie 14100000.pcie:      MEM 0x20a8000000..0x20afffffff -> 0x0040000000
+[    2.139678] tegra194-pcie 14100000.pcie:       IO 0x0030100000..0x00301fffff -> 0x0030100000
+[    2.140135] tegra194-pcie 14100000.pcie: iATU unroll: enabled
+[    2.140139] tegra194-pcie 14100000.pcie: Detected iATU regions: 8 outbound, 2 inbound
+[    2.245071] tegra194-pcie 14100000.pcie: Link up
+[    2.249113] tegra194-pcie 14100000.pcie: Link up
+[    2.249158] tegra194-pcie 14100000.pcie: PCI host bridge to bus 0001:00
+[    2.267499] pcieport 0001:00:00.0: Adding to iommu group 4
+[    2.267573] pcieport 0001:00:00.0: PME: Signaling with IRQ 190
+[    2.267838] pcieport 0001:00:00.0: AER: enabled with IRQ 190
+[    2.268096] tegra194-pcie 14160000.pcie: Adding to iommu group 5
+[    2.271301] tegra194-pcie 14160000.pcie: host bridge /bus@0/pcie@14160000 ranges:
+[    2.271320] tegra194-pcie 14160000.pcie:      MEM 0x2140000000..0x2427ffffff -> 0x2140000000
+[    2.271326] tegra194-pcie 14160000.pcie:      MEM 0x2428000000..0x242fffffff -> 0x0040000000
+[    2.271329] tegra194-pcie 14160000.pcie:       IO 0x0036100000..0x00361fffff -> 0x0036100000
+[    2.271812] tegra194-pcie 14160000.pcie: iATU unroll: enabled
+[    2.271816] tegra194-pcie 14160000.pcie: Detected iATU regions: 8 outbound, 2 inbound
+[    2.377009] tegra194-pcie 14160000.pcie: Link up
+[    2.379613] tegra194-pcie 14160000.pcie: Link up
+[    2.379663] tegra194-pcie 14160000.pcie: PCI host bridge to bus 0004:00
+[    2.395458] pcieport 0004:00:00.0: Adding to iommu group 5
+[    2.395531] pcieport 0004:00:00.0: PME: Signaling with IRQ 192
+[    2.395832] pcieport 0004:00:00.0: AER: enabled with IRQ 192
+[    2.396050] tegra194-pcie 141e0000.pcie: Adding to iommu group 6
+[    2.399057] tegra194-pcie 141e0000.pcie: host bridge /bus@0/pcie@141e0000 ranges:
+[    2.399077] tegra194-pcie 141e0000.pcie:      MEM 0x3000000000..0x3227ffffff -> 0x3000000000
+[    2.399082] tegra194-pcie 141e0000.pcie:      MEM 0x3228000000..0x322fffffff -> 0x0040000000
+[    2.399085] tegra194-pcie 141e0000.pcie:       IO 0x003e100000..0x003e1fffff -> 0x003e100000
+[    2.399584] tegra194-pcie 141e0000.pcie: iATU unroll: enabled
+[    2.399588] tegra194-pcie 141e0000.pcie: Detected iATU regions: 8 outbound, 2 inbound
+[    3.506829] tegra194-pcie 141e0000.pcie: Phy link never came up
+[    4.509025] tegra194-pcie 141e0000.pcie: Phy link never came up
+[    4.509074] tegra194-pcie 141e0000.pcie: PCI host bridge to bus 0007:00
+[    4.514264] pcieport 0007:00:00.0: Adding to iommu group 6
+[    4.514334] pcieport 0007:00:00.0: PME: Signaling with IRQ 194
+[    4.515564] pcieport 0007:00:00.0: AER: enabled with IRQ 194
+[    4.526089] nvme 0004:01:00.0: Adding to iommu group 5
+[    4.526278] nvme nvme0: pci function 0004:01:00.0
+[    4.526503] nvme 0004:01:00.0: enabling device (0000 -> 0002)
+[    4.556765] nvme nvme0: allocated 128 MiB host memory buffer.
+[    4.561830] nvme nvme0: 8/0/0 default/read/poll queues
+[    4.564468]  nvme0n1: p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 p15
+[    4.588058] r8168: loading out-of-tree module taints kernel.
+[    4.589985] r8168 0008:01:00.0: Adding to iommu group 3
+[    4.590068] r8168 Gigabit Ethernet driver 8.053.00-NAPI loaded
+[    4.590141] r8168 0008:01:00.0: enabling device (0000 -> 0003)
+[    4.606331] r8168: This product is covered by one or more of the following patents: US6,570,884, US6,115,776, and US6,327,625.
+[    4.608384] r8168  Copyright (C) 2024 Realtek NIC software team <nicfae@realtek.com> 
+[    8.778246] r8168: eth0: link up
+
+===== rescue (http): disks
+NAME           SIZE TYPE RO PARTLABEL
+nvme0n1      238.5G disk  0 
+|-nvme0n1p1    237G part  0 
+|-nvme0n1p2    128M part  0 
+|-nvme0n1p3    768K part  0 
+|-nvme0n1p4   31.6M part  0 
+|-nvme0n1p5    128M part  0 
+|-nvme0n1p6    768K part  0 
+|-nvme0n1p7   31.6M part  0 
+|-nvme0n1p8     80M part  0 
+|-nvme0n1p9    512K part  0 
+|-nvme0n1p10    64M part  0 
+|-nvme0n1p11    80M part  0 
+|-nvme0n1p12   512K part  0 
+|-nvme0n1p13    64M part  0 
+|-nvme0n1p14   400M part  0 
+`-nvme0n1p15 479.5M part  0 
+
+===== rescue (http): boot state
+boot_chain_current     0x0
+BootChainFwCurrent     0600000000000000
+BootChainFwNext        absent
+BootChainFwStatus      absent
+BootCurrent            060000000400
+BootNext               absent
+BootOrder              0700000001000400030002000500000006000700
+L4TDefaultBootMode     0700000001000000
+reset_reason           MAINSWRST
+rootfs_current         0x0
+RootfsRedundancyLevel  0600000000000000
+rootfs_retry_count_a   0x0
+rootfs_retry_count_b   0x0
+RootfsRetryCountMax    0600000003000000
+rootfs_sr_magic        0x0
+RootfsStatusSlotA      0700000000000000
+RootfsStatusSlotB      0700000000000000
+
+===== rescue (http): the NVMe read only, the NIC
+gpt=7a28028439738d216f804f0c9481dade9ea1569b754f287153d73c13ff466230
+app=/dev/nvme0n1p1
+release=# R36 (release), REVISION: 4.4, GCID: 41062509, BOARD: generic, EABI: aarch64, DATE: Mon Jun 16 16:07:13 UTC 2025
+nic=eth0 r8168 up
+addr=eth0 192.168.10.115/24
+
+===== the mini-PC's journal (http)
+2026-10-18T12:56:18+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2983829481 available DHCP subnet: 192.168.10.0/255.255.255.0
+2026-10-18T12:56:18+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2983829481 vendor class: HTTPClient:Arch:00019:UNDI:003016
+2026-10-18T12:56:18+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2983829481 PXE(wlp3s0) <mac> proxy
+2026-10-18T12:56:18+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2983829481 tags: http-arm64, fjarr-box, wlp3s0
+2026-10-18T12:56:18+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2983829481 bootfile name: http://192.168.10.108:8471/fjarr-net-rescue.efi
+2026-10-18T12:56:18+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2983829481 next server: 192.168.10.108
+2026-10-18T12:56:18+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2983829481 broadcast response
+2026-10-18T12:56:18+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2983829481 sent size:  1 option: 53 message-type  2
+2026-10-18T12:56:18+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2983829481 sent size:  4 option: 54 server-identifier  192.168.10.108
+2026-10-18T12:56:18+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2983829481 sent size: 10 option: 60 vendor-class  <mac>:69:65:6e:74
+2026-10-18T12:56:18+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2983829481 sent size: 17 option: 97 client-machine-id  <mac>:<mac>:00:00...
+2026-10-18T12:56:22+02:00 <hostname> python3[13003]: 192.168.10.115 - - [18/Oct/2026 12:56:22] "HEAD /fjarr-net-rescue.efi HTTP/1.1" 200 -
+2026-10-18T12:56:22+02:00 <hostname> python3[13003]: 192.168.10.115 - - [18/Oct/2026 12:56:22] served /fjarr-net-rescue.efi to 192.168.10.115 (<mac>), 0 bytes
+2026-10-18T12:56:22+02:00 <hostname> python3[13003]: 192.168.10.115 - - [18/Oct/2026 12:56:22] "GET /fjarr-net-rescue.efi HTTP/1.1" 200 -
+2026-10-18T12:56:32+02:00 <hostname> python3[13003]: 192.168.10.115 - - [18/Oct/2026 12:56:32] served /fjarr-net-rescue.efi to 192.168.10.115 (<mac>), 50338304 bytes
+2026-10-18T12:56:45+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2227926600 available DHCP subnet: 192.168.10.0/255.255.255.0
+2026-10-18T12:56:45+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2227926600 vendor class: udhcp 1.30.1
+2026-10-18T12:56:45+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2227926600 client provides name: fjarr-net-rescue
+2026-10-18T12:56:45+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2227926600 available DHCP subnet: 192.168.10.0/255.255.255.0
+2026-10-18T12:56:45+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2227926600 vendor class: udhcp 1.30.1
+2026-10-18T12:56:45+02:00 <hostname> dnsmasq[13002]: dnsmasq-dhcp[13002]: 2227926600 client provides name: fjarr-net-rescue
+
+===== boot state after t5 net-http
+boot_chain_current     0x0
+BootChainFwCurrent     0600000000000000
+BootChainFwNext        absent
+BootChainFwStatus      absent
+BootCurrent            060000000100
+BootNext               absent
+BootOrder              0700000001000400030002000500000006000700
+L4TDefaultBootMode     0700000001000000
+reset_reason           SYS_RESET_N
+rootfs_current         0x0
+RootfsRedundancyLevel  0600000000000000
+rootfs_retry_count_a   0x0
+rootfs_retry_count_b   0x0
+RootfsRetryCountMax    0600000003000000
+rootfs_sr_magic        0x0
+RootfsStatusSlotA      0700000000000000
+RootfsStatusSlotB      0700000000000000

@@ -11,6 +11,8 @@ backups stay in `.lab/` (gitignored). Every file here is written by a script, ne
 | `<date>-backup.txt` | `backup.sh` | B3: what the backup holds, how it was checked, where its copy is, and NVIDIA's QSPI fix |
 | `<date>-rcm.csv` | `rcm.sh` | B4: one line per RCM round trip, times in seconds |
 | `<date>-shelly.txt` | `shelly.sh` | B5: the plug's settings, before and after `apply` |
+| `<date>-b6.csv` | `b6.sh` | B6: one line per step of the one-shot boot tests, times in seconds |
+| `<date>-b6-<test>.txt` | `b6.sh` | B6: what each test read on the box, its rescues and the mini-PC, redacted |
 
 A second run on the same day adds `-HHMM` to the name; `rcm.csv` takes one line per trip, its
 `run` column telling runs apart.
@@ -28,6 +30,24 @@ cycle, from the cut to the plug reporting on again), `to_l4t_usb_s`, `to_ssh_s` 
 (systemd's), `reset_reason` (the PMC's), `slots` (the slot state against the run's start) and
 `result`: `ok`, or the step at which the run stopped (L7), such as `no-rcm`, `rcm-leave`,
 `rcm-again`, `not-back`, `host-key`, `slots-changed`.
+
+`b6.csv` columns: `run` (the run's start, UTC), `test` (`t2`, `t5`, `t4`, `t6`, `t3`, `serial`,
+`clean`), `step` (such as `bootnext-nvme`, `net-pxe`, `stock-recovery`, `sysrq-c-panic-10`),
+`start_utc`, `entry` (the `BootNext` entry, `-` for none), `pmc_before` (L4TLauncher's PMC
+register before a warm reset: `rootfs_sr_magic`, `0xface` once set up, and `rootfs_retry_count_a`;
+L6 refuses the reset while the magic is set and the count below 2), `came_up_as` (`stock`, `net` the network
+rescue, `rec` the stock recovery with the lab's safety script, `a5` Fjarr's rescue in `recovery`,
+each told by its host key), `to_down_s` (from the reboot command to the old boot gone), `to_up_s`
+and `to_ready_s` (from the reboot command, or from power on after a power cycle, to ssh and to
+systemd done starting), `boot_current` and `boot_next_after` (the entries, read where the box came
+up), `reset_reason`, `retry_a` (the PMC's `rootfs_retry_count_a`), `status_a`
+(`RootfsStatusSlotA`'s value), `note` (what the step saw) and `result`: `ok`, `consumed`,
+`fell-through`, `partial`, `skipped`, `reset`, `no-reset`, `hung`, `recovery`, `interrupted`, or the
+step at which the run stopped (L7), such as `no-net-rescue` (nothing came up; one power cycle
+brought back the stock system), `up-stock` (the stock system came up instead), `bootnext-left`,
+`state-changed`, `not-verified`, `not-back` (nothing after the one power cycle; no second one),
+`write-unproven` (T4: the safety script's efivarfs write not shown). A note that held a collected
+identifier is replaced, and the line kept unredacted in `.lab/b6/raw/`.
 
 ## Phase B on 2026-10-17
 
@@ -56,3 +76,26 @@ hostname` fields ([lib/README.md](../lib/README.md#redaction)), and the four fil
 through it again with each run's own secrets file and passed `lab_leak_check`: the redaction
 script's output, not a hand edit, and only that line changed in each. `probe-host.sh` itself
 could not run again that late (the 23:00 hard stop).
+
+## Phase B6 on 2026-10-18
+
+`b6.sh`, after the safety review's fixes (`LAB_DESKTOP_OK=1`; steps in `2026-10-18-b6.csv`,
+details in `2026-10-18-b6-<test>.txt`):
+
+| Step | Result |
+|---|---|
+| T2 `t2` (12:49) | passed: `BootNext` 0001 consumed, stock system on ssh 76 s after the reboot; `BootNext` 0002 (PXEv4) with no rescue server consumed and honoured: the fall-through to the NVMe took 106 s, 30 s longer; `BootCurrent` 0001, the slot state unchanged both times |
+| `net-up` (12:53) | the mini-PC serves the network rescue (proxy DHCP, TFTP, HTTP on 8471) to the box's MAC only; the 48 MiB image uploaded in 4 s over the LAN |
+| T5 `t5` (12:53) | passed by both ways: PXEv4 on ssh 76 s after the reboot, HTTPv4 51 s; each time `BootCurrent` the entry booted and `BootNext` consumed, the rescue's watchdog armed (60 s), the GPT header hashing as the stock system read it, `APP` mounted `ro,noload`, `eth0` up on `r8168`; `reboot-recovery` reached RCM in 20 s, and one power cycle brought back the stock system in 41 s and 38 s |
+| T4 `t4` (12:58) | **stopped (L7), `no-stock-recovery`**: `recovery` and `recovery-dtb` matched the backup, the entry Boot0008 (`HD(10)`, `\EFI\BOOT\BOOTAA64.efi`, `bootmode=recovery`, outside `BootOrder`) was created and read back, and the box booted the stock recovery through it: the safety script's log on `APP` shows `BootCurrent` 0008, `BootNext` consumed, `BootOrder` unchanged, both variables written through efivarfs (`write ok`, the same values) and `sshd started`, 16 s after the kernel. Nothing answered ssh on the box's MAC within 600 s, and the mini-PC's dnsmasq saw no request from the box in that time. One power cycle brought back the stock system (40 s), the state as before. Not retried |
+| T6 | not run: T4 did not pass, and A5 is not built (it would record a skip) |
+| T3 | not run: it needs T4's pass with `write ok` |
+| `clean`, `net-down` (13:11) | Boot0008 and `/ota_work` removed, `BootOrder` and `BootNext` as before; the network rescue undone on the mini-PC (units, `/var/lib/fjarr-net-rescue`, UDP 67/69/4011 gone; the uploaded files stay in the lab user's `~/fjarr-net-rescue/` for the next `net-up`) |
+| `probe.sh` | `2026-10-18-probe-stock-after-t4.txt` after the stop and `2026-10-18-probe-stock-after-b6.txt` at the end: stock R36.4.4, chain A current and active, `BootCurrent` 0001, `BootNext` absent, entries 0000 to 0007 as in B1, `RootfsStatusSlotA` 0, `L4TDefaultBootMode` 1, the PMC's rootfs register cleared (magic 0) |
+
+Why the stock recovery did not answer is not known: its own log of DHCP and the addresses is in
+`/run`, which the power cycle cleared, and the copy on `APP` ends at `sshd started` because the
+script remounts `APP` read-only next. The stock ramdisk (read from the backup's `recovery`) has
+`dhclient`, `dhclient-script` and `r8168`, and its `/init` loads `r8168` and runs no DHCP for
+`root=/dev/initrd`. Before T4 runs again, the safety script should keep its network log on `APP`
+until it has an address (or a minute has passed), so that a stop shows where it ended.
