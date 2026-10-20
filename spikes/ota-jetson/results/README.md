@@ -145,5 +145,24 @@ The boot configuration matches the one NVIDIA's 36.4.4 tool used for C1, whose R
 flash initrd worked on this box, except where Fjarr changes it on purpose (the pinmux file and
 the MB2 file without the carrier EEPROM read): the same SDRAM, PMIC, pad voltage, ODM data and
 RAM code. What differs is the firmware (36.5.2, and meta-tegra's own UEFI build) and the
-packaging. Next: NVIDIA's own `l4t_initrd_flash.sh --initrd` on a 36.5.2 tree with Stereolabs'
-36.5.2 bootloader files, which tells meta-tegra's packaging from 36.5.2 itself.
+packaging.
+
+The bisection that followed (22:25 to 22:59, each run writing nothing, the box back unchanged):
+
+| Run | Result |
+|---|---|
+| NVIDIA's own way: `l4t_initrd_flash.sh --initrd --network usb0` on a 36.5.2 tree with Stereolabs' 36.5.2 bootloader files (`D0_NVIDIA_L4T`, `flash/prepare-l4t.sh 36.5.2`) | **passed**: the flash initrd's USB device (0955:7035) and ssh over the USB link in about 60 s. 36.5.2 and the box are fine; the fault is in meta-tegra's package |
+| meta-tegra's package without Fjarr's `RootfsRetryCountMax` overlay (`D0_FLASHVARS_SED`) | the same silence: not the overlay |
+| with NVIDIA's 36.5.2 `uefi_jetson.bin` as the RCM UEFI (`D0_SWAP`) | the same: not meta-tegra's UEFI build |
+| with NVIDIA's `tos-optee_t234.img` | the same: not meta-tegra's OP-TEE build |
+| with NVIDIA's `boot.img` (its kernel and flash initrd) as `initrd-flash.img` | different: RCM left after 5 s, then **back in RCM after 50 s** (a reset), no USB device |
+
+Both packages send the same NVIDIA binaries for MB1, MB2, PSC, BPMP and its device tree, and the
+same configuration but for Fjarr's pinmux and MB2 files, which compile to Stereolabs' (A1). With
+meta-tegra's own kernel the box neither resets nor shows anything for 300 s; that kernel carries
+Fjarr's watchdog backport, which keeps the watchdog fed from the kernel, so a flash initrd whose
+USB gadget never comes up would sit there silently. Suspect: meta-tegra's flash kernel or
+initrd on this machine (its USB gadget), not the firmware. Not provable without the box's debug
+UART. Next: an image built with `--unpatched-kernel` through D0 (a reset would then show where a
+hang now hides), meta-tegra's flash initramfs read for what it needs from the machine, and the
+debug UART.

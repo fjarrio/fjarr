@@ -6,7 +6,7 @@
 # pinned here or in rootfs-debs.lock.
 # spec: docs/32-fleet-ota.md#jetson-test-image
 #
-#   prepare-l4t.sh [36.4.4]
+#   prepare-l4t.sh [36.4.4 | 36.5.2]
 #
 # The tree goes to $FJARR_L4T_OUT/l4t-<release>/Linux_for_Tegra (default: the spike's out/flash).
 # Run on the host (the workstation or the mini-PC), never inside `dev`. Needs docker and curl.
@@ -27,8 +27,18 @@ case $release in
 	ovl_url=https://stereolabs.sfo2.cdn.digitaloceanspaces.com/utils/zed_boxes/zedbox_mini_device_trees_364.tar
 	ovl_sha=d17993499723bd63c1287bd482400c43322d2b94cf87073654a3daed87c0c03e
 	;;
+36.5.2)
+	# Fjarr's release (Q1), for phase D0's comparison with meta-tegra's package. No Stereolabs
+	# flash script fetches this tarball; it holds the same three bootloader files as the 36.4.4
+	# one (docs/18 #45) and no board conf or kernel device tree, so the tree uses NVIDIA's
+	# p3509-a02-p3767-0000 conf as it is.
+	bsp_url=https://developer.download.nvidia.com/embedded/L4T/r36_Release_v5.2/release/Jetson_Linux_R36.5.2_aarch64.tbz2
+	bsp_sha=752326264c5e16826d3044a78e59ae06109467d37705143b94e664c91a471f47
+	ovl_url=https://stereolabs.sfo2.cdn.digitaloceanspaces.com/utils/zed_boxes/zedbox_mini_device_trees_365.tar
+	ovl_sha=b839dd30dfdfc0af970ad0ead1d4ddee25a3d1075f484b54bc6a92b84dde3b56
+	;;
 *)
-	echo "only 36.4.4, the factory release: Stereolabs publishes no flash script for $release" >&2
+	echo "36.4.4 (the factory release) or 36.5.2 (Fjarr's)" >&2
 	exit 2
 	;;
 esac
@@ -51,6 +61,7 @@ bsp=$spike/out/bsp/$(basename "$bsp_url")
 [ -f "$bsp" ] || bsp=$out/dl/$(basename "$bsp_url")
 fetch "$bsp_url" "$bsp_sha" "$bsp"
 ovl=$out/dl/$(basename "$ovl_url")
+[ -f "$ovl" ] || [ ! -f "$spike/out/bsp/stereolabs/$(basename "$ovl_url")" ] || ovl=$spike/out/bsp/stereolabs/$(basename "$ovl_url")
 fetch "$ovl_url" "$ovl_sha" "$ovl"
 while read -r sha path _; do
 	case $sha in '' | '#'*) continue ;; esac
