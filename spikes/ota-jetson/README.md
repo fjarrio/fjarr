@@ -19,6 +19,7 @@ nothing here ships.
 | `button.sh` | C: RCM by the front panel's buttons, with a person at the box (Q4) |
 | `c1-backup.sh` | C1: NVIDIA's full backup over RCM, run on the mini-PC; `pull` copies it to `.lab/factory-36.4.4/` |
 | `c2-restore.sh` | C2: NVIDIA's restore of that backup, NVMe and QSPI, only with a person at the box (Q4); the box's fingerprint before and after |
+| `d0-rcmboot.sh` | D0: the Yocto image's firmware and flash initrd booted from RAM over RCM, writing nothing; `D0_DTB` swaps the device tree for one run |
 | `results/` | committed measurements, identifiers redacted ([results/README.md](results/README.md)) |
 | `applier/` | the Jetson applier: the x86 applier's verbs on NVIDIA's boot state |
 | `board/` | the board package: Fjarr's bootloader files, carrier device tree and Stereolabs' pin |

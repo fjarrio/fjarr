@@ -127,3 +127,23 @@ backups and the logs stay in `.lab/` (gitignored); `.lab/c2/` holds the fingerpr
 | `lib/mb1bct.sh check QSPI0.img` | `trimmer2-val` 0x0c in both MB1 BCT copies (A at 0x1c4494, B at 0x2084494): the factory firmware does not carry NVIDIA's QSPI fix |
 | `c2-restore.sh` (20:56 to 21:10, run by Erik in his terminal) | network rescue serving, RCM by software, NVIDIA's restore 711 s: the GPT, `APP` from its tar, every raw partition, and the QSPI (erased, then 64 MiB in 86 s, in parallel with the NVMe); one power cycle, the stock system back with the same fingerprint (`nv_boot_control.conf`, the SSH host keys, the root PARTUUID, five `sl_` modules, both chains normal, the boot entries) |
 | `probe.sh` (21:11, `2026-10-20-probe-stock-after-c2.txt`) | stock R36.4.4, `BootCurrent` 0001, `BootNext` absent, entries as before, the slot variables and `BootChainFw*` at their stock values |
+
+## Phase D0 on 2026-10-20: not passed yet
+
+`d0-rcmboot.sh` (the mini-PC reserved): the Yocto image's flash package (`fjarr-spike-image`,
+sha256 `5bcb2185…`) unpacked on the mini-PC, the box into RCM by software, and meta-tegra's
+`initrd-flash` in the `fjarr-l4t-flash` container, cut off after its RCM boot step. Three runs,
+21:40 to 22:01; each wrote nothing, and each time one power cycle brought back the stock system
+with the same fingerprint.
+
+| Run | Result |
+|---|---|
+| Fjarr's device tree (21:40, 21:48) | signing and the RCM boot passed: the BootROM took every image (`Sending blob`), the RCM loader reported `last_boot_error: 0`, and the box left RCM 4 s later; then no USB device at all on the mini-PC for 300 s |
+| NVIDIA's 36.5.2 `tegra234-p3768-0000+p3767-0000-nv.dtb` in its place (`D0_DTB`, 21:55) | the same: RCM left after 4 s, then nothing for 300 s. The carrier device tree is not the cause |
+
+The boot configuration matches the one NVIDIA's 36.4.4 tool used for C1, whose RCM boot of the
+flash initrd worked on this box, except where Fjarr changes it on purpose (the pinmux file and
+the MB2 file without the carrier EEPROM read): the same SDRAM, PMIC, pad voltage, ODM data and
+RAM code. What differs is the firmware (36.5.2, and meta-tegra's own UEFI build) and the
+packaging. Next: NVIDIA's own `l4t_initrd_flash.sh --initrd` on a 36.5.2 tree with Stereolabs'
+36.5.2 bootloader files, which tells meta-tegra's packaging from 36.5.2 itself.
