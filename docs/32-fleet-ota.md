@@ -1145,11 +1145,28 @@ with that line deleted.
   watchdog to 120 s. So a Fjarr image on the Jetson keeps the watchdog open
   from its initrd on (L3) and boots with `panic=10`, as the
   [x86 test image](#x86-test-image) does: neither alone resets a hung box.
-- One restore of the full backup (C): pending.
+- RCM by the front panel's buttons (C, 2026-10-20, Erik at the box): held
+  RCV, pressed RST, and the mini-PC saw RCM; one power cycle through the
+  plug brought back the stock system 51 s later. The way in when nothing on
+  the box boots far enough to enter RCM by software is proven, and Q4's
+  "person on site" covered C's QSPI write before the relay.
+- The full backup and one restore (C, 2026-10-20): NVIDIA's backup tool,
+  run on the mini-PC in the flash container (Docker there with its own
+  networking off), read the box over RCM in 20 minutes: 17 GB, `APP` as a
+  zstd tar of its 29 GB of files, every other partition raw, and the 64 MiB
+  QSPI. Every file matched the backup's index, and `A_kernel`, `recovery`
+  and `recovery-dtb` matched B3's copies byte for byte. Its restore, with a
+  person at the box (Q4), rewrote the whole NVMe and, at the same time, the
+  QSPI (86 s at 778 kB/s) in 12 minutes; one power cycle brought back the
+  stock system with the same `nv_boot_control.conf`, SSH host keys, root
+  PARTUUID, Stereolabs' five `sl_` modules, boot entries, and both chains
+  normal. Q3's factory restore is proven, and a second copy of the backup
+  is on the workstation.
 - Whether the factory QSPI carries NVIDIA's QSPI fix (`trimmer2-val`),
-  read from its dump (B, C): not answerable in B, since the stock kernel
-  does not show the QSPI to Linux (B3); C's QSPI dump with NVIDIA's backup
-  tool answers it: pending.
+  read from C's QSPI dump (2026-10-20, `lib/mb1bct.sh`): **it does not**.
+  Both MB1 BCT copies (chains A and B) hold `trimmer2-val` 0x0c, the
+  36.4.4 default; NVIDIA's fix sets 0x04, and Fjarr's 36.5.2 firmware
+  brings it with D1.
 - Fjarr's firmware from RAM: MB2 past its EEPROM step, and the flashing
   gadget with Fjarr's device tree (D0): pending.
 - The first flash: both slots and the rescue written, RCM reached from the

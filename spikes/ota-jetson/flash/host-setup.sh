@@ -10,6 +10,10 @@
 #   - /run/nvidia_initrd_flash/docker_host_network, made at every boot by tmpfiles.d: with it,
 #     NVIDIA's script in the container expects this host's NFS server
 #   - with ufw active: NFS (TCP 2049) from fc00:1:1::/48
+#   - Docker (docker.io), if absent, for the container itself, with its own networking off
+#     (/etc/docker/daemon.json: no bridge, no iptables rules): the container runs with the host's
+#     network, and the lab desktop's firewall and fjarr0 stay as they are. Its images are loaded
+#     (docker load), not built here: a build would need the bridge
 # spec: docs/32-fleet-ota.md#jetson-test-image (flashing from the mini-PC; Q6: every change undoable)
 #
 #   host-setup.sh [--dry-run] --l4t <Linux_for_Tegra> [--l4t <another tree>]...
@@ -32,6 +36,8 @@ tmpfiles_conf=/etc/tmpfiles.d/fjarr-l4t-flash.conf
 marker_dir=/run/nvidia_initrd_flash
 marker=$marker_dir/docker_host_network
 rules_dir=/etc/udev/rules.d
+docker_conf=/etc/docker/daemon.json
+docker_data=/var/lib/docker
 net=fc00:1:1::/48
 # NVIDIA's PERMISSION_STR (tools/kernel_flash/l4t_kernel_flash_vars.func).
 opts=rw,nohide,insecure,no_subtree_check,async,no_root_squash
@@ -123,9 +129,11 @@ if [ "$undo" = 1 ]; then
 		die "an earlier setup stopped while installing packages: run it again to record them, then --undo"
 	[ -f "$state" ] || { say "nothing recorded in $state: nothing to undo"; exit 0; }
 	packages=()
+	trees=()
 	while read -r kind value; do
 		case $kind in
 		package) packages+=("$value") ;;
+		tree) trees+=("$value") ;; # after the purge, once its daemon is gone
 		file)
 			run rm -f "$value"
 			case $value in
@@ -154,6 +162,7 @@ if [ "$undo" = 1 ]; then
 			[ ! -d /var/lib/nfs ] || run rmdir --ignore-fail-on-non-empty /var/lib/nfs
 		fi
 	fi
+	for t in "${trees[@]}"; do run rm -rf --one-file-system "$t"; done
 	run rm -f "$state"
 	run rmdir --ignore-fail-on-non-empty "$state_dir"
 	say "undone"
@@ -183,25 +192,50 @@ for name in "${!rule_sha[@]}"; do
 	[ ! -e "$dst" ] || cmp -s "$src" "$dst" || die "$dst exists and differs from NVIDIA's; not replacing it"
 done
 for f in "$tmpfiles_conf" "$exports_file"; do ours "$f" || die "$f exists and was not made here"; done
-command -v docker >/dev/null || say "warning: no docker here; the flash container needs it"
+# Docker: this script installs it only where neither it nor a configuration of another's is there.
+want_docker=0
+if ! command -v docker >/dev/null; then
+	want_docker=1
+	ours "$docker_conf" || die "$docker_conf exists and is not this script's"
+	[ ! -e "$docker_data" ] || recorded tree "$docker_data" || die "$docker_data exists with no docker installed"
+fi
 
 # --- setup: the changes ---------------------------------------------------------------------------
 # 1. The NFS server. The package list from before the install stays on disk until what it added
 # is recorded, so an interrupted install is still undone in full after a rerun.
-installed() { dpkg-query -W -f='${Package} ${Status}\n' | awk '/ok installed/{print $1}' | sort; }
-if is_installed nfs-kernel-server; then
-	[ -f "$packages_before" ] || say "nfs-kernel-server already installed"
+# One collation for sort and comm (Ubuntu 26.04's uutils sort and GNU comm disagreed on the mini-PC).
+installed() { dpkg-query -W -f='${Package} ${Status}\n' | awk '/ok installed/{print $1}' | LC_ALL=C sort; }
+# Docker's configuration goes in first, so that its daemon never starts with networking on.
+want=()
+is_installed nfs-kernel-server || want+=(nfs-kernel-server)
+if [ "$want_docker" = 1 ]; then
+	want+=(docker.io)
+	mkdirs "$(dirname "$docker_conf")"
+	if [ ! -e "$docker_conf" ]; then
+		put "$docker_conf" 0644 <<-EOF
+			{
+			  "bridge": "none",
+			  "iptables": false,
+			  "ip6tables": false
+			}
+		EOF
+		record file "$docker_conf"
+	fi
+	[ -e "$docker_data" ] || record tree "$docker_data"
+fi
+if [ ${#want[@]} -eq 0 ]; then
+	[ -f "$packages_before" ] || say "nfs-kernel-server and docker already installed"
 elif [ "$dry" = 1 ]; then
-	say "would install nfs-kernel-server and: $(apt-get -s install --no-install-recommends nfs-kernel-server 2>/dev/null |
-		awk '/^Inst /{print $2}' | grep -vx nfs-kernel-server | xargs)"
+	say "would install ${want[*]} and: $(apt-get -s install --no-install-recommends "${want[@]}" 2>/dev/null |
+		awk '/^Inst /{print $2}' | grep -vxF -f <(printf '%s\n' "${want[@]}") | xargs)"
 else
 	[ -d "$state_dir" ] || install -d -m 0755 "$state_dir"
 	[ -f "$packages_before" ] || installed >"$packages_before"
 	apt-get -o DPkg::Lock::Timeout=120 update -qq
-	apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends nfs-kernel-server
+	apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends "${want[@]}"
 fi
 if [ "$dry" = 0 ] && [ -f "$packages_before" ]; then
-	while read -r p; do record package "$p"; done < <(comm -13 "$packages_before" <(installed))
+	while read -r p; do record package "$p"; done < <(LC_ALL=C comm -13 "$packages_before" <(installed))
 	rm -f "$packages_before"
 fi
 
@@ -294,4 +328,8 @@ for r in "${all[@]}"; do
 done
 [ -e "$marker" ] || die "$marker is missing"
 for name in "${!rule_sha[@]}"; do [ -e "$rules_dir/$name" ] || die "$rules_dir/$name is missing"; done
+if recorded file "$docker_conf"; then
+	docker info --format '{{.Name}}' >/dev/null || die "docker does not answer"
+	! ip link show docker0 >/dev/null 2>&1 || die "docker made its bridge despite $docker_conf"
+fi
 say "ready: ${#all[@]} tree(s) exported to $net; undo with: $0 --undo"

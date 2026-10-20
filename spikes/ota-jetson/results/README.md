@@ -113,3 +113,17 @@ The evening's runs (19:52 to 20:40), with that change:
 | `clean`, `net-down` (20:40) | Boot0008, `/ota_work` and the drop-in removed; the network rescue undone |
 | `clean`, `net-down` (21:31) | after T6: Boot0008 and `/ota_work` removed, the network rescue undone |
 | `probe.sh` | `2026-10-18-probe-stock-after-b6-t6.txt` after T6, as after T3; `2026-10-18-probe-stock-after-b6-t3.txt`: stock R36.4.4, `BootCurrent` 0001, `BootNext` absent, entries as in B1, the slot variables at their stock values |
+
+## Phase C on 2026-10-20
+
+With Erik at the box (Q4, a person on site) and the mini-PC reserved (`fjarr-lab reserve`). The
+backups and the logs stay in `.lab/` (gitignored); `.lab/c2/` holds the fingerprints.
+
+| Step | Result |
+|---|---|
+| `button.sh` (19:50, `2026-10-20-button.csv`) | RCV held, RST pressed: RCM seen on the mini-PC; one power cycle out, the stock system on ssh 51 s later, systemd running |
+| `flash/host-setup.sh` on the mini-PC (20:16) | Docker (`docker.io`, with `bridge` none and no iptables rules, so no `docker0` and no firewall rules appeared), NFS, NVIDIA's two udev rules, the marker, three exports of the tree in `/srv/fjarr-flash/l4t-36.4.4/`; eight packages recorded for `--undo`, as apt's own log lists them. The tree went over without the two sparse raw images `gen-images.sh` leaves in `bootloader/` (74 GB apparent) |
+| `c1-backup.sh` (20:18 to 20:39) | RCM by software, NVIDIA's backup 1187 s: 17 GB (`APP` a 17.3 GB zstd tar, the other partitions raw and compressed, `QSPI0.img` 64 MiB); every file matches `nvpartitionmap.txt`, and the raw `A_kernel`, `recovery` and `recovery-dtb` match B3's; the stock system back after one power cycle |
+| `lib/mb1bct.sh check QSPI0.img` | `trimmer2-val` 0x0c in both MB1 BCT copies (A at 0x1c4494, B at 0x2084494): the factory firmware does not carry NVIDIA's QSPI fix |
+| `c2-restore.sh` (20:56 to 21:10, run by Erik in his terminal) | network rescue serving, RCM by software, NVIDIA's restore 711 s: the GPT, `APP` from its tar, every raw partition, and the QSPI (erased, then 64 MiB in 86 s, in parallel with the NVMe); one power cycle, the stock system back with the same fingerprint (`nv_boot_control.conf`, the SSH host keys, the root PARTUUID, five `sl_` modules, both chains normal, the boot entries) |
+| `probe.sh` (21:11, `2026-10-20-probe-stock-after-c2.txt`) | stock R36.4.4, `BootCurrent` 0001, `BootNext` absent, entries as before, the slot variables and `BootChainFw*` at their stock values |

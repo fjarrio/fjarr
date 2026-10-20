@@ -202,6 +202,7 @@ check on a QSPI build (the QSPI rule, L4 in [docs/32's lab safety rules](../../.
 | `/etc/tmpfiles.d/fjarr-l4t-flash.conf`, making `/run/nvidia_initrd_flash/docker_host_network` at every boot | NVIDIA's docker mode; the container mounts it |
 | `nfs-server` started, if it was not running | |
 | with ufw active only: TCP 2049 from `fc00:1:1::/48` | |
+| `docker.io`, only where Docker is absent, with `/etc/docker/daemon.json` written first: `"bridge": "none"`, `"iptables": false`, `"ip6tables": false`; `/var/lib/docker` removed by `--undo` after the purge | the container itself; it runs with the host's network, so the daemon needs no networks or firewall rules, and the lab desktop's firewall and `fjarr0` stay as they are. Images are loaded (`docker save` on the workstation, `docker load` here): a build would need the bridge |
 
 It refuses before any change from 23:55 to 06:30 Europe/Stockholm (the nightly window, the 30 min
 `fjarr-lab` gives a job still running at its end, and a run takes about a minute), while another script holds the lab lock `/run/lock/fjarr-zedbox.lock` (L1;
@@ -232,7 +233,11 @@ Tested (2026-10-17, and again after the last change):
   that run (one check more: a refusal at 06:15; the foreign rule now at 06:30); the test has not
   run since (it installs packages from the network).
 
-It has not run on the mini-PC (phase C, with Erik). Notes for that run:
+It ran on the mini-PC on 2026-10-20 (phase C, `results/README.md`), Docker added; `test-host-setup.sh`
+has not run since Docker was added. `sort` and `comm` run with `LC_ALL=C`: on the mini-PC, Ubuntu
+26.04's uutils `sort` and `comm` disagreed on the order (the record was right, the warning real).
+Copy a tree to the mini-PC without `bootloader/system.img*.raw` and with `tar --sparse`: those two
+images from `gen-images.sh` are 74 GB apparent. Notes:
 
 - NVIDIA's `l4t_initrd_flash.sh`, run natively on the host instead of in the container, links the
   same two rule names into `/etc/udev/rules.d` and deletes them on exit; rerun `host-setup.sh` after

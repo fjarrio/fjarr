@@ -16,6 +16,9 @@ nothing here ships.
 | `rcm.sh` | B4: RCM round trips, entered by software and left by a power cycle |
 | `shelly.sh` | B5: the box's plug, rule L8 |
 | `b6.sh` | B6: the one-shot boot tests through `BootNext` (T2, T5, T4, T6, T3), the network rescue's start and stop, the USB serial console ([below](#b6-one-shot-boot-tests)) |
+| `button.sh` | C: RCM by the front panel's buttons, with a person at the box (Q4) |
+| `c1-backup.sh` | C1: NVIDIA's full backup over RCM, run on the mini-PC; `pull` copies it to `.lab/factory-36.4.4/` |
+| `c2-restore.sh` | C2: NVIDIA's restore of that backup, NVMe and QSPI, only with a person at the box (Q4); the box's fingerprint before and after |
 | `results/` | committed measurements, identifiers redacted ([results/README.md](results/README.md)) |
 | `applier/` | the Jetson applier: the x86 applier's verbs on NVIDIA's boot state |
 | `board/` | the board package: Fjarr's bootloader files, carrier device tree and Stereolabs' pin |
@@ -63,6 +66,12 @@ the mini-PC (read only) and refuses while the runner is anything but offline. Ev
 `lab_need` refuses each action whose own worst case would (a power cycle, a trip through RCM, the
 backup's stream and copy, which also run under a time limit that ends them by then). Worst cases
 come from the timeouts the code uses, and every remote command has a time limit.
+
+**When the mini-PC is reserved** (`sudo fjarr-lab reserve` there: the CI runner stays offline,
+nightly window included, until `fjarr-lab release`), nothing shares it with the lab scripts, and a
+run may lift L1's window and hard stop with `LAB_WINDOW_END_M=0 LAB_DEADLINE_MARGIN=0` (only
+midnight stays a stop). The defaults stay as they are, for the times the runner is on its schedule.
+Phase C ran that way on 2026-10-20.
 
 ## The mini-PC's desktop
 
