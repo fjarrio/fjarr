@@ -67,6 +67,19 @@ class NotifySocket {
     }
     void drain(int ms) { count("", ms); }
 
+    /// Wait up to `ms` for the first notification containing `needle`; true once it arrived.
+    bool wait_for(const char* needle, int ms) {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+        while (std::chrono::steady_clock::now() < until) {
+            char buf[512];
+            const ssize_t r = ::recv(fd_, buf, sizeof(buf) - 1, 0);
+            if (r <= 0) continue;
+            buf[r] = '\0';
+            if (std::strstr(buf, needle)) return true;
+        }
+        return false;
+    }
+
     /// Everything received over `ms`, concatenated, for asserting on several lines at once.
     std::string collect(int ms) {
         std::string all;
@@ -144,7 +157,9 @@ TEST(Supervision, theWatchdogPingsWhileHealthyAndStopsWhileTheProcessIsStopped) 
     const pid_t pid = spawn_agent(notify.path());
     ASSERT_GT(pid, 0);
 
-    // Healthy: pings at WatchdogSec/3 (500 ms), so ~4 in 2.5 s.
+    // Healthy: pings at WatchdogSec/3 (500 ms), so ~4 in 2.5 s — counted from the first ping, not
+    // from the spawn: under TSan on a loaded machine the startup alone ate the window (2 of 3).
+    ASSERT_TRUE(notify.wait_for("WATCHDOG=1", 10000)) << "the agent never fed the watchdog";
     const int healthy = notify.count("WATCHDOG=1", 2500);
     EXPECT_GE(healthy, 3) << "the agent is not feeding the watchdog (got " << healthy << " in 2.5 s)";
 
