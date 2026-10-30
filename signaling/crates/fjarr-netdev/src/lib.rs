@@ -60,7 +60,7 @@ pub fn open_tun(name: &str) -> Result<OwnedFd> {
         *slot = *byte as libc::c_char;
     }
     // TUNSETIFF: _IOW('T', 202, int).
-    const TUNSETIFF: libc::c_ulong = 0x4004_54ca;
+    const TUNSETIFF: libc::Ioctl = 0x4004_54ca;
     // SAFETY: `req` is a correctly shaped, zero-initialised `ifreq` for this ioctl.
     if unsafe { libc::ioctl(fd.as_raw_fd(), TUNSETIFF, &mut req) } < 0 {
         return Err(std::io::Error::last_os_error())
@@ -74,8 +74,8 @@ pub fn open_tun(name: &str) -> Result<OwnedFd> {
 /// (docs/27#the-shape), and the owner is who can attach to it later with no privilege at all.
 pub fn make_persistent(fd: &OwnedFd, owner: libc::uid_t) -> Result<()> {
     // TUNSETPERSIST: _IOW('T', 203, int); TUNSETOWNER: _IOW('T', 204, int).
-    const TUNSETPERSIST: libc::c_ulong = 0x4004_54cb;
-    const TUNSETOWNER: libc::c_ulong = 0x4004_54cc;
+    const TUNSETPERSIST: libc::Ioctl = 0x4004_54cb;
+    const TUNSETOWNER: libc::Ioctl = 0x4004_54cc;
     // SAFETY: both take an int by value on an fd this process owns.
     unsafe {
         if libc::ioctl(fd.as_raw_fd(), TUNSETPERSIST, 1) < 0 {
