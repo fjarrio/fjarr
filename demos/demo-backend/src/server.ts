@@ -84,7 +84,7 @@ const PARAMS: Record<string, Record<string, unknown>> = {
 
 /** The company's own robot registry — their data, not Fjarr's. It knows what each robot has, and a
  *  grant names only those: the robot refuses a session whose grant names a capability it lacks (docs/10). */
-const FLEET_ROBOT = ["fjarr.test", "fjarr.camera", "fjarr.desktop", "fjarr.introspect", "fjarr.terminal"];
+const FLEET_ROBOT = ["fjarr.test", "fjarr.camera", "fjarr.desktop", "fjarr.introspect", "fjarr.terminal", "fjarr.net"];
 // The demo robots carry a microphone (a test tone) and a null speaker; the Mini PC its webcam's
 // microphone and a real speaker (M3.5 slice 3.5.4).
 const FLEET_ROBOT_AUDIO = [...FLEET_ROBOT, "fjarr.audio"];
@@ -95,6 +95,8 @@ const robots = [
   // A robot with a screen and no camera: the headless-mutter fixture (`make desktop-e2e`, docs/12#services).
   // Its own site: the 4.5f gate connects by "lab", which must name demo-robot-01 alone.
   { id: "desktop-robot-01", name: "Desktop Robot 01", site: "Office", capabilities: ["fjarr.test", "fjarr.desktop", "fjarr.introspect"] },
+  // A Jetson (L4T R36) running the agent's container for the tunnel alone (docs/26#containerized-robots).
+  { id: "roger", name: "Roger prototype B", site: "Jetson", capabilities: ["fjarr.net"] },
 ];
 
 // ---------------------------------------------------------------- the operator API (docs/09#operator-api)
@@ -253,11 +255,13 @@ const server = createServer(async (req, res) => {
     if (!who) return respond(401, { error: "operator credential required (fjarr-connect login)" });
     const body = await jsonBody(req);
     const robotId = typeof body.robot_id === "string" ? body.robot_id : "";
-    if (!robots.some((r) => r.id === robotId)) return respond(404, { error: `unknown robot ${robotId || "(none)"}` });
+    const robot = robots.find((r) => r.id === robotId);
+    if (!robot) return respond(404, { error: `unknown robot ${robotId || "(none)"}` });
     const asked = body.capabilities;
     if (asked !== undefined && !(Array.isArray(asked) && asked.every((n) => typeof n === "string")))
       return respond(400, { error: "capabilities must be a list of capability names" });
-    const allowed = [...ROLES[who.role]!, ...(who.role === "developer" ? ["fjarr.net"] : [])];
+    // The same grant as endpoint 1 (docs/09#operator-api): only what this robot has, or it refuses the session.
+    const allowed = [...ROLES[who.role]!, ...(who.role === "developer" ? ["fjarr.net"] : [])].filter((name) => robot.capabilities.includes(name));
     const names = asked === undefined ? allowed : allowed.filter((n) => (asked as string[]).includes(n));
     const capabilities = names.map((name) => ({ name }));
     return respond(200, { grant: mintGrant(robotId, who.operator, capabilities), robot_id: robotId, capabilities });
