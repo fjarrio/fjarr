@@ -171,10 +171,12 @@ fn main() -> Result<()> {
 }
 
 async fn run(cli: Cli) -> Result<()> {
-    // A shell's screen is the robot's: progress lines would land in the middle of it, and a log line
-    // written in raw mode has no carriage return. So `shell` logs nothing of its libraries' and only
-    // this crate's errors, unless FJARR_LOG asks — webrtc-rs reports a TURN retry as an ERROR, which
-    // is noise to a person typing at a prompt. What ends a shell is printed, not logged.
+    // What a person needs is printed, not logged (docs/27#what-it-feels-like), so by default nothing of the
+    // libraries' is logged unless FJARR_LOG asks: webrtc-rs reports the expected as ERROR and WARN —
+    // a TURN retry, the relay refusing a permission for a private address, a candidate it cannot
+    // use — and a failure that matters ends the command with its own message. A shell's screen is
+    // the robot's: a progress line would land in the middle of it, and one written in raw mode has
+    // no carriage return, so `shell` keeps only this crate's errors.
     let quiet = matches!(cli.command, Some(Command::Shell { .. }));
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -182,7 +184,7 @@ async fn run(cli: Cli) -> Result<()> {
                 if quiet {
                     "off,fjarr_connect=error"
                 } else {
-                    "info"
+                    "off,fjarr_connect=warn"
                 }
                 .into()
             }),

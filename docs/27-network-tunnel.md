@@ -448,6 +448,12 @@ the [interface layout](#the-shape) was designed for. The filter matches the
 label as well as the id, so `fjarr-connect packer3` works and nobody
 memorises identifiers.
 
+**That is all it prints.** Its libraries log nothing unless `FJARR_LOG` asks
+(a `tracing` filter: `FJARR_LOG=info`, or `FJARR_LOG=webrtc_ice=debug`).
+webrtc-rs reports the expected as errors and warnings — the relay refusing a
+permission for a robot's private address, an ICE-TCP candidate it does not
+use — and a failure that matters ends the command with its own message.
+
 **A link lives in the terminal that started it.** Ctrl-C ends it, and
 closing the window ends it. For a grant this consequential
 ([docs/10](10-security.md#network-tunnel)), a link that cannot outlive the

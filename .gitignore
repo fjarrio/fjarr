@@ -20,6 +20,7 @@ dist/
 .ccache/
 compile_commands.json
 .pnpm-store/
+__pycache__/
 *.log
 
 # --- editors ---
