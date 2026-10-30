@@ -1,3 +1,35 @@
+fjarr (0.2.0) unstable; urgency=medium
+
+  * Desktop (new, fjarr.desktop): the robot's screen in the browser, on GNOME
+    (Wayland) and on an X11 kiosk. Every monitor is a track that follows
+    hot-plug, a session can add virtual monitors, the operator drives it with
+    keyboard and pointer (a drag crosses monitors), the clipboard works both
+    ways (text and PNG images) and the robot's cursor is shown. GNOME capture
+    is DMA-BUF into the encoder without a copy (ADR-0041).
+  * Desktop packages: fjarr-desktop-session (the session helper, which hands
+    the agent only its capture's PipeWire node), fjarr-desktop-wayland and
+    fjarr-desktop-x11; setup desktop and --undo desktop, ghost screens for a
+    headless robot, and a desktop with the agent in a container.
+  * Audio (new, fjarr.audio): the robot's microphones as Opus tracks for a
+    session granted listen; talking through its speaker with talk
+    (push-to-talk); the desktop's own sound on GNOME and X11.
+  * Agent: a signaling socket whose pings go unanswered is dropped within
+    45 s and the agent reconnects; it used to look online for ~15 min after
+    its uplink died (docs/08#transport-layers).
+  * Agent: a Fjarr tunnel interface never carries ICE (#34).
+  * Media: stopping the thumbnail tier could freeze every tier (#38); a bad
+    viewer drags a shared encoder down for 2 s, not ~7 (#40); a returning
+    track keeps its SSRC's sequence numbers; the sharpness preference.
+  * Terminal: a shell that refuses logins is reported, not started.
+  * Packaging: /run/fjarr exists after install, and --check without root
+    says why it cannot look.
+  * Server: a WebSocket ping on every socket every 30 s, and a socket that
+    answers none for two intervals is ended and its peer told.
+  * fjarr-connect: wss:// signaling (it failed against any hosted server);
+    prints what a person needs and no library logs by default.
+
+ -- Fjarr <dev@fjarr.io>  Fri, 30 Oct 2026 23:01:31 +0100
+
 fjarr (0.1.2) unstable; urgency=medium
 
   * Agent: stopping a quality tier moments after starting it no longer leaks
