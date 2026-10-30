@@ -101,7 +101,9 @@ void SignalingClient::on_open(GObject* conn) {
                                 })),
                                 this);
     soup_websocket_connection_set_max_incoming_payload_size(SOUP_WEBSOCKET_CONNECTION(conn), 4 * 1024 * 1024);
-    soup_websocket_connection_set_keepalive_interval(SOUP_WEBSOCKET_CONNECTION(conn), 20);
+    soup_websocket_connection_set_keepalive_interval(SOUP_WEBSOCKET_CONNECTION(conn), config_.keepalive_interval_s);
+    // A peer gone without a FIN would otherwise look connected until TCP gives up (docs/08#transport-layers).
+    soup_websocket_connection_set_keepalive_pong_timeout(SOUP_WEBSOCKET_CONNECTION(conn), config_.keepalive_pong_timeout_s);
     nlohmann::json hello = protocol::signaling_base("hello");
     hello["role"] = "agent";
     hello["auth"] = {{"scheme", "dev-token"}, {"robot_id", config_.robot_id}, {"dev_token", config_.dev_token}};

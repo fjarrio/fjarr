@@ -22,6 +22,9 @@ struct SignalingConfig {
     std::string dev_token;
     std::vector<std::string> capability_names;
     std::string fjarr_version;
+    // docs/08#transport-layers: a ping every interval; a ping unanswered for pong_timeout drops the socket.
+    unsigned keepalive_interval_s = 20;
+    unsigned keepalive_pong_timeout_s = 20;
 };
 
 struct SignalingHooks {

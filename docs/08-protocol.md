@@ -40,6 +40,16 @@ as if it had dropped, so its sessions get `peer-gone`. Without that, the
 pings would keep alive a socket whose peer vanished without closing it,
 which the proxy's idle limit used to end.
 
+**The agent applies the same rule from its side.** It sends its own
+WebSocket ping every 20 s and treats a ping with no pong within 20 s as a
+dropped socket: it closes it (giving the silent peer libsoup's 5 s for a close
+frame, so at most 45 s after the uplink died), ends its sessions and
+reconnects with the usual backoff. Without that, a robot whose uplink vanished without a FIN or RST (a
+Wi-Fi drop, a NAT that forgot the flow) believes it is online while the
+server has long since sent `robot.offline`, until the kernel abandons the TCP
+connection some 15 minutes later, and nobody can reach it in between
+(2026-10-23, a Jetson on the hosted demo).
+
 ### RTP feedback and repair {#rtp-feedback}
 
 Every video m-line the agent offers carries, and the agent honours:

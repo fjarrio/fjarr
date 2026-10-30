@@ -3,6 +3,7 @@ find_package(GTest REQUIRED)
 add_executable(fjarr-tests
   test_main.cpp
   test_backoff.cpp
+  test_signaling_client.cpp
   test_loop.cpp
   test_protocol.cpp
   test_config.cpp
