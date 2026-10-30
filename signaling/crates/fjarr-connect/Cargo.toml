@@ -13,7 +13,8 @@ description = "Fjarr operator client: a routable address for one robot (docs/27)
 # The wire types, shared with the server rather than restated, so drift is a compile error.
 fjarr-protocol = { workspace = true }
 tokio = { workspace = true }
-tokio-tungstenite = { workspace = true }
+# wss:// to a hosted server: the same rustls (ring) and webpki roots reqwest already brings.
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }
 futures-util = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
