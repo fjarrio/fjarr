@@ -39,6 +39,19 @@ own authentication: operators present a grant the demo backend minted, robots
 the device token. `demo` is behind Access, because the demo backend mints a
 grant for whoever asks: without Access, anyone with the URL could drive a robot.
 
+The exception is the [operator API](09-interfaces.md#operator-api) that
+`fjarr-connect` calls: `/api/fjarr/robots`, `/api/fjarr/grants` and
+`/api/fjarr/cli-codes`. A terminal has no Access session, so a second Access
+application **bypasses** Access for those three paths, and the backend
+authenticates them itself: `robots` and `grants` take only a credential the
+backend minted for a browser that passed Access (`/api/me/fjarr-cli-token`,
+which stays behind it); `cli-codes` hands one out only to the holder of the poll
+token, after a browser behind Access approved the code. Creating a code needs
+nothing, so pending codes are capped. The backend refuses a request whose path
+is not already in normal form, so a path that Access reads as one of the three
+(`/api/fjarr/grants/../grant`) cannot reach another route. Everything else under
+`/api`, the dashboard's `/api/fjarr/grant` included, stays behind Access.
+
 ### Direct or relayed
 
 Robot and browser connect directly when their NATs allow it, and through coturn

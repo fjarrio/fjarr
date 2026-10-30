@@ -7,6 +7,7 @@ Idempotent; prints no secret. The API token is read from a file (default
   cloudflare.py dns <host-ip>                   signal + turn records (demo only with `access`)
   cloudflare.py origin-cert root@<host>         Origin CA certificate; its key is made on the server
   cloudflare.py access <host-ip> <email>...     Access for demo.fjarr.io (email one-time PIN), then its record
+  cloudflare.py cli-bypass                      fjarr-connect's operator API past Access (`access` does it too)
 """
 import json
 import os
@@ -92,8 +93,30 @@ def cmd_access(ip, emails):
         print("created the Access application for demo.fjarr.io")
     api("POST", f"/accounts/{account}/access/apps/{app['id']}/policies", {**policy, "precedence": 1})
     print(f"allowed: {', '.join(emails)}")
+    cmd_cli_bypass()
     # Only now the record: before Access, anyone with the URL would have been given a grant.
     record(zone_id, "demo.fjarr.io", ip, True)
+
+
+# The operator API fjarr-connect calls authenticates itself (docs/31#topology); a terminal has no
+# Access session. A path application is more specific than the host's, so Access applies this one.
+CLI_PATHS = ["demo.fjarr.io/api/fjarr/robots", "demo.fjarr.io/api/fjarr/grants", "demo.fjarr.io/api/fjarr/cli-codes"]
+
+
+def cmd_cli_bypass():
+    _, account = zone()
+    body = {"name": "fjarr demo CLI", "type": "self_hosted", "domain": CLI_PATHS[0],
+            "destinations": [{"type": "public", "uri": u} for u in CLI_PATHS], "app_launcher_visible": False}
+    apps = [a for a in api("GET", f"/accounts/{account}/access/apps") if a.get("name") == body["name"]]
+    if apps:
+        app = api("PUT", f"/accounts/{account}/access/apps/{apps[0]['id']}", body)
+        for p in api("GET", f"/accounts/{account}/access/apps/{app['id']}/policies"):
+            api("DELETE", f"/accounts/{account}/access/apps/{app['id']}/policies/{p['id']}")
+    else:
+        app = api("POST", f"/accounts/{account}/access/apps", body)
+    api("POST", f"/accounts/{account}/access/apps/{app['id']}/policies",
+        {"name": "fjarr-connect", "decision": "bypass", "include": [{"everyone": {}}], "precedence": 1})
+    print(f"Access bypassed for {', '.join(CLI_PATHS)}")
 
 
 if __name__ == "__main__":
@@ -104,5 +127,7 @@ if __name__ == "__main__":
         cmd_origin_cert(args[1])
     elif args[:1] == ["access"] and len(args) >= 3:
         cmd_access(args[1], args[2:])
+    elif args == ["cli-bypass"]:
+        cmd_cli_bypass()
     else:
         raise SystemExit(__doc__)

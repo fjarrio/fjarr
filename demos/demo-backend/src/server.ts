@@ -122,6 +122,7 @@ interface CliCode {
 }
 const cliCodes = new Map<string, CliCode>(); // by code
 const CLI_CODE_TTL_MS = 10 * 60 * 1000;
+const CLI_CODES_MAX = 1000;
 // Eight characters from an alphabet with no 0/O/1/I: 32^8 = 2^40 guesses, and the PUT is rate limited.
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const randomCode = () => Array.from(randomBytes(8), (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join("");
@@ -177,6 +178,9 @@ const server = createServer(async (req, res) => {
   };
 
   if (req.method === "OPTIONS") return respond(204, {});
+  // Access on the hosted demo lets the operator API's paths through by prefix (docs/31#topology): a
+  // path it read one way must not reach another route here, so only the normal form is served.
+  if ((req.url ?? "/").split("?")[0] !== url.pathname) return respond(400, { error: "path not in normal form" });
 
   // The company's own API…
   if (url.pathname === "/api/robots") return respond(200, robots);
@@ -263,6 +267,8 @@ const server = createServer(async (req, res) => {
   // creates a code, a human approves it in the dashboard, the terminal polls with a separate token.
   if (url.pathname === "/api/fjarr/cli-codes" && req.method === "POST") {
     for (const [code, c] of cliCodes) if (Date.now() - c.created > CLI_CODE_TTL_MS) cliCodes.delete(code);
+    // Anyone may create one on the hosted demo (docs/31#topology), so the pending ones are capped.
+    if (cliCodes.size >= CLI_CODES_MAX) return respond(429, { error: "too many pending login codes; try again later" });
     const entry: CliCode = { code: randomCode(), pollToken: randomBytes(24).toString("base64url"), created: Date.now() };
     cliCodes.set(entry.code, entry);
     return respond(200, { code: entry.code, poll_token: entry.pollToken, expires_in: CLI_CODE_TTL_MS / 1000 });
