@@ -12,9 +12,9 @@ one. Targets outside the primary column are adapters, not core concerns.
 |---|---|---|
 | **Ubuntu 26.04 LTS x86-64 / arm64** | **Primary** ([ADR-0022](adr/0022-baseline-ubuntu-2604-gstreamer-128.md)) | GStreamer 1.28, libnice 0.1.23, libsoup 3.6, PipeWire, libei — everything the specs need from distro packages; systemd required for the packaged agent (ADR-0019) |
 | Ubuntu 24.04 LTS | Embedders only, at their own risk | GStreamer 1.24 works as the offerer against browsers; a `webrtcbin` answerer (`fjarr-opsim`, loop tests) needs ≥ 1.26 for `reuse-source-pads` ([docs/23](23-agent-core-architecture.md#offer-construction-and-renegotiation)); not supported by the packaged agent |
-| Ubuntu 22.04 | Not targeted | GStreamer 1.20 lacks `vah264enc`, unusable libei; upgrade the robot instead |
+| Ubuntu 22.04 | Not targeted | GStreamer 1.20 lacks `vah264enc`, unusable libei; upgrade the robot instead, or run the agent's [container image](26-robot-install-and-drivers.md#containerized-robots), which brings its own 26.04 userland (as on the Jetson below) |
 | Debian 13 / other distros | Untested, likely works | Same component versions; no CI |
-| NVIDIA Jetson (Ubuntu-based, L4T) | Planned, M2.6 | arm64, NVIDIA's own GStreamer: the `nvv4l2` encoder family ([ADR-0025](adr/0025-encoder-families.md)). **Not** the nvcodec plugin a desktop card uses — different plugin, packages and memory type |
+| NVIDIA Jetson (Ubuntu-based, L4T) | Planned, M2.6 | arm64, NVIDIA's own GStreamer: the `nvv4l2` encoder family ([ADR-0025](adr/0025-encoder-families.md)). **Not** the nvcodec plugin a desktop card uses — different plugin, packages and memory type. Today: L4T R36 (JetPack 6) is Ubuntu 22.04 underneath, so the packages do not install, but the arm64 container image runs there; verified tunnel-only (`fjarr.net`, no media) on the hosted demo, 2026-10-23 |
 
 ## Robot — GPU / encoder
 
@@ -84,7 +84,7 @@ A native client, because a browser cannot create a network interface
 
 | | Status | Notes |
 |---|---|---|
-| **Linux x86-64** | **Primary** | run in the lab against real robots every slice: interface, per-robot /32 routes, `ssh`, a hash-verified 1 GiB `scp`, `ros2 topic list`. Configures the interface over netlink in-process, so `setcap cap_net_admin+ep` is enough and no `iproute2` is needed |
+| **Linux x86-64** | **Primary** | run in the lab against real robots every slice: interface, per-robot /32 routes, `ssh`, a hash-verified 1 GiB `scp`, `ros2 topic list`. Configures the interface over netlink in-process, so `setcap cap_net_admin+p` is enough and no `iproute2` is needed. The packaged binary is built on 26.04 and needs glibc ≥ 2.39, so it does not run on an Ubuntu 22.04 workstation; there a static musl build does (`cargo build --release -p fjarr-connect --target x86_64-unknown-linux-musl`, with `musl-tools` and `CC_x86_64_unknown_linux_musl=musl-gcc`), until `fjarr-tools` ships that one ([ADR-0024](adr/0024-native-operator-client.md)'s single static binary) |
 | Linux arm64 | Expected to work, unverified | same code paths; the release builds and install-tests arm64 packages on hosted runners, and Raspberry Pi 4/5 and Jetson lab machines are planned ([docs/12](12-development-environment.md#lab-machines-and-fjarr-lab)) |
 | **macOS (Apple silicon)** | **Written, type-checked, never run** | `utun` instead of `/dev/net/tun`, a 4-byte address-family header on every packet, `ifconfig`/`route` under `sudo` because macOS has no `setcap` equivalent. CI type-checks it for `aarch64-apple-darwin` on every change (`make connect-platform-check`); it does **not** link the binary — webrtc-rs pulls `ring`, whose build script needs the Apple SDK — and nothing has run on macOS hardware. Until it has, treat this row as an intention with a compiler behind it, not as support |
 | Windows | Not targeted | WSL2 is the free answer; native Wintun is [question #24](18-open-questions.md) |

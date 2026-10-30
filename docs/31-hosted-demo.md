@@ -114,4 +114,14 @@ providers edit, for the one account.
   (and `coturn`, `caddy`, `demo-backend`); container logs are capped in size.
 - **Update**: `make demo-deploy` again; `.env` and the certificate stay.
 - **A robot onto it**: `server_url = "wss://signal.fjarr.io/ws"` and the device
-  token in the robot's `/etc/fjarr/fjarr.toml`, then restart the agent.
+  token in the robot's `/etc/fjarr/fjarr.toml`, then restart the agent. The
+  server accepts any robot id with the token, but the demo backend is the
+  company's registry and knows only the robots in its list
+  (`demos/demo-backend/src/server.ts`): add the new id there with the
+  capabilities the robot has enabled, then deploy. A grant names only those,
+  and a robot refuses a grant that names one it lacks.
+- **`fjarr-connect` against it**: `fjarr-connect login https://demo.fjarr.io`,
+  approved as the developer role (the only one with `fjarr.net`), and
+  `FJARR_SERVER_URL=wss://signal.fjarr.io/ws`. `login` does not learn the
+  signaling URL yet, and the default is `ws://localhost:8080/ws`, a dev stack's
+  server if one is running, which then calls the demo's grant invalid.

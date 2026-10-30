@@ -699,6 +699,14 @@ docker compose up -d
 docker compose exec fjarr-agent fjarr-agent --check
 ```
 
+**Tunnel only**, on a machine with no GPU for the agent or no `/dev/dri`
+(a Jetson, whose encoder is not VA-API): delete the `/dev/dri` device and
+`group_add`. Docker refuses to start a container whose listed device is
+missing, and a tunnel needs neither. Keep `user: "0"`, `cap_add`,
+`/dev/net/tun` and host networking. The host needs no Fjarr package, only a
+Docker that knows the `clone3` syscall (20.10.10 or later), because the
+image's glibc uses it.
+
 The image's entrypoint runs the setup tool as root (`setup`, `net`, `drivers`);
 for the agent it creates the tunnel device when `fjarr.net` is enabled and then
 `setpriv`s to `fjarr` — no capabilities, keeping the supplementary groups
