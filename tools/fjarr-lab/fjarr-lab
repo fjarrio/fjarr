@@ -56,11 +56,12 @@ desired() {
 }
 
 need_service() { [ -n "$RUNNER_SERVICE" ] || die "RUNNER_SERVICE is not set in $CONF"; }
-runner_active() { systemctl is-active --quiet "$RUNNER_SERVICE"; }
+# A listener outside the unit counts: GitHub's KillMode=process left one taking jobs after a stop.
+runner_active() { systemctl is-active --quiet "$RUNNER_SERVICE" || pgrep -x Runner.Listener >/dev/null 2>&1; }
 job_running() { pgrep -f 'Runner.Worker' >/dev/null 2>&1; }
 
 go_online() {
-  runner_active && { say "runner already online"; return 0; }
+  systemctl is-active --quiet "$RUNNER_SERVICE" && { say "runner already online"; return 0; }
   systemctl start "$RUNNER_SERVICE"
   say "runner online ($RUNNER_SERVICE)"
 }
@@ -80,7 +81,29 @@ go_offline() {
     sleep "$POLL_S"; waited=$((waited + POLL_S))
   done
   systemctl stop "$RUNNER_SERVICE"
+  if pgrep -x Runner.Listener >/dev/null 2>&1; then
+    pkill -x Runner.Listener || true
+    say "stopped a runner listener left outside $RUNNER_SERVICE"
+  fi
   say "runner offline"
+}
+
+# fjarr-lab alone starts the runner (docs/12#lab-machines-and-fjarr-lab): its own unit, enabled by
+# ./svc.sh install, would start at every boot whatever the schedule or a reservation says, and take
+# queued jobs while apply waits for the first. The drop-in makes a stop end the whole runner.
+own_runner() {
+  local dropin=$UNITS/$RUNNER_SERVICE.d/fjarr-lab.conf
+  local want=$'# fjarr-lab (docs/12#lab-machines-and-fjarr-lab): a stop ends the listener too.\n[Service]\nKillMode=mixed\nTimeoutStopSec=60'
+  if [ "$(cat "$dropin" 2>/dev/null)" != "$want" ]; then
+    mkdir -p "${dropin%/*}"
+    printf '%s\n' "$want" > "$dropin"
+    [ -n "${FJARR_LAB_NO_SYSTEMD:-}" ] || systemctl daemon-reload
+    say "$RUNNER_SERVICE: a stop now ends the listener too ($dropin)"
+  fi
+  if [ "$(systemctl is-enabled "$RUNNER_SERVICE" 2>/dev/null)" = enabled ]; then
+    systemctl disable --quiet "$RUNNER_SERVICE"
+    say "$RUNNER_SERVICE disabled: fjarr-lab alone starts it"
+  fi
 }
 
 next_change() {
@@ -110,6 +133,7 @@ cmd_reserve() {
   mkdir -p "$STATE"
   echo "${SUDO_USER:-${USER:-root}} since $(date '+%Y-%m-%d %H:%M')" > "$STATE/reserved"
   say "reserved for ${SUDO_USER:-${USER:-root}}"
+  own_runner
   go_offline
 }
 
@@ -122,6 +146,7 @@ cmd_release() {
 
 cmd_apply() {
   need_service
+  own_runner
   if [ "$(desired)" = online ]; then go_online; else go_offline; fi
 }
 

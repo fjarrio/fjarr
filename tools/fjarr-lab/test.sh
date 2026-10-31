@@ -19,18 +19,27 @@ setup() {
 echo "systemctl $*" >> "$T/log"
 case "$1" in
   is-active) [ -f "$T/active" ] ;;
+  is-enabled) if [ -f "$T/enabled" ]; then echo enabled; else echo disabled; exit 1; fi ;;
+  disable) rm -f "$T/enabled" ;;
   start) touch "$T/active" ;;
   stop) rm -f "$T/active" "$T/job" ;;
   *) : ;;
 esac
 S
+  # pgrep -x Runner.Listener: a listener left outside the unit is $T/listener; otherwise the job.
   cat > "$T/bin/pgrep" <<'S'
 #!/usr/bin/env bash
+[ "$1 $2" = "-x Runner.Listener" ] && { [ -f "$T/listener" ]; exit; }
 [ -f "$T/job" ] || exit 1
 if [ -f "$T/job_polls" ]; then n=$(cat "$T/job_polls"); [ "$n" -le 0 ] && { rm -f "$T/job"; exit 1; }; echo $((n - 1)) > "$T/job_polls"; fi
 exit 0
 S
-  chmod +x "$T/bin/systemctl" "$T/bin/pgrep"
+  cat > "$T/bin/pkill" <<'S'
+#!/usr/bin/env bash
+echo "pkill $*" >> "$T/log"
+rm -f "$T/listener"
+S
+  chmod +x "$T/bin/systemctl" "$T/bin/pgrep" "$T/bin/pkill"
   printf 'RUNNER_SERVICE="actions.runner.test.service"\nWINDOW="00:00-06:00"\nGRACE_MIN=30\nPOLL_S=0\n' > "$T/conf"
   export T PATH="$T/bin:$PATH" FJARR_LAB_CONF="$T/conf" FJARR_LAB_STATE="$T/state" FJARR_LAB_UNITS="$T/units" FJARR_LAB_NO_SYSTEMD=1
 }
@@ -91,6 +100,31 @@ out=$(lab_at 12:00 window 25:00-06:00); rc=$?
 if [ $rc -ne 0 ] && grep -q "not a window" <<<"$out"; then ok "an impossible window is refused"; else bad "an impossible window was accepted: $out"; fi
 lab_at 12:00 window off >/dev/null
 if [ ! -f "$T/units/fjarr-lab-open.timer.d/window.conf" ]; then ok "window off removes the timers"; else bad "window off left a timer"; fi
+
+# fjarr-lab alone starts the runner: its unit, enabled by ./svc.sh install, started at every boot and
+# took queued jobs on a reserved machine; KillMode=process left its listener taking jobs after a stop
+# (2026-10-31).
+sed -i 's/^WINDOW=.*/WINDOW="00:00-06:00"/' "$T/conf"
+rm -f "$T/active" "$T/job"; touch "$T/enabled"; : > "$T/log"
+out=$(lab_at 12:00 apply)
+contains "apply disables the runner's own unit" "$out" "disabled: fjarr-lab alone starts it"
+if [ -f "$T/enabled" ]; then bad "the unit is still enabled"; else ok "the unit is no longer enabled"; fi
+contains "and gives it a drop-in that ends the listener on stop" "$(cat "$T/units/actions.runner.test.service.d/fjarr-lab.conf")" "KillMode=mixed"
+out=$(lab_at 12:00 apply)
+if grep -qE 'disabled|drop-in|listener too' <<<"$out"; then bad "a second apply changed the unit again: $out"; else ok "a second apply leaves the unit alone"; fi
+touch "$T/enabled"
+SUDO_USER=erik lab_at 12:00 reserve >/dev/null
+if [ -f "$T/enabled" ]; then bad "reserve left the unit enabled"; else ok "reserve disables the unit too"; fi
+rm -f "$T/state/reserved"
+touch "$T/listener"; : > "$T/log"
+contains "a listener outside the unit shows as online" "$(lab_at 12:00 status)" "runner:   actions.runner.test.service — online"
+out=$(lab_at 12:00 apply)
+contains "going offline stops a listener outside the unit" "$out" "stopped a runner listener left outside"
+if [ -f "$T/listener" ]; then bad "the listener is still there"; else ok "the listener is gone"; fi
+touch "$T/listener"; : > "$T/log"
+lab_at 03:00 apply >/dev/null
+contains "inside the window, a stray listener does not stop the unit's start" "$(cat "$T/log")" "systemctl start actions.runner.test.service"
+rm -f "$T/listener" "$T/active"
 
 # reboot: a lab job asks and ends; the reboot comes once no job runs, with the runner taken offline first.
 : > "$T/log"

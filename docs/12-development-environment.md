@@ -364,6 +364,14 @@ fjarr-lab reboot                # a lab job's reboot: waits until the runner is 
   the window's edges. At boot the unit works out the right state for the time
   of day, so a job that reboots the machine (the unattended-access test) gets
   its runner back.
+- **`fjarr-lab` alone starts the runner.** The runner's own unit stays
+  disabled: enabled, it started at every boot beside the apply unit, which then
+  waited for the job it found while the runner took the next queued one, and a
+  reserved mini-PC ran a queue of rebooting lab jobs (2026-10-31). `apply`,
+  `reserve` and `release` disable the unit where `./svc.sh install` enabled it,
+  and give it a drop-in (`KillMode=mixed`, `TimeoutStopSec=60`): GitHub's
+  `KillMode=process` left `Runner.Listener` taking jobs after a stop. A
+  listener outside the unit counts as online, and going offline stops it.
 - **A reservation wins** over the window until `release`, so an evening at the
   machine is not interrupted at midnight.
 - **Nothing is killed halfway.** When the window closes, or someone reserves the
