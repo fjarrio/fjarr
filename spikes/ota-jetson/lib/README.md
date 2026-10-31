@@ -64,6 +64,7 @@ Three conventions follow from bash:
 | `lab_box_bootid` | sets `LAB_BOOTID`, and `LAB_SSH_ERR` for `lab_host_key_failed` (something else answered on the box's MAC) |
 | `lab_wait_ready <s>` | wait for systemd on the box to finish starting; prints its state |
 | `lab_backup_check` | L2: `.lab/zedbox-backup/SHA256SUMS` is the one `backup.sh` verified, and the files still match it |
+| `lab_use_fjarr_image` | from now on the box runs a Fjarr image: `root` without sudo, the image's ed25519 host key pinned from `.lab/yocto/ssh` under `zedbox-fjarr`, and no USB device while Linux runs (`LAB_RUNNING_USB=none`) |
 | `lab_deadman_touch` | touch `LAB_DEADMAN_FILE` on the box: a Fjarr image's lab dead-man then waits another 20 minutes |
 | `lab_plug <method?query>` | the plug's RPC answer (JSON), digest auth, the credentials as curl's configuration on its standard input |
 | `lab_plug_status`, `lab_plug_check` | `LAB_PLUG_OUTPUT` and `LAB_PLUG_APOWER`; the check logs them (L2) |
@@ -84,6 +85,8 @@ From the environment, then `.lab/lab.env` (gitignored), then the defaults:
 |---|---|---|
 | `LAB_BOX_MAC` | none: set it in `.lab/lab.env` | the box's Ethernet MAC, a unique ID kept out of the repo |
 | `LAB_BOX_USER` | `user` | the stock image's user |
+| `LAB_BOX_SUDO` | `sudo -n` | how that user becomes root; empty for root (`lab_use_fjarr_image`) |
+| `LAB_RUNNING_USB` | `l4t` | what the mini-PC sees of the box while its Linux runs: `l4t` (stock) or `none` (a Fjarr image); `lab_rcm_enter` checks it |
 | `LAB_BOX_HOSTKEY_ALIAS` | `zedbox` | the name the box's host key is pinned under in `.lab/known_hosts` |
 | `LAB_SUBNET` | `192.168.10` | the /24 swept to find the box |
 | `LAB_MINIPC` | `robot@192.168.10.108` | the mini-PC |

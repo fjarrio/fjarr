@@ -1,0 +1,16 @@
+# spec: docs/32-fleet-ota.md#jetson-test-image ("The lab dead-man"; L3)
+# RCM when /run/fjarr-lab-ok has gone 20 minutes without a touch from the lab scripts, so a slot
+# that boots but cannot be reached ends where the mini-PC can reflash the box. Started early and
+# kept through an isolate (emergency, rescue), whatever else fails.
+[Unit]
+Description=Fjarr lab dead-man: RCM after 20 minutes without operator contact
+DefaultDependencies=no
+IgnoreOnIsolate=yes
+
+[Service]
+ExecStart=/usr/sbin/fjarr-lab-deadman
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=sysinit.target

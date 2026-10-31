@@ -147,6 +147,7 @@ listed vendor `0955` only, so it read "none". **Every "no USB device" below was 
 |---|---|
 | 20:54, with the console, the old poll | the flash initrd up and connected 10 s after the RCM boot (the mini-PC's kernel log: `1d6b:0104`, `flashpkg`); the poll saw "none" |
 | 21:03, with the console and the fixed poll | **passed**: RCM boot, the device 9 s later and still there after 30 s; one power cycle, the stock system back with the same fingerprint |
+| 21:47, the image rebuilt with the lab dead-man (sha256 `ef17bd75…`, no `NOT-FOR-THE-BOX`), meta-tegra's script run natively on the mini-PC as D1 runs it (`D0_NATIVE=1`) | **passed**: the device 11 s after the RCM boot, held 30 s, the box unchanged. This package is the one D1 may write (`.lab/d0/passed`) |
 
 The stock image logs `user` (passwordless sudo) in automatically on `ttyTCU0`: a root shell on the
 header's pins. A Fjarr image must not (a getty with a login, or none).

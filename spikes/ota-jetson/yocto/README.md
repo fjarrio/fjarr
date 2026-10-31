@@ -160,8 +160,11 @@ first boot, as on x86, with the image's own copies as fallback), DHCP on any wir
 the MAC as client identifier (systemd-networkd), `/boot/efi` as an automount that unmounts
 after 30 s idle (meta-tegra mounts the ESP for the whole uptime; `setup-nv-boot-control_%.bbappend`
 links an automount instead), `reboot-recovery` (meta-tegra's `tegra-flash-reboot`), nvbootctrl
-and `oe4t-set-uefi-OSIndications`, `efibootmgr`, `efivar`, the disk tools, and `os-release`
-with `IMAGE_ID=fjarr` and `IMAGE_VERSION`.
+and `oe4t-set-uefi-OSIndications`, `efibootmgr`, `efivar`, the disk tools, `os-release`
+with `IMAGE_ID=fjarr` and `IMAGE_VERSION`, and the lab dead-man (L3): the rescues' script from
+`../rescue/rootfs/usr/sbin/fjarr-lab-deadman`, as `fjarr-lab-deadman.service` from `sysinit.target`
+on and through an isolate, `reboot-recovery` after 20 minutes without a touch of
+`/run/fjarr-lab-ok` (`lab_deadman_touch`).
 
 ## The recovery-partition rescue (A5)
 
@@ -262,11 +265,6 @@ resets after 120 s even while userspace's watchdog is stopped.
 
 ## Not in this image yet
 
-- **The lab dead-man** (L3: enter RCM when no operator contact for 20 minutes) is not in the
-  layer; until it is, this image does not meet L3 and is not for the box. The image recipe says
-  so in the build itself: without `fjarr-lab-deadman.service` in the root it warns (`bbwarn`) and
-  writes `/etc/fjarr/NOT-FOR-THE-BOX` into the root, which the flash scripts (D0, D1) must refuse.
-  The port is `rescue/rootfs/usr/sbin/fjarr-lab-deadman` plus a systemd unit.
 - **The network rescue** (A8) on 36.5.2 (`rescue/build.sh --l4t 36.5.2` after D1), the flash
   container, the `.swu` packaging (its `sw-description` with `fjarr,slot-a|b` and
   `hardware-compatibility` `1.0`) and the flash itself (D0, then D1) are other tasks.
@@ -296,5 +294,5 @@ resets after 120 s even while userspace's watchdog is stopped.
 | `meta-fjarr-spike/recipes-core/fjarr-slot-root/` | `/dev/fjarr/root` |
 | `meta-fjarr-spike/recipes-core/fjarr-spike-base/` | network, sshd, watchdog, emergency reboot, `/data`, the trial's health gate and deadline |
 | `meta-fjarr-spike/recipes-core/fjarr-spike-initrd-config/` | the initrd's systemd settings |
-| `meta-fjarr-spike/recipes-core/fjarr-spike-lab/` | the lab key, host keys and SWUpdate certificate |
+| `meta-fjarr-spike/recipes-core/fjarr-spike-lab/` | the lab key, host keys, SWUpdate certificate and the lab dead-man |
 | `meta-fjarr-spike/recipes-core/fjarr-spike-applier/` | the applier and its units from `../applier/` |

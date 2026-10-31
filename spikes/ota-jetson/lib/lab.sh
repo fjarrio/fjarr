@@ -31,6 +31,9 @@ if [[ -r $LAB_DIR/lab.env ]]; then
 fi
 : "${LAB_BOX_MAC:=}"                     # the box's Ethernet MAC: a unique ID, so only in lab.env
 : "${LAB_BOX_USER:=user}"                # the stock image's user (key login, passwordless sudo)
+: "${LAB_BOX_SUDO=sudo -n}"              # how that user becomes root; empty for root itself
+: "${LAB_RUNNING_USB:=l4t}"              # what the mini-PC sees of the box while its Linux runs:
+                                         # l4t (stock, 0955:7020), none (a Fjarr image)
 : "${LAB_SUBNET:=192.168.10}"            # the /24 swept when the box's address is unknown
 : "${LAB_MINIPC:=robot@192.168.10.108}"  # the mini-PC: the lock, the USB cable to the box
 : "${LAB_PLUG:=192.168.10.202}"          # the box's Shelly plug (RPC over HTTP, digest auth)
@@ -668,7 +671,7 @@ lab_box_root() { # [-t <s>] <bash script> [args...]: run as root on the box (sud
   fi
   script=$1
   shift
-  cmd="sudo -n bash -c $(_lab_sq "$script") lab"
+  cmd="${LAB_BOX_SUDO:+$LAB_BOX_SUDO }bash -c $(_lab_sq "$script") lab"
   for a in "$@"; do cmd+=" $(_lab_sq "$a")"; done
   lab_box "${t[@]}" "$cmd"
 }
@@ -698,6 +701,20 @@ lab_backup_check() { # L2: the latest backup has a verified checksum list; 1 (an
   [[ $sum == "$rec" ]] || { lab_log "L2: SHA256SUMS changed since it was verified"; return 1; }
   (cd "$top" && sha256sum -c --quiet SHA256SUMS) || { lab_log "L2: the backup does not match SHA256SUMS"; return 1; }
   lab_log "L2: backup verified ($(wc -l <"$top/SHA256SUMS") files, recorded $(cut -d' ' -f1 "$top/SHA256SUMS.verified"))"
+}
+
+# A Fjarr image (yocto/): root with the lab key, no sudo, the image's own host keys (the same in
+# every build, from .lab/yocto/ssh, pinned from there under their own alias, never on first
+# contact), and no USB device while it runs. Called once the box runs one, e.g. after a flash.
+lab_use_fjarr_image() {
+  local pub=$LAB_DIR/yocto/ssh/ssh_host_ed25519_key.pub kh=$LAB_DIR/known_hosts alias=zedbox-fjarr
+  [[ -s $pub ]] || lab_die "no $pub: the Fjarr image's host key (yocto/build.sh makes it)"
+  if ! grep -q "^$alias " "$kh" 2>/dev/null; then
+    printf '%s %s\n' "$alias" "$(cut -d' ' -f1,2 "$pub")" >>"$kh"
+  fi
+  LAB_BOX_USER=root LAB_BOX_SUDO='' LAB_RUNNING_USB=none LAB_BOX_HOSTKEY_ALIAS=$alias
+  LAB_SSH_BOX=("${LAB_SSH_COMMON[@]}" -o "StrictHostKeyChecking=yes" -o "UserKnownHostsFile=$kh"
+    -o "HostKeyAlias=$alias" -o "HostKeyAlgorithms=ssh-ed25519")
 }
 
 lab_deadman_touch() { # Fjarr images only: keep the lab dead-man from sending the box to RCM
@@ -783,21 +800,22 @@ lab_power_cycle() { # [off seconds]: off now, back on by the plug's own flip-bac
 
 # --- RCM ----------------------------------------------------------------------------------------------
 
-lab_rcm_enter() { # the box reboots into RCM by software; it must run L4T and answer ssh just before
+lab_rcm_enter() { # the box reboots into RCM by software; its Linux must run and answer ssh just before
   local rc=0
   lab_lock_check
   lab_desktop_guard
   lab_need "$LAB_RCM_ROUND_WORST" "a round trip through RCM"
   lab_usb_poll
-  [[ $LAB_USB_STATE == l4t ]] || lab_die "before RCM the mini-PC sees '$LAB_USB_STATE' on the box's USB, not L4T ($LAB_L4T_USB) (L7)"
+  [[ $LAB_USB_STATE == "$LAB_RUNNING_USB" ]] ||
+    lab_die "before RCM the mini-PC sees '$LAB_USB_STATE' on the box's USB, not '$LAB_RUNNING_USB' (L7)"
   [[ -n $LAB_BOX_IP ]] || lab_find_box || lab_die "the box does not answer on its MAC (L2)"
   # Just before: ssh and sudo work, and the disk is synced. After this, an ssh exit of 255 can only
   # be the session closed by the reboot.
-  lab_box -t 20 'sudo -n sync' >/dev/null 2>&1 || lab_die "the box does not answer ssh or sudo just before the reboot: nothing sent (L7)"
+  lab_box -t 20 "${LAB_BOX_SUDO:+$LAB_BOX_SUDO }sync" >/dev/null 2>&1 || lab_die "the box does not answer ssh or sudo just before the reboot: nothing sent (L7)"
   lab_lock_check
   lab_log "box: reboot --force forced-recovery"
   # The session ends with the reboot: 255 (closed) and 124 (timed out) are expected, 0 too.
-  _lab_tmo 20 ssh -n "${LAB_SSH_BOX[@]}" "$LAB_BOX_USER@$LAB_BOX_IP" 'sudo -n reboot --force forced-recovery' \
+  _lab_tmo 20 ssh -n "${LAB_SSH_BOX[@]}" "$LAB_BOX_USER@$LAB_BOX_IP" "${LAB_BOX_SUDO:+$LAB_BOX_SUDO }reboot --force forced-recovery" \
     >/dev/null 2>&1 || rc=$?
   case $rc in
     0 | 124 | 255) ;;

@@ -7,9 +7,13 @@
 #     with NVIDIA's options, to fc00:1:1::/48 only, at the paths the container sees them under
 #   - NVIDIA's udev rules: 10-l4t-usb-msd.rules (udisks, and so GNOME, leave the box's USB disks
 #     alone) and 99-l4t-host.rules (NetworkManager leaves the flash link alone)
-#   - 70-fjarr-box-uart.rules: the USB-serial adapter on the box's debug UART (a CP210x, any one) is
+#   - 70-fjarr-box.rules: the USB-serial adapter on the box's debug UART (a CP210x, any one) is
 #     /dev/fjarr-box-uart for lib/lab.sh's console capture, and ModemManager leaves it alone (its
-#     probes would type into the box's console)
+#     probes would type into the box's console); and udisks never automounts the disks of
+#     meta-tegra's flash initrd (1d6b:0104, "Linux for Tegra": not NVIDIA's 0955:7035, which
+#     NVIDIA's rule covers), which its initrd-flash mounts and writes itself
+#   - device-tree-compiler and bmaptool: meta-tegra's initrd-flash runs natively (it mounts the box's
+#     disks through the host's udisks), and its tegraflash and make-sdcard call dtc and bmaptool
 #   - /run/nvidia_initrd_flash/docker_host_network, made at every boot by tmpfiles.d: with it,
 #     NVIDIA's script in the container expects this host's NFS server
 #   - with ufw active: NFS (TCP 2049) from fc00:1:1::/48
@@ -39,7 +43,7 @@ tmpfiles_conf=/etc/tmpfiles.d/fjarr-l4t-flash.conf
 marker_dir=/run/nvidia_initrd_flash
 marker=$marker_dir/docker_host_network
 rules_dir=/etc/udev/rules.d
-uart_rule=$rules_dir/70-fjarr-box-uart.rules
+box_rule=$rules_dir/70-fjarr-box.rules
 docker_conf=/etc/docker/daemon.json
 docker_data=/var/lib/docker
 net=fc00:1:1::/48
@@ -195,7 +199,7 @@ for name in "${!rule_sha[@]}"; do
 	dst=$rules_dir/$name
 	[ ! -e "$dst" ] || cmp -s "$src" "$dst" || die "$dst exists and differs from NVIDIA's; not replacing it"
 done
-for f in "$tmpfiles_conf" "$exports_file" "$uart_rule"; do ours "$f" || die "$f exists and was not made here"; done
+for f in "$tmpfiles_conf" "$exports_file" "$box_rule"; do ours "$f" || die "$f exists and was not made here"; done
 # Docker: this script installs it only where neither it nor a configuration of another's is there.
 want_docker=0
 if ! command -v docker >/dev/null; then
@@ -211,7 +215,7 @@ fi
 installed() { dpkg-query -W -f='${Package} ${Status}\n' | awk '/ok installed/{print $1}' | LC_ALL=C sort; }
 # Docker's configuration goes in first, so that its daemon never starts with networking on.
 want=()
-is_installed nfs-kernel-server || want+=(nfs-kernel-server)
+for p in nfs-kernel-server device-tree-compiler bmaptool; do is_installed "$p" || want+=("$p"); done
 if [ "$want_docker" = 1 ]; then
 	want+=(docker.io)
 	mkdirs "$(dirname "$docker_conf")"
@@ -228,7 +232,7 @@ if [ "$want_docker" = 1 ]; then
 	[ -e "$docker_data" ] || record tree "$docker_data"
 fi
 if [ ${#want[@]} -eq 0 ]; then
-	[ -f "$packages_before" ] || say "nfs-kernel-server and docker already installed"
+	[ -f "$packages_before" ] || say "nfs-kernel-server, device-tree-compiler, bmaptool and docker already installed"
 elif [ "$dry" = 1 ]; then
 	say "would install ${want[*]} and: $(apt-get -s install --no-install-recommends "${want[@]}" 2>/dev/null |
 		awk '/^Inst /{print $2}' | grep -vxF -f <(printf '%s\n' "${want[@]}") | xargs)"
@@ -256,15 +260,18 @@ for name in "${!rule_sha[@]}"; do
 	record file "$dst"
 	reload_udev=1
 done
-if [ ! -e "$uart_rule" ]; then
-	put "$uart_rule" 0644 <<-'EOF'
-		# The lab's USB-serial adapter on the ZED Box Mini's debug UART: a stable name for lib/lab.sh,
-		# and no ModemManager probes into the box's console. Made by flash/host-setup.sh, removed by
-		# its --undo (docs/32-fleet-ota.md#jetson-test-image).
+if [ ! -e "$box_rule" ]; then
+	put "$box_rule" 0644 <<-'EOF'
+		# The ZED Box Mini lab (docs/32-fleet-ota.md#jetson-test-image). Made by flash/host-setup.sh,
+		# removed by its --undo.
+		# The USB-serial adapter on the box's debug UART: a stable name for lib/lab.sh, and no
+		# ModemManager probes into the box's console.
 		ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ENV{ID_MM_DEVICE_IGNORE}="1"
 		SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ENV{ID_MM_DEVICE_IGNORE}="1", SYMLINK+="fjarr-box-uart"
+		# meta-tegra's flash initrd: its disks are initrd-flash's to mount, never the desktop's.
+		SUBSYSTEM=="block", SUBSYSTEMS=="usb", ATTRS{idVendor}=="1d6b", ATTRS{idProduct}=="0104", ATTRS{product}=="Linux for Tegra", ENV{UDISKS_AUTO}="0"
 	EOF
-	record file "$uart_rule"
+	record file "$box_rule"
 	reload_udev=1
 fi
 if [ "$reload_udev" = 1 ] && command -v udevadm >/dev/null; then
@@ -346,7 +353,7 @@ for r in "${all[@]}"; do
 done
 [ -e "$marker" ] || die "$marker is missing"
 for name in "${!rule_sha[@]}"; do [ -e "$rules_dir/$name" ] || die "$rules_dir/$name is missing"; done
-[ -e "$uart_rule" ] || die "$uart_rule is missing"
+[ -e "$box_rule" ] || die "$box_rule is missing"
 if recorded file "$docker_conf"; then
 	docker info --format '{{.Name}}' >/dev/null || die "docker does not answer"
 	! ip link show docker0 >/dev/null 2>&1 || die "docker made its bridge despite $docker_conf"

@@ -163,9 +163,9 @@ echo 0630 >/tmp/hhmm # from 06:30 the window lets it through, to the next refusa
 check "refuses a rule that differs from NVIDIA's, at 06:30" refuses "differs from NVIDIA's" --l4t $t1
 echo 1200 >/tmp/hhmm
 rm /etc/udev/rules.d/99-l4t-host.rules
-echo '# not ours' >/etc/udev/rules.d/70-fjarr-box-uart.rules
-check "refuses a UART rule it did not make" refuses "70-fjarr-box-uart.rules exists and was not made here" --l4t $t1
-rm /etc/udev/rules.d/70-fjarr-box-uart.rules
+echo '# not ours' >/etc/udev/rules.d/70-fjarr-box.rules
+check "refuses a box rule it did not make" refuses "70-fjarr-box.rules exists and was not made here" --l4t $t1
+rm /etc/udev/rules.d/70-fjarr-box.rules
 check "no state after refusals" test ! -e /var/lib/fjarr-flash-host/state
 snapshot >/tmp/s2
 diff /tmp/s0 /tmp/s2 | grep -E '^[<>]' >/tmp/d2 || true
@@ -176,8 +176,10 @@ check "setup runs" $setup --l4t $t1
 check "lab lock file made, mode 0644" test "$(stat -c %a /run/lock/fjarr-zedbox.lock)" = 644
 check "nfs-kernel-server installed" dpkg-query -W nfs-kernel-server
 check "rules are NVIDIA's" cmp /rules/10-l4t-usb-msd.rules /etc/udev/rules.d/10-l4t-usb-msd.rules
-check "UART rule written and recorded" grep -qx "file /etc/udev/rules.d/70-fjarr-box-uart.rules" /var/lib/fjarr-flash-host/state
-check "UART rule names the adapter, ModemManager off it" grep -q 'ID_MM_DEVICE_IGNORE}="1", SYMLINK+="fjarr-box-uart"' /etc/udev/rules.d/70-fjarr-box-uart.rules
+check "box rule written and recorded" grep -qx "file /etc/udev/rules.d/70-fjarr-box.rules" /var/lib/fjarr-flash-host/state
+check "UART rule names the adapter, ModemManager off it" grep -q 'ID_MM_DEVICE_IGNORE}="1", SYMLINK+="fjarr-box-uart"' /etc/udev/rules.d/70-fjarr-box.rules
+check "the flash initrd's disks are never automounted" grep -q 'ATTRS{product}=="Linux for Tegra", ENV{UDISKS_AUTO}="0"' /etc/udev/rules.d/70-fjarr-box.rules
+check "the native flasher's tools installed" dpkg-query -W device-tree-compiler bmaptool
 check "marker made by tmpfiles.d" test -e /run/nvidia_initrd_flash/docker_host_network
 exports() { awk -F'\t' '$2 ~ /^fc00:1:1::\/48\(/' /var/lib/nfs/etab | wc -l; } # etab: path TAB client(options)
 check "three exports loaded, to fc00:1:1::/48 only" test "$(exports)" = 3

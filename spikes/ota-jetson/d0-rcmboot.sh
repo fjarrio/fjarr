@@ -17,6 +17,10 @@
 # D0_FLASHVARS_SED=<a sed expression> edits the copy's flashvars for one run (a bisection step,
 # such as leaving one overlay out of BOOTCONTROL_OVERLAYS).
 #
+# D0_NATIVE=1 runs meta-tegra's script on the mini-PC itself instead of in the container, as D1
+# runs it (it mounts the box's disks through the host's udisks); flash/host-setup.sh installs its
+# tools. A passed run records the package's sha256 in .lab/d0/passed: D1 writes only those (L4).
+#
 # D0_NVIDIA_L4T=<a tree on the mini-PC> boots NVIDIA's own way instead, for comparison:
 # tools/kernel_flash/l4t_initrd_flash.sh --initrd --network usb0 p3509-a02-p3767-0000 internal in
 # that tree (flash/prepare-l4t.sh, exported by flash/host-setup.sh), as NVIDIA's backup tool boots
@@ -50,6 +54,7 @@ pkg=${1:-$deploy/fjarr-spike-image-zedbox-mini-orin-nx16.rootfs.tegraflash.tar.g
 : "${D0_NVIDIA_L4T:=}"
 : "${D0_FLASHVARS_SED:=}"
 : "${D0_SWAP:=}"
+: "${D0_NATIVE:=}"
 [[ -z $D0_DTB || -s $D0_DTB ]] || { echo "d0-rcmboot.sh: no $D0_DTB" >&2; exit 2; }
 
 mkdir -p "$LAB_DIR/d0"
@@ -116,7 +121,8 @@ chmod +x initrd-flash-d0
 grep -c "write_to_device \\$" initrd-flash-d0 || true
 # The MB2 configuration of Fjarr, without the carrier EEPROM read (NVIDIA default stops before UEFI).
 grep -lE "cvb_eeprom_read_size = <0x0+>" ./*mb2-bct-misc*zedbox-mini*.dts* >/dev/null 2>&1 || { echo "the package lacks the MB2 configuration of Fjarr"; exit 1; }
-docker image inspect fjarr-l4t-flash >/dev/null' "$D0_DIR" "$([[ -n $D0_DTB ]] && echo 1 || echo 0)" "$D0_FLASHVARS_SED" 2>"$LAB_DIR/d0/flashvars.txt") || lab_die "the mini-PC is not ready: $out"
+if [ "$4" = 1 ]; then for t in dtc bmaptool udisksctl; do command -v $t >/dev/null || { echo "no $t for the native run (flash/host-setup.sh)"; exit 1; }; done
+else docker image inspect fjarr-l4t-flash >/dev/null; fi' "$D0_DIR" "$([[ -n $D0_DTB ]] && echo 1 || echo 0)" "$D0_FLASHVARS_SED" "$D0_NATIVE" 2>"$LAB_DIR/d0/flashvars.txt") || lab_die "the mini-PC is not ready: $out"
 [[ $out == 0 ]] || lab_die "initrd-flash-d0 still calls write_to_device: $out"
 lab_log "initrd-flash-d0 ready: meta-tegra's script up to the RCM boot"
 [[ -z $D0_FLASHVARS_SED ]] || lab_log "flashvars for this run: $(grep -E 'OVERLAY' "$LAB_DIR/d0/flashvars.txt" | tr '\n' ' ')"
@@ -143,6 +149,8 @@ docker run --rm --privileged --net=host -v /dev:/dev -v /run/nvidia_initrd_flash
   -v "$L4T:$L4T" -w "$L4T" fjarr-l4t-flash \
   ./tools/kernel_flash/l4t_initrd_flash.sh --initrd --showlogs --network usb0 p3509-a02-p3767-0000 internal' "$D0_NVIDIA_L4T" >"$log" 2>&1 || rc=$?
   grep -q 'Device has booted into initrd' "$log" || rc=${rc/#0/1}
+elif [[ $D0_NATIVE == 1 ]]; then
+  lab_mpc_root -t 900 'cd "$1/work" && ./initrd-flash-d0; rc=$?; cat "$(ls -t log.initrd-flash.* | head -n 1)"; exit $rc' "$D0_DIR" >"$log" 2>&1 || rc=$?
 else
 lab_mpc_root -t 900 'cd "$1/work" && docker run --rm --privileged --net=host -v /dev:/dev -v "$1/work:$1/work" -w "$1/work" \
   fjarr-l4t-flash ./initrd-flash-d0; cat "$(ls -t log.initrd-flash.* | head -n 1)"' "$D0_DIR" >"$log" 2>&1 || rc=$?
@@ -190,5 +198,9 @@ diff "$LAB_DIR/d0/before.txt" "$LAB_DIR/d0/after.txt" >"$LAB_DIR/d0/diff.txt" ||
 if [[ -n $D0_NVIDIA_L4T ]]; then
   lab_log "D0 comparison done: NVIDIA's own firmware and flash initrd booted from RAM; the box is unchanged"
 else
+  # Only the package as built: a run with a swapped file or edited flashvars proves something else.
+  if [[ -z $D0_DTB$D0_SWAP$D0_FLASHVARS_SED ]]; then
+    echo "$sha $(date -u +%FT%TZ) $([[ $D0_NATIVE == 1 ]] && echo native || echo container) ${pkg##*/}" >>"$LAB_DIR/d0/passed"
+  fi
   lab_log "D0 done: Fjarr's firmware and the flash initrd booted from RAM; the box is unchanged"
 fi

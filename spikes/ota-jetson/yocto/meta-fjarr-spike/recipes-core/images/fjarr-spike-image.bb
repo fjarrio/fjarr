@@ -100,10 +100,9 @@ fjarr_replace_nv_update_verifier() {
 }
 ROOTFS_POSTPROCESS_COMMAND += "fjarr_replace_nv_update_verifier"
 
-# L3: every Fjarr Linux on the lab box runs the lab dead-man (docs/32-fleet-ota.md#jetson-test-image).
-# The slot image has none yet (yocto/README.md, "Not in this image yet"), so until a dead-man unit
-# is in it the build warns and the root carries /etc/fjarr/NOT-FOR-THE-BOX, which the flash
-# (D0, D1) checks before it writes the box.
+# L3: every Fjarr Linux on the lab box runs the lab dead-man (docs/32-fleet-ota.md#jetson-test-image),
+# fjarr-spike-lab's unit. Without it the build warns and the root carries /etc/fjarr/NOT-FOR-THE-BOX,
+# which the first flash (D1) checks before it writes the box.
 FJARR_DEADMAN_UNIT = "fjarr-lab-deadman.service"
 fjarr_not_for_the_box() {
     if [ -e ${IMAGE_ROOTFS}${systemd_system_unitdir}/${FJARR_DEADMAN_UNIT} ]; then
