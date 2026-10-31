@@ -33,6 +33,8 @@
 # nobody sends. That device must appear (MB2 got past the carrier EEPROM it no longer reads, and
 # UEFI and the kernel ran); nothing mounts or writes it. One power cycle then brings back the
 # stock system from the QSPI and the NVMe, and the box's fingerprint must equal the one before.
+# With the USB-serial adapter on the debug UART, the box's console from RCM to the stock system's
+# start goes to .lab/logs/d0-<time>-console.log, and its last lines before the power cycle to the log.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=lib/lab.sh
@@ -131,6 +133,7 @@ fingerprint >"$LAB_DIR/d0/before.txt" || lab_die "could not read the box's finge
 lab_rcm_enter
 lab_rcm_wait || lab_die "no RCM within $LAB_RCM_TMO s (the mini-PC sees '$LAB_USB_STATE')"
 lab_log "box in RCM; signing and the RCM boot"
+lab_uart_start d0
 lab_lock_check
 log=$LAB_DIR/logs/d0-rcmboot-$(date -u +%Y%m%dT%H%M%SZ).log
 rc=0
@@ -164,6 +167,10 @@ if [[ -n $seen ]]; then
   lab_mpc 'for d in /sys/bus/usb/devices/*; do [ "$(cat $d/idVendor 2>/dev/null)" = 0955 ] && printf "%s %s:%s %s %s\n" "${d##*/}" "$(cat $d/idVendor)" "$(cat $d/idProduct)" "$(cat $d/product 2>/dev/null)" "$(cat $d/speed 2>/dev/null)"; done; lsblk -o NAME,SIZE,TRAN,VENDOR,MODEL,MOUNTPOINTS 2>/dev/null | grep -i usb || true' >>"$log" 2>&1 || true
 fi
 
+if [[ -n $LAB_UART_UNIT ]]; then
+  lab_log "the box's console, its last lines before the power cycle:"
+  lab_uart_tail 30 >&2 || true
+fi
 lab_lock_check
 lab_power_cycle
 t1=$SECONDS
@@ -174,6 +181,7 @@ done
 [[ -n ${LAB_BOOTID:-} && $LAB_BOOTID != "$before" ]] || lab_die "the stock system did not come back after the power cycle"
 state=$(lab_wait_ready 300) || true
 lab_log "stock system back $((SECONDS - t1)) s after the power cycle: systemd $state"
+lab_uart_stop
 fingerprint >"$LAB_DIR/d0/after.txt" || lab_die "could not read the fingerprint after"
 diff "$LAB_DIR/d0/before.txt" "$LAB_DIR/d0/after.txt" >"$LAB_DIR/d0/diff.txt" ||
   lab_die "the fingerprint changed (L7): .lab/d0/diff.txt"

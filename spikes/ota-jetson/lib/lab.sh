@@ -55,6 +55,8 @@ fi
 : "${LAB_USB_RESTORE:=/run/fjarr-zedbox-usb.restore}"  # on the mini-PC: the isolated hubs' settings
 : "${LAB_USB_CTL:=0000:01:00.0}"         # the mini-PC's USB controller the box's cable is on (B2):
                                          # isolated when the box shows nothing on USB
+: "${LAB_UART:=/dev/fjarr-box-uart}"     # on the mini-PC: the USB-serial adapter on the box's debug
+                                         # UART (flash/host-setup.sh names it), optional
 
 # Worst cases, in seconds, that lab_need checks against the hard stop (L1).
 # A power cycle: the plug's answers (curl -m 5 each) to the cut, 5 polls for off, the off time,
@@ -80,7 +82,7 @@ LAB_NAME=lab LAB_LOG='' LAB_RUN='' LAB_PLUG_PASS='' LAB_BOX_IP='' LAB_IS_MINIPC=
 LAB_LOCK_MODE='' LAB_LOCK_FD='' LAB_LOCK_IN='' LAB_LOCK_OUT='' LAB_LOCK_PID='' LAB_LOCK_REPLY=''
 LAB_PLUG_OUTPUT=unknown LAB_PLUG_APOWER='' LAB_LAST_SWEEP=-1000 LAB_USB_STATE=unknown
 LAB_CYCLE_OFF_APOWER='' LAB_CYCLE_SECONDS='' LAB_CYCLE_ON_AT='' LAB_USB_L4T_AT='' LAB_USB_ISOLATED=0
-LAB_BOOTID='' LAB_SSH_ERR='' LAB_DYING='' LAB_BG_PIDS=()
+LAB_BOOTID='' LAB_SSH_ERR='' LAB_DYING='' LAB_BG_PIDS=() LAB_UART_UNIT='' LAB_UART_LOG=''
 : "${LAB_DIE_HOOK:=}" # a function lab_die calls once before it exits, e.g. to record the state (L7)
 
 # --- logging -------------------------------------------------------------------------------------
@@ -151,6 +153,7 @@ _lab_exit() {
   LAB_PLUG_PASS=''
   for p in "${LAB_BG_PIDS[@]}"; do kill "$p" 2>/dev/null; done
   [[ -n $LAB_RUN ]] && rm -rf "$LAB_RUN"
+  [[ -n $LAB_UART_UNIT ]] && lab_uart_stop
   [[ $LAB_LOCK_MODE == local ]] && _lab_usb_restore_local
   lab_unlock
   lab_log "== $LAB_NAME: end (exit $rc)"
@@ -203,10 +206,15 @@ EOF
 _lab_usb_ids_sh() {
   cat <<'EOF'
 usb_ids() { # <sysfs> <vendor>: "vendor:product" of each such device, comma separated
+  # The flash initrd's gadget is not the vendor's: 1d6b:0104, "Linux for Tegra" (the mini-PC's own
+  # root hubs are 1d6b too). Missed, it read as "none" through every D0 run before 2026-10-31.
   for d in "$1"/*; do
     [ -r "$d/idVendor" ] || continue
-    [ "$(cat "$d/idVendor" 2>/dev/null)" = "$2" ] || continue
-    printf '%s:%s\n' "$2" "$(cat "$d/idProduct" 2>/dev/null)"
+    usb_v=$(cat "$d/idVendor" 2>/dev/null) usb_p=$(cat "$d/idProduct" 2>/dev/null)
+    if [ "$usb_v" = "$2" ] ||
+      { [ "$usb_v:$usb_p" = 1d6b:0104 ] && [ "$(cat "$d/product" 2>/dev/null)" = "Linux for Tegra" ]; }; then
+      printf '%s:%s\n' "$usb_v" "$usb_p"
+    fi
   done | sort -u | paste -sd, -
 }
 EOF
@@ -827,6 +835,75 @@ lab_rcm_leave() { # a power cycle out of RCM; RCM must stay away for LAB_RCM_GON
     sleep 2
   done
   return 0
+}
+
+# --- the box's debug console ---------------------------------------------------------------------
+#
+# The GPIO header's pins 9 and 10 carry the module's combined debug UART (TCU: MB1, MB2, UEFI and
+# the kernel console, 115200 8N1), read by a 3.3 V USB-serial adapter on the mini-PC (LAB_UART).
+# The capture runs there as a transient systemd unit, so it outlives no run (lab_uart_stop, or
+# _lab_exit, stops it by name; RuntimeMaxSec bounds it anyway) and needs no pkill. Each line carries
+# the seconds since the capture started; a line the box leaves unfinished for a second is written
+# with " <partial>", so the last words before a hang are kept. The log stays under .lab (it holds
+# the box's identifiers).
+
+_LAB_UART_PY='import os, select, sys, termios, time
+dev, out = sys.argv[1:]
+fd = os.open(dev, os.O_RDONLY | os.O_NOCTTY)
+a = termios.tcgetattr(fd)
+a[0] = a[1] = a[3] = 0
+a[2] = termios.CS8 | termios.CREAD | termios.CLOCAL
+a[4] = a[5] = termios.B115200
+a[6][termios.VMIN], a[6][termios.VTIME] = 1, 0
+termios.tcsetattr(fd, termios.TCSANOW, a)
+termios.tcflush(fd, termios.TCIFLUSH)
+f = open(out, "ab", buffering=0)
+f.write(time.strftime("# console capture from %Y-%m-%dT%H:%M:%SZ\n", time.gmtime()).encode())
+t0, buf = time.monotonic(), b""
+def put(line, tail=b""):
+    f.write(b"%9.3f " % (time.monotonic() - t0) + line.rstrip(b"\r").replace(b"\r", b"") + tail + b"\n")
+while True:
+    if not select.select([fd], [], [], 1.0)[0]:
+        if buf:
+            put(buf, b" <partial>")
+            buf = b""
+        continue
+    buf += os.read(fd, 4096)
+    *lines, buf = buf.split(b"\n")
+    for line in lines:
+        put(line)'
+
+# shellcheck disable=SC2016 # runs on the mini-PC and expands there
+lab_uart_start() { # <tag>: capture the box's console on the mini-PC from now; nothing (logged) without an adapter
+  local unit
+  unit=fjarr-uart-$1-$(date -u +%Y%m%dT%H%M%SZ)
+  if lab_mpc_root -t 30 '[ -c "$1" ] || exit 3
+install -d -m 0700 /var/log/fjarr-lab-uart
+systemd-run -q --unit="$2" --property=RuntimeMaxSec=7200 python3 -Ic "$3" "$1" "/var/log/fjarr-lab-uart/$2.log"' \
+    "$LAB_UART" "$unit" "$_LAB_UART_PY"; then
+    LAB_UART_UNIT=$unit
+    lab_log "the box's console is captured on the mini-PC ($unit)"
+  else
+    lab_log "no console capture: no $LAB_UART on the mini-PC, or the capture did not start"
+  fi
+}
+
+# shellcheck disable=SC2016 # runs on the mini-PC and expands there
+lab_uart_tail() { # [lines]: the capture's last lines so far
+  [[ -n $LAB_UART_UNIT ]] || return 0
+  lab_mpc_root -t 30 'tail -n "$2" "/var/log/fjarr-lab-uart/$1.log"' "$LAB_UART_UNIT" "${1:-25}"
+}
+
+# shellcheck disable=SC2016 # runs on the mini-PC and expands there
+lab_uart_stop() { # stop the capture; LAB_UART_LOG: its copy under .lab/logs
+  local unit=$LAB_UART_UNIT
+  [[ -n $unit ]] || return 0
+  LAB_UART_UNIT=''
+  LAB_UART_LOG=$LAB_DIR/logs/${unit#fjarr-uart-}-console.log
+  lab_mpc_root -t 60 'systemctl stop "$1" 2>/dev/null; systemctl reset-failed "$1" 2>/dev/null
+cat "/var/log/fjarr-lab-uart/$1.log" && rm -f "/var/log/fjarr-lab-uart/$1.log"' "$unit" >"$LAB_UART_LOG" ||
+    lab_log "the console capture $unit could not be copied back"
+  lab_log "console capture: ${LAB_UART_LOG#"$LAB_HOME"/}, $(wc -l <"$LAB_UART_LOG") lines"
 }
 
 # --- results: redaction of the box's identifiers -------------------------------------------------

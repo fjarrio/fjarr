@@ -7,6 +7,9 @@
 #     with NVIDIA's options, to fc00:1:1::/48 only, at the paths the container sees them under
 #   - NVIDIA's udev rules: 10-l4t-usb-msd.rules (udisks, and so GNOME, leave the box's USB disks
 #     alone) and 99-l4t-host.rules (NetworkManager leaves the flash link alone)
+#   - 70-fjarr-box-uart.rules: the USB-serial adapter on the box's debug UART (a CP210x, any one) is
+#     /dev/fjarr-box-uart for lib/lab.sh's console capture, and ModemManager leaves it alone (its
+#     probes would type into the box's console)
 #   - /run/nvidia_initrd_flash/docker_host_network, made at every boot by tmpfiles.d: with it,
 #     NVIDIA's script in the container expects this host's NFS server
 #   - with ufw active: NFS (TCP 2049) from fc00:1:1::/48
@@ -36,6 +39,7 @@ tmpfiles_conf=/etc/tmpfiles.d/fjarr-l4t-flash.conf
 marker_dir=/run/nvidia_initrd_flash
 marker=$marker_dir/docker_host_network
 rules_dir=/etc/udev/rules.d
+uart_rule=$rules_dir/70-fjarr-box-uart.rules
 docker_conf=/etc/docker/daemon.json
 docker_data=/var/lib/docker
 net=fc00:1:1::/48
@@ -191,7 +195,7 @@ for name in "${!rule_sha[@]}"; do
 	dst=$rules_dir/$name
 	[ ! -e "$dst" ] || cmp -s "$src" "$dst" || die "$dst exists and differs from NVIDIA's; not replacing it"
 done
-for f in "$tmpfiles_conf" "$exports_file"; do ours "$f" || die "$f exists and was not made here"; done
+for f in "$tmpfiles_conf" "$exports_file" "$uart_rule"; do ours "$f" || die "$f exists and was not made here"; done
 # Docker: this script installs it only where neither it nor a configuration of another's is there.
 want_docker=0
 if ! command -v docker >/dev/null; then
@@ -252,7 +256,21 @@ for name in "${!rule_sha[@]}"; do
 	record file "$dst"
 	reload_udev=1
 done
-[ "$reload_udev" = 0 ] || ! command -v udevadm >/dev/null || run udevadm control --reload-rules
+if [ ! -e "$uart_rule" ]; then
+	put "$uart_rule" 0644 <<-'EOF'
+		# The lab's USB-serial adapter on the ZED Box Mini's debug UART: a stable name for lib/lab.sh,
+		# and no ModemManager probes into the box's console. Made by flash/host-setup.sh, removed by
+		# its --undo (docs/32-fleet-ota.md#jetson-test-image).
+		ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ENV{ID_MM_DEVICE_IGNORE}="1"
+		SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ENV{ID_MM_DEVICE_IGNORE}="1", SYMLINK+="fjarr-box-uart"
+	EOF
+	record file "$uart_rule"
+	reload_udev=1
+fi
+if [ "$reload_udev" = 1 ] && command -v udevadm >/dev/null; then
+	run udevadm control --reload-rules
+	run udevadm trigger --subsystem-match=tty --action=add
+fi
 
 # 3. The marker, made at every boot.
 mkdirs "$(dirname "$tmpfiles_conf")"
@@ -328,6 +346,7 @@ for r in "${all[@]}"; do
 done
 [ -e "$marker" ] || die "$marker is missing"
 for name in "${!rule_sha[@]}"; do [ -e "$rules_dir/$name" ] || die "$rules_dir/$name is missing"; done
+[ -e "$uart_rule" ] || die "$uart_rule is missing"
 if recorded file "$docker_conf"; then
 	docker info --format '{{.Name}}' >/dev/null || die "docker does not answer"
 	! ip link show docker0 >/dev/null 2>&1 || die "docker made its bridge despite $docker_conf"

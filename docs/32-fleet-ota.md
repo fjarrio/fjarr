@@ -1168,7 +1168,11 @@ with that line deleted.
   36.4.4 default; NVIDIA's fix sets 0x04, and Fjarr's 36.5.2 firmware
   brings it with D1.
 - Fjarr's firmware from RAM: MB2 past its EEPROM step, and the flashing
-  gadget with Fjarr's device tree (D0): pending.
+  gadget with Fjarr's device tree (D0, 2026-10-31): **passed**. Over RCM,
+  MB1, MB2, UEFI and meta-tegra's flash initrd ran, and its USB device
+  (`1d6b:0104`, not NVIDIA's `0955`) appeared 9 s after the boot; the box
+  unchanged after one power cycle. The debug UART is the GPIO header's pins
+  9 and 10 (TCU, 115200 8N1); the lab logs it on every run.
 - The first flash: both slots and the rescue written, RCM reached from the
   Fjarr image (D1): pending.
 - NVIDIA's semantics: retries on warm reboots without a verify, what

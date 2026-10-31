@@ -54,7 +54,7 @@ Three conventions follow from bash:
 | `lab_lock_check` | prove the lock is still held; before every action that changes the box, its plug or RCM (the helpers below that change something call it) |
 | `lab_on_minipc` | true on the mini-PC (by its address; `LAB_LOCAL=1` or `0` overrides) |
 | `lab_mpc [-t s] <cmd>`, `lab_mpc_root [-t s] <script> [args]` | run on the mini-PC, as `robot` or as root, at most `s` seconds (`LAB_SSH_TMO`) |
-| `lab_usb_poll` | sets `LAB_USB_STATE`: `rcm`, `l4t`, `none`, `other:<ids>` or `unknown`, the box on the mini-PC's USB; from the workstation through the lock session, whose loss stops the run |
+| `lab_usb_poll` | sets `LAB_USB_STATE`: `rcm`, `l4t`, `none`, `other:<ids>` or `unknown`, the box on the mini-PC's USB (NVIDIA's vendor id, and the flash initrd's gadget `1d6b:0104` "Linux for Tegra", which shows as `other:1d6b:0104`); from the workstation through the lock session, whose loss stops the run |
 | `lab_runner_check` | after the lock: `fjarr-lab status` on the mini-PC, read only; refuse unless its runner is offline (L1). Fails open: when the status cannot be read, or names no runner, the run goes on with the time window alone, and says so in the log |
 | `lab_desktop_guard` | before anything that makes the box appear again on the mini-PC's USB: `lab_usb_isolate` once per run with `LAB_DESKTOP_ISOLATE=1`, nothing with `LAB_DESKTOP_OK=1`, else refuse |
 | `lab_usb_isolate [check]` | isolate the box's USB controller on the mini-PC (the box's, else `LAB_USB_CTL`), or (`check`) only say whether it can; lifted only once the box is on USB and deauthorized |
@@ -71,6 +71,7 @@ Three conventions follow from bash:
 | `lab_rcm_enter` | `reboot --force forced-recovery` on the box, which must run L4T (`0955:7020` on USB) and answer ssh and sudo just before |
 | `lab_rcm_wait [s]` | until `0955:7323` (RCM) shows on the mini-PC, `LAB_RCM_TMO` (90 s) by default |
 | `lab_rcm_leave` | a power cycle, then RCM must stay away for `LAB_RCM_GONE_S` (L7); sets `LAB_USB_L4T_AT` when L4T shows meanwhile |
+| `lab_uart_start <tag>`, `lab_uart_tail [n]`, `lab_uart_stop` | capture the box's debug console (header pins 9 and 10, `LAB_UART` on the mini-PC) in a transient systemd unit there, each line timed; stop copies it to `.lab/logs/<tag>-<time>-console.log` (`LAB_UART_LOG`). Without an adapter: a log line, nothing else. `_lab_exit` stops a running capture |
 | `lab_die <why>` | log `STOP: <why>`, run `LAB_DIE_HOOK` once (a script's own record of the state, L7), exit 1 |
 | `lab_redact <secrets>`, `lab_leak_check <file> <secrets>` | committed results: identifiers out, and a refusal if one survived |
 | `LAB_SECRETS_SCRIPT` | a script for `lab_box_root` or `lab_mpc_root` that prints the machine's identifiers, one `<kind> <value>` per line |
@@ -96,6 +97,7 @@ From the environment, then `.lab/lab.env` (gitignored), then the defaults:
 | `LAB_SSH_TMO` | `300` | the default limit of one remote command |
 | `LAB_DESKTOP_ISOLATE`, `LAB_DESKTOP_OK` | unset | a person's choice before anything that shows the box on the mini-PC's USB: `1` isolates the box's USB controller; `1` lets the desktop see the box. Neither: refused |
 | `LAB_USB_CTL` | `0000:01:00.0` | the mini-PC's USB controller the box's cable is on (B2), isolated when the box shows nothing |
+| `LAB_UART` | `/dev/fjarr-box-uart` | on the mini-PC: the USB-serial adapter on the box's debug UART (header pins 9 and 10), named by `flash/host-setup.sh`; optional |
 | `LAB_PIN_HOSTKEY` | unset | `1`: first contact with a new image, its host key recorded (`accept-new`); otherwise an unknown key is refused |
 | `LAB_DESKTOP_USER` | `desktop` | the mini-PC's GNOME account, for the automount check |
 | `LAB_USB_SYSFS`, `LAB_USB_RESTORE` | `/sys/bus/usb/devices`, `/run/fjarr-zedbox-usb.restore` | the mini-PC's USB devices; the isolated hubs' saved settings there |

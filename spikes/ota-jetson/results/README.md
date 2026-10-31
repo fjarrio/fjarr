@@ -128,7 +128,30 @@ backups and the logs stay in `.lab/` (gitignored); `.lab/c2/` holds the fingerpr
 | `c2-restore.sh` (20:56 to 21:10, run by Erik in his terminal) | network rescue serving, RCM by software, NVIDIA's restore 711 s: the GPT, `APP` from its tar, every raw partition, and the QSPI (erased, then 64 MiB in 86 s, in parallel with the NVMe); one power cycle, the stock system back with the same fingerprint (`nv_boot_control.conf`, the SSH host keys, the root PARTUUID, five `sl_` modules, both chains normal, the boot entries) |
 | `probe.sh` (21:11, `2026-10-20-probe-stock-after-c2.txt`) | stock R36.4.4, `BootCurrent` 0001, `BootNext` absent, entries as before, the slot variables and `BootChainFw*` at their stock values |
 
-## Phase D0 on 2026-10-20: not passed yet
+## Phase D0 on 2026-10-31: passed
+
+The box's debug UART is on the GPIO header: pins 9 (RXD) and 10 (TXD) carry the combined TCU UART
+(`ttyTCU0`: MB1, MB2, UEFI and the kernel console, 115200 8N1), read by a 3.3 V CP2102 adapter on
+the mini-PC (`/dev/fjarr-box-uart`, `flash/host-setup.sh`). Lines written to `ttyTHS1` and
+`ttyTHS2` do not reach it. `lib/lab.sh`'s console capture (`lab_uart_start`) now logs every D0 run.
+
+The console showed what the runs of 2026-10-20 could not: Fjarr's firmware and meta-tegra's flash
+initrd booted all the way every time (MB1, MB2, UEFI v36.5.2, `L4TLauncher: Attempting RCM Boot`,
+the 5.15.199 kernel, `/init`, `Exported /tmp/flashpkg.ext4 as flashpkg`), and the mini-PC
+connected to it ("Waiting for host to disconnect..."). Its USB device is not NVIDIA's: meta-tegra's
+flash initrd shows `1d6b:0104` ("Linux for Tegra", a 128 MiB `flashpkg` disk), and `lab_usb_poll`
+listed vendor `0955` only, so it read "none". **Every "no USB device" below was that blind spot.**
+`lab_usb_poll` now lists the gadget as `other:1d6b:0104`.
+
+| Run (`d0-rcmboot.sh`, the package of 2026-10-20, sha256 `5bcb2185…`, Fjarr's device tree) | Result |
+|---|---|
+| 20:54, with the console, the old poll | the flash initrd up and connected 10 s after the RCM boot (the mini-PC's kernel log: `1d6b:0104`, `flashpkg`); the poll saw "none" |
+| 21:03, with the console and the fixed poll | **passed**: RCM boot, the device 9 s later and still there after 30 s; one power cycle, the stock system back with the same fingerprint |
+
+The stock image logs `user` (passwordless sudo) in automatically on `ttyTCU0`: a root shell on the
+header's pins. A Fjarr image must not (a getty with a login, or none).
+
+## Phase D0 on 2026-10-20: misread (see 2026-10-31)
 
 `d0-rcmboot.sh` (the mini-PC reserved): the Yocto image's flash package (`fjarr-spike-image`,
 sha256 `5bcb2185…`) unpacked on the mini-PC, the box into RCM by software, and meta-tegra's
@@ -165,4 +188,6 @@ USB gadget never comes up would sit there silently. Suspect: meta-tegra's flash 
 initrd on this machine (its USB gadget), not the firmware. Not provable without the box's debug
 UART. Next: an image built with `--unpatched-kernel` through D0 (a reset would then show where a
 hang now hides), meta-tegra's flash initramfs read for what it needs from the machine, and the
-debug UART.
+debug UART. (2026-10-31: wrong. There was no hang: the poll could not see meta-tegra's gadget, see
+above. Only the run with NVIDIA's `boot.img` as `initrd-flash.img`, a reset after 50 s, was a real
+difference.)
