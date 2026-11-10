@@ -97,6 +97,8 @@ const robots = [
   { id: "desktop-robot-01", name: "Desktop Robot 01", site: "Office", capabilities: ["fjarr.test", "fjarr.desktop", "fjarr.introspect"] },
   // A Jetson (L4T R36) running the agent's container for the tunnel alone (docs/26#containerized-robots).
   { id: "roger", name: "Roger prototype B", site: "Jetson", capabilities: ["fjarr.net"] },
+  // A friend's Linux computer, the agent container for the tunnel alone, as roger.
+  { id: "chitt", name: "Chitt", site: "Friend", capabilities: ["fjarr.net"] },
 ];
 
 // ---------------------------------------------------------------- the operator API (docs/09#operator-api)
