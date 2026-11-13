@@ -2,11 +2,11 @@
   "name": "fjarr-website",
   "private": true,
   "version": "0.0.1",
-  "description": "fjarr.io — landing page + developer docs (renders ../docs directly)",
+  "description": "fjarr.io \u2014 landing page + developer docs (renders ../docs directly)",
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "node scripts/clear-content-cache.mjs && astro build",
     "preview": "astro preview",
     "typecheck": "astro check || true",
     "check:mermaid": "node scripts/check-mermaid.mjs"

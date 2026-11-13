@@ -1,0 +1,41 @@
+---
+// The site's line icons, drawn for fjarr.io (no icon library ships). 24×24, stroke = currentColor.
+// spec: docs/19-website-and-publishing.md#visual-design
+const paths = {
+  camera: '<rect x="3" y="7" width="13" height="10" rx="2"/><path d="M16 11l5-3v8l-5-3z"/>',
+  terminal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M12.5 15H17"/>',
+  link: '<circle cx="5.5" cy="12" r="2.5"/><circle cx="18.5" cy="12" r="2.5"/><path d="M8 12h8"/>',
+  graph: '<rect x="3" y="9" width="5" height="6" rx="1"/><rect x="16" y="4" width="5" height="6" rx="1"/><rect x="16" y="14" width="5" height="6" rx="1"/><path d="M8 12h4m0 0V7h4m-4 5v5h4"/>',
+  monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0013 0M12 17.5V21"/>',
+  folder: '<path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>',
+  chart: '<path d="M4 19h16M4 15l4-5 4 3 5-7 3 4"/>',
+  pulse: '<path d="M3 12h4l2-5 4 10 2-5h6"/>',
+  refresh: '<path d="M19.5 10A8 8 0 005.6 6.6L4 8.5M4 4v4.5h4.5M4.5 14a8 8 0 0013.9 3.4l1.6-1.9M20 20v-4.5h-4.5"/>',
+  lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/>',
+  ticket: '<path d="M3 8a2 2 0 012-2h14a2 2 0 012 2v2a2 2 0 000 4v2a2 2 0 01-2 2H5a2 2 0 01-2-2v-2a2 2 0 000-4z"/><path d="M14.5 6.5v2m0 2.5v2m0 2.5v2"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  shield: '<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/>',
+  user: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0114 0"/>',
+  seal: '<circle cx="12" cy="9.5" r="6"/><path d="M9.5 9.5l1.8 1.8 3.2-3.6M8.5 14.5L7 21l5-2.5 5 2.5-1.5-6.5"/>',
+  fanout: '<circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="5" r="2"/><circle cx="19" cy="12" r="2"/><circle cx="19" cy="19" r="2"/><path d="M7.5 12H17M7.2 10.8l9.9-4.9M7.2 13.2l9.9 4.9"/>',
+  chip: '<rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>',
+  gauge: '<path d="M4 17a8 8 0 1116 0"/><path d="M12 17l4-6"/><circle cx="12" cy="17" r="1"/>',
+  server: '<rect x="4" y="4" width="16" height="7" rx="1.5"/><rect x="4" y="13" width="16" height="7" rx="1.5"/><path d="M8 7.5h.01M8 16.5h.01"/>',
+  robot: '<rect x="5" y="8" width="14" height="11" rx="2.5"/><path d="M12 5v3M9.5 13h.01M14.5 13h.01M3 12.5v2.5M21 12.5v2.5"/><circle cx="12" cy="4" r="1"/>',
+  dashboard: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/>',
+  stop: '<path d="M8.5 3h7L21 8.5v7L15.5 21h-7L3 15.5v-7z"/><path d="M9 12h6"/>',
+  pointer: '<path d="M5 3l5.5 16.5 2.6-6.9L20 10z"/>',
+  heartbeat: '<path d="M12 20s-7.5-4.6-7.5-10.2A4.2 4.2 0 0112 7.4a4.2 4.2 0 017.5 2.4C19.5 15.4 12 20 12 20z"/><path d="M7 12h2.5l1-2 2 4 1-2H17"/>',
+  eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
+  hub: '<circle cx="5" cy="6.5" r="2"/><circle cx="5" cy="17.5" r="2"/><circle cx="18.5" cy="12" r="2.5"/><path d="M6.9 7.3L16.2 11M6.9 16.7l9.3-3.7"/>',
+  magnifier: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
+  check: '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/>',
+  puzzle: '<path d="M10 4.5a2 2 0 014 0V6h4v4h-1.5a2 2 0 000 4H18v4h-4v-1.5a2 2 0 00-4 0V18H6v-4h1.5a2 2 0 000-4H6V6h4z"/>',
+} as const;
+export type FjIconName = keyof typeof paths;
+interface Props { name: FjIconName; size?: string; class?: string }
+const { name, size = "1.25rem" } = Astro.props;
+---
+<svg class={Astro.props.class} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+  stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" set:html={paths[name]} />

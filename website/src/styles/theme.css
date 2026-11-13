@@ -1,0 +1,85 @@
+/* fjarr.io design tokens — the only place a colour is defined.
+ * spec: docs/19-website-and-publishing.md#visual-design
+ * The docs load this through Starlight's customCss; the landing page imports it and uses the
+ * same --sl-* names, so one change restyles both. */
+
+:root {
+  /* Fjarr blue */
+  --fj-blue: #2f81f7;
+  --fj-blue-light: #58a6ff;
+  --fj-blue-deep: #1d4ed8;
+  /* Status only: "available" and the peer-to-peer path. Never decoration. */
+  --fj-ok: #3fb950;
+  --fj-warn: #d29922;
+
+  --sl-color-white: hsl(0, 0%, 100%);
+  --sl-color-gray-1: hsl(216, 28%, 93%);
+  --sl-color-gray-2: hsl(216, 14%, 79%);
+  --sl-color-gray-3: hsl(216, 10%, 60%);
+  --sl-color-gray-4: hsl(216, 10%, 40%);
+  --sl-color-gray-5: hsl(217, 18%, 21%);
+  --sl-color-gray-6: hsl(218, 26%, 12%);
+  --sl-color-black: hsl(220, 36%, 6.5%);
+
+  --sl-hue-blue: 214;
+  --sl-color-accent-low: hsl(215, 62%, 17%);
+  --sl-color-accent: var(--fj-blue);
+  --sl-color-accent-high: var(--fj-blue-light);
+
+  --sl-color-text: var(--sl-color-gray-2);
+  --sl-color-text-accent: var(--sl-color-accent-high);
+  --sl-color-bg: var(--sl-color-black);
+  /* Tauri-style: the chrome sits on the page, separated by hairlines, not by a lighter slab. */
+  --sl-color-bg-nav: hsla(220, 36%, 6.5%, 0.82);
+  --sl-color-bg-sidebar: var(--sl-color-bg);
+  --sl-color-bg-inline-code: var(--sl-color-gray-6);
+  --sl-color-hairline-light: var(--sl-color-gray-5);
+  --sl-color-hairline: hsl(217, 22%, 15%);
+
+  /* Surfaces for cards and panels, and the hero's glows. */
+  --fj-surface: hsla(218, 30%, 13%, 0.6);
+  --fj-surface-solid: var(--sl-color-gray-6);
+  --fj-border: var(--sl-color-hairline-light);
+  --fj-code-bg: hsl(220, 40%, 4.5%);
+  --fj-glow-a: hsla(214, 92%, 58%, 0.22);
+  --fj-glow-b: hsla(226, 76%, 48%, 0.2);
+  /* The network field (docs/19#network-field) reads these. */
+  --fj-field-dot: hsla(212, 100%, 72%, 0.75);
+  --fj-field-line: 212, 100%, 67%;
+}
+
+:root[data-theme="light"] {
+  --fj-blue: #1f6feb;
+  --fj-blue-light: #0b4fb3;
+  --fj-blue-deep: #1d4ed8;
+  --fj-ok: #1a7f37;
+  --fj-warn: #9a6700;
+
+  --sl-color-white: hsl(220, 36%, 9%);
+  --sl-color-gray-1: hsl(218, 26%, 14%);
+  --sl-color-gray-2: hsl(217, 18%, 24%);
+  --sl-color-gray-3: hsl(216, 10%, 38%);
+  --sl-color-gray-4: hsl(216, 10%, 56%);
+  --sl-color-gray-5: hsl(216, 18%, 84%);
+  --sl-color-gray-6: hsl(216, 30%, 95%);
+  --sl-color-gray-7: hsl(216, 30%, 97.5%);
+  --sl-color-black: hsl(0, 0%, 100%);
+
+  --sl-color-accent-low: hsl(214, 100%, 93%);
+  --sl-color-accent: var(--fj-blue);
+  --sl-color-accent-high: var(--fj-blue-light);
+
+  --sl-color-text-accent: var(--sl-color-accent);
+  --sl-color-bg-nav: hsla(0, 0%, 100%, 0.85);
+  --sl-color-bg-sidebar: var(--sl-color-bg);
+  --sl-color-bg-inline-code: var(--sl-color-gray-6);
+  --sl-color-hairline: hsl(216, 22%, 90%);
+
+  --fj-surface: hsla(216, 40%, 97%, 0.8);
+  --fj-surface-solid: var(--sl-color-gray-7);
+  --fj-code-bg: hsl(216, 30%, 97%);
+  --fj-glow-a: hsla(214, 92%, 58%, 0.14);
+  --fj-glow-b: hsla(226, 76%, 58%, 0.1);
+  --fj-field-dot: hsla(214, 85%, 45%, 0.55);
+  --fj-field-line: 214, 85%, 48%;
+}

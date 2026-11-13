@@ -1,0 +1,139 @@
+/* Docs chrome on top of Starlight. Colours come from theme.css only.
+ * spec: docs/19-website-and-publishing.md#visual-design */
+
+/* Header: translucent over the page, separated by a hairline. */
+header.header {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom-color: var(--sl-color-hairline);
+}
+
+/* Sidebar: quieter items, accent on hover, the current page as a tinted pill. */
+.sidebar-pane {
+  border-inline-end-color: var(--sl-color-hairline);
+}
+.sidebar-content a {
+  color: var(--sl-color-gray-3);
+  font-weight: 500;
+  border-radius: 0.375rem;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+.sidebar-content a:hover,
+.sidebar-content a:focus-visible {
+  color: var(--sl-color-text-accent);
+}
+.sidebar-content a[aria-current="page"],
+.sidebar-content a[aria-current="page"]:hover,
+.sidebar-content a[aria-current="page"]:focus {
+  color: var(--sl-color-text-accent);
+  background-color: color-mix(in srgb, var(--sl-color-accent) 14%, transparent);
+  font-weight: 600;
+}
+.sidebar-content .large {
+  color: var(--sl-color-white);
+  letter-spacing: 0.01em;
+}
+.sidebar-content ul ul li {
+  border-inline-start-color: var(--sl-color-hairline);
+}
+
+/* Right-hand table of contents. */
+.right-sidebar {
+  border-inline-start-color: var(--sl-color-hairline);
+}
+
+/* Content. */
+.sl-markdown-content a:not(:where(.not-content *)) {
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  text-underline-offset: 0.2em;
+  transition: text-decoration-color 120ms ease;
+}
+.sl-markdown-content a:not(:where(.not-content *)):hover {
+  text-decoration-color: currentColor;
+}
+.sl-markdown-content code:not(:where(.not-content *, pre code)) {
+  border-radius: 4px;
+  border: 1px solid var(--sl-color-hairline);
+  padding: 0.1em 0.35em;
+}
+.sl-markdown-content table:not(:where(.not-content *)) {
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--sl-color-hairline-light);
+  border-radius: 0.5rem;
+  /* Starlight makes tables scroll sideways on narrow screens; keep that (never clip). */
+  overflow: auto;
+}
+.sl-markdown-content :is(th, td):not(:where(.not-content *)) {
+  border: 0;
+  border-bottom: 1px solid var(--sl-color-hairline);
+}
+.sl-markdown-content tr:last-child td:not(:where(.not-content *)) {
+  border-bottom: 0;
+}
+.sl-markdown-content th:not(:where(.not-content *)) {
+  background: var(--fj-surface-solid);
+}
+.sl-markdown-content pre.mermaid {
+  background: var(--fj-surface);
+  border: 1px solid var(--sl-color-hairline-light);
+  border-radius: 0.5rem;
+  padding: 1rem;
+}
+
+/* Asides and cards: softer corners, the hairline language of the landing page. */
+.starlight-aside {
+  border-radius: 0.5rem;
+}
+article.card,
+.sl-link-card {
+  border-radius: 0.5rem;
+  box-shadow: none;
+  background: var(--fj-surface);
+  border-color: var(--sl-color-hairline-light);
+}
+.sl-link-card:hover {
+  border-color: var(--sl-color-accent);
+  background: var(--fj-surface);
+}
+
+/* Previous / next. */
+.pagination-links a {
+  box-shadow: none;
+  border-color: var(--sl-color-hairline-light);
+  background: var(--fj-surface);
+  transition: border-color 120ms ease;
+}
+.pagination-links a:hover {
+  border-color: var(--sl-color-accent);
+}
+
+/* Search trigger. */
+site-search > button {
+  border-radius: 0.5rem;
+  border-color: var(--sl-color-hairline-light);
+  background-color: var(--fj-surface);
+}
+site-search > button:hover {
+  border-color: var(--sl-color-accent);
+}
+
+/* Site title: the mark carries the colour; the name stays neutral. */
+.site-title {
+  color: var(--sl-color-white);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Mobile menu button: a quiet control, not a white disc. */
+button.sl-menu-button,
+:root[data-theme="light"] button.sl-menu-button {
+  background-color: var(--fj-surface-solid);
+  color: var(--sl-color-white);
+  border: 1px solid var(--sl-color-hairline-light);
+  box-shadow: none;
+}
+button.sl-menu-button:has(~ :popover-open) {
+  background-color: var(--fj-surface-solid);
+  border-color: var(--sl-color-accent);
+}

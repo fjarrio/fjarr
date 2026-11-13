@@ -1,0 +1,281 @@
+---
+// The landing hero's background: drifting dots, linked when close — machines and the links
+// between them. Decoration, held to docs/19-website-and-publishing.md#network-field: plain
+// canvas, linear-time neighbours, stops when unseen, a still frame under reduced motion.
+---
+<canvas class="network-field" aria-hidden="true"></canvas>
+
+<script>
+  type Dot = { x: number; y: number; vx: number; vy: number; r: number };
+  type Packet = { a: number; b: number; t: number; dur: number };
+
+  // Tuned by eye at 1440×900 and 390×844; distances are CSS pixels.
+  const LINK = 150; // a line is drawn between dots closer than this
+  const REPEL = 46; // dots closer than this push apart
+  const REPEL_FORCE = 160;
+  const POINTER_R = 170;
+  const POINTER_FORCE = 900;
+  const DRIFT = 26; // random acceleration, px/s²
+  const DAMPING = 0.35; // velocity decay per second (fraction, exponential)
+  const MIN_SPEED = 6;
+  const MAX_SPEED = 60;
+  const AREA_PER_DOT = 15000;
+  const MAX_DOTS = 85;
+  const MIN_DOTS = 26;
+  const PACKET_EVERY = 0.45; // seconds between new packets, on average
+  const ALPHA_BUCKETS = 8; // lines are batched by opacity: one stroke() per bucket
+  // Cost is canvas pixels, not physics (~0.25 ms of JS a frame). With GPU raster the field takes
+  // ~4% of the main thread; where the browser rasterises in software it is pixel-bound, so the
+  // backing store stops at 1.5× and the field draws at 30 fps — slow drift doesn't need 60.
+  const MAX_DPR = 1.5;
+  const FRAME_MS = 1000 / 30;
+
+  function start(canvas: HTMLCanvasElement) {
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+
+    let w = 0;
+    let h = 0;
+    let dpr = 1;
+    let dots: Dot[] = [];
+    let packets: Packet[] = [];
+    let pointer: { x: number; y: number } | null = null;
+    let visible = true;
+    let raf = 0;
+    let last = 0;
+    let sincePacket = 0;
+    let dotColor = "";
+    let lineRgb = "";
+
+    const readColors = () => {
+      const s = getComputedStyle(document.documentElement);
+      dotColor = s.getPropertyValue("--fj-field-dot").trim() || "rgba(88,166,255,0.75)";
+      lineRgb = s.getPropertyValue("--fj-field-line").trim() || "212, 100%, 67%";
+    };
+
+    const spawn = (): Dot => {
+      const a = Math.random() * Math.PI * 2;
+      const s = MIN_SPEED + Math.random() * 14;
+      return { x: Math.random() * w, y: Math.random() * h, vx: Math.cos(a) * s, vy: Math.sin(a) * s, r: 1.1 + Math.random() * 1.3 };
+    };
+
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect();
+      const nw = Math.max(1, rect.width);
+      const nh = Math.max(1, rect.height);
+      // Keep the field where it was, stretched to the new size.
+      if (w && h) for (const d of dots) { d.x *= nw / w; d.y *= nh / h; }
+      w = nw;
+      h = nh;
+      dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const want = Math.max(MIN_DOTS, Math.min(MAX_DOTS, Math.round((w * h) / AREA_PER_DOT)));
+      while (dots.length < want) dots.push(spawn());
+      if (dots.length > want) dots.length = want;
+      packets = packets.filter((p) => p.a < want && p.b < want);
+      if (reduced.matches) draw();
+    };
+
+    // Spatial grid with LINK-sized cells: neighbours are in the 3×3 block around a dot's cell.
+    let cols = 0;
+    let rows = 0;
+    let heads = new Int32Array(0);
+    let next = new Int32Array(0);
+    const buildGrid = () => {
+      cols = Math.max(1, Math.ceil(w / LINK));
+      rows = Math.max(1, Math.ceil(h / LINK));
+      if (heads.length !== cols * rows) heads = new Int32Array(cols * rows);
+      heads.fill(-1);
+      if (next.length !== dots.length) next = new Int32Array(dots.length);
+      for (let i = 0; i < dots.length; i++) {
+        const cx = Math.min(cols - 1, Math.max(0, Math.floor(dots[i].x / LINK)));
+        const cy = Math.min(rows - 1, Math.max(0, Math.floor(dots[i].y / LINK)));
+        const c = cy * cols + cx;
+        next[i] = heads[c];
+        heads[c] = i;
+      }
+    };
+    // Calls fn once per unordered pair closer than LINK.
+    const eachPair = (fn: (i: number, j: number, dx: number, dy: number, d: number) => void) => {
+      for (let i = 0; i < dots.length; i++) {
+        const a = dots[i];
+        const cx = Math.min(cols - 1, Math.max(0, Math.floor(a.x / LINK)));
+        const cy = Math.min(rows - 1, Math.max(0, Math.floor(a.y / LINK)));
+        for (let oy = -1; oy <= 1; oy++) {
+          const y = cy + oy;
+          if (y < 0 || y >= rows) continue;
+          for (let ox = -1; ox <= 1; ox++) {
+            const x = cx + ox;
+            if (x < 0 || x >= cols) continue;
+            for (let j = heads[y * cols + x]; j !== -1; j = next[j]) {
+              if (j <= i) continue;
+              const dx = dots[j].x - a.x;
+              const dy = dots[j].y - a.y;
+              const d2 = dx * dx + dy * dy;
+              if (d2 < LINK * LINK) fn(i, j, dx, dy, Math.sqrt(d2));
+            }
+          }
+        }
+      }
+    };
+
+    const step = (dt: number) => {
+      const decay = Math.exp(-DAMPING * dt);
+      buildGrid();
+      eachPair((i, j, dx, dy, d) => {
+        if (d >= REPEL || d === 0) return;
+        const f = (REPEL_FORCE * (1 - d / REPEL) * dt) / d;
+        dots[i].vx -= dx * f;
+        dots[i].vy -= dy * f;
+        dots[j].vx += dx * f;
+        dots[j].vy += dy * f;
+      });
+      for (const d of dots) {
+        d.vx += (Math.random() - 0.5) * 2 * DRIFT * dt;
+        d.vy += (Math.random() - 0.5) * 2 * DRIFT * dt;
+        if (pointer) {
+          const dx = d.x - pointer.x;
+          const dy = d.y - pointer.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist < POINTER_R && dist > 0.5) {
+            const k = 1 - dist / POINTER_R;
+            const f = (POINTER_FORCE * k * k * dt) / dist;
+            d.vx += dx * f;
+            d.vy += dy * f;
+          }
+        }
+        d.vx *= decay;
+        d.vy *= decay;
+        const s = Math.hypot(d.vx, d.vy);
+        if (s > MAX_SPEED) { d.vx *= MAX_SPEED / s; d.vy *= MAX_SPEED / s; }
+        else if (s < MIN_SPEED && s > 0) { d.vx *= MIN_SPEED / s; d.vy *= MIN_SPEED / s; }
+        d.x += d.vx * dt;
+        d.y += d.vy * dt;
+        if (d.x < 0) { d.x = 0; d.vx = Math.abs(d.vx); }
+        else if (d.x > w) { d.x = w; d.vx = -Math.abs(d.vx); }
+        if (d.y < 0) { d.y = 0; d.vy = Math.abs(d.vy); }
+        else if (d.y > h) { d.y = h; d.vy = -Math.abs(d.vy); }
+      }
+
+      // Packets: now and then a pulse runs along a live link; it dies if the link breaks.
+      sincePacket += dt;
+      if (sincePacket > PACKET_EVERY * (0.5 + Math.random())) {
+        sincePacket = 0;
+        const a = Math.floor(Math.random() * dots.length);
+        let best = -1;
+        let bestD = LINK * 0.85;
+        for (let j = 0; j < dots.length; j++) {
+          if (j === a) continue;
+          const d = Math.hypot(dots[j].x - dots[a].x, dots[j].y - dots[a].y);
+          if (d < bestD && Math.random() < 0.6) { best = j; bestD = d; }
+        }
+        if (best >= 0 && packets.length < 6) packets.push({ a, b: best, t: 0, dur: 0.7 + bestD / 220 });
+      }
+      packets = packets.filter((p) => {
+        p.t += dt / p.dur;
+        const A = dots[p.a];
+        const B = dots[p.b];
+        return p.t < 1 && A && B && Math.hypot(B.x - A.x, B.y - A.y) < LINK;
+      });
+    };
+
+    const draw = () => {
+      ctx.clearRect(0, 0, w, h);
+      buildGrid();
+      const paths: Path2D[] = Array.from({ length: ALPHA_BUCKETS }, () => new Path2D());
+      eachPair((i, j, _dx, _dy, d) => {
+        const k = 1 - d / LINK;
+        const b = Math.min(ALPHA_BUCKETS - 1, Math.floor(k * k * ALPHA_BUCKETS));
+        paths[b].moveTo(dots[i].x, dots[i].y);
+        paths[b].lineTo(dots[j].x, dots[j].y);
+      });
+      ctx.lineWidth = 1;
+      for (let b = 0; b < ALPHA_BUCKETS; b++) {
+        ctx.strokeStyle = `hsla(${lineRgb}, ${(((b + 0.5) / ALPHA_BUCKETS) * 0.42).toFixed(3)})`;
+        ctx.stroke(paths[b]);
+      }
+      ctx.fillStyle = dotColor;
+      ctx.beginPath();
+      for (const d of dots) { ctx.moveTo(d.x + d.r, d.y); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2); }
+      ctx.fill();
+      for (const p of packets) {
+        const A = dots[p.a];
+        const B = dots[p.b];
+        const t = p.t;
+        const x = A.x + (B.x - A.x) * t;
+        const y = A.y + (B.y - A.y) * t;
+        const fade = Math.sin(Math.PI * t);
+        ctx.fillStyle = `hsla(${lineRgb}, ${(0.18 * fade).toFixed(3)})`;
+        ctx.beginPath();
+        ctx.arc(x, y, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = `hsla(${lineRgb}, ${(0.95 * fade).toFixed(3)})`;
+        ctx.beginPath();
+        ctx.arc(x, y, 1.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    };
+
+    const frame = (now: number) => {
+      raf = 0;
+      if (last && now - last < FRAME_MS - 2) return schedule();
+      const dt = last ? Math.min(0.05, (now - last) / 1000) : 1 / 60;
+      last = now;
+      step(dt);
+      draw();
+      schedule();
+    };
+    const schedule = () => {
+      if (!raf && visible && !reduced.matches && !document.hidden) raf = requestAnimationFrame(frame);
+    };
+    const stop = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+      last = 0;
+    };
+
+    readColors();
+    resize();
+    // Settle the initial random scatter a little so the first frame already looks like a field.
+    for (let i = 0; i < 90; i++) step(1 / 30);
+    draw();
+
+    new ResizeObserver(resize).observe(canvas);
+    new IntersectionObserver((entries) => {
+      visible = entries.some((e) => e.isIntersecting);
+      visible ? schedule() : stop();
+    }).observe(canvas);
+    document.addEventListener("visibilitychange", () => (document.hidden ? stop() : schedule()));
+    reduced.addEventListener("change", () => (reduced.matches ? (stop(), draw()) : schedule()));
+    document.addEventListener("fjarr:theme", () => { readColors(); draw(); });
+
+    // The canvas sits under the hero's content, so follow the pointer on the window.
+    window.addEventListener("pointermove", (e) => {
+      const r = canvas.getBoundingClientRect();
+      const x = e.clientX - r.left;
+      const y = e.clientY - r.top;
+      pointer = x >= 0 && y >= 0 && x <= r.width && y <= r.height ? { x, y } : null;
+    }, { passive: true });
+    document.documentElement.addEventListener("pointerleave", () => (pointer = null));
+
+    schedule();
+  }
+
+  document.querySelectorAll<HTMLCanvasElement>("canvas.network-field").forEach(start);
+</script>
+
+<style>
+  .network-field {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    /* Fade into the page so the first section starts on a plain background. */
+    -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 55%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 0%, #000 55%, transparent 100%);
+  }
+</style>

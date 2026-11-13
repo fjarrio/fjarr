@@ -4,20 +4,28 @@
 // badge states (#badge-states) and claim rules (#claims). Every number here is a row of
 // docs/16-performance-budgets.md#measured; every badge is docs/17's state.
 
+import "../styles/theme.css";
+import ThemeInit from "../components/ThemeInit.astro";
+import SiteHeader from "../components/SiteHeader.astro";
+import NetworkField from "../components/NetworkField.astro";
+import FjIcon from "../components/FjIcon.astro";
+// The docs' code renderer (Expressive Code, same themes and config), so code looks the same on both.
+import { Code } from "@astrojs/starlight/components";
+
 // The latest published release (apt.fjarr.io stable). Moves with each release, not with main.
 const release = "0.1.2";
 
 const capabilities = [
-  { icon: "📷", name: "Camera video", desc: "Many cameras, one encode fanned out to every viewer, adaptive bitrate. Cameras that already speak H.264 cost no encoder at all.", status: "available" },
-  { icon: "⌨️", name: "Remote terminal", desc: "A shell in the browser, over the same session. Off until configured, audited when opened.", status: "available" },
-  { icon: "🔌", name: "Network link", desc: "A routable address for one machine: ssh, scp, ROS 2, your debugger, your vendor tools.", status: "available" },
-  { icon: "🔬", name: "Pipeline introspection", desc: "The live media pipeline as a graph, on the machine and in your dashboard.", status: "available" },
-  { icon: "🖥️", name: "Remote desktop", desc: "The machine's own desktop in your dashboard, unattended after a reboot, every monitor.", status: "in development" },
-  { icon: "🎙️", name: "Audio", desc: "Hear the machine's microphones, talk through its speaker, push-to-talk.", status: "planned" },
-  { icon: "📦", name: "Files", desc: "The machine's files as a drive, and resumable transfers that survive a flaky LTE link.", status: "planned" },
-  { icon: "📈", name: "Telemetry & logs", desc: "Typed sensor streams with change-triggered updates, and logs that store and forward when offline.", status: "planned" },
-  { icon: "🩺", name: "Fleet observability", desc: "Versions, host metrics and error rates across the fleet.", status: "planned" },
-  { icon: "🔄", name: "Atomic OTA", desc: "A/B updates with rollback and streamed binary diffs.", status: "planned" },
+  { icon: "camera" as const, name: "Camera video", desc: "Many cameras, one encode fanned out to every viewer, adaptive bitrate. Cameras that already speak H.264 cost no encoder at all.", status: "available" },
+  { icon: "terminal" as const, name: "Remote terminal", desc: "A shell in the browser, over the same session. Off until configured, audited when opened.", status: "available" },
+  { icon: "link" as const, name: "Network link", desc: "A routable address for one machine: ssh, scp, ROS 2, your debugger, your vendor tools.", status: "available" },
+  { icon: "graph" as const, name: "Pipeline introspection", desc: "The live media pipeline as a graph, on the machine and in your dashboard.", status: "available" },
+  { icon: "monitor" as const, name: "Remote desktop", desc: "The machine's own desktop in your dashboard, unattended after a reboot, every monitor.", status: "in development" },
+  { icon: "mic" as const, name: "Audio", desc: "Hear the machine's microphones, talk through its speaker, push-to-talk.", status: "planned" },
+  { icon: "folder" as const, name: "Files", desc: "The machine's files as a drive, and resumable transfers that survive a flaky LTE link.", status: "planned" },
+  { icon: "chart" as const, name: "Telemetry & logs", desc: "Typed sensor streams with change-triggered updates, and logs that store and forward when offline.", status: "planned" },
+  { icon: "pulse" as const, name: "Fleet observability", desc: "Versions, host metrics and error rates across the fleet.", status: "planned" },
+  { icon: "refresh" as const, name: "Atomic OTA", desc: "A/B updates with rollback and streamed binary diffs.", status: "planned" },
 ];
 const badgeClass = (s: string) => (s === "available" ? "avail" : s === "in development" ? "dev" : "");
 
@@ -35,42 +43,49 @@ const tunnelUses = [
   {
     title: "The machine's CAN bus on your laptop",
     desc: "Bridge its bus to a virtual interface; SavvyCAN or the vendor's tool sees it live.",
+    lang: "sh",
     code: "cannelloni -I vcan0 -R <machine> -r 20000 -l 20000\ncandump vcan0",
     href: "/29-tunnel-howtos/#can-the-robots-bus-on-your-laptop-cannelloni",
   },
   {
     title: "Your debugger, on its process",
     desc: "VS Code Remote-SSH for the editor, gdbserver for a process that's already running.",
-    code: "(gdb) target remote <machine>:2345",
+    lang: "sh",
+    code: "gdb ./my_node -ex \"target remote <machine>:2345\"",
     href: "/29-tunnel-howtos/#gdbserver-debug-a-process-on-the-robot",
   },
   {
     title: "ROS 2 from your desk",
     desc: "DDS discovery crosses the link, so the CLI and rviz2 just see the robot's graph.",
+    lang: "sh",
     code: "ros2 topic list\nrviz2",
     href: "/29-tunnel-howtos/#ros-2-over-the-link",
   },
   {
     title: "Its containers, from your CLI",
     desc: "Your docker client, the machine's engine — logs, exec, restarts.",
+    lang: "sh",
     code: "DOCKER_HOST=ssh://user@<machine> \\\n  docker logs -f my-node",
     href: "/29-tunnel-howtos/#docker-on-the-robot-from-your-cli",
   },
 ];
 
 const trust = [
-  { icon: "🔐", title: "Encrypted end to end", desc: "Media and data are encrypted between the machine and the viewer. When a relay is needed, it only ever forwards ciphertext." },
-  { icon: "🎫", title: "Your backend decides", desc: "Access is a short-lived grant your backend signs, scoped per capability. The machine re-checks it against its own config, so a grant can't switch on what you didn't." },
-  { icon: "⏳", title: "No static secrets", desc: "Relay credentials are minted per session and expire with the grant. Nothing long-lived is compiled into a frontend." },
-  { icon: "🧱", title: "Nothing to open", desc: "The machine dials out. It never asks the customer's router to open a port, and their IT department has no inbound rule to approve." },
-  { icon: "🪪", title: "Least privilege on the machine", desc: "The agent runs as its own unprivileged user. Desktop access is narrowed to the screen — not the microphone." },
-  { icon: "✍️", title: "Signed from repo to robot", desc: "A signed apt repository, and container images signed with an SBOM." },
+  { icon: "lock" as const, title: "Encrypted end to end", desc: "Media and data are encrypted between the machine and the viewer. When a relay is needed, it only ever forwards ciphertext." },
+  { icon: "ticket" as const, title: "Your backend decides", desc: "Access is a short-lived grant your backend signs, scoped per capability. The machine re-checks it against its own config, so a grant can't switch on what you didn't." },
+  { icon: "clock" as const, title: "No static secrets", desc: "Relay credentials are minted per session and expire with the grant. Nothing long-lived is compiled into a frontend." },
+  { icon: "shield" as const, title: "Nothing to open", desc: "The machine dials out. It never asks the customer's router to open a port, and their IT department has no inbound rule to approve." },
+  { icon: "user" as const, title: "Least privilege on the machine", desc: "The agent runs as its own unprivileged user. Desktop access is narrowed to the screen — not the microphone." },
+  { icon: "seal" as const, title: "Signed from repo to robot", desc: "A signed apt repository, and container images signed with an SBOM." },
 ];
 const efficiency = [
-  { icon: "🎞️", title: "One encode, any number of viewers", desc: "A second viewer costs fan-out, not another encoder." },
-  { icon: "🧮", title: "The integrated GPU first", desc: "Video encodes on the iGPU, so the discrete GPU stays with perception — the job the machine exists to do." },
-  { icon: "🚦", title: "Bulk never starves video", desc: "A transfer saturating the link leaves the camera beside it at full frame rate." },
+  { icon: "fanout" as const, title: "One encode, any number of viewers", desc: "A second viewer costs fan-out, not another encoder." },
+  { icon: "chip" as const, title: "The integrated GPU first", desc: "Video encodes on the iGPU, so the discrete GPU stays with perception — the job the machine exists to do." },
+  { icon: "gauge" as const, title: "Bulk never starves video", desc: "A transfer saturating the link leaves the camera beside it at full frame rate." },
 ];
+const connectSession = `$ fjarr-connect login                 # your company's sign-in, in the browser
+$ fjarr-connect robot-024
+robot-024  100.70.118.224  mtu 1184  up in 0.8 s`;
 // Section 3's snippets: real exported names only (docs/19), claims as docs/09#a-session-grants.
 const backendSnippet = `// any JWT library, any language
 const grant = jwt.sign({
@@ -97,95 +112,131 @@ const client = createFjarrClient({
     session={client.sessions.open("robot-024")} />
 </FjarrProvider>`;
 ---
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Fjarr — remote access for the machines you ship</title>
     <meta name="description" content="Live video, remote desktop, a terminal and a direct network link to machines in the field — peer-to-peer, end-to-end encrypted, through firewalls and carrier NAT. Open-core libraries for your machine, your backend and your dashboard." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <ThemeInit />
     <style>
-      :root { color-scheme: dark; --bg: #0d1117; --panel: #161b22; --line: #30363d; --line-soft: #21262d; --text: #e6edf3; --muted: #9da7b3; --faint: #7d8590; --accent: #58a6ff; --accent-strong: #2f81f7; --ok: #3fb950; }
+      /* Colours are theme.css tokens only (docs/19#visual-design). */
+      :root {
+        --text: var(--sl-color-gray-1); --muted: var(--sl-color-gray-2); --faint: var(--sl-color-gray-3);
+        --line: var(--sl-color-hairline-light); --line-soft: var(--sl-color-hairline);
+        --panel: var(--fj-surface); --accent: var(--sl-color-text-accent); --ok: var(--fj-ok);
+      }
       * { box-sizing: border-box; }
       html, body { overflow-x: hidden; }
-      body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
-      .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
-      header.hero { padding-top: 96px; padding-bottom: 56px; text-align: center; }
-      .hero h1 { font-size: clamp(2.1rem, 6vw, 3.5rem); line-height: 1.15; margin: 0 0 20px; }
-      .hero .fjarr { color: var(--accent); }
-      .hero p.fit { font-size: 1.3rem; color: var(--text); max-width: 42rem; margin: 0 auto 16px; }
-      .hero p.tag { font-size: 1.1rem; color: var(--muted); max-width: 44rem; margin: 0 auto 8px; }
-      .hero p.sub { color: var(--faint); max-width: 44rem; margin: 0 auto 32px; }
-      .cta { display: inline-block; padding: 12px 28px; border-radius: 8px; font-weight: 600; text-decoration: none; margin: 0 6px 8px; }
-      .cta.primary { background: var(--accent-strong); color: #fff; }
-      .cta.ghost { border: 1px solid var(--line); color: var(--text); }
-      .release { margin: 40px auto 0; max-width: 40rem; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; text-align: left; }
-      .release .meta { color: var(--muted); font-size: 0.95rem; margin: 0 0 8px; }
+      body { margin: 0; font-family: var(--sl-font-system, system-ui, sans-serif); background: var(--sl-color-bg); color: var(--muted); line-height: 1.6; -webkit-font-smoothing: antialiased; }
+      .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+      a { color: var(--accent); text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); text-underline-offset: 0.2em; }
+      a:hover { text-decoration-color: currentColor; }
+      h1, h2, h3 { color: var(--sl-color-white); }
+
+      /* Hero: glows, the network field, then the words */
+      .hero { position: relative; overflow: hidden; isolation: isolate; }
+      .hero::before, .hero::after { content: ""; position: absolute; z-index: -2; pointer-events: none; border-radius: 50%; }
+      .hero::before { width: 1100px; height: 900px; left: -380px; top: -520px; background: radial-gradient(closest-side, var(--fj-glow-a), transparent); }
+      .hero::after { width: 1000px; height: 800px; right: -420px; top: -160px; background: radial-gradient(closest-side, var(--fj-glow-b), transparent); }
+      .hero :global(.network-field) { z-index: -1; }
+      .hero-inner { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 56px; align-items: center; padding-top: 112px; padding-bottom: 96px; }
+      .hero h1 { font-size: clamp(2.2rem, 4.4vw, 3.5rem); line-height: 1.08; letter-spacing: -0.03em; font-weight: 800; margin: 0 0 24px; text-wrap: balance; }
+      .hero h1 .grad { background: linear-gradient(95deg, var(--sl-color-white) 0%, var(--fj-blue-light) 55%, var(--fj-blue) 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+      .hero p.fit { font-size: 1.25rem; line-height: 1.55; color: var(--text); margin: 0 0 22px; max-width: 36rem; }
+      .chips { list-style: none; padding: 0; margin: 0 0 32px; display: flex; flex-wrap: wrap; gap: 8px 22px; }
+      .chips li { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-weight: 500; font-size: 0.97rem; }
+      .chips li :global(svg) { color: var(--accent); flex: none; }
+      .friction { margin: 14px 0 0; color: var(--faint); font-size: 0.9rem; }
+      .ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+      .cta { display: inline-flex; align-items: center; gap: 8px; padding: 11px 22px; border-radius: 10px; font-weight: 600; text-decoration: none; transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease; }
+      .cta.primary { background: var(--fj-blue); color: #fff; box-shadow: 0 0 0 1px color-mix(in srgb, var(--fj-blue) 60%, white 0%), 0 8px 28px -8px color-mix(in srgb, var(--fj-blue) 70%, transparent); }
+      .cta.primary:hover { background: color-mix(in srgb, var(--fj-blue) 88%, white); }
+      .cta.ghost { border: 1px solid var(--line); color: var(--text); background: color-mix(in srgb, var(--sl-color-bg) 60%, transparent); }
+      .cta.ghost:hover { border-color: var(--fj-blue); }
+      .release { min-width: 0; background: color-mix(in srgb, var(--sl-color-bg) 72%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; box-shadow: 0 24px 60px -30px rgba(0,0,0,0.6); }
+      .release .label .badge { text-transform: none; letter-spacing: 0; }
+      .release .label { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint); font-weight: 600; }
+      .release .meta { color: var(--muted); font-size: 0.95rem; margin: 0 0 4px; }
       .release .meta b { color: var(--ok); }
-      section.wrap { padding-top: 48px; padding-bottom: 48px; }
-      h2 { font-size: 1.7rem; line-height: 1.25; margin: 0 0 12px; }
-      h2 small { font-weight: 400; color: var(--faint); }
-      .lede { color: var(--muted); max-width: 50rem; margin: 0 0 24px; }
-      .note { color: var(--faint); margin: 20px 0 0; }
-      .grid.two { grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); }
-      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px; }
-      .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; min-width: 0; }
-      .card h3 { margin: 0 0 6px; font-size: 1.05rem; }
-      .card p { margin: 0; color: var(--muted); }
-      .badge { float: right; margin-left: 8px; font-size: 0.7rem; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
-      .badge.avail { border-color: var(--ok); color: var(--ok); }
-      .badge.dev { border-color: var(--accent-strong); color: var(--accent); }
-      code { background: var(--line-soft); padding: 1px 6px; border-radius: 4px; font-size: 0.9em; overflow-wrap: anywhere; }
-      pre { background: #010409; border: 1px solid var(--line-soft); border-radius: 8px; padding: 12px 14px; margin: 12px 0 0; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; }
-      pre code { background: none; padding: 0; overflow-wrap: normal; }
-      pre .c { color: var(--faint); }
-      a { color: var(--accent); }
+      .release .after { color: var(--muted); margin: 12px 0 0; font-size: 0.875rem; }
+
+      /* Sections */
+      section.wrap { padding-top: 56px; padding-bottom: 56px; }
+      h2 { font-size: clamp(1.6rem, 3vw, 2.1rem); line-height: 1.2; letter-spacing: -0.02em; margin: 0 0 14px; }
+      h2 small { display: block; font-size: 1.05rem; font-weight: 500; letter-spacing: 0; color: var(--faint); margin-top: 6px; }
+      .lede { color: var(--muted); max-width: 52rem; margin: 0 0 28px; font-size: 1.05rem; }
+      .note { color: var(--faint); margin: 22px 0 0; font-size: 0.95rem; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 16px; }
+      .grid.two { grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr)); }
+      .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; min-width: 0; }
+      .card h3 { margin: 0 0 6px; font-size: 1.05rem; line-height: 1.35; }
+      .card p { margin: 0; color: var(--muted); font-size: 0.97rem; }
+      .card .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 14px; }
+      .ic { display: inline-grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; color: var(--accent); background: color-mix(in srgb, var(--fj-blue) 13%, transparent); border: 1px solid color-mix(in srgb, var(--fj-blue) 28%, transparent); flex: none; }
+      .card > .ic { margin-bottom: 14px; }
+      .badge { font-size: 0.72rem; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--faint); white-space: nowrap; font-weight: 500; }
+      .badge.avail { border-color: color-mix(in srgb, var(--ok) 55%, transparent); color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, transparent); }
+      .badge.dev { border-color: color-mix(in srgb, var(--fj-blue) 60%, transparent); color: var(--accent); background: color-mix(in srgb, var(--fj-blue) 10%, transparent); }
+      code { background: var(--sl-color-bg-inline-code); border: 1px solid var(--line-soft); padding: 1px 6px; border-radius: 5px; font-family: var(--sl-font-system-mono, ui-monospace, monospace); font-size: 0.86em; color: var(--text); overflow-wrap: anywhere; }
+      pre { background: var(--fj-code-bg); border: 1px solid var(--line-soft); border-radius: 10px; padding: 14px 16px; margin: 12px 0 0; overflow-x: auto; font-size: 0.85rem; line-height: 1.55; }
+      pre code { background: none; border: 0; padding: 0; color: var(--text); overflow-wrap: normal; }
+      .card :global(.expressive-code), .release :global(.expressive-code) { margin-top: 12px; }
 
       /* The problem */
-      ul.patchwork { list-style: none; padding: 0; margin: 0 0 20px; display: grid; gap: 10px; }
-      ul.patchwork li { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid #d29922; border-radius: 8px; padding: 12px 16px; color: var(--muted); }
+      ul.patchwork { list-style: none; padding: 0; margin: 0 0 22px; display: grid; gap: 10px; }
+      ul.patchwork li { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--fj-warn); border-radius: 10px; padding: 12px 16px; color: var(--muted); }
       ul.patchwork li b { color: var(--text); }
 
       /* Tier diagram: backend on top, machine ⇄ dashboard below with the direct path between them */
-      .tiers-diagram { display: grid; grid-template-columns: 1fr minmax(120px, 0.8fr) 1fr; grid-template-rows: auto auto; gap: 0 12px; align-items: center; margin: 8px 0 24px; }
-      .tiers-diagram .node { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
-      .tiers-diagram .node h3 { margin: 0 0 4px; font-size: 1.05rem; }
+      .tiers-diagram { display: grid; grid-template-columns: 1fr minmax(120px, 0.8fr) 1fr; grid-template-rows: auto auto; gap: 0 12px; align-items: center; margin: 8px 0 28px; }
+      .tiers-diagram .node { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; min-width: 0; }
+      .tiers-diagram .node h3 { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; font-size: 1.05rem; }
+      .tiers-diagram .node h3 .ic { width: 32px; height: 32px; border-radius: 8px; }
       .tiers-diagram .node p { margin: 0; color: var(--muted); font-size: 0.95rem; }
-      .tiers-diagram .backend { grid-column: 1 / 4; justify-self: center; max-width: 30rem; text-align: center; }
+      .tiers-diagram .backend { grid-column: 1 / 4; justify-self: center; max-width: 32rem; text-align: center; }
+      .tiers-diagram .backend h3 { justify-content: center; }
       .tiers-diagram .control { grid-column: 1 / 4; display: flex; justify-content: space-between; padding: 0 16%; color: var(--faint); font-size: 0.8rem; }
       .tiers-diagram .control span { border-left: 2px dashed var(--line); padding: 10px 0 10px 8px; }
       .tiers-diagram .machine { grid-column: 1; grid-row: 3; }
       .tiers-diagram .dashboard { grid-column: 3; grid-row: 3; }
       .tiers-diagram .p2p { grid-column: 2; grid-row: 3; text-align: center; color: var(--ok); font-size: 0.85rem; line-height: 1.35; }
-      .tiers-diagram .p2p .arrow { display: block; height: 3px; background: var(--ok); border-radius: 2px; margin: 6px 0; position: relative; }
+      .tiers-diagram .p2p .arrow { display: block; height: 3px; background: var(--ok); border-radius: 2px; margin: 6px 0; position: relative; box-shadow: 0 0 12px color-mix(in srgb, var(--ok) 60%, transparent); }
       .tiers-diagram .p2p .arrow::before, .tiers-diagram .p2p .arrow::after { content: ""; position: absolute; top: -5px; border: 6.5px solid transparent; }
       .tiers-diagram .p2p .arrow::before { left: -6px; border-right-color: var(--ok); border-left: 0; }
       .tiers-diagram .p2p .arrow::after { right: -6px; border-left-color: var(--ok); border-right: 0; }
-      .snippets { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 16px; }
+      .snippets { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr)); gap: 16px; }
       .snippets .card h3 { font-size: 0.95rem; color: var(--muted); font-weight: 600; }
 
       /* Measured numbers */
-      .numbers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 12px; }
-      .numbers a { display: block; text-decoration: none; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; color: inherit; }
-      .numbers a:hover { border-color: var(--accent-strong); }
-      .numbers .v { display: block; font-size: 1.9rem; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.2; }
+      .numbers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 12px; }
+      .numbers a { display: block; text-decoration: none; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; color: inherit; transition: border-color 120ms ease, transform 120ms ease; }
+      .numbers a:hover { border-color: var(--fj-blue); }
+      .numbers .v { display: block; font-size: 2rem; font-weight: 800; letter-spacing: -0.02em; color: var(--sl-color-white); font-variant-numeric: tabular-nums; line-height: 1.2; }
       .numbers .l { display: block; color: var(--muted); font-size: 0.95rem; }
       .numbers .d { display: block; color: var(--faint); font-size: 0.8rem; margin-top: 4px; }
 
-      ul.features { columns: 2 16rem; padding-left: 1.2rem; color: var(--muted); margin: 0 0 28px; }
+      ul.features { columns: 2 16rem; padding-left: 1.2rem; color: var(--muted); margin: 0 0 32px; }
       ul.features li { break-inside: avoid; margin-bottom: 6px; }
-      h3.sub { font-size: 1.15rem; margin: 8px 0 12px; }
+      ul.features li::marker { color: var(--fj-blue); }
+      h3.sub { font-size: 1.2rem; margin: 8px 0 14px; }
 
-      table.tiers { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-      table.tiers td { padding: 12px 14px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+      table.tiers { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+      table.tiers td { padding: 14px 18px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
       table.tiers tr:last-child td { border-bottom: 0; }
-      table.tiers td:first-child { white-space: nowrap; }
+      table.tiers td:first-child { white-space: nowrap; color: var(--text); }
 
-      .closing { text-align: center; padding: 56px 0 24px; }
-      footer { padding: 24px 0 64px; color: var(--faint); text-align: center; }
+      .closing { text-align: center; padding: 72px 0 32px; }
+      .closing .ctas { justify-content: center; }
+      footer { border-top: 1px solid var(--line-soft); margin-top: 40px; padding: 28px 0 56px; color: var(--faint); text-align: center; font-size: 0.92rem; }
 
+      @media (max-width: 900px) {
+        .hero-inner { grid-template-columns: minmax(0, 1fr); gap: 36px; padding-top: 72px; padding-bottom: 64px; }
+      }
       @media (max-width: 720px) {
-        .wrap { padding: 0 16px; }
-        header.hero { padding-top: 64px; padding-bottom: 40px; }
+        .wrap { padding-left: 16px; padding-right: 16px; }
+        section.wrap { padding-top: 40px; padding-bottom: 40px; }
         .tiers-diagram { grid-template-columns: 1fr; }
         .tiers-diagram .backend, .tiers-diagram .control, .tiers-diagram .machine, .tiers-diagram .dashboard, .tiers-diagram .p2p { grid-column: 1; grid-row: auto; }
         .tiers-diagram .control { padding: 0 24px; }
@@ -195,44 +246,54 @@ const client = createFjarrClient({
         .tiers-diagram .p2p .arrow::after { left: -5px; right: auto; top: auto; bottom: -6px; border: 6.5px solid transparent; border-top-color: var(--ok); border-bottom: 0; }
         table.tiers td { display: block; border-bottom: 0; }
         table.tiers tr { display: block; border-bottom: 1px solid var(--line-soft); }
+        table.tiers tr:last-child { border-bottom: 0; }
         table.tiers td:first-child { padding-bottom: 0; }
       }
     </style>
   </head>
   <body>
+    <SiteHeader />
+
     <!-- 1. Hero — who it's for, by traits (docs/03#who-its-for) -->
-    <header class="hero wrap">
-      <h1>Remote access for<br />the machines you ship.</h1>
-      <p class="fit">
-        Linux on board. Cameras or a screen. Behind someone else's network, far
-        from the people who need to see it, drive it and fix it. If that's your
-        product, <span class="fjarr">Fjarr</span> is how you reach it.
-      </p>
-      <p class="tag">
-        Live video, the desktop, a terminal and a direct network link —
-        peer-to-peer, encrypted end to end, through firewalls and carrier NAT
-        with no ports to open. Built into <em>your</em> machine, <em>your</em> backend and <em>your</em> dashboard.
-      </p>
-      <p class="sub">
-        Robots are where we started; vehicles, farm machinery and field gateways
-        have the same shape. Open-core (AGPL-3.0) libraries you self-host, plus a
-        managed cloud when you'd rather not. <i>Fjärr</i> is Swedish for "remote".
-      </p>
-      <a class="cta primary" href="/readme/">Read the docs</a>
-      <a class="cta ghost" href="https://github.com/fjarrio/fjarr">GitHub</a>
-      <div class="release">
-        <p class="meta"><b>v{release} released</b> · Ubuntu 26.04 · amd64 and arm64 · apt or Docker</p>
-        <pre><code>wget -qO- https://get.fjarr.io | sudo sh</code></pre>
-        <p class="meta" style="margin:8px 0 0;font-size:0.85rem;">
-          Then <code>sudo fjarr-agent --check</code>. <a href="/26-robot-install-and-drivers/">Install guide</a>
-        </p>
+    <header class="hero">
+      <NetworkField />
+      <div class="hero-inner wrap">
+        <div>
+          <h1>Remote access for<br /><span class="grad">the machines you ship.</span></h1>
+          <p class="fit">
+            Live video, the desktop, a terminal and a network link to Linux machines
+            in the field: peer-to-peer, end-to-end encrypted, nothing to open on their network.
+          </p>
+          <ul class="chips">
+            <li><FjIcon name="check" size="1.05rem" />Built into your product</li>
+            <li><FjIcon name="check" size="1.05rem" />Works behind carrier NAT</li>
+            <li><FjIcon name="check" size="1.05rem" />Open source, self-hostable</li>
+          </ul>
+          <div class="ctas">
+            <a class="cta primary" href="/readme/">Read the docs</a>
+            <a class="cta ghost" href="https://github.com/fjarrio/fjarr">GitHub</a>
+          </div>
+          <p class="friction">Open source (AGPL-3.0). Self-host free, forever.</p>
+        </div>
+        <div class="release">
+          <p class="label"><span>Install</span><span class="badge avail">v{release}</span></p>
+          <p class="meta"><b>v{release} released</b> · Ubuntu 26.04 · amd64 and arm64 · apt or Docker</p>
+          <Code code="wget -qO- https://get.fjarr.io | sudo sh" lang="sh" frame="none" />
+          <p class="after">
+            Then <code>sudo fjarr-agent --check</code>. <a href="/26-robot-install-and-drivers/">Install guide</a>
+          </p>
+        </div>
       </div>
     </header>
 
     <!-- 2. The problem — the visitor's situation (docs/00#the-problem, docs/03#who-its-for) -->
     <section class="wrap">
       <h2>What you probably have today</h2>
-      <p class="lede">Rarely nothing. Usually a patchwork that kind of works:</p>
+      <p class="lede">
+        Linux on board. Cameras or a screen. Behind someone else's network, far
+        from the people who need to see it, drive it and fix it. If that's your
+        product, it rarely has no remote access at all — usually a patchwork that kind of works:
+      </p>
       <ul class="patchwork">
         <li><b>A VPN or a jump host</b> every engineer has to be set up on — and a second identity system nobody wants to explain to a customer's IT department.</li>
         <li><b>A remote-desktop tool</b> the end customer has to install and approve, that knows nothing about your machine.</li>
@@ -245,7 +306,10 @@ const client = createFjarrClient({
         secure, and a different login every time. Fjarr replaces the patchwork with
         one connection per machine that carries all of it.
       </p>
-      <p class="note">We've built this stack three times before, inside robot companies — <a href="/11-prior-art/">what we kept and what we didn't</a>.</p>
+      <p class="note">
+        Robots are where we started; vehicles, farm machinery and field gateways have the same shape.
+        We've built this stack three times before, inside robot companies — <a href="/11-prior-art/">what we kept and what we didn't</a>.
+      </p>
     </section>
 
     <!-- 3. Three tiers (docs/02, docs/09) -->
@@ -254,12 +318,12 @@ const client = createFjarrClient({
       <p class="lede">Fjarr embeds into what you already run. Your backend stays in charge of who may reach what; video and data go straight between the machine and the person looking at it.</p>
       <div class="tiers-diagram" role="img" aria-label="Your backend, with the fjarr-server sidecar, issues grants and handles signaling for the machine and the dashboard. Media and data flow directly between the machine and the dashboard, peer-to-peer.">
         <div class="node backend">
-          <h3>🗄️ Next to your backend</h3>
+          <h3><span class="ic"><FjIcon name="server" size="1.1rem" /></span>Next to your backend</h3>
           <p>The <code>fjarr-server</code> sidecar, beside a backend in any language. Your backend signs grants and receives webhooks. It never touches the media.</p>
         </div>
         <div class="control"><span>signaling</span><span>grants · signaling</span></div>
         <div class="node machine">
-          <h3>🤖 On the machine</h3>
+          <h3><span class="ic"><FjIcon name="robot" size="1.1rem" /></span>On the machine</h3>
           <p>Embed <code>libfjarr</code> (C++/GStreamer) in your software, or run the <code>fjarr-agent</code> daemon beside it. Hardware encode.</p>
         </div>
         <div class="p2p">
@@ -268,18 +332,18 @@ const client = createFjarrClient({
           encrypted · relay only<br />when nothing else works
         </div>
         <div class="node dashboard">
-          <h3>📊 In your dashboard</h3>
+          <h3><span class="ic"><FjIcon name="dashboard" size="1.1rem" /></span>In your dashboard</h3>
           <p><code>@fjarr/core</code> + <code>@fjarr/react</code> in the dashboard you already have — standard WebRTC, any modern browser. Headless-first: your design system wins.</p>
         </div>
       </div>
       <div class="snippets">
         <div class="card">
           <h3>Your backend: decide who may open what</h3>
-          <pre><code>{backendSnippet}</code></pre>
+          <Code code={backendSnippet} lang="js" />
         </div>
         <div class="card">
           <h3>Your dashboard: mount it</h3>
-          <pre><code>{dashboardSnippet}</code></pre>
+          <Code code={dashboardSnippet} lang="tsx" />
         </div>
       </div>
       <p class="note">The contract between the pieces: <a href="/09-interfaces/">interfaces</a> · <a href="/02-architecture/">architecture</a></p>
@@ -287,12 +351,15 @@ const client = createFjarrClient({
 
     <!-- 4. Capabilities (docs/06 + docs/17; badges per docs/19#badge-states) -->
     <section class="wrap">
-      <h2>Capabilities <small>— everything is a plugin, including yours</small></h2>
+      <h2>Capabilities <small>Everything is a plugin, including yours</small></h2>
       <div class="grid">
         {capabilities.map((c) => (
           <div class="card">
-            <span class={`badge ${badgeClass(c.status)}`}>{c.status}</span>
-            <h3>{c.icon} {c.name}</h3>
+            <div class="top">
+              <span class="ic"><FjIcon name={c.icon} /></span>
+              <span class={`badge ${badgeClass(c.status)}`}>{c.status}</span>
+            </div>
+            <h3>{c.name}</h3>
             <p>{c.desc}</p>
           </div>
         ))}
@@ -317,10 +384,10 @@ const client = createFjarrClient({
 
     <!-- 6. The desktop, and control that's safe for a moving machine (docs/22, docs/10, docs/15) -->
     <section class="wrap">
-      <h2>The machine's desktop <small>— and control that's safe for one that moves</small></h2>
+      <h2>The machine's desktop <small>And control that's safe for one that moves</small></h2>
       <p class="lede">
         The desktop your machine already has, in your dashboard — no tool for the
-        end customer to install. <span class="badge dev" style="float:none;">in development</span>
+        end customer to install. <span class="badge dev">in development</span>
       </p>
       <ul class="features">
         <li>Unattended: back after a reboot with nobody at the machine</li>
@@ -332,41 +399,39 @@ const client = createFjarrClient({
       </ul>
       <h3 class="sub">Who's in control is explicit</h3>
       <div class="grid two">
-        <div class="card"><h3>🛑 Taking control stops the robot first</h3><p>Driving is one operator at a time, and never handed over on idle. Taking it over releases every input before anyone new can move it.</p></div>
-        <div class="card"><h3>🖱️ One pointer, handed over cleanly</h3><p>Desktop control frees five seconds after the holder's last input, or anyone can take it at once — and the holder is told.</p></div>
-        <div class="card"><h3>💓 Gone means released</h3><p>If an operator's connection dies, their held keys and buttons are released and their control lapses. A machine is never left stuck.</p></div>
-        <div class="card"><h3>👁️ Watch without touching</h3><p>A view-only grant can never take control or read the clipboard — for the customer, the auditor, the second pair of eyes.</p></div>
+        <div class="card"><span class="ic"><FjIcon name="stop" /></span><h3>Taking control stops the robot first</h3><p>Driving is one operator at a time, and never handed over on idle. Taking it over releases every input before anyone new can move it.</p></div>
+        <div class="card"><span class="ic"><FjIcon name="pointer" /></span><h3>One pointer, handed over cleanly</h3><p>Desktop control frees five seconds after the holder's last input, or anyone can take it at once — and the holder is told.</p></div>
+        <div class="card"><span class="ic"><FjIcon name="heartbeat" /></span><h3>Gone means released</h3><p>If an operator's connection dies, their held keys and buttons are released and their control lapses. A machine is never left stuck.</p></div>
+        <div class="card"><span class="ic"><FjIcon name="eye" /></span><h3>Watch without touching</h3><p>A view-only grant can never take control or read the clipboard — for the customer, the auditor, the second pair of eyes.</p></div>
       </div>
       <p class="note">Each of these ships with a regression test (<a href="/15-testing-strategy/#safety-behaviors-safety-behaviors">safety behaviors</a>). How control works: <a href="/10-security/">security</a> · <a href="/22-remote-desktop-client/">remote desktop</a>.</p>
     </section>
 
     <!-- 7. A link, not a VPN (docs/03#tunnel-positioning, docs/27, docs/29) -->
     <section class="wrap">
-      <h2>A link to one machine <small>— not a VPN</small></h2>
+      <h2>A link to one machine <small>Not a VPN</small></h2>
       <p class="lede">
         Every team keeps a list of things it occasionally needs to do on a machine
         that nobody will ever write a protocol for. The network link is the escape
         hatch: an authorized operator gets a routable address for <b>one</b> machine, inside the session that already carries its video — and the tools
         they already use just work.
       </p>
-      <pre><code>$ fjarr-connect login                 <span class="c"># your company's sign-in, in the browser</span>
-$ fjarr-connect robot-024
-robot-024  100.70.118.224  mtu 1184  up in 0.8 s</code></pre>
+      <Code lang="console" code={connectSession} />
       <div class="grid two" style="margin-top:16px;">
         {tunnelUses.map((u) => (
           <div class="card">
             <h3>{u.title}</h3>
             <p>{u.desc}</p>
-            <pre><code>{u.code}</code></pre>
-            <p style="margin-top:8px;font-size:0.85rem;"><a href={u.href}>How-to →</a></p>
+            <Code code={u.code} lang={u.lang} frame="none" />
+            <p style="margin-top:10px;font-size:0.875rem;"><a href={u.href}>How-to →</a></p>
           </div>
         ))}
       </div>
       <p class="note">And ssh, scp, RDP, your file manager, Wireshark, a serial port, Modbus — <a href="/28-tunnel-ideas/">more ideas</a>.</p>
       <div class="grid" style="margin-top:24px;">
-        <div class="card"><h3>🔒 Isolation you can't misconfigure</h3><p>Connect to two machines at once and they still can't see each other. Every link ends at you and nothing is forwarded between them — there's no path to leave open by mistake.</p></div>
-        <div class="card"><h3>🎫 One set of permissions</h3><p>You already decide who may reach machine 42. The link is that same decision, in the same grant, in the same audit log. No second identity system to run beside yours.</p></div>
-        <div class="card"><h3>⏱️ Access that expires</h3><p>The link exists while a session does, then it's gone. Nothing becomes permanently reachable, and there's no extra daemon on the machine to install, update or license.</p></div>
+        <div class="card"><span class="ic"><FjIcon name="hub" /></span><h3>Isolation you can't misconfigure</h3><p>Connect to two machines at once and they still can't see each other. Every link ends at you and nothing is forwarded between them — there's no path to leave open by mistake.</p></div>
+        <div class="card"><span class="ic"><FjIcon name="ticket" /></span><h3>One set of permissions</h3><p>You already decide who may reach machine 42. The link is that same decision, in the same grant, in the same audit log. No second identity system to run beside yours.</p></div>
+        <div class="card"><span class="ic"><FjIcon name="clock" /></span><h3>Access that expires</h3><p>The link exists while a session does, then it's gone. Nothing becomes permanently reachable, and there's no extra daemon on the machine to install, update or license.</p></div>
       </div>
       <p class="note">
         It deliberately isn't a mesh: no shared network, no machine-to-machine
@@ -379,13 +444,13 @@ robot-024  100.70.118.224  mtu 1184  up in 0.8 s</code></pre>
       <h2>Safe to put on a customer's network</h2>
       <div class="grid">
         {trust.map((t) => (
-          <div class="card"><h3>{t.icon} {t.title}</h3><p>{t.desc}</p></div>
+          <div class="card"><span class="ic"><FjIcon name={t.icon} /></span><h3>{t.title}</h3><p>{t.desc}</p></div>
         ))}
       </div>
-      <h3 class="sub" style="margin-top:32px;">Light on the machine</h3>
+      <h3 class="sub" style="margin-top:36px;">Light on the machine</h3>
       <div class="grid">
         {efficiency.map((t) => (
-          <div class="card"><h3>{t.icon} {t.title}</h3><p>{t.desc}</p></div>
+          <div class="card"><span class="ic"><FjIcon name={t.icon} /></span><h3>{t.title}</h3><p>{t.desc}</p></div>
         ))}
       </div>
       <p class="note">The whole threat model is public: <a href="/10-security/">security</a>. Encoders and hardware: <a href="/04-supported-platforms/">supported platforms</a>.</p>
@@ -395,9 +460,9 @@ robot-024  100.70.118.224  mtu 1184  up in 0.8 s</code></pre>
     <section class="wrap">
       <h2>Built for the people who debug machines</h2>
       <div class="grid">
-        <div class="card"><h3>🔬 See the media plane</h3><p>The live pipeline graph, with rates and drops, on the machine and in your dashboard — readable by a support engineer or an AI coding agent. <a href="/24-pipeline-introspection/">Introspection</a></p></div>
-        <div class="card"><h3>✅ One command says if it's healthy</h3><p><code>sudo fjarr-agent --check</code> lists every configured source and backend, and gives the one-line fix for anything missing. <a href="/26-robot-install-and-drivers/">Install &amp; drivers</a></p></div>
-        <div class="card"><h3>🧩 Only the drivers it needs</h3><p><code>fjarr-agent drivers detect</code> matches the hardware actually attached against a catalog and names the package each needs. Install those, and nothing else lands on the machine.</p></div>
+        <div class="card"><span class="ic"><FjIcon name="graph" /></span><h3>See the media plane</h3><p>The live pipeline graph, with rates and drops, on the machine and in your dashboard — readable by a support engineer or an AI coding agent. <a href="/24-pipeline-introspection/">Introspection</a></p></div>
+        <div class="card"><span class="ic"><FjIcon name="check" /></span><h3>One command says if it's healthy</h3><p><code>sudo fjarr-agent --check</code> lists every configured source and backend, and gives the one-line fix for anything missing. <a href="/26-robot-install-and-drivers/">Install &amp; drivers</a></p></div>
+        <div class="card"><span class="ic"><FjIcon name="puzzle" /></span><h3>Only the drivers it needs</h3><p><code>fjarr-agent drivers detect</code> matches the hardware actually attached against a catalog and names the package each needs. Install those, and nothing else lands on the machine.</p></div>
       </div>
     </section>
 
@@ -415,14 +480,16 @@ robot-024  100.70.118.224  mtu 1184  up in 0.8 s</code></pre>
     <!-- 11. Docs CTA -->
     <section class="wrap closing">
       <h2>See if it fits</h2>
-      <p class="lede" style="margin:0 auto 24px;">The specs are the product's source of truth, and they're all public.</p>
-      <a class="cta primary" href="/readme/">Read the docs</a>
-      <a class="cta ghost" href="https://github.com/fjarrio/fjarr">GitHub</a>
-      <a class="cta ghost" href="/17-roadmap/">Roadmap</a>
+      <p class="lede" style="margin:0 auto 28px;">The specs are the product's source of truth, and they're all public.</p>
+      <div class="ctas">
+        <a class="cta primary" href="/readme/">Read the docs</a>
+        <a class="cta ghost" href="https://github.com/fjarrio/fjarr">GitHub</a>
+        <a class="cta ghost" href="/17-roadmap/">Roadmap</a>
+      </div>
     </section>
 
-    <footer class="wrap">
-      Fjarr · <a href="/readme/">documentation</a> · <a href="https://github.com/fjarrio/fjarr">GitHub</a> · built documentation-first in Sweden 🇸🇪
+    <footer>
+      <div class="wrap">Fjarr · <a href="/readme/">documentation</a> · <a href="https://github.com/fjarrio/fjarr">GitHub</a> · built documentation-first in Sweden 🇸🇪 · <i>Fjärr</i> is Swedish for "remote"</div>
     </footer>
   </body>
 </html>

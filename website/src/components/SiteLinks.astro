@@ -1,0 +1,30 @@
+---
+// The few top links both headers carry. `current` marks the section a docs page is in.
+// spec: docs/19-website-and-publishing.md#visual-design
+interface Props { path?: string }
+const path = Astro.props.path ?? "";
+const links = [
+  { label: "Docs", href: "/readme/", match: (p: string) => p !== "" && !p.startsWith("/17-roadmap") && !p.startsWith("/adr/") },
+  { label: "Roadmap", href: "/17-roadmap/", match: (p: string) => p.startsWith("/17-roadmap") },
+  { label: "Decisions", href: "/adr/readme/", match: (p: string) => p.startsWith("/adr/") },
+];
+---
+<nav class="site-links" aria-label="Site">
+  {links.map((l) => (
+    <a href={l.href} aria-current={l.match(path) ? "true" : undefined}>{l.label}</a>
+  ))}
+</nav>
+
+<style>
+  .site-links { display: flex; gap: 1.25rem; align-items: center; }
+  a {
+    color: var(--sl-color-gray-2);
+    font-weight: 600;
+    font-size: var(--sl-text-sm, 0.875rem);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 120ms ease;
+  }
+  a:hover { color: var(--sl-color-white); }
+  a[aria-current] { color: var(--sl-color-text-accent); }
+</style>

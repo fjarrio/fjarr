@@ -1,0 +1,14 @@
+---
+// Sets the theme before first paint, on the docs (as Starlight's ThemeProvider override) and on
+// the landing page. Dark unless the visitor chose light — whatever their OS prefers.
+// spec: docs/19-website-and-publishing.md#visual-design
+---
+<script is:inline>
+  (() => {
+    let stored = null;
+    try { stored = localStorage.getItem("starlight-theme"); } catch {}
+    document.documentElement.dataset.theme = stored === "light" ? "light" : "dark";
+    // Starlight's own ThemeSelect calls this; ours (ThemeToggle) doesn't need it.
+    window.StarlightThemeProvider = { updatePickers() {} };
+  })();
+</script>

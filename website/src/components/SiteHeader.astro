@@ -1,0 +1,67 @@
+---
+// The landing page's header: the same mark, links, GitHub and theme toggle as the docs header
+// (overrides/Header.astro). Search lives on the docs, where there is something to search.
+// spec: docs/19-website-and-publishing.md#visual-design
+import { Icon } from "@astrojs/starlight/components";
+import mark from "../assets/fjarr-mark.svg";
+import SiteLinks from "./SiteLinks.astro";
+import ThemeToggle from "./ThemeToggle.astro";
+---
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="/">
+      <img src={mark.src} width="32" height="32" alt="" />
+      <span>Fjarr</span>
+    </a>
+    <div class="right">
+      <SiteLinks />
+      <span class="sep" aria-hidden="true"></span>
+      <a class="gh" href="https://github.com/fjarrio/fjarr" aria-label="GitHub"><Icon name="github" size="1.2rem" /></a>
+      <ThemeToggle />
+    </div>
+  </div>
+</header>
+
+<style>
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    height: 3.5rem;
+    background: var(--sl-color-bg-nav);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--sl-color-hairline);
+  }
+  .inner {
+    max-width: 1200px;
+    height: 100%;
+    margin: 0 auto;
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--sl-color-white);
+    font-weight: 700;
+    font-size: 1.25rem;
+    letter-spacing: -0.01em;
+    text-decoration: none;
+  }
+  .right { display: flex; align-items: center; gap: 16px; }
+  .sep { height: 1.5rem; border-left: 1px solid var(--sl-color-hairline-light); }
+  .gh { display: grid; place-items: center; color: var(--sl-color-gray-2); }
+  .gh:hover { color: var(--sl-color-white); }
+  @media (max-width: 560px) {
+    .inner { padding: 0 16px; }
+    .right { gap: 12px; }
+    .sep { display: none; }
+    /* Room for Docs, GitHub and the toggle; the rest is one tap away in the docs. */
+    .right :global(.site-links a:not(:first-child)) { display: none; }
+  }
+</style>
