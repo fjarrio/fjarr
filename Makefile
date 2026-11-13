@@ -668,6 +668,10 @@ docs-links: ## Internal link check (offline: files + anchors)
 docs-mermaid: ## Parse every ```mermaid diagram in docs/, and check the built site still holds its source
 	pnpm --filter fjarr-website run check:mermaid
 
+.PHONY: docs-anchors
+docs-anchors: ## Every #fragment link in the built site lands on an id on its page (after website-build)
+	pnpm --filter fjarr-website run check:anchors
+
 # -------------------------------------------------------------- hygiene ---
 .PHONY: fmt
 # The C++ is hand-formatted and there is no `.clang-format`, so this target used to

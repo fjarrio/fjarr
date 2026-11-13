@@ -69,6 +69,10 @@ jobs:
       # was scraped back out of highlighted markup and lost every line break (docs/19#diagrams).
       - name: mermaid diagrams (parse + present in the built site)
         run: pnpm --filter fjarr-website run check:mermaid
+      # lychee checks anchors in the markdown; this checks them in what readers get. They disagreed
+      # once: the site ignored `{#id}` heading ids and 361 links missed while lychee passed.
+      - name: anchors (every #fragment link in the built site has its id)
+        run: pnpm --filter fjarr-website run check:anchors
 
   web:
     name: Web packages + demos

@@ -6,12 +6,13 @@ import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import { remarkMdLinks } from "./plugins/remark-md-links.mjs";
 import { remarkMermaid } from "./plugins/remark-mermaid.mjs";
+import { remarkHeadingIds } from "./plugins/remark-heading-ids.mjs";
 import { gstGrammar } from "./plugins/gst-grammar.mjs";
 
 export default defineConfig({
   site: "https://fjarr.io",
   markdown: {
-    remarkPlugins: [remarkMdLinks, remarkMermaid],
+    remarkPlugins: [remarkMdLinks, remarkMermaid, remarkHeadingIds],
   },
   integrations: [
     starlight({

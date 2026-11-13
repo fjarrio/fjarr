@@ -9,7 +9,8 @@
     "build": "node scripts/clear-content-cache.mjs && astro build",
     "preview": "astro preview",
     "typecheck": "astro check || true",
-    "check:mermaid": "node scripts/check-mermaid.mjs"
+    "check:mermaid": "node scripts/check-mermaid.mjs",
+    "check:anchors": "node scripts/check-anchors.mjs"
   },
   "dependencies": {
     "@astrojs/markdown-remark": "^7.3.1",

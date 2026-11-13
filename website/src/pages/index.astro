@@ -373,7 +373,7 @@ const client = createFjarrClient({
       <p class="lede">Every number below was measured on named hardware at a milestone gate, against a written budget. Click one for where and when.</p>
       <div class="numbers">
         {numbers.map((n) => (
-          <a href="/16-performance-budgets/#measured-results-measured">
+          <a href="/16-performance-budgets/#measured">
             <span class="v">{n.value}</span>
             <span class="l">{n.label}</span>
             <span class="d">{n.detail}</span>
@@ -404,7 +404,7 @@ const client = createFjarrClient({
         <div class="card"><span class="ic"><FjIcon name="heartbeat" /></span><h3>Gone means released</h3><p>If an operator's connection dies, their held keys and buttons are released and their control lapses. A machine is never left stuck.</p></div>
         <div class="card"><span class="ic"><FjIcon name="eye" /></span><h3>Watch without touching</h3><p>A view-only grant can never take control or read the clipboard — for the customer, the auditor, the second pair of eyes.</p></div>
       </div>
-      <p class="note">Each of these ships with a regression test (<a href="/15-testing-strategy/#safety-behaviors-safety-behaviors">safety behaviors</a>). How control works: <a href="/10-security/">security</a> · <a href="/22-remote-desktop-client/">remote desktop</a>.</p>
+      <p class="note">Each of these ships with a regression test (<a href="/15-testing-strategy/#safety-behaviors">safety behaviors</a>). How control works: <a href="/10-security/">security</a> · <a href="/22-remote-desktop-client/">remote desktop</a>.</p>
     </section>
 
     <!-- 7. A link, not a VPN (docs/03#tunnel-positioning, docs/27, docs/29) -->
