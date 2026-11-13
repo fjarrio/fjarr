@@ -2,10 +2,12 @@
 [Unit]
 Description=Machine state on /data (SSH host keys, update staging)
 RequiresMountsFor=/data
-# Early: sshd.socket starts before sockets.target, so this cannot wait for basic.target.
+# Early: sshd.socket starts before sockets.target, so this cannot wait for basic.target. And before
+# openssh's sshdgenkeys.service, which generates every host key sshd_config names and finds missing,
+# /data/ssh's first: run after it, this found /data/ssh full of new keys and skipped (D1, 2026-11-13).
 DefaultDependencies=no
 After=local-fs.target
-Before=sockets.target sshd.socket shutdown.target
+Before=sockets.target sshd.socket sshdgenkeys.service shutdown.target
 Conflicts=shutdown.target
 ConditionPathExists=!/data/ssh/ssh_host_ed25519_key
 

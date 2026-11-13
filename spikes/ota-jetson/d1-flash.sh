@@ -15,7 +15,14 @@
 # L3: the image carries the lab dead-man (no /etc/fjarr/NOT-FOR-THE-BOX), and the Fjarr image
 # passes one RCM round trip before the run ends. The box's console goes to .lab/logs/ throughout.
 #
-# Before: the stock box's fingerprint (.lab/d1/before.txt). After the flash, the Fjarr image must
+# D1_FROM=rescue starts from Fjarr's recovery rescue instead of the stock system (a second D1 after
+# a slot that did not boot): it answers on the box's MAC with its own host key, and enters RCM with
+# reboot-recovery; D1_FROM=fjarr from a Fjarr slot that answers with the image's host key. L4: the
+# package passed D0, or its firmware digest did (lib/lab.sh, lab_firmware_digest: a rebuild that
+# changed only the NVMe's side). D1_ERASE_NVME=1 passes --erase-nvme to initrd-flash, so /data is
+# blank again and the next boot is a first boot.
+#
+# Before: the box's fingerprint (.lab/d1/before.txt). After the flash, the Fjarr image must
 # answer on the box's MAC as root with the image's host key, its slot state, the dead-man, the
 # kernel's panic=10 and the rescue in recovery go to .lab/d1/after.txt; then reboot
 # forced-recovery, RCM, one power cycle, and the Fjarr image back with a new boot id.
@@ -30,18 +37,27 @@ pkg=${1:-$deploy/fjarr-spike-image-zedbox-mini-orin-nx16.rootfs.tegraflash.tar.g
 : "${D1_TMO:=3600}"                # the whole initrd-flash, at most
 : "${D1_FIRST_BOOT_S:=900}"        # from the flash's end to the Fjarr image on ssh
 : "${C1_L4T:=/srv/fjarr-flash/l4t-36.4.4/Linux_for_Tegra}"
+: "${D1_FROM:=stock}"              # stock | rescue: what runs on the box before the flash
+: "${D1_ERASE_NVME:=}"            # 1: initrd-flash --erase-nvme
+[[ $D1_FROM =~ ^(stock|rescue|fjarr)$ ]] || { echo "d1-flash.sh: D1_FROM is stock, rescue or fjarr" >&2; exit 2; }
 [[ ${D1_PERSON_AT_BOX:-} == 1 ]] || { echo "d1-flash.sh: the QSPI write needs a person at the box (Q4): D1_PERSON_AT_BOX=1" >&2; exit 2; }
 [[ -s $pkg ]] || { echo "d1-flash.sh: no flash package $pkg" >&2; exit 2; }
 sha=$(sha256sum <"$(readlink -f "$pkg")" | cut -d' ' -f1)
-grep -q "^$sha " "$LAB_DIR/d0/passed" 2>/dev/null ||
-  { echo "d1-flash.sh: package ${sha:0:16} has not passed D0 as built (L4): run d0-rcmboot.sh on it first" >&2; exit 2; }
+if grep -q "^$sha " "$LAB_DIR/d0/passed" 2>/dev/null; then
+  l4="passed D0: $(grep "^$sha " "$LAB_DIR/d0/passed" | tail -n 1 | cut -d' ' -f2,3)"
+elif fw=$(lab_firmware_digest "$(readlink -f "$pkg")") && grep -q "^$fw " "$LAB_DIR/d0/passed-firmware" 2>/dev/null; then
+  l4="its firmware (digest ${fw:0:16}) passed D0 with $(grep "^$fw " "$LAB_DIR/d0/passed-firmware" | tail -n 1 | cut -d' ' -f3); only the NVMe's side differs"
+else
+  echo "d1-flash.sh: neither package ${sha:0:16} nor its firmware has passed D0 (L4): run d0-rcmboot.sh on it first" >&2
+  exit 2
+fi
 
 mkdir -p "$LAB_DIR/d1"
 lab_init d1-flash $((600 + LAB_RCM_ROUND_WORST + D1_TMO + D1_FIRST_BOOT_S + LAB_RCM_ROUND_WORST + 600))
 lab_plug_check
 lab_desktop_guard
 lab_backup_check || lab_die "no verified B3 backup (L2)"
-lab_log "flash package ${pkg##*/}, sha256 ${sha:0:16}, passed D0: $(grep "^$sha " "$LAB_DIR/d0/passed" | tail -n 1 | cut -d' ' -f2,3)"
+lab_log "flash package ${pkg##*/}, sha256 ${sha:0:16}, $l4 (L4)"
 
 # The mini-PC: the network rescue, C1's backup (the way back), the native flasher's tools and the
 # rule that keeps the desktop off the box's disks.
@@ -75,13 +91,22 @@ lab_log "package checked: ${out##*$'\n'}; the dead-man in the slot, no NOT-FOR-T
 read -r rec_sha rec_size < <(lab_mpc_root -t 60 'printf "%s %s\n" "$(sha256sum <"$1/d1/fjarr-recovery-rescue.img" | cut -d" " -f1)" "$(stat -c %s "$1/d1/fjarr-recovery-rescue.img")"' "$D0_DIR")
 [[ $rec_sha =~ ^[0-9a-f]{64}$ && $rec_size =~ ^[0-9]+$ ]] || lab_die "could not read the rescue's checksum on the mini-PC"
 
+[[ $D1_FROM == rescue ]] && lab_use_fjarr_rescue
+[[ $D1_FROM == fjarr ]] && lab_use_fjarr_image
 lab_usb_poll
-[[ $LAB_USB_STATE == l4t ]] || lab_die "the mini-PC sees the box as '$LAB_USB_STATE', not the stock system's L4T"
+[[ $LAB_USB_STATE == "$LAB_RUNNING_USB" ]] || lab_die "the mini-PC sees the box as '$LAB_USB_STATE', not '$LAB_RUNNING_USB' ($D1_FROM)"
 lab_find_box || lab_die "the box does not answer on its MAC (L2)"
-lab_box_bootid || lab_die "no boot id: $LAB_SSH_ERR"
-lab_box_root -t 60 'cat /etc/nv_boot_control.conf; for k in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -l -f "$k"; done
+lab_box_bootid || lab_die "no boot id from the $D1_FROM system: $LAB_SSH_ERR"
+if [[ $D1_FROM == stock ]]; then
+  lab_box_root -t 60 'cat /etc/nv_boot_control.conf; for k in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -l -f "$k"; done
 echo "root PARTUUID $(findmnt -no PARTUUID /)"; nvbootctrl dump-slots-info 2>&1; nvbootctrl -t rootfs dump-slots-info 2>&1
 efibootmgr 2>&1 | grep -v "^BootCurrent"' >"$LAB_DIR/d1/before.txt" 2>&1 || lab_die "could not read the stock box's fingerprint"
+else # a rescue or a Fjarr slot: root, busybox or not, so only portable tools
+  lab_deadman_touch || true
+  lab_box -t 60 'for v in BootChainOsCurrent BootChainFwCurrent BootChainFwStatus RootfsStatusSlotA RootfsStatusSlotB RootfsRetryCountMax; do
+printf "%s: " $v; hexdump -v -e "1/1 \"%02x \"" /sys/firmware/efi/efivars/$v-781e084c-a330-417c-b678-38e696380cb9; echo; done
+efibootmgr 2>&1 | grep -v "^BootCurrent"; sgdisk -p /dev/nvme0n1' >"$LAB_DIR/d1/before.txt" 2>&1 || lab_die "could not read the rescue's view of the box"
+fi
 
 lab_rcm_enter
 lab_rcm_wait || lab_die "no RCM within $LAB_RCM_TMO s (the mini-PC sees '$LAB_USB_STATE')"
@@ -91,7 +116,7 @@ lab_lock_check
 lab_log "box in RCM; meta-tegra's initrd-flash writes the QSPI and the NVMe now (at most $D1_TMO s)"
 log=$LAB_DIR/logs/d1-flash-$(date -u +%Y%m%dT%H%M%SZ).log
 t0=$SECONDS rc=0
-lab_mpc_root -t "$D1_TMO" 'cd "$1/d1" && ./initrd-flash; rc=$?; cat "$(ls -t log.initrd-flash.* | head -n 1)"; exit $rc' "$D0_DIR" >"$log" 2>&1 || rc=$?
+lab_mpc_root -t "$D1_TMO" 'cd "$1/d1" && ./initrd-flash $2; rc=$?; cat "$(ls -t log.initrd-flash.* | head -n 1)"; exit $rc' "$D0_DIR" "$([[ $D1_ERASE_NVME == 1 ]] && echo --erase-nvme)" >"$log" 2>&1 || rc=$?
 dur=$((SECONDS - t0))
 lab_log "initrd-flash ended with exit $rc after $dur s; its log: ${log#"$LAB_HOME"/}"
 grep -E '^== Step|ERR|Successfully finished|Error' "$log" >&2 || true

@@ -128,6 +128,70 @@ backups and the logs stay in `.lab/` (gitignored); `.lab/c2/` holds the fingerpr
 | `c2-restore.sh` (20:56 to 21:10, run by Erik in his terminal) | network rescue serving, RCM by software, NVIDIA's restore 711 s: the GPT, `APP` from its tar, every raw partition, and the QSPI (erased, then 64 MiB in 86 s, in parallel with the NVMe); one power cycle, the stock system back with the same fingerprint (`nv_boot_control.conf`, the SSH host keys, the root PARTUUID, five `sl_` modules, both chains normal, the boot entries) |
 | `probe.sh` (21:11, `2026-10-20-probe-stock-after-c2.txt`) | stock R36.4.4, `BootCurrent` 0001, `BootNext` absent, entries as before, the slot variables and `BootChainFw*` at their stock values |
 
+## Phase D1 on 2026-11-13: passed (fourth run)
+
+**First run, 22:59** (`d1-flash.sh`, the package `ef17bd75…` that passed D0 natively, Erik at the
+box): every check before the write passed (L2, L3's dead-man in the slot, L4). meta-tegra's
+`initrd-flash`, run natively on the mini-PC, wrote both QSPI chains and the NVMe in 219 s
+(`Successfully finished`; the NVMe's part 27 s with bmaptool, the rest the device's own QSPI
+write). Fjarr's firmware then booted from the QSPI every time (MB1, MB2, UEFI v36.5.2,
+L4TLauncher), but the slot did not: its initrd waited for `/dev/fjarr/root`, which never appeared,
+and after the 90 s device timeout its emergency mode rebooted it. The console showed what NVIDIA's
+A/B does with a slot that never boots, which D2 asks about:
+
+| Boot | What the console showed |
+|---|---|
+| 1–3 | chain A, `L4TLauncher: Attempting Direct Boot`, each reset by the slot about 2 min in (a warm reset, no verify) |
+| 4 | UEFI's `Bootchain failure check`, then `Switching the bootchain. Resetting the system in 2 seconds.` and `Rebooting to new boot chain`: the firmware chain too, not only the root slot (`BootChainFwCurrent` and `BootChainOsCurrent` 1 afterwards) |
+| 5–7 | chain B, `Attempting Direct Boot`, the same reset |
+| 8 | `L4TLauncher: Attempting Recovery Boot`: Fjarr's rescue in `recovery` (A5) came up, took its address by DHCP, armed its watchdog (60 s) and dead-man, and answered ssh with its own host key, 16 min after the flash. `RootfsStatusSlotA` and `RootfsStatusSlotB` both `0xff`, `RootfsRetryCountMax` 3 |
+
+`d1-flash.sh` stopped there (L7: another host key on the box's MAC). The cause, found from the
+rescue: the spike distro's `DISTRO_FEATURES` had no `efi`, so systemd was built without its EFI
+support and never mounted efivarfs, in the initrd or the slot. `fjarr-slot-root`'s helper could
+not read `BootChainOsCurrent`, so its rule added no `/dev/fjarr/root`. With efivarfs mounted (from
+the rescue, the slot's root mounted read-only), the same helper and `udevadm test` added the link
+for `APP_b`. The distro now has `efi`.
+
+**Second run, 23:58** (from the rescue, `D1_FROM=rescue`; package `5eff9bdd…` with `efi`, its
+firmware byte-identical to `ef17bd75…`'s: only `boot.img` and `initrd-flash.img` differed, so L4
+held without a new D0): the box reached RCM from the rescue (`reboot-recovery`), the flash took
+219 s, and **the slot booted**: `/dev/fjarr/root` appeared, the root mounted, the dead-man armed,
+ssh answered 34 s after the flash. With a host key that was not the lab's, so `d1-flash.sh` stopped
+(L7). Two faults of the image, found on the box:
+
+- `fjarr-data-format` never formatted `/data`: on a GPT partition `blkid -p` always succeeds (it
+  reports the partition's own table entry), so the script read the blank partition as taken. With
+  no `/data`, `data.mount` failed and `fjarr-data-init` never ran.
+- openssh's `sshdgenkeys.service` generates every host key `sshd_config` names and finds missing.
+  `/data` was not mounted, so it wrote new keys into the root's `/data/ssh`, which sshd lists
+  first, ahead of the lab's in `/etc/ssh`.
+
+**Third run, 00:14** (from the Fjarr slot, `D1_FROM=fjarr`, `D1_ERASE_NVME=1`; package `1de6f82b…`,
+`fjarr-data-init` ordered before `sshdgenkeys`, the same firmware digest): the flash took 218 s and
+the slot booted again, with the same new key; the ordering alone could not help while `/data`
+stayed unformatted. Fixed: `data-format` probes only content signatures (`blkid -p -u
+filesystem,raid,crypto,other -s TYPE`; dry-run on the box: it formats the blank `fjarr-data` and
+leaves `APP` and `esp` alone), and the image masks `sshdgenkeys.service` (`data-init` owns the host
+keys). L4 for these rebuilds: `lib/lab.sh`'s firmware digest, every file of the package but the
+NVMe's side, recorded by D0 (`.lab/d0/passed-firmware`; `ef17bd75…`'s computed from its tree on
+the mini-PC).
+
+**Fourth run, 00:27: passed** (from the Fjarr slot, `D1_ERASE_NVME=1`; package `93389eaa…`, the
+same firmware digest `a7793482…`):
+
+| Step | Result |
+|---|---|
+| L2, L3, L4 | the plug, the backup, the network rescue, C1's backup; the dead-man in the slot; the firmware digest passed D0 |
+| RCM | from the Fjarr slot by `reboot --force forced-recovery`, 21 s |
+| flash | `initrd-flash --erase-nvme`, native, 217 s: both QSPI chains, the GPT, both slots, the ESP, `recovery` and `recovery-dtb` |
+| first boot | the slot on ssh with the lab's host key 35 s after the flash, systemd `running`, no failed units; `/data` formatted (ext4 on `fjarr-data`, 205 GiB) and the host keys copied there |
+| state | `fjarr-spike` 1.0, the kernel's `panic=10`, the dead-man active, the watchdog at 30 s; bootloader 36.5.2 on chain A, both chains `normal`, capsule status 0; root slot A, both slots `normal` with `retry_count` 3; `recovery` byte-identical to the package's rescue; the network boot entries in `BootOrder` after the disk |
+| L3 round trip | `reboot --force forced-recovery` from the slot, RCM 21 s later, one power cycle, the slot back with a new boot id and the dead-man running |
+
+The box now runs Fjarr's firmware and image; the stock system is gone (C2 restores it from C1's
+backup). Its dead-man sends it to RCM 20 minutes after the last touch.
+
 ## Phase D0 on 2026-10-31: passed
 
 The box's debug UART is on the GPIO header: pins 9 (RXD) and 10 (TXD) carry the combined TCU UART

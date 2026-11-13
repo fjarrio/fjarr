@@ -19,7 +19,8 @@
 #
 # D0_NATIVE=1 runs meta-tegra's script on the mini-PC itself instead of in the container, as D1
 # runs it (it mounts the box's disks through the host's udisks); flash/host-setup.sh installs its
-# tools. A passed run records the package's sha256 in .lab/d0/passed: D1 writes only those (L4).
+# tools. A passed run records the package's sha256 in .lab/d0/passed and its firmware digest in
+# .lab/d0/passed-firmware (lib/lab.sh): D1 writes only those (L4).
 #
 # D0_NVIDIA_L4T=<a tree on the mini-PC> boots NVIDIA's own way instead, for comparison:
 # tools/kernel_flash/l4t_initrd_flash.sh --initrd --network usb0 p3509-a02-p3767-0000 internal in
@@ -201,6 +202,7 @@ else
   # Only the package as built: a run with a swapped file or edited flashvars proves something else.
   if [[ -z $D0_DTB$D0_SWAP$D0_FLASHVARS_SED ]]; then
     echo "$sha $(date -u +%FT%TZ) $([[ $D0_NATIVE == 1 ]] && echo native || echo container) ${pkg##*/}" >>"$LAB_DIR/d0/passed"
+    echo "$(lab_firmware_digest "$(readlink -f "$pkg")") $(date -u +%FT%TZ) ${sha:0:16}" >>"$LAB_DIR/d0/passed-firmware"
   fi
   lab_log "D0 done: Fjarr's firmware and the flash initrd booted from RAM; the box is unchanged"
 fi

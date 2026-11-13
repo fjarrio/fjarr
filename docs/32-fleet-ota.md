@@ -1174,7 +1174,16 @@ with that line deleted.
   unchanged after one power cycle. The debug UART is the GPIO header's pins
   9 and 10 (TCU, 115200 8N1); the lab logs it on every run.
 - The first flash: both slots and the rescue written, RCM reached from the
-  Fjarr image (D1): pending.
+  Fjarr image (D1, 2026-11-14): **passed**, on the fourth run. meta-tegra's
+  `initrd-flash`, native on the mini-PC, writes the box in about 220 s; the
+  slot answered 35 s later with `/data` made and the lab's host key, and its
+  RCM round trip passed. The runs before found three faults of the image,
+  now fixed: no `efi` distro feature (systemd never mounted efivarfs, so no
+  `/dev/fjarr/root`), `data-format` reading every GPT partition as taken,
+  and openssh's key generation writing over `/data/ssh` before `/data`
+  existed. They also measured part of D2: a slot that never boots is reset
+  three times on its chain, then the firmware switches the whole boot chain,
+  and after three more L4TLauncher boots the rescue in `recovery`.
 - NVIDIA's semantics: retries on warm reboots without a verify, what
   `nvbootctrl verify` writes, the count after a cold boot, whether a
   fallback switches the chain, `BootChainFwResetCount` after a successful

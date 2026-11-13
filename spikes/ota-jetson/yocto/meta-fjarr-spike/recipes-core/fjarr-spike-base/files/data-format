@@ -8,13 +8,16 @@ set -euo pipefail
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 dev=${1:?usage: data-format <device>}
 
+# Only content signatures count: on a GPT partition blkid -p always succeeds, reporting the
+# partition's own table entry (PART_ENTRY_*), so its exit code alone read every blank partition as
+# taken and /data was never formatted (D1, 2026-11-13).
 rc=0
-blkid -p "$dev" >/dev/null 2>&1 || rc=$?
+type=$(blkid -p -u filesystem,raid,crypto,other -o value -s TYPE "$dev" 2>/dev/null) || rc=$?
 case $rc in
-  0) exit 0 ;;
-  2) ;;
+  0 | 2) ;;
   *) echo "data-format: blkid -p $dev failed ($rc); not formatting" >&2; exit 1 ;;
 esac
+[ -z "$type" ] || exit 0
 
 if dumpe2fs -h -o superblock=32768 -o blocksize=4096 "$dev" >/dev/null 2>&1; then
   echo "data-format: $dev has no readable superblock but a backup at 32768; run e2fsck -b 32768, not formatting" >&2

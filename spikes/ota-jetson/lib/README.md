@@ -65,6 +65,7 @@ Three conventions follow from bash:
 | `lab_wait_ready <s>` | wait for systemd on the box to finish starting; prints its state |
 | `lab_backup_check` | L2: `.lab/zedbox-backup/SHA256SUMS` is the one `backup.sh` verified, and the files still match it |
 | `lab_use_fjarr_image` | from now on the box runs a Fjarr image: `root` without sudo, the image's ed25519 host key pinned from `.lab/yocto/ssh` under `zedbox-fjarr`, and no USB device while Linux runs (`LAB_RUNNING_USB=none`) |
+| `lab_use_fjarr_rescue` | the same for Fjarr's recovery-partition rescue: its own host key (`.lab/yocto/recovery-ssh`) under `zedbox-recovery`, and `reboot-recovery` as `LAB_RCM_CMD` |
 | `lab_deadman_touch` | touch `LAB_DEADMAN_FILE` on the box: a Fjarr image's lab dead-man then waits another 20 minutes |
 | `lab_plug <method?query>` | the plug's RPC answer (JSON), digest auth, the credentials as curl's configuration on its standard input |
 | `lab_plug_status`, `lab_plug_check` | `LAB_PLUG_OUTPUT` and `LAB_PLUG_APOWER`; the check logs them (L2) |
@@ -73,6 +74,7 @@ Three conventions follow from bash:
 | `lab_rcm_wait [s]` | until `0955:7323` (RCM) shows on the mini-PC, `LAB_RCM_TMO` (90 s) by default |
 | `lab_rcm_leave` | a power cycle, then RCM must stay away for `LAB_RCM_GONE_S` (L7); sets `LAB_USB_L4T_AT` when L4T shows meanwhile |
 | `lab_uart_start <tag>`, `lab_uart_tail [n]`, `lab_uart_stop` | capture the box's debug console (header pins 9 and 10, `LAB_UART` on the mini-PC) in a transient systemd unit there, each line timed; stop copies it to `.lab/logs/<tag>-<time>-console.log` (`LAB_UART_LOG`). Without an adapter: a log line, nothing else. `_lab_exit` stops a running capture |
+| `lab_firmware_list <pkg>`, `lab_firmware_digest <pkg>` | a tegraflash package's QSPI side (every file but the slot images, `boot.img`, `esp.img`, the rescue and `initrd-flash.img`) and its digest: D0 records it on a pass, D1 writes a package whose firmware passed (L4) |
 | `lab_die <why>` | log `STOP: <why>`, run `LAB_DIE_HOOK` once (a script's own record of the state, L7), exit 1 |
 | `lab_redact <secrets>`, `lab_leak_check <file> <secrets>` | committed results: identifiers out, and a refusal if one survived |
 | `LAB_SECRETS_SCRIPT` | a script for `lab_box_root` or `lab_mpc_root` that prints the machine's identifiers, one `<kind> <value>` per line |
@@ -87,6 +89,7 @@ From the environment, then `.lab/lab.env` (gitignored), then the defaults:
 | `LAB_BOX_USER` | `user` | the stock image's user |
 | `LAB_BOX_SUDO` | `sudo -n` | how that user becomes root; empty for root (`lab_use_fjarr_image`) |
 | `LAB_RUNNING_USB` | `l4t` | what the mini-PC sees of the box while its Linux runs: `l4t` (stock) or `none` (a Fjarr image); `lab_rcm_enter` checks it |
+| `LAB_RCM_CMD` | `reboot --force forced-recovery` | how the box's Linux enters RCM in `lab_rcm_enter` (`reboot-recovery` in the busybox rescues) |
 | `LAB_BOX_HOSTKEY_ALIAS` | `zedbox` | the name the box's host key is pinned under in `.lab/known_hosts` |
 | `LAB_SUBNET` | `192.168.10` | the /24 swept to find the box |
 | `LAB_MINIPC` | `robot@192.168.10.108` | the mini-PC |

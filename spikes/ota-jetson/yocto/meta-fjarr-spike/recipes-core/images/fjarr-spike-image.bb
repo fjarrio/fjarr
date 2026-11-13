@@ -100,6 +100,15 @@ fjarr_replace_nv_update_verifier() {
 }
 ROOTFS_POSTPROCESS_COMMAND += "fjarr_replace_nv_update_verifier"
 
+# data-init owns the SSH host keys (/data/ssh: the lab's copied from /etc/ssh, a robot's made on
+# its first boot). openssh's sshdgenkeys makes every key sshd_config names and finds missing: with
+# /data not mounted yet, it wrote new keys into the root's /data/ssh, which sshd then preferred to
+# the lab's in /etc/ssh (D1, 2026-11-13).
+fjarr_mask_sshdgenkeys() {
+    ln -sfn /dev/null ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/sshdgenkeys.service
+}
+ROOTFS_POSTPROCESS_COMMAND += "fjarr_mask_sshdgenkeys"
+
 # L3: every Fjarr Linux on the lab box runs the lab dead-man (docs/32-fleet-ota.md#jetson-test-image),
 # fjarr-spike-lab's unit. Without it the build warns and the root carries /etc/fjarr/NOT-FOR-THE-BOX,
 # which the first flash (D1) checks before it writes the box.

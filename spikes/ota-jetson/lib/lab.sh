@@ -34,6 +34,7 @@ fi
 : "${LAB_BOX_SUDO=sudo -n}"              # how that user becomes root; empty for root itself
 : "${LAB_RUNNING_USB:=l4t}"              # what the mini-PC sees of the box while its Linux runs:
                                          # l4t (stock, 0955:7020), none (a Fjarr image)
+: "${LAB_RCM_CMD:=reboot --force forced-recovery}" # how its Linux enters RCM (lab_rcm_enter)
 : "${LAB_SUBNET:=192.168.10}"            # the /24 swept when the box's address is unknown
 : "${LAB_MINIPC:=robot@192.168.10.108}"  # the mini-PC: the lock, the USB cable to the box
 : "${LAB_PLUG:=192.168.10.202}"          # the box's Shelly plug (RPC over HTTP, digest auth)
@@ -706,13 +707,21 @@ lab_backup_check() { # L2: the latest backup has a verified checksum list; 1 (an
 # A Fjarr image (yocto/): root with the lab key, no sudo, the image's own host keys (the same in
 # every build, from .lab/yocto/ssh, pinned from there under their own alias, never on first
 # contact), and no USB device while it runs. Called once the box runs one, e.g. after a flash.
-lab_use_fjarr_image() {
-  local pub=$LAB_DIR/yocto/ssh/ssh_host_ed25519_key.pub kh=$LAB_DIR/known_hosts alias=zedbox-fjarr
-  [[ -s $pub ]] || lab_die "no $pub: the Fjarr image's host key (yocto/build.sh makes it)"
+lab_use_fjarr_image() { _lab_use_root_profile zedbox-fjarr "$LAB_DIR/yocto/ssh/ssh_host_ed25519_key.pub"; }
+# Fjarr's recovery-partition rescue (A5) on the box: the same, with the rescue's own host key, and
+# busybox, whose reboot takes no argument: reboot-recovery enters RCM.
+lab_use_fjarr_rescue() {
+  _lab_use_root_profile zedbox-recovery "$LAB_DIR/yocto/recovery-ssh/ssh_host_ed25519_key.pub"
+  LAB_RCM_CMD=reboot-recovery
+}
+_lab_use_root_profile() { # <alias> <host key .pub>
+  local alias=$1 pub=$2 kh=$LAB_DIR/known_hosts
+  [[ -s $pub ]] || lab_die "no $pub: the host key yocto/build.sh made for that image"
   if ! grep -q "^$alias " "$kh" 2>/dev/null; then
     printf '%s %s\n' "$alias" "$(cut -d' ' -f1,2 "$pub")" >>"$kh"
   fi
   LAB_BOX_USER=root LAB_BOX_SUDO='' LAB_RUNNING_USB=none LAB_BOX_HOSTKEY_ALIAS=$alias
+  LAB_RCM_CMD='reboot --force forced-recovery'
   LAB_SSH_BOX=("${LAB_SSH_COMMON[@]}" -o "StrictHostKeyChecking=yes" -o "UserKnownHostsFile=$kh"
     -o "HostKeyAlias=$alias" -o "HostKeyAlgorithms=ssh-ed25519")
 }
@@ -813,13 +822,13 @@ lab_rcm_enter() { # the box reboots into RCM by software; its Linux must run and
   # be the session closed by the reboot.
   lab_box -t 20 "${LAB_BOX_SUDO:+$LAB_BOX_SUDO }sync" >/dev/null 2>&1 || lab_die "the box does not answer ssh or sudo just before the reboot: nothing sent (L7)"
   lab_lock_check
-  lab_log "box: reboot --force forced-recovery"
+  lab_log "box: $LAB_RCM_CMD"
   # The session ends with the reboot: 255 (closed) and 124 (timed out) are expected, 0 too.
-  _lab_tmo 20 ssh -n "${LAB_SSH_BOX[@]}" "$LAB_BOX_USER@$LAB_BOX_IP" "${LAB_BOX_SUDO:+$LAB_BOX_SUDO }reboot --force forced-recovery" \
+  _lab_tmo 20 ssh -n "${LAB_SSH_BOX[@]}" "$LAB_BOX_USER@$LAB_BOX_IP" "${LAB_BOX_SUDO:+$LAB_BOX_SUDO }$LAB_RCM_CMD" \
     >/dev/null 2>&1 || rc=$?
   case $rc in
     0 | 124 | 255) ;;
-    *) lab_die "the box refused 'reboot --force forced-recovery' (exit $rc) (L7)" ;;
+    *) lab_die "the box refused '$LAB_RCM_CMD' (exit $rc) (L7)" ;;
   esac
 }
 
@@ -923,6 +932,22 @@ cat "/var/log/fjarr-lab-uart/$1.log" && rm -f "/var/log/fjarr-lab-uart/$1.log"' 
     lab_log "the console capture $unit could not be copied back"
   lab_log "console capture: ${LAB_UART_LOG#"$LAB_HOME"/}, $(wc -l <"$LAB_UART_LOG") lines"
 }
+
+# --- L4: the firmware a flash package writes to the QSPI -------------------------------------------
+#
+# Every file of a tegraflash package but the NVMe's side (the slot images, boot.img, esp.img, the
+# rescue in recovery and recovery-dtb) and the flasher's own initrd-flash.img: MB1, MB2, the BCT
+# sources and the kernel DTB they take, BPMP, TOS, UEFI, the boot-control overlays. Its digest is
+# the sha256 of "<sha256> <name>" for each, sorted by name; D0 records it on a pass
+# (.lab/d0/passed-firmware), and D1 writes a package whose firmware digest a D0 passed (L4).
+LAB_NVME_SIDE_RE='.*\.ext4|boot\.img|esp\.img|initrd-flash\.img|fjarr-recovery-rescue\.(img|dtb)'
+# shellcheck disable=SC2016 # tar runs the command, which expands its own variables
+lab_firmware_list() { # <package>: "<sha256> <name>" of its QSPI's side, sorted by name
+  tar -xzf "$1" --exclude='*.ext4' --exclude='__pycache__' \
+    --to-command='printf "%s %s\n" "$(sha256sum | cut -c1-64)" "${TAR_FILENAME#./}"' |
+    awk -v re="^($LAB_NVME_SIDE_RE)\$" '$2 !~ re' | LC_ALL=C sort -k2
+}
+lab_firmware_digest() { lab_firmware_list "$1" | sha256sum | cut -d' ' -f1; } # <package>
 
 # --- results: redaction of the box's identifiers -------------------------------------------------
 #
