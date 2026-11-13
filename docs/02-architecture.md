@@ -59,7 +59,7 @@ dead process may never leave a robot permanently "owned"
 Adopted from the proven camera-streamer v3 design
 ([prior art](11-prior-art.md#camera-streamer)):
 
-```text
+```gst
 capture ─ encode ─ appsink ──► FrameHub ──► per-session pipelines
 (one producer, persistent)    (fan-out)     appsrc ! queue(leaky) ! valve
                                             ! rtp*pay ! webrtcbin

@@ -22,7 +22,7 @@ tunnel address, so the destination rule drops every discovery announcement. With
 the direct path between the two ends removed, `ros2 topic list` saw nothing, and
 the robot's log said exactly why:
 
-```text
+```log
 inbound packet refused reason=wrong-destination dst=239.255.0.1 src=100.64.0.1
 inbound packet refused reason=wrong-destination dst=224.0.0.22  src=100.64.0.1
 ```

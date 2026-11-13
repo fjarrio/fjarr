@@ -1138,7 +1138,7 @@ cost one keyframe.
 
 ### Consumer pipeline (per session)
 
-```text
+```gst
 [per track]  appsrc(is-live, format=time) ! queue(leaky=downstream, max 1 GOP)
              ! valve ! rtp{h264,vp8,opus}pay(pt, ssrc, config-interval=-1)
              ! webrtcbin.sink_%u
@@ -1870,7 +1870,7 @@ the operator side of docs/08 against the real `fjarr-server`, answers with
 its own `webrtcbin` (the spike's answerer, so its `pad-added`/`src_N`
 quirks are known), and runs named scenarios:
 
-```text
+```sh
 fjarr-opsim --server ws://fjarr-server:8080/ws --robot demo-robot-01 \
             --grant-secret "$FJARR_GRANT_HS256_SECRET" \
             --scenario <name> [--json out.json] [--timeout 60]

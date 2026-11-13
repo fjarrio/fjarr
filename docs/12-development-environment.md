@@ -351,7 +351,7 @@ that trigger on `schedule` and `workflow_dispatch` from `main`, never `push` or
 build step, the same on amd64 and on arm64 boards. It decides when the runner
 is online:
 
-```text
+```sh
 fjarr-lab status                # CI (job, since) · idle in the CI window · reserved (by whom, until) · next change
 fjarr-lab reserve               # the machine is yours now: waits for a running job, then takes the runner offline
 fjarr-lab release               # back to the schedule

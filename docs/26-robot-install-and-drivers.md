@@ -565,7 +565,7 @@ each other:
 `fjarr-agent display` lists every connector and manages ghosts, as root, and `setup desktop --ghost-screens N`
 uses the same code:
 
-```text
+```console
 $ sudo fjarr-agent display list
   CONNECTOR  STATE        MONITOR                    GHOST
   HDMI-A-1   connected    DELL U2422H (real)         —
@@ -642,7 +642,7 @@ leave. It needs no reboot and no connector, and promises no persistence
 
 Mostly output, for people and scripts alike (`--json`):
 
-```text
+```console
 $ fjarr-agent drivers list
   NAME        STATUS          PACKAGE              NOTE
   v4l2        built in        —                    source = { type = "v4l2", … } in fjarr.toml (docs/06)

@@ -20,6 +20,15 @@ One Astro app (`website/`) serves both public surfaces
 - Relative links between docs (`[x](08-protocol.md#anchor)`) — they work in
   GitHub, editors, and Starlight alike.
 - Mermaid diagrams in fenced blocks ([below](#diagrams)).
+- **Every code fence names its real language**, so it is highlighted: `sh`
+  for commands, `console` for a session with `$` prompts and output, `toml`,
+  `json`, `yaml` for config, `log` for log lines, `gst` for GStreamer
+  pipeline descriptions — gst-launch syntax and the docs' shorthand
+  (`queue(leaky)`, `rtp{h264,vp8}pay`, `[per track]` notes), highlighted by
+  the site's own grammar (`website/plugins/gst-grammar.mjs`). `text` is only
+  for what has no grammar: box-drawing diagrams, terminal-UI mockups, byte
+  layouts. The landing page renders its snippets with
+  the same highlighter (Starlight's `<Code>`), never a bare `<pre>`.
 - ADRs publish too — they are the "why" documentation integrators love.
 - **Feature-status honesty**: the landing page labels capabilities with
   their real state (`available`, `in development`, `planned`, defined
@@ -72,6 +81,14 @@ make website-build   # production build (CI gate from M0.5)
 `make docs-lint` / `make docs-links` gate the content itself
 ([docs/13](13-development-workflow.md#docs-hygiene)).
 
+The production build clears Astro's content cache first
+(`website/scripts/clear-content-cache.mjs`). The cache holds rendered markdown,
+including the link to the code-block stylesheet, whose name changes with the
+Expressive Code config, and Astro does not invalidate it when that config
+changes: a cached build (locally, or in Cloudflare's build cache) would ship
+pages linking a stylesheet that no longer exists. The dev server keeps its
+cache, so restart it after changing `expressiveCode` in `astro.config.mjs`.
+
 ## Deployment
 
 **Cloudflare Workers Builds via Git integration** — no deploy workflow, no
@@ -120,8 +137,8 @@ do, does it actually work, and can I trust it*.
 
 | # | Section | Says | Owner |
 |---|---|---|---|
-| 1 | **Hero** | Who it's for, by the traits of the machine rather than a list of industries ([who it's for](03-product-strategy.md#who-its-for)): Linux on board, cameras or a screen, behind someone else's network, far from the people who need it. Robots, vehicles and farm machinery appear at most once, as an example, not as a list. Below it, a release line: the latest version, the platforms, and the one-line install | [00](00-vision.md), [03](03-product-strategy.md#who-its-for), [26](26-robot-install-and-drivers.md) |
-| 2 | **The problem** | The visitor's situation, not ours: a patchwork that kind of works (VPN or jump host, a remote-desktop tool the end customer installs, a hand-rolled video stream, `scp` for logs), or the remote-access project still on the backlog. Our [prior art](11-prior-art.md) is one line of credibility, not the pitch | [00](00-vision.md#the-problem), [03](03-product-strategy.md#who-its-for) |
+| 1 | **Hero** | Short, the way complex products present themselves: the headline, one sentence of at most ~25 words saying what Fjarr does and for which machines (Linux machines in the field), and three chips — built into your product, works behind carrier NAT, open source and self-hostable. Under the calls to action, one line that removes friction: the licence, and that self-hosting is free. Beside it (below it on narrow screens), a release card: the latest version, the platforms, and the one-line install. Everything else waits for section 2 | [00](00-vision.md), [03](03-product-strategy.md#who-its-for), [26](26-robot-install-and-drivers.md) |
+| 2 | **The problem** | Opens with who it's for, by the traits of the machine rather than a list of industries ([who it's for](03-product-strategy.md#who-its-for)): Linux on board, cameras or a screen, behind someone else's network, far from the people who need it. Robots, vehicles and farm machinery appear at most once, as an example, not as a list. Then the visitor's situation, not ours: a patchwork that kind of works (VPN or jump host, a remote-desktop tool the end customer installs, a hand-rolled video stream, `scp` for logs), or the remote-access project still on the backlog. Our [prior art](11-prior-art.md) is one line of credibility, not the pitch | [00](00-vision.md#the-problem), [03](03-product-strategy.md#who-its-for) |
 | 3 | **Three tiers** | Machine, backend, dashboard as a diagram, then a short embed snippet (mint a grant in the backend, mount a component in the dashboard). The snippet uses real exported names only | [02](02-architecture.md), [09](09-interfaces.md) |
 | 4 | **Capabilities** | The capability grid with [status badges](#badge-states); everything is a plugin | [06](06-capabilities.md), [17](17-roadmap.md) |
 | 5 | **Measured, not promised** | A strip of numbers, each linking its source | [16](16-performance-budgets.md#measured) |
@@ -130,7 +147,7 @@ do, does it actually work, and can I trust it*.
 | 8 | **Trust and efficiency** | End-to-end encryption, per-capability grants the agent re-checks, short-lived relay credentials, an unprivileged agent, no ports opened on the customer's router, signed packages and images; one encode for any number of viewers, cameras that already encode cost nothing, the integrated GPU first so the discrete one stays with perception | [10](10-security.md), [04](04-supported-platforms.md), [ADR-0025](adr/0025-encoder-families.md) |
 | 9 | **Built for the people who debug machines** | Live pipeline graphs, `--check`, the driver catalog | [24](24-pipeline-introspection.md), [26](26-robot-install-and-drivers.md) |
 | 10 | **Open core, honest split** | What is free and what Cloud adds; AGPL-3.0 or a commercial licence; no GPL dependency in anything we ship | [03](03-product-strategy.md), [ADR-0011](adr/0011-license-open-core.md) |
-| 11 | **Docs CTA and footer** | Docs, GitHub | — |
+| 11 | **Docs CTA and footer** | Docs, GitHub, and what *Fjärr* means | — |
 
 ### Status badges {#badge-states}
 
@@ -161,3 +178,60 @@ A badge moves when docs/17 moves, in the same change.
 - **Not claimed yet** (revisit as docs/17 moves): `fjarr-connect` on macOS or
   Windows, NVIDIA and Jetson encode, the desktop in a release, several
   operators on one machine's tunnel.
+
+## Visual design {#visual-design}
+
+The landing page and the docs are one site and look it: dark by default,
+near-black surfaces with a slight blue tint, hairline borders, and **Fjarr
+blue** (`#2f81f7`, lighter `#58a6ff` for text on dark) as the only accent.
+Green stays reserved for "available" and the peer-to-peer path; there is no
+second brand colour.
+
+- **One set of tokens.** `website/src/styles/theme.css` sets Starlight's
+  `--sl-color-*` variables for both themes and is the only place a colour is
+  defined. The docs load it through `customCss`; the landing page imports
+  it. The landing page uses the `--sl-*` names directly, so a token change
+  restyles both.
+- **Dark by default, light available.** A visitor who has not chosen sees the
+  dark theme whatever their OS prefers; the header toggle (Starlight's
+  `ThemeProvider` and `ThemeSelect`, overridden) switches between dark and
+  light and is remembered (`localStorage` key `starlight-theme`, the
+  key Starlight uses). The landing page follows the same choice.
+- **One header.** The landing page renders the same header the docs do —
+  logo, a few top links, search on the docs, GitHub, the theme toggle — so
+  moving between them doesn't feel like changing sites.
+- **Icons**, not emoji, on cards: a small set of line icons drawn for the
+  site (`website/src/components/FjIcon.astro`), so no icon library ships.
+  Starlight's own set has no camera, microphone or terminal, and emoji
+  render differently on every OS.
+- **Code blocks** stay Expressive Code, with GitHub's dark and light themes
+  on the token background; mermaid diagrams take their colours from the same
+  tokens and redraw when the theme is toggled ([diagrams](#diagrams)).
+
+### The network field {#network-field}
+
+The landing hero's background is a field of drifting dots, joined by a line
+when two are close — machines and the links between them. It is decoration,
+and it is held to that:
+
+- **Hero only.** No docs page animates.
+- **Plain canvas, no library.** Each dot has a velocity with a little random
+  drift and damping, nearby dots repel softly so they don't clump, and the
+  pointer pushes dots aside within a short radius. Neighbours are found with
+  a spatial grid, so a frame costs time linear in the dot count.
+- **Sized to the screen**: the dot count scales with the hero's area,
+  capped (about 80 on a desktop, 30 on a phone), and the canvas is sharp on
+  high-DPI screens.
+- **Stops when unseen.** No frames while the hero is scrolled out of view
+  or the tab is hidden.
+- **Cheap where it runs.** The physics is about 0.25 ms of JavaScript a
+  frame; the cost is canvas pixels. So the field draws at 30 fps (slow drift
+  doesn't need 60) into a backing store of at most 1.5× device pixels.
+  Measured 2026-11-13 at 1440×900: about 2.5% of the main thread with GPU
+  raster (Intel iGPU, Chrome), 7% (1×) to 16% (2×) where the browser
+  rasterises in software, and 0% once scrolled away.
+- **Reduced motion** (`prefers-reduced-motion: reduce`) gets one still
+  frame, and no JavaScript means the hero simply has no field.
+- **Colours from the tokens**, read when the theme changes, and the field
+  fades into the page background toward the bottom of the hero so the first
+  section starts on a plain background.
