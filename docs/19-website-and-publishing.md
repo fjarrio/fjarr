@@ -19,6 +19,12 @@ One Astro app (`website/`) serves both public surfaces
   Starlight, harmless on GitHub.
 - Relative links between docs (`[x](08-protocol.md#anchor)`) — they work in
   GitHub, editors, and Starlight alike.
+- **Stable sections carry an explicit id**, `## The envelope {#envelope}`,
+  and links use it (`08-protocol.md#envelope`), so retitling a section
+  doesn't break them. `website/plugins/remark-heading-ids.mjs` turns the
+  suffix into the heading's `id` on the site (Starlight would otherwise show
+  `{#envelope}` as text and slug the whole title); `make docs-anchors` checks,
+  after the build, that every `#fragment` link in the site lands on an id.
 - Mermaid diagrams in fenced blocks ([below](#diagrams)).
 - **Every code fence names its real language**, so it is highlighted: `sh`
   for commands, `console` for a session with `$` prompts and output, `toml`,
@@ -79,7 +85,8 @@ make website-build   # production build (CI gate from M0.5)
 ```
 
 `make docs-lint` / `make docs-links` gate the content itself
-([docs/13](13-development-workflow.md#docs-hygiene)).
+([docs/13](13-development-workflow.md#docs-hygiene)); `make docs-mermaid` and
+`make docs-anchors` gate the built site, and CI runs both after its build.
 
 The production build clears Astro's content cache first
 (`website/scripts/clear-content-cache.mjs`). The cache holds rendered markdown,
