@@ -128,6 +128,71 @@ backups and the logs stay in `.lab/` (gitignored); `.lab/c2/` holds the fingerpr
 | `c2-restore.sh` (20:56 to 21:10, run by Erik in his terminal) | network rescue serving, RCM by software, NVIDIA's restore 711 s: the GPT, `APP` from its tar, every raw partition, and the QSPI (erased, then 64 MiB in 86 s, in parallel with the NVMe); one power cycle, the stock system back with the same fingerprint (`nv_boot_control.conf`, the SSH host keys, the root PARTUUID, five `sl_` modules, both chains normal, the boot entries) |
 | `probe.sh` (21:11, `2026-10-20-probe-stock-after-c2.txt`) | stock R36.4.4, `BootCurrent` 0001, `BootNext` absent, entries as before, the slot variables and `BootChainFw*` at their stock values |
 
+## Phase D2 on 2026-11-14: NVIDIA's A/B semantics on the Fjarr image
+
+`d2.sh` (README, "D2"), unattended, the Fjarr image 1.0 on both slots; the state files are in
+`.lab/d2/`. "Retries" below is `nvbootctrl -t rootfs dump-slots-info`'s `retry_count`, the PMC
+values its scratch nodes (`rootfs_retry_count_a`/`_b`).
+
+**`count`** (00:52): fjarr-boot-verify masked on slot A.
+
+| Step | Retries A:B | PMC a:b | `reset_reason` |
+|---|---|---|---|
+| start, verified | 3:3 | 0x0:0x0 | SYS_RESET_N |
+| a warm reboot, no verify | 2:3 | 0x2:0x3 | MAINSWRST |
+| a second | 1:3 | 0x1:0x3 | MAINSWRST |
+| a power cycle | 2:3 | 0x2:0x3 | SYS_RESET_N |
+| `nvbootctrl verify` | 3:3 | 0x0:0x0 | |
+
+Each warm reset without a verify takes one retry from the booted slot; a cold boot seeds the
+register afresh from `RootfsRetryCountMax` (3), and that boot takes one. `nvbootctrl verify`
+clears the whole scratch register, both slots: the nodes read 0 on a verified boot, which means
+not seeded, not out of retries, and `nvbootctrl` shows 3 for an unseeded register. So the applier's
+`pmc:rootfs_retry_count_b=0x0` for "unbootable" works only while the register is seeded (after a
+boot without a verify); right after a verify the slot's 0 reads as unseeded. Its
+`RootfsStatusSlotB=0xFF`, which L4TLauncher seeds from, still decides.
+
+**`switch`** (00:54) and **`stale`** (00:57): fjarr-boot-verify masked on both slots.
+
+- `nvbootctrl set-active-boot-slot 1` writes `BootChainFwNext` = 1, nothing else.
+- The reboot switches the firmware chain and the root slot together (`BootChainFwCurrent`,
+  `BootChainOsCurrent` 1; slot B took one retry). It leaves `BootChainFwStatus` = 0 (success);
+  `BootChainFwResetCount` and `BootChainFwPrevious` never show in efivarfs, as the source says.
+- **`nvbootctrl verify` deletes the leftover `BootChainFwStatus`** ("switch boot chain success …
+  delete variable BootChainFwStatus"). The applier's own clearing in `mark-good` and `boot-verify`
+  is redundant after it, and harmless.
+- **A status left set stops the next switch** (`stale`): with `BootChainFwStatus` 0 still there,
+  `set-active-boot-slot 0` and a reboot stayed on chain B, the firmware deleted `BootChainFwNext`,
+  and slot B took another retry. After `nvbootctrl verify` deleted the status, the same switch
+  went to chain A. `rollback-now` clearing the status first is needed.
+- Both chains booted L4TLauncher from the one `esp` (both took the same `BootOrder` entry).
+
+**`net`**: not run yet. The 36.5.2 network rescue is built (`rescue/build.sh --l4t 36.5.2`), but
+`net-rescue.sh` installs it only from 06:30 (Q6: no mini-PC change 00:00–06:00); until then the
+mini-PC serves the 36.4.4 one.
+
+**`wdt`** (D2b, the kernel with the watchdog backport), first runs (01:00, 01:10):
+
+- `kill -STOP 1` does nothing: PID 1 takes only the signals it handles, so systemd went on
+  feeding the watchdog and the box ran on. The test now crashes it with `kill -SEGV 1`.
+- **A crashed systemd was not reset.** After `kill -SEGV 1` (systemd's crash handler freezes
+  PID 1; ssh, socket-activated, refused; journald logged "Failed to send WATCHDOG=1
+  notification") the box ran on for more than 20 minutes without a watchdog reset, until its
+  dead-man entered RCM (`fjarr-lab-deadman: no operator contact for 1200 s: entering RCM` at
+  1888 s of uptime, `reboot` with `forced-recovery`): L3's dead-man on the Fjarr slot, with
+  systemd frozen. `d2.sh recover` then left RCM by one power cycle and verified slot A.
+- **The driver resets an unfed watchdog** (second run, 01:31): with systemd's hold released
+  (`RuntimeWatchdogUSec 0`), a shell opened `/dev/watchdog0`, fed it once and held it: reset
+  about 100 s later, `reset_reason` LCCPLEXWDT. A panic (`panic=10`) resets as MAINSWRST, the
+  reason a `systemctl reboot` gives. Both started from a verified, unseeded register, so both
+  showed slot A at 2 afterwards; whether they count down or seed afresh is `seeded`'s question.
+- **Why a crashed systemd is never reset:** systemd 255's `freeze()` closes every descriptor
+  first ("make sure nobody waits for us"), the watchdog's included, without the magic close, so
+  the watchdog core stops it or pings it from the kernel, and nothing resets the box. The crash
+  repeated it (no reset in 420 s, then the dead-man). Not the backport: systemd's default. The
+  image now sets `CrashReboot=yes` (initrd and slot), a reboot 10 s after the crash, a warm reset
+  L4TLauncher counts; it takes effect with the next flash.
+
 ## Phase D1 on 2026-11-13: passed (fourth run)
 
 **First run, 22:59** (`d1-flash.sh`, the package `ef17bd75…` that passed D0 natively, Erik at the

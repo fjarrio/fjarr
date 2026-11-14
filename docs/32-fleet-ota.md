@@ -881,7 +881,10 @@ console is connected.
 - **A trial that cannot come up resets warm**, the reset L4TLauncher
   counts: `panic=10`, `rootflags=x-systemd.device-timeout=90s`, an initrd
   whose emergency mode reboots and whose systemd opens the watchdog (30 s),
-  and a deadline on `boot-complete.target`, as on x86.
+  and a deadline on `boot-complete.target`, as on x86. And a crashed
+  systemd reboots (`CrashReboot=yes`): its default, freezing, closes every
+  descriptor, the watchdog's too, and nothing resets the box again (D2b
+  measured it; the x86 image has the same default).
 - **The kernel** carries two upstream fixes to the Tegra watchdog driver
   (`timer-tegra186`), neither in NVIDIA's 36.5.2 tree: the self-ping fix
   (b42d781e0350) and a kernel watchdog armed at probe and kept alive from

@@ -348,3 +348,34 @@ review's fixes (2026-10-18 12:49 to 13:12): T2 and T5 passed, T4 stopped with th
 booted but not answering ssh. With its DHCP fixed (19:52 to 20:40): T4 passed, T6 recorded its skip,
 T3 passed with the held-watchdog step added; with A5 built (21:07 to 21:31), T6 passed; `clean`
 and `net-down` left the box and the mini-PC as before ([results/README.md](results/README.md#phase-b6-on-2026-10-18)).
+
+## D2: NVIDIA's A/B semantics on the Fjarr image (`d2.sh`)
+
+Phase D2 measures on the box what the applier takes from NVIDIA's source
+([`applier/README.md`](applier/README.md), "From the source"), after D1 left the Fjarr image on
+both slots. Every step writes only UEFI variables and the slot's own root, never the QSPI, so it
+runs unattended behind the network rescue and the dead-man. Each test starts on slot A, committed
+(verified at boot by `fjarr-boot-verify`), and ends there. Before and after every boot `d2.sh`
+records the same state (`.lab/d2/<time>-<test>/<n>-<step>.txt`): which system answers (the slot, the
+recovery rescue or the network rescue, told apart by their host keys), the boot id, the
+boot-chain variables, `RootfsStatusSlotA`/`B`, `OsIndications`, `BootNext`, `SystemFwVersions`,
+the PMC nodes (`rootfs_retry_count_a`/`_b`, `boot_chain_*`, `reset_reason`, `reset_level`), both
+`nvbootctrl dump-slots-info` outputs and `bios_version`.
+
+To see the firmware's own behaviour, a test masks `fjarr-boot-verify.service` on the slot it
+boots, and unmasks it before it ends (also when it stops: L7 records first, then unmasks if the
+slot answers). L6 bounds it: at most two warm resets in a row without a verify.
+
+| Test | Steps | Measures |
+|---|---|---|
+| `net` | the network rescue built on 36.5.2 (`rescue/build.sh --l4t 36.5.2`) served; `BootNext` to `UEFI PXEv4`, a reboot; the rescue on ssh; `reboot -f`; then the same by `UEFI HTTPv4` | L2's network rescue boots on Fjarr's firmware; `BootNext` consumed, `BootOrder` unchanged (L5) |
+| `count` | mask; a warm reboot; a second; a power cycle; `nvbootctrl verify`; unmask | the count per warm reset without a verify, what a cold boot restores, what `nvbootctrl verify` writes (variables, PMC nodes, `dump-slots-info`) |
+| `switch` | mask on both slots; `nvbootctrl set-active-boot-slot 1`; a warm reboot to chain B; `nvbootctrl verify`; with `BootChainFwStatus` left as the switch set it, `set-active-boot-slot 0` and a reboot; then the status deleted (as the applier's `rollback-now` does), `set-active-boot-slot 0` and a reboot back to chain A; unmask on both | `BootChainFwNext` after `set-active-boot-slot`; `BootChainFwStatus` and `BootChainFwResetCount` after a switch, and whether Linux sees the count; whether `nvbootctrl verify` clears the status; whether a status left set stops the next switch, as the source says; both chains taking L4TLauncher from `esp` |
+| `stale` | as `switch`, but without the verify on chain B: `set-active-boot-slot 0` while the switch's `BootChainFwStatus` is still set, a reboot; if still on B, `nvbootctrl verify`, `set-active-boot-slot 0`, a reboot | whether a status left set stops the next switch (`switch` found that `nvbootctrl verify` deletes it) |
+| `seeded` | mask; a warm reboot (the register seeded, slot A at 2); the unfed hold; verify; a warm reboot; a panic; verify; unmask | whether a watchdog reset and a panic take one retry from a seeded register (1) or seed it afresh like a cold boot (2); `wdt` cannot tell, it starts from a verified, unseeded register |
+| `wdt` | mask; systemd lets go of the watchdog (`busctl` `RuntimeWatchdogUSec 0`: a magic close, its 30 s timeout kept), a shell opens `/dev/watchdog0`, feeds it once and holds it unfed; the reset; verify; a panic (`/proc/sysrq-trigger`, `panic=10`); verify; then systemd crashed (`kill -SEGV 1`: its crash handler freezes it; `kill -STOP 1` does nothing, PID 1 takes only the signals it handles), and if nothing resets the box, its dead-man's RCM and a power cycle; verify; unmask | D2b: whether the driver resets an unfed watchdog, whether a watchdog reset and a panic count down like a warm reset or restore the count like a power cut (`reset_reason`), and whether a crashed systemd is reset, with the kernel's watchdog fixes; `wdt` again on the unpatched kernel (`yocto/build.sh --unpatched-kernel`, written by `d1-flash.sh` with `D1_SKIP_BOOTLOADER=1`, the NVMe only) measures it without them |
+
+```bash
+LAB_DESKTOP_OK=1 spikes/ota-jetson/d2.sh state        # read only
+LAB_DESKTOP_OK=1 spikes/ota-jetson/d2.sh net|count|switch|wdt
+```

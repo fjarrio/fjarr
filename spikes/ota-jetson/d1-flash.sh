@@ -20,7 +20,9 @@
 # reboot-recovery; D1_FROM=fjarr from a Fjarr slot that answers with the image's host key. L4: the
 # package passed D0, or its firmware digest did (lib/lab.sh, lab_firmware_digest: a rebuild that
 # changed only the NVMe's side). D1_ERASE_NVME=1 passes --erase-nvme to initrd-flash, so /data is
-# blank again and the next boot is a first boot.
+# blank again and the next boot is a first boot. D1_SKIP_BOOTLOADER=1 passes --skip-bootloader: the
+# NVMe only, no QSPI write, so no person at the box (Q4); L4 is checked all the same, so the slot's
+# kernel runs on firmware that passed D0 (D2b's unpatched kernel).
 #
 # Before: the box's fingerprint (.lab/d1/before.txt). After the flash, the Fjarr image must
 # answer on the box's MAC as root with the image's host key, its slot state, the dead-man, the
@@ -39,8 +41,10 @@ pkg=${1:-$deploy/fjarr-spike-image-zedbox-mini-orin-nx16.rootfs.tegraflash.tar.g
 : "${C1_L4T:=/srv/fjarr-flash/l4t-36.4.4/Linux_for_Tegra}"
 : "${D1_FROM:=stock}"              # stock | rescue: what runs on the box before the flash
 : "${D1_ERASE_NVME:=}"            # 1: initrd-flash --erase-nvme
+: "${D1_SKIP_BOOTLOADER:=}"        # 1: initrd-flash --skip-bootloader (the NVMe only)
 [[ $D1_FROM =~ ^(stock|rescue|fjarr)$ ]] || { echo "d1-flash.sh: D1_FROM is stock, rescue or fjarr" >&2; exit 2; }
-[[ ${D1_PERSON_AT_BOX:-} == 1 ]] || { echo "d1-flash.sh: the QSPI write needs a person at the box (Q4): D1_PERSON_AT_BOX=1" >&2; exit 2; }
+[[ ${D1_PERSON_AT_BOX:-} == 1 || $D1_SKIP_BOOTLOADER == 1 ]] ||
+  { echo "d1-flash.sh: the QSPI write needs a person at the box (Q4): D1_PERSON_AT_BOX=1 (or D1_SKIP_BOOTLOADER=1)" >&2; exit 2; }
 [[ -s $pkg ]] || { echo "d1-flash.sh: no flash package $pkg" >&2; exit 2; }
 sha=$(sha256sum <"$(readlink -f "$pkg")" | cut -d' ' -f1)
 if grep -q "^$sha " "$LAB_DIR/d0/passed" 2>/dev/null; then
@@ -113,10 +117,13 @@ lab_rcm_wait || lab_die "no RCM within $LAB_RCM_TMO s (the mini-PC sees '$LAB_US
 lab_uart_start d1
 lab_need "$D1_TMO" "meta-tegra's initrd-flash"
 lab_lock_check
-lab_log "box in RCM; meta-tegra's initrd-flash writes the QSPI and the NVMe now (at most $D1_TMO s)"
+lab_log "box in RCM; meta-tegra's initrd-flash writes $([[ $D1_SKIP_BOOTLOADER == 1 ]] && echo "the NVMe only" || echo "the QSPI and the NVMe") now (at most $D1_TMO s)"
 log=$LAB_DIR/logs/d1-flash-$(date -u +%Y%m%dT%H%M%SZ).log
 t0=$SECONDS rc=0
-lab_mpc_root -t "$D1_TMO" 'cd "$1/d1" && ./initrd-flash $2; rc=$?; cat "$(ls -t log.initrd-flash.* | head -n 1)"; exit $rc' "$D0_DIR" "$([[ $D1_ERASE_NVME == 1 ]] && echo --erase-nvme)" >"$log" 2>&1 || rc=$?
+flags=()
+[[ $D1_ERASE_NVME == 1 ]] && flags+=(--erase-nvme)
+[[ $D1_SKIP_BOOTLOADER == 1 ]] && flags+=(--skip-bootloader)
+lab_mpc_root -t "$D1_TMO" 'cd "$1/d1" && shift && ./initrd-flash "$@"; rc=$?; cat "$(ls -t log.initrd-flash.* | head -n 1)"; exit $rc' "$D0_DIR" "${flags[@]}" >"$log" 2>&1 || rc=$?
 dur=$((SECONDS - t0))
 lab_log "initrd-flash ended with exit $rc after $dur s; its log: ${log#"$LAB_HOME"/}"
 grep -E '^== Step|ERR|Successfully finished|Error' "$log" >&2 || true
