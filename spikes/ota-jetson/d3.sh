@@ -78,7 +78,9 @@ reboot_wait() { # <command> <step>: a command that ends the session, the next bo
   _lab_tmo 20 ssh -n "${LAB_SSH_BOX[@]}" "$LAB_BOX_USER@$LAB_BOX_IP" "$1" >/dev/null 2>&1 || rc=$?
   case $rc in 0 | 124 | 255) ;; *) lab_die "the box refused '$1' (exit $rc)" ;; esac
   up_wait "$before" "$D3_BOOT_TMO" || lab_die "nothing came back within $D3_BOOT_TMO s of '$1'"
-  st "$2"
+  # A failing trial reboots on its own within seconds (health, panic, a root that never mounts):
+  # its state may be gone before it can be read, and trial_end follows it.
+  st "$2" || lab_log "($2: the box went down again before its state could be read)"
 }
 trial_end() { # <step>: until no trial is in progress (its last_trial written), reboots included
   local t0=$SECONDS

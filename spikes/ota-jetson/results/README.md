@@ -128,7 +128,7 @@ backups and the logs stay in `.lab/` (gitignored); `.lab/c2/` holds the fingerpr
 | `c2-restore.sh` (20:56 to 21:10, run by Erik in his terminal) | network rescue serving, RCM by software, NVIDIA's restore 711 s: the GPT, `APP` from its tar, every raw partition, and the QSPI (erased, then 64 MiB in 86 s, in parallel with the NVMe); one power cycle, the stock system back with the same fingerprint (`nv_boot_control.conf`, the SSH host keys, the root PARTUUID, five `sl_` modules, both chains normal, the boot entries) |
 | `probe.sh` (21:11, `2026-10-20-probe-stock-after-c2.txt`) | stock R36.4.4, `BootCurrent` 0001, `BootNext` absent, entries as before, the slot variables and `BootChainFw*` at their stock values |
 
-## Phase D3 on 2026-11-14: the applier's rehearsal
+## Phase D3 on 2026-11-14: the applier's rehearsal, passed
 
 `d3.sh` (README, "D3"), from a fresh write of release 1.0 (`CrashReboot=yes`, NVMe only, erased)
 to release 1.2 (`mkswu.sh 1.2`: 127 MB, signed, two selections).
@@ -143,6 +143,20 @@ to release 1.2 (`mkswu.sh 1.2`: 127 MB, signed, two selections).
   while `rootfs_sr_magic` is set; `test.sh`'s model of `nvbootctrl verify` now clears the
   register and deletes a finished switch's status, as measured, with a new case (N1b). Both
   releases rebuilt with the fix.
+
+From a fresh write of the fixed 1.0 (02:51), every case passed:
+
+| Case | Result |
+|---|---|
+| `ab` (U1, 02:51) | `install 1.2`, a reboot: still 1.0 on slot A; `set-next 1.2`, a reboot: 1.2 on slot B, confirmed (`last_trial` `good`) within a second of ssh; a reboot: still 1.2 on B; `rollback-now`: 1.0 on A |
+| `health` (U2, 02:57) | a failing health check (`fail-health`) rebooted the trial, and its second boot rolled back to 1.0 on A (`fell-back`, slot B marked 255); the next `install` into slot B re-armed it, and that update booted and was confirmed |
+| `panic` (03:01) | a panic on the trial boot (`panic=10`, a warm reset) rolled back at the trial's second boot |
+| `badroot` (03:03) | slot B's superblock zeroed after the install: three tries on slot B, each `Attempting Direct Boot` (the slot's `/boot/extlinux`, unreadable), then `Attempting Kernel Boot` (`B_kernel`), whose kernel found no ext4 root and reset; at the fourth, `Switching the bootchain`, back to chain A, where `fjarr-trial` ended the trial `fell-back`. About three minutes, without the applier |
+| `powercut` (U4, 03:07) | the trial on slot B held open (`hold-health`), then a power cycle: the cold boot gave slot B its retries back, and the applier's one-try counter rolled it back at that second boot |
+
+The first `health` run stopped on `d3.sh` itself, not the applier: the failing trial reboots
+within seconds, before its state could be read; that read is now allowed to miss. The box
+rolled that trial back on its own all the same.
 
 ## Phase D2 on 2026-11-14: NVIDIA's A/B semantics on the Fjarr image
 

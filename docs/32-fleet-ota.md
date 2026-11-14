@@ -1187,15 +1187,28 @@ with that line deleted.
   existed. They also measured part of D2: a slot that never boots is reset
   three times on its chain, then the firmware switches the whole boot chain,
   and after three more L4TLauncher boots the rescue in `recovery`.
-- NVIDIA's semantics: retries on warm reboots without a verify, what
-  `nvbootctrl verify` writes, the count after a cold boot, whether a
-  fallback switches the chain, `BootChainFwResetCount` after a successful
-  switch, and that both chains take L4TLauncher and the capsule from `esp`,
-  as A1 read in edk2-nvidia's source (D2): pending.
-- A watchdog reset on a committed slot, with and without the kernel fixes,
-  and whether it counts down the retry counter like a warm reboot or
-  restores it like a power cut (D2b): pending.
-- Every rehearsal case from a fresh flash (D3): pending.
+- NVIDIA's semantics (D2, 2026-11-14): **as read in the source**, measured
+  on the box. A warm reset without a verify takes one retry; a cold boot
+  seeds the counters afresh; `nvbootctrl verify` clears the whole PMC
+  register (so the counters read 0, unseeded) and deletes a finished
+  switch's `BootChainFwStatus`; a switch moves the firmware chain and the
+  root slot together and leaves `BootChainFwStatus` 0, which, left set,
+  stops the next switch; `BootChainFwResetCount` never shows in Linux; both
+  chains boot L4TLauncher from the one `esp`. The capsule's side waits for
+  E.
+- A watchdog reset on a committed slot (D2b, 2026-11-14): it **counts down
+  like a warm reset**, with and without the kernel fixes, as does a panic;
+  only a power cut seeds afresh. A crashed systemd was never reset: its
+  freeze closes the watchdog. The image sets `CrashReboot=yes`, which
+  reboots it 36 s after the crash.
+- Every rehearsal case from a fresh flash (D3, 2026-11-14): **passed** on
+  the box, release 1.0 to 1.2 without a capsule: an update confirmed and
+  kept across a reboot, then `rollback-now`; a failed health check, a panic
+  on the trial boot and a power cut during the trial each rolled back at the
+  trial's second boot; a slot whose root never mounts fell back by
+  L4TLauncher's own retries and chain switch. It found one fault of the
+  applier, fixed: after `nvbootctrl verify` the retry counters read 0
+  (unseeded), and `set-next` took that for "no retries left".
 - A hung trial kernel recovering by itself, or the gap recorded (D4,
   [docs/18](18-open-questions.md) #48): pending.
 - The capsule as the slot switch, rolled back with the slot: the hypothesis
