@@ -33,9 +33,15 @@ set-active-boot-slot)
   fi
   ;;
 verify)
+  # As measured on the box (D2, 2026-11-14): verify clears the whole scratch register, the magic
+  # and both slots' counts, and deletes a finished switch's BootChainFwStatus 0.
   ev "nvbootctrl:verify"
   if [ -e "$T/fw/model" ]; then
-    printf '0x%x\n' "$(var RootfsRetryCountMax || echo 3)" > "$R/sys/devices/platform/bus@0/c360000.pmc/rootfs_retry_count_$(if [ "$cur" = 0 ]; then echo a; else echo b; fi)"
+    for n in rootfs_sr_magic rootfs_retry_count_a rootfs_retry_count_b; do
+      echo 0x0 > "$R/sys/devices/platform/bus@0/c360000.pmc/$n"
+    done
+    f=$R/sys/firmware/efi/efivars/BootChainFwStatus-781e084c-a330-417c-b678-38e696380cb9
+    if [ "$(var BootChainFwStatus || true)" = 0 ]; then real chmod u+w "$f"; real rm -f "$f"; fi
   fi
   ;;
 dump-slots-info)
@@ -47,6 +53,10 @@ dump-slots-info)
     for s in 0 1; do
       n=$(real cat "$R/sys/devices/platform/bus@0/c360000.pmc/rootfs_retry_count_$(if [ "$s" = 0 ]; then echo a; else echo b; fi)")
       st=$(var "RootfsStatusSlot$(ab "$s")" || true)
+      # An unseeded register (magic 0, as after verify) shows what the next boot seeds (D2).
+      if [ "$(real cat "$R/sys/devices/platform/bus@0/c360000.pmc/rootfs_sr_magic")" = 0x0 ]; then
+        if [ "${st:-0}" = 0 ]; then n=3; else n=0; fi
+      fi
       printf 'slot: %d,             retry_count: %d,             status: %s\n' "$s" "$((n))" \
         "$(if [ "${st:-0}" = 0 ]; then echo normal; else echo unbootable; fi)"
     done

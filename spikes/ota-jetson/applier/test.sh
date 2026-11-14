@@ -295,6 +295,9 @@ installed; b_on 36.4.4
 echo 2360579 > "$R/sys/firmware/efi/esrt/entries/entry0/lowest_supported_fw_version"; refused N13 "below the lowest supported firmware 36.5.3" set-next 1.2
 installed; var RootfsStatusSlotB "$NV" 7 4 255; refused N14 "slot b is marked unbootable" set-next 1.2
 installed; pmcw rootfs_retry_count_b 0; refused N15 "no retries left" set-next 1.2
+# After a verify the register is unseeded (magic 0, both counts 0, D2): not a refusal.
+installed; pmcw rootfs_sr_magic 0; pmcw rootfs_retry_count_a 0; pmcw rootfs_retry_count_b 0; run set-next 1.2
+expect "N1b: set-next after a verify cleared the register" "$(cat "$T/rc")" 0
 installed; kvw "$R/data/fjarr-update/applier/trial" version=1.2 slot=b previous=a boots=0 capsule=0 fw=36.5.2; refused N16 "a trial of 1.2 is in progress" set-next 1.2
 installed; var BootChainFwStatus "$NV" 7 4 0; refused N17 "BootChainFwStatus is 0" set-next 1.2
 

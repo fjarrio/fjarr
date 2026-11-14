@@ -141,7 +141,7 @@ nodes and the booted slot. Both also need this boot verified and no trial in pro
 | N12 | `set-next 1.2` | the capsule in the cache changed since `install` |
 | N13 | `set-next 1.2` | the capsule (36.5.2) is below the ESRT's lowest supported version |
 | N14 | `set-next 1.2` | slot B is marked unbootable |
-| N15 | `set-next 1.2` | slot B's retry counter is 0 |
+| N15 | `set-next 1.2` | slot B's retry counter is 0, in a seeded register (`rootfs_sr_magic` set); after a verify the register is unseeded and both counters read 0, which is not a refusal (N1b) |
 | N16 | `set-next 1.2` | a trial is already pending |
 | N17 | `set-next 1.2` | `BootChainFwStatus` is set (0): a switch not yet settled |
 | M10 | `mark-good` | slot A booted, the trial is on slot B |
@@ -259,8 +259,14 @@ and one `write()` of the whole file, as NVIDIA's `nv_ota_common.func` does with 
   (`rootfs_retry_count_a`/`_b`, `0x%x`, in meta-tegra's
   `0009-NVIDIA-SAUCE-soc-tegra-pmc-Add-sysfs-nodes-to-select.patch`). Without the counter, a
   slot whose trial failed by warm resets keeps a counter of 0 after it is rewritten, and the
-  next switch to it falls straight back (U2 checks it). D2 measures which resets keep the
-  register, and whether `nvbootctrl verify` resets the counter or the magic.
+  next switch to it falls straight back (U2 checks it). D2 measured the rest on the box
+  (2026-11-14): a warm reset, a watchdog reset and a panic each take one retry from a seeded
+  register; a cold boot seeds it afresh; and **`nvbootctrl verify` clears the whole register**,
+  `rootfs_sr_magic` and both slots' counts, so on a verified boot both counters read 0, which
+  means unseeded. `set-next`'s N15 counts only while the magic is set (D3 found it refusing a
+  freshly installed slot after a reboot). `nvbootctrl verify` also deletes a finished switch's
+  `BootChainFwStatus` 0, so the applier's own clearing after it is redundant, and harmless. The
+  model in `test.sh` does both.
 - **`bios_version` has two forms.** NVIDIA's prebuilt firmware reports `36.5.2-gcid-<n>`;
   meta-tegra's source build reports `v36.5.2` (`BUILDID_STRING=v${PV}`,
   `edk2-firmware-tegra-36.5.2.inc` 86, into SMBIOS type 0 through `PcdFirmwareVersionString`,

@@ -379,3 +379,27 @@ slot answers). L6 bounds it: at most two warm resets in a row without a verify.
 LAB_DESKTOP_OK=1 spikes/ota-jetson/d2.sh state        # read only
 LAB_DESKTOP_OK=1 spikes/ota-jetson/d2.sh net|count|switch|wdt
 ```
+
+## D3: the applier's rehearsal on the box (`d3.sh`)
+
+Phase D3 runs the applier ([`applier/README.md`](applier/README.md)) on the box: whole updates
+from a fresh flash of release 1.0 (`d1-flash.sh` with `D1_SKIP_BOOTLOADER=1 D1_ERASE_NVME=1`) to
+release 1.2, a second build of the same image (`yocto/build.sh --image-version 1.2`) packed by
+`mkswu.sh 1.2` into the applier's release directory (`fjarr_1.2.swu`, `fjarr_1.2.fw`, no
+capsule). Both chains hold the same 36.5.2 firmware, so no case stages a capsule (capsules are
+phase E, under Q4). Each case starts on 1.0 in slot A, committed, and ends there; the applier's
+`state` (JSON) is recorded before and after every boot (`.lab/d3/<time>-<case>/`).
+
+| Case | Steps | Expected |
+|---|---|---|
+| `setup` | the release directory to `/data/fjarr-update/stage/1.2`; chain B's marker seeded `fw=36.5.2 state=complete` (D1 wrote both chains with it and D2 booted chain B on it; only a verified boot on a chain writes its marker) | |
+| `ab` (U1) | `install 1.2`; a reboot; `set-next 1.2`; a reboot; the trial confirmed; a reboot; `rollback-now` | 1.0 after the first reboot (installed, not active); 1.2 on slot B, `last_trial` `good`, still 1.2 after a reboot; 1.0 on slot A after `rollback-now` |
+| `health` (U2) | `install`, `fail-health`, `set-next`, a reboot; then `install` again into the same slot, `set-next`, a reboot, `rollback-now` | the failed trial back on 1.0 in slot A at its second boot, `last_trial` `fell-back`; the next update into slot B boots and is confirmed |
+| `panic` | `install`, `panic`, `set-next`, a reboot | the trial's panic, a warm reset; back on 1.0 at its second boot |
+| `badroot` | `install`, slot B's ext4 superblock zeroed, `set-next`, a reboot | slot B never reaches userspace: L4TLauncher takes its three retries and falls back to slot A and chain A; `fjarr-trial` there ends the trial, `fell-back` |
+| `powercut` (U4) | `install`, `hold-health`, `set-next`, a reboot; the trial on slot B, held; a power cycle | the cold boot is the trial's second: back on 1.0 in slot A, although the cold boot gave slot B its retries back |
+
+```bash
+spikes/ota-jetson/mkswu.sh 1.2 <1.2's tegraflash package>
+LAB_DESKTOP_OK=1 spikes/ota-jetson/d3.sh setup|ab|health|panic|badroot|powercut|all
+```

@@ -128,6 +128,22 @@ backups and the logs stay in `.lab/` (gitignored); `.lab/c2/` holds the fingerpr
 | `c2-restore.sh` (20:56 to 21:10, run by Erik in his terminal) | network rescue serving, RCM by software, NVIDIA's restore 711 s: the GPT, `APP` from its tar, every raw partition, and the QSPI (erased, then 64 MiB in 86 s, in parallel with the NVMe); one power cycle, the stock system back with the same fingerprint (`nv_boot_control.conf`, the SSH host keys, the root PARTUUID, five `sl_` modules, both chains normal, the boot entries) |
 | `probe.sh` (21:11, `2026-10-20-probe-stock-after-c2.txt`) | stock R36.4.4, `BootCurrent` 0001, `BootNext` absent, entries as before, the slot variables and `BootChainFw*` at their stock values |
 
+## Phase D3 on 2026-11-14: the applier's rehearsal
+
+`d3.sh` (README, "D3"), from a fresh write of release 1.0 (`CrashReboot=yes`, NVMe only, erased)
+to release 1.2 (`mkswu.sh 1.2`: 127 MB, signed, two selections).
+
+- `setup` (02:39): the release on `/data`, chain B's marker seeded; both chains `complete` on
+  36.5.2.
+- `ab`, first run (02:40): `install 1.2` passed (SWUpdate's hardware check, the three images into
+  `APP_b`, `B_kernel`, `B_kernel-dtb`; slot B labelled `fjarr_1.2`, its counter re-armed to 3),
+  and after a reboot the box still ran 1.0 from slot A. Then **`set-next` refused: "slot b has no
+  retries left"**. The reboot's `nvbootctrl verify` had cleared the PMC register (D2), so slot B's
+  counter read 0, unseeded, and N15 took it as a count. Fixed in the applier: N15 counts only
+  while `rootfs_sr_magic` is set; `test.sh`'s model of `nvbootctrl verify` now clears the
+  register and deletes a finished switch's status, as measured, with a new case (N1b). Both
+  releases rebuilt with the fix.
+
 ## Phase D2 on 2026-11-14: NVIDIA's A/B semantics on the Fjarr image
 
 `d2.sh` (README, "D2"), unattended, the Fjarr image 1.0 on both slots; the state files are in
@@ -185,13 +201,31 @@ mini-PC serves the 36.4.4 one.
   (`RuntimeWatchdogUSec 0`), a shell opened `/dev/watchdog0`, fed it once and held it: reset
   about 100 s later, `reset_reason` LCCPLEXWDT. A panic (`panic=10`) resets as MAINSWRST, the
   reason a `systemctl reboot` gives. Both started from a verified, unseeded register, so both
-  showed slot A at 2 afterwards; whether they count down or seed afresh is `seeded`'s question.
+  showed slot A at 2 afterwards.
+- **A watchdog reset and a panic count down like a warm reset** (`seeded`, 01:56): after a warm
+  reboot without a verify (slot A at 2), the unfed watchdog's reset (LCCPLEXWDT) left slot A at 1,
+  and so did a panic after another warm reboot. Only a power cut (SYS_RESET_N) seeds afresh. A
+  trial that hangs or panics uses up its retries and falls back; a power cut gives them back,
+  which the applier's one-try counter covers.
 - **Why a crashed systemd is never reset:** systemd 255's `freeze()` closes every descriptor
   first ("make sure nobody waits for us"), the watchdog's included, without the magic close, so
   the watchdog core stops it or pings it from the kernel, and nothing resets the box. The crash
   repeated it (no reset in 420 s, then the dead-man). Not the backport: systemd's default. The
   image now sets `CrashReboot=yes` (initrd and slot), a reboot 10 s after the crash, a warm reset
-  L4TLauncher counts; it takes effect with the next flash.
+  L4TLauncher counts. **Checked on the box** (02:35, release 1.0 with it, freshly written): the
+  crash rebooted 36 s later (the 10 s wait and the boot), MAINSWRST, one retry taken.
+- **The unpatched kernel** (NVIDIA's own driver; the `-nvwdt` image written to the NVMe only,
+  `d1-flash.sh` `D1_SKIP_BOOTLOADER=1`, 02:00; `wdt` and `seeded` at 02:04 and 02:27): the
+  unfed hold reset faster, about 25 s after the feed against 100 s, and as BCCPLEXWDT instead of
+  LCCPLEXWDT: NVIDIA's driver gives userspace WDT0, the backport WDT1 (WDT0 is the kernel's).
+  Everything else was the same: the watchdog reset and the panic each took one retry from a
+  seeded register, and a crashed systemd was not reset either (RCM by the dead-man 1209 s
+  later). No "watchdog did not stop!" in either kernel's log: closing the device stops it.
+  So D2b's answer: a watchdog reset is a warm reset for L4TLauncher with and without the
+  backport, and what keeps a hung userspace from resetting is systemd's freeze, not the
+  driver. The backport's own gain, a kernel watchdog for hard lockups, stays unmeasured (no
+  lab way to hang the kernel with interrupts off). `nvfancontrol` failed once on the unpatched
+  image ("Failed to get FAN1 PWM"), after a cold boot: unrelated, noted.
 
 ## Phase D1 on 2026-11-13: passed (fourth run)
 

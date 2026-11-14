@@ -272,7 +272,12 @@ set-next)
   [ "$(kv "$STATE/slot-$f" version)" = "$v" ] || refuse "$v is not installed in slot $f"
   st=$(efivar_value "RootfsStatusSlot$(upper "$f")" "$NV" 2>/dev/null) || st=0
   [ "$st" = 0 ] || refuse "slot $f is marked unbootable ($st)"
-  [ "$(pmc_get "rootfs_retry_count_$f" || echo 0)" -gt 0 ] || refuse "slot $f has no retries left"
+  # The counter means something only once L4TLauncher has seeded the register (its magic set):
+  # nvbootctrl verify clears the whole register, and the next boot seeds each slot from
+  # RootfsStatusSlot, checked above (D2, 2026-11-14).
+  if [ "$(pmc_get rootfs_sr_magic || echo 0)" -ne 0 ]; then
+    [ "$(pmc_get "rootfs_retry_count_$f" || echo 0)" -gt 0 ] || refuse "slot $f has no retries left"
+  fi
   check_committed; check_firmware_idle
   fw=$(kv "$STATE/slot-$f" fw)
   is_fw "$fw" || refuse "slot $f's record names no firmware version"
