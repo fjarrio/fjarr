@@ -10,5 +10,8 @@ FJARR_WDT_BACKPORT ??= "1"
 
 SRC_URI:append:zedbox-mini-orin-nx16 = "${@' file://0001-timer-tegra186-backport-the-kernel-watchdog.patch' if d.getVar('FJARR_WDT_BACKPORT') == '1' else ''}"
 
-# The two kernels must be told apart on the box (uname -r, /proc/version).
+# The two kernels must be told apart on the box (uname -r, /proc/version). meta-tegra's 36.4.4
+# recipe names its git branch after LINUX_VERSION_EXTENSION, so the branch is taken first, before
+# the append (36.5.2's names it outright: the same value either way).
+SRCBRANCH := "${SRCBRANCH}"
 LINUX_VERSION_EXTENSION:append:zedbox-mini-orin-nx16 = "${@'' if d.getVar('FJARR_WDT_BACKPORT') == '1' else '-nvwdt'}"

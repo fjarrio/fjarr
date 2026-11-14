@@ -17,6 +17,7 @@ spikes/ota-jetson/yocto/build.sh stop
 spikes/ota-jetson/yocto/build.sh build [targets]     # in the foreground
 spikes/ota-jetson/yocto/build.sh --image-version 1.2 start          # a second release for the update tests
 spikes/ota-jetson/yocto/build.sh --unpatched-kernel start           # NVIDIA's watchdog driver (D2b)
+spikes/ota-jetson/yocto/build.sh --l4t 36.4.4 --image-version 0.9 start   # the 36.4.4 image (E4)
 ```
 
 `start` again resumes an interrupted build from its stamps and the shared-state cache. The
@@ -24,7 +25,8 @@ default targets are `fjarr-spike-image` and `tegra-uefi-capsules`; `build` and `
 `bitbake -k`, so a failed recipe does not stop the rest and the log's summary lists every
 failure. Everything the build writes
 is under `spikes/ota-jetson/out/yocto/` (gitignored): the layer checkouts, `downloads/`,
-`sstate-cache/`, `build/` (`build-nvwdt/` for `--unpatched-kernel`), and the pinned
+`sstate-cache/`, `build/` (`build-nvwdt/` for `--unpatched-kernel`, `-r36.4.4` appended for
+`--l4t 36.4.4`, with meta-tegra in `meta-tegra-r36.4.4/`), and the pinned
 `tools/kas-container`. The outputs, in `build/tmp/deploy/images/zedbox-mini-orin-nx16/`:
 
 | File | What |
@@ -58,6 +60,7 @@ recovery-partition rescue's own ed25519 host key and its `known_hosts` line for
 | Layer | Branch | Commit | Why |
 |---|---|---|---|
 | meta-tegra | scarthgap | `6d7cc8f27e8b` (2026-09-29) | L4T 36.5.2 (Q1); the branch head and the commit tegra-demo-distro's scarthgap builds |
+| meta-tegra, `--l4t 36.4.4` | scarthgap | `447c21467f65` (2026-01-06) | L4T 36.4.4 for E4 (Q9), `kas-r36.4.4.yml`: the last commit before `ef1f40d6` "meta: update L4T R36.4.4 -> R36.5.0". The other layers keep their pins. The kernel keeps NVIDIA's watchdog driver (`-nvwdt`): the backport applies to 36.5's `timer-tegra186.c`, which NVIDIA reworked after 36.4.4 |
 | poky | scarthgap | `3a3d07f625ae` (yocto-5.0.20+156) | what tegra-demo-distro's scarthgap (`874b4877`, 2026-10-03) builds meta-tegra `6d7cc8f` with |
 | meta-openembedded (meta-oe) | scarthgap | `0f00f8b9a219` | as poky |
 | meta-swupdate | scarthgap | `25c9be858d1a` | the branch head (2026-10-16); tegra-demo-distro leaves this layer to the user. The distro pins SWUpdate 2025.12, the version the x86 spike measured |

@@ -1,0 +1,15 @@
+# The same image on L4T 36.4.4, for E4's real version change (docs/32 Q9): flashed as a 36.4.4
+# box, then moved to 36.5.2 by a capsule. Layered over kas.yml by build.sh --l4t 36.4.4.
+# spec: docs/32-fleet-ota.md#jetson-test-image (phase E, E4)
+header:
+  version: 14
+
+repos:
+  # meta-tegra scarthgap at 447c2146 (2026-01-06), the last commit before "meta: update L4T
+  # R36.4.4 -> R36.5.0" (ef1f40d6). Its own checkout, so the 36.5.2 tree beside it stays at its
+  # pin. The other layers keep kas.yml's pins.
+  meta-tegra:
+    url: https://github.com/OE4T/meta-tegra.git
+    branch: scarthgap
+    commit: 447c21467f65be2389f68a189b6871f13729d222
+    path: meta-tegra-r36.4.4

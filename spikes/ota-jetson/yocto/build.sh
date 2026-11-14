@@ -14,6 +14,8 @@
 #   --image-version V    the release the image reports and is labelled with (default 1.0)
 #   --unpatched-kernel   NVIDIA's watchdog driver, without the backport, in its own build
 #                        directory (out/yocto/build-nvwdt) sharing downloads and shared state
+#   --l4t 36.4.4         the same image on L4T 36.4.4 (kas-r36.4.4.yml, E4) with NVIDIA's watchdog
+#                        driver, in its own build directory (out/yocto/build-r36.4.4); default 36.5.2
 #
 # The default targets are kas.yml's: fjarr-spike-image and tegra-uefi-capsules.
 set -euo pipefail
@@ -31,15 +33,24 @@ kas=$out/tools/kas-container
 image_version=1.0
 wdt_backport=1
 build_name=build
+l4t=36.5.2
 while [ $# -gt 0 ]; do
   case $1 in
     --image-version) image_version=${2:?--image-version needs a value}; shift 2 ;;
     --unpatched-kernel) wdt_backport=0; build_name=build-nvwdt; shift ;;
+    --l4t) l4t=${2:?--l4t needs a value}; shift 2 ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     -*) echo "unknown option $1" >&2; exit 2 ;;
     *) break ;;
   esac
 done
+case $l4t in
+  36.5.2) kas_files=$here/kas.yml ;;
+  # The watchdog backport sits on NVIDIA's rework of timer-tegra186.c in 36.5's kernel; 36.4.4's
+  # kernel has the driver before it, so its image keeps NVIDIA's watchdog (-nvwdt, as D2b's).
+  36.4.4) kas_files=$here/kas.yml:$here/kas-r36.4.4.yml; build_name=$build_name-r36.4.4; wdt_backport=0 ;;
+  *) echo "--l4t: 36.5.2 or 36.4.4, not $l4t" >&2; exit 2 ;;
+esac
 cmd=${1:-}
 [ $# -gt 0 ] && shift
 targets=("$@")
@@ -106,16 +117,17 @@ running() { [ -n "$(docker ps -q --filter "name=^${container}$")" ]; }
 bitbake_targets() { echo "bitbake $* ${targets[*]:-fjarr-spike-image tegra-uefi-capsules}"; }
 
 case $cmd in
-  checkout) run_kas checkout "$here/kas.yml" ;;
-  dry-run) run_kas shell "$here/kas.yml" -c "$(bitbake_targets -n)" ;;
+  checkout) run_kas checkout "$kas_files" ;;
+  dry-run) run_kas shell "$kas_files" -c "$(bitbake_targets -n)" ;;
   # -k: a failed recipe does not stop the rest, so one long run builds all it can.
-  build) run_kas shell "$here/kas.yml" -c "$(bitbake_targets -k)" ;;
+  build) run_kas shell "$kas_files" -c "$(bitbake_targets -k)" ;;
   start)
     if running; then echo "$container is already running; log: $log" >&2; exit 1; fi
     get_kas
     lab_identity
     opts=(--image-version "$image_version")
     [ "$wdt_backport" = 0 ] && opts+=(--unpatched-kernel)
+    opts+=(--l4t "$l4t")
     # Detached from the caller's session, so the build outlives it. Starting again resumes
     # from the build's stamps and the shared state.
     setsid nohup "$0" "${opts[@]}" build "${targets[@]}" > "$log" 2>&1 < /dev/null &
@@ -124,6 +136,6 @@ case $cmd in
     if running; then echo "$container: running"; else echo "$container: not running"; fi
     if [ -f "$log" ]; then tail -n 5 "$log"; fi ;;
   stop) docker stop "$container" ;;
-  shell) run_kas shell "$here/kas.yml" ;;
+  shell) run_kas shell "$kas_files" ;;
   *) sed -n '2,20p' "$0" >&2; exit 2 ;;
 esac
