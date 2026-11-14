@@ -25,6 +25,7 @@ nothing here ships.
 | `mkswu.sh` | the signed SWUpdate package of one slot image, the applier's release directory; with `MKSWU_CAP`, its capsule too, checked by `capsule-check.py` |
 | `capsule-check.py`, `test-capsule-check.py` | L4 for a capsule: each image in it byte-identical to what a flash wrote (`.lab/d1/flashed-*`, kept by `d1-flash.sh`); its off-box tests |
 | `d3.sh` | D3: the applier's rehearsal on the box, without a capsule ([below](#d3-the-appliers-rehearsal-on-the-box-d3sh)) |
+| `d4.sh` | D4: a trial kernel that hangs before userspace, and the way out without the button ([below](#d4-a-trial-kernel-that-hangs-before-userspace-d4sh)) |
 | `e-capsule.sh` | E1–E3: the capsule as the slot switch, rolled back with the slot, and the applier's refusals ([below](#e-the-bootloader-capsule-e-capsulesh)) |
 | `f-powercut.sh` | F: power cuts through the plug during an update ([below](#f-power-cuts-through-the-plug-f-powercutsh)) |
 | `results/` | committed measurements, identifiers redacted ([results/README.md](results/README.md)) |
@@ -409,6 +410,36 @@ phase E, under Q4). Each case starts on 1.0 in slot A, committed, and ends there
 spikes/ota-jetson/mkswu.sh 1.2 <1.2's tegraflash package>
 LAB_DESKTOP_OK=1 spikes/ota-jetson/d3.sh setup|ab|health|panic|badroot|powercut|all
 ```
+
+## D4: a trial kernel that hangs before userspace (`d4.sh`)
+
+Phase D4 measures [docs/18](../../docs/18-open-questions.md) #48 on the box. Each case installs
+1.2 into slot B from a stage without a capsule (`/data/fjarr-update/stage/d4`), then rewrites
+slot B's `extlinux.conf` into a menu: entry 0, the default, the hang, with no initrd, a root that
+does not exist (`root=/dev/fjarr-hang`) and `panic=0`; entry 1, the slot's own entry as
+installed. Then `set-next` and a reboot. Nothing in userspace runs, so nothing opens a watchdog;
+both kernels arm WDT0 at probe (120 s) and pet it from its interrupt.
+
+| Case | The hang | Expected | Measured (2026-11-14) |
+|---|---|---|---|
+| `panic` | the release's kernel, with the watchdog fixes: the root cannot be opened, a panic | the panic stops the interrupt, the watchdog resets, three warm resets, L4TLauncher falls back to slot A | **hung**: no reset in 30 min. The panic never printed its last line, and a USB message came from another CPU 0.3 s after it |
+| `panic-nv` | the same with NVIDIA's unpatched kernel (`setup` copies it from `build.sh --unpatched-kernel`) | the same | **hung**: no reset in 15 min, the same console |
+| `live` | the release's kernel waiting for the root (`rootwait`), alive | no reset: the interrupt keeps the watchdog fed | **hung**: no reset in 5 min; after a power cut slot B's hang again, a cold boot giving it its count back, hung for 2 min more |
+
+**The way out, without the button:** a power cut, then entry 1 at L4TLauncher's menu ("Press 0-1
+to boot selection within 10.0 seconds"), which the mini-PC types on the box's console (the UART,
+while the capture runs). Entry 1 is the slot's own boot: its trial confirms, then `rollback-now`.
+It worked all three times. The button is needed only when the menu never comes (Q4:
+`D4_PERSON_AT_BOX=1`).
+
+```bash
+LAB_DESKTOP_OK=1 spikes/ota-jetson/d4.sh setup
+LAB_DESKTOP_OK=1 D4_PERSON_AT_BOX=1 spikes/ota-jetson/d4.sh panic|panic-nv|live
+```
+
+`D4_RESET_TMO` (1800 s) bounds the wait for the panic cases' fall-back; `D4_LIVE_S` and
+`D4_LIVE2_S` (600 and 300 s) the live hang's watch before and after the power cut. The runs above
+used 1800, 900, and 300 and 120 s.
 
 ## E: the bootloader capsule (`e-capsule.sh`)
 

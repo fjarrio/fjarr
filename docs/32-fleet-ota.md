@@ -1216,10 +1216,31 @@ with that line deleted.
   their random GUIDs and the CRCs over them, and `VER` only in the board's
   FAB and the build time. The lab checks every capsule this way before a
   release may carry it.
-- A hung trial kernel recovering by itself, or the gap recorded (D4,
-  [docs/18](18-open-questions.md) #48): pending.
+- A trial kernel that hangs before userspace (D4, 2026-11-14): **the gap
+  is real**, on both kernels ([docs/18](18-open-questions.md) #48). With no
+  initrd and a root that does not exist, a kernel that panics with
+  `panic=0` was never reset: 30 minutes with the kernel's watchdog fixes, 15
+  without. The watchdog both drivers arm at probe does not cover even a
+  panic: the panic never printed its last line, and another CPU printed
+  after it, so the driver's interrupt is likely still serviced. A kernel
+  waiting for that root, alive, was not reset either, and after a power cut
+  L4TLauncher booted the same slot and the same hang again: the cold boot
+  gave it its count back. A real trial kernel has `panic=10`, so its panics
+  reboot and count down (D3); what stays uncovered is a kernel that stops
+  without panicking, or before the panic reboots. Each hang was left without
+  the button, by a power cut and the slot's own entry chosen at
+  L4TLauncher's menu on the console.
 - The capsule as the slot switch, rolled back with the slot: the hypothesis
-  [above](#updater) (E1, E2): pending.
+  [above](#updater) (E1, E2, 2026-11-14): **confirmed**. `set-next` staged
+  1.2's capsule (36.5.2, the flash's firmware by L4); UEFI wrote chain B and
+  booted it with slot B, 132 s from the reboot to ssh, the capsule's write
+  included; the capsule status 1, the ESRT's last attempt 0, the trial
+  confirmed, still 1.2 after a reboot. `rollback-now` then gave chain A with
+  slot A, and the update forward again needed no capsule. Before staging
+  anything the applier refused each unsafe state on the box (E3): a stale
+  `BootChainFwStatus` or `BootChainFwNext`, a set `BootNext`, a pending
+  capsule, a capsule below the ESRT's lowest supported version, and one
+  changed since `install`.
 - The version ratchet after a reflash, and a real version change with its
   apply time, with 36.4.4's L4TLauncher left in the shared ESP (E4):
   pending.
