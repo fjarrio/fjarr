@@ -17,6 +17,9 @@
 # D0_FLASHVARS_SED=<a sed expression> edits the copy's flashvars for one run (a bisection step,
 # such as leaving one overlay out of BOOTCONTROL_OVERLAYS).
 #
+# D0_FROM=fjarr starts from a Fjarr slot instead of the stock system (root, the image's host key;
+# the fingerprint is the one D1 reads there), and expects it back after the power cycle.
+#
 # D0_NATIVE=1 runs meta-tegra's script on the mini-PC itself instead of in the container, as D1
 # runs it (it mounts the box's disks through the host's udisks); flash/host-setup.sh installs its
 # tools. A passed run records the package's sha256 in .lab/d0/passed and its firmware digest in
@@ -56,6 +59,8 @@ pkg=${1:-$deploy/fjarr-spike-image-zedbox-mini-orin-nx16.rootfs.tegraflash.tar.g
 : "${D0_FLASHVARS_SED:=}"
 : "${D0_SWAP:=}"
 : "${D0_NATIVE:=}"
+: "${D0_FROM:=stock}"   # stock | fjarr: what runs on the box before and after (a Fjarr slot: root, its host key)
+[[ $D0_FROM =~ ^(stock|fjarr)$ ]] || { echo "d0-rcmboot.sh: D0_FROM is stock or fjarr" >&2; exit 2; }
 [[ -z $D0_DTB || -s $D0_DTB ]] || { echo "d0-rcmboot.sh: no $D0_DTB" >&2; exit 2; }
 
 mkdir -p "$LAB_DIR/d0"
@@ -64,6 +69,14 @@ lab_plug_check
 lab_desktop_guard
 
 fingerprint() {
+  if [[ $D0_FROM == fjarr ]]; then # root on a Fjarr slot: what D1 reads there
+    lab_deadman_touch || true
+    lab_box -t 60 'for v in BootChainOsCurrent BootChainFwCurrent BootChainFwStatus RootfsStatusSlotA RootfsStatusSlotB RootfsRetryCountMax; do
+printf "%s: " $v; hexdump -v -e "1/1 \"%02x \"" /sys/firmware/efi/efivars/$v-781e084c-a330-417c-b678-38e696380cb9; echo; done
+for k in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -l -f "$k"; done
+efibootmgr 2>&1 | grep -v "^BootCurrent"; sgdisk -p /dev/nvme0n1' 2>&1
+    return
+  fi
   lab_box_root -t 60 'cat /etc/nv_boot_control.conf
 for k in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -l -f "$k"; done
 echo "root PARTUUID $(findmnt -no PARTUUID /)"
@@ -129,8 +142,9 @@ lab_log "initrd-flash-d0 ready: meta-tegra's script up to the RCM boot"
 [[ -z $D0_FLASHVARS_SED ]] || lab_log "flashvars for this run: $(grep -E 'OVERLAY' "$LAB_DIR/d0/flashvars.txt" | tr '\n' ' ')"
 fi
 
+[[ $D0_FROM == fjarr ]] && lab_use_fjarr_image
 lab_usb_poll
-[[ $LAB_USB_STATE == l4t ]] || lab_die "the mini-PC sees the box as '$LAB_USB_STATE', not L4T"
+[[ $LAB_USB_STATE == "$LAB_RUNNING_USB" ]] || lab_die "the mini-PC sees the box as '$LAB_USB_STATE', not '$LAB_RUNNING_USB' ($D0_FROM)"
 lab_find_box || lab_die "the box does not answer on its MAC"
 lab_box_bootid || lab_die "no boot id: $LAB_SSH_ERR"
 before=$LAB_BOOTID
@@ -187,9 +201,9 @@ while ((SECONDS - t1 < 2 * LAB_BACK_TMO)); do
   if lab_find_box && lab_box_bootid && [[ $LAB_BOOTID != "$before" ]]; then break; fi
   sleep 5
 done
-[[ -n ${LAB_BOOTID:-} && $LAB_BOOTID != "$before" ]] || lab_die "the stock system did not come back after the power cycle"
+[[ -n ${LAB_BOOTID:-} && $LAB_BOOTID != "$before" ]] || lab_die "the $D0_FROM system did not come back after the power cycle"
 state=$(lab_wait_ready 300) || true
-lab_log "stock system back $((SECONDS - t1)) s after the power cycle: systemd $state"
+lab_log "$D0_FROM system back $((SECONDS - t1)) s after the power cycle: systemd $state"
 lab_uart_stop
 fingerprint >"$LAB_DIR/d0/after.txt" || lab_die "could not read the fingerprint after"
 diff "$LAB_DIR/d0/before.txt" "$LAB_DIR/d0/after.txt" >"$LAB_DIR/d0/diff.txt" ||

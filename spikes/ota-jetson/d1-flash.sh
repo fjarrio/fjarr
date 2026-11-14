@@ -17,7 +17,8 @@
 #
 # D1_FROM=rescue starts from Fjarr's recovery rescue instead of the stock system (a second D1 after
 # a slot that did not boot): it answers on the box's MAC with its own host key, and enters RCM with
-# reboot-recovery; D1_FROM=fjarr from a Fjarr slot that answers with the image's host key. L4: the
+# reboot-recovery; D1_FROM=fjarr from a Fjarr slot that answers with the image's host key;
+# D1_FROM=rcm from a box already in RCM (a slot the lab cannot reach, sent there by its dead-man). L4: the
 # package passed D0, or its firmware digest did (lib/lab.sh, lab_firmware_digest: a rebuild that
 # changed only the NVMe's side). D1_ERASE_NVME=1 passes --erase-nvme to initrd-flash, so /data is
 # blank again and the next boot is a first boot. D1_SKIP_BOOTLOADER=1 passes --skip-bootloader: the
@@ -39,10 +40,10 @@ pkg=${1:-$deploy/fjarr-spike-image-zedbox-mini-orin-nx16.rootfs.tegraflash.tar.g
 : "${D1_TMO:=3600}"                # the whole initrd-flash, at most
 : "${D1_FIRST_BOOT_S:=900}"        # from the flash's end to the Fjarr image on ssh
 : "${C1_L4T:=/srv/fjarr-flash/l4t-36.4.4/Linux_for_Tegra}"
-: "${D1_FROM:=stock}"              # stock | rescue: what runs on the box before the flash
+: "${D1_FROM:=stock}"              # stock | rescue | fjarr | rcm: what runs on the box before the flash
 : "${D1_ERASE_NVME:=}"            # 1: initrd-flash --erase-nvme
 : "${D1_SKIP_BOOTLOADER:=}"        # 1: initrd-flash --skip-bootloader (the NVMe only)
-[[ $D1_FROM =~ ^(stock|rescue|fjarr)$ ]] || { echo "d1-flash.sh: D1_FROM is stock, rescue or fjarr" >&2; exit 2; }
+[[ $D1_FROM =~ ^(stock|rescue|fjarr|rcm)$ ]] || { echo "d1-flash.sh: D1_FROM is stock, rescue, fjarr or rcm" >&2; exit 2; }
 [[ ${D1_PERSON_AT_BOX:-} == 1 || $D1_SKIP_BOOTLOADER == 1 ]] ||
   { echo "d1-flash.sh: the QSPI write needs a person at the box (Q4): D1_PERSON_AT_BOX=1 (or D1_SKIP_BOOTLOADER=1)" >&2; exit 2; }
 [[ -s $pkg ]] || { echo "d1-flash.sh: no flash package $pkg" >&2; exit 2; }
@@ -97,6 +98,11 @@ read -r rec_sha rec_size < <(lab_mpc_root -t 60 'printf "%s %s\n" "$(sha256sum <
 
 [[ $D1_FROM == rescue ]] && lab_use_fjarr_rescue
 [[ $D1_FROM == fjarr ]] && lab_use_fjarr_image
+if [[ $D1_FROM == rcm ]]; then # already in RCM (a dead-man, a script that stopped there): nothing to read first
+  lab_usb_poll
+  [[ $LAB_USB_STATE == rcm ]] || lab_die "D1_FROM=rcm, but the mini-PC sees the box as '$LAB_USB_STATE'"
+  echo "D1_FROM=rcm: the box was in RCM before the flash; nothing read" >"$LAB_DIR/d1/before.txt"
+else
 lab_usb_poll
 [[ $LAB_USB_STATE == "$LAB_RUNNING_USB" ]] || lab_die "the mini-PC sees the box as '$LAB_USB_STATE', not '$LAB_RUNNING_USB' ($D1_FROM)"
 lab_find_box || lab_die "the box does not answer on its MAC (L2)"
@@ -114,6 +120,7 @@ fi
 
 lab_rcm_enter
 lab_rcm_wait || lab_die "no RCM within $LAB_RCM_TMO s (the mini-PC sees '$LAB_USB_STATE')"
+fi
 lab_uart_start d1
 lab_need "$D1_TMO" "meta-tegra's initrd-flash"
 lab_lock_check

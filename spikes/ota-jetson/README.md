@@ -462,9 +462,14 @@ revision 5.2: 36.5.2).
 | `e1` (Q4) | on 1.0 in slot A: `install 1.2`; chain B's marker set aside, so the applier cannot know the chain's firmware; `set-next` stages the capsule; a reboot | UEFI writes chain B and boots it with slot B; the trial confirmed; the capsule status 1, `BootChainFwCurrent` 1, `bios_version` v36.5.2, the ESRT's last attempt 0; chain B's marker `complete` 36.5.2; the apply time, reboot included, in the log; still 1.2 after a reboot |
 | `e2` | after `e1`: `rollback-now`; then `install` and `set-next` again, a reboot, and `rollback-now` | chain A with slot A on 36.5.2, both markers `complete`; forward again without a capsule (chain B is known now) and confirmed; back on the baseline |
 
-E4 (a 36.4.4 flash, then the capsule to 36.5.2) and E5 (a broken chain) follow with Q4; the
-36.4.4 image is `yocto/build.sh --l4t 36.4.4 --image-version 0.9`, and D0 boots it from RAM first
-(L4).
+| `e4` (Q4) | on 0.9, a flash of the 36.4.4 build (`D1_ERASE_NVME=1`, so chain B has no marker), in slot A: `install 1.2`, `set-next` stages its 36.5.2 capsule, a reboot; `rollback-now`; then 0.9 with its own 36.4.4 capsule (`MKSWU_CAP=… mkswu.sh 0.9`, checked against 0.9's flash) into slot B, whose chain is now 36.5.2 | chain B on 36.5.2 under 36.4.4's L4TLauncher, the ESP unchanged, the apply time in the log; chain A on 36.4.4 after `rollback-now`; the 36.4.4 capsule refused by the applier or by UEFI, or applied: recorded |
+
+E4 has not run. The 36.4.4 image is `yocto/build.sh --l4t 36.4.4 --image-version 0.9`; its
+package passed D0 on 2026-11-14 (`D0_FROM=fjarr`, from the Fjarr image) and D1 wrote it, but on
+the box its Ethernet (`r8168`, enP8p1s0) times out from 19 s after boot and resets every 10 s, so
+the lab could not reach it, and the image has no console login. The dead-man sent it to RCM and
+`D1_FROM=rcm` wrote 1.0 back (Ethernet fine, ssh 34 s after the flash). E4 waits for that image's
+Ethernet; E5 (a broken chain) follows with Q4.
 
 ```bash
 MKSWU_CAP=out/yocto/build/tmp/deploy/images/zedbox-mini-orin-nx16/tegra-bl.cap \
@@ -472,6 +477,7 @@ MKSWU_CAP=out/yocto/build/tmp/deploy/images/zedbox-mini-orin-nx16/tegra-bl.cap \
 LAB_DESKTOP_OK=1 spikes/ota-jetson/e-capsule.sh setup|e3
 LAB_DESKTOP_OK=1 E_PERSON_AT_BOX=1 spikes/ota-jetson/e-capsule.sh e1
 LAB_DESKTOP_OK=1 spikes/ota-jetson/e-capsule.sh e2
+LAB_DESKTOP_OK=1 E_PERSON_AT_BOX=1 E_BASE=0.9 spikes/ota-jetson/e-capsule.sh e4
 ```
 
 ## F: power cuts through the plug (`f-powercut.sh`)

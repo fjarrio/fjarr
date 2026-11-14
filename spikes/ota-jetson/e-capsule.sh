@@ -6,6 +6,7 @@
 #
 #   LAB_DESKTOP_OK=1 e-capsule.sh setup|e3|e2
 #   LAB_DESKTOP_OK=1 E_PERSON_AT_BOX=1 e-capsule.sh e1
+#   LAB_DESKTOP_OK=1 E_PERSON_AT_BOX=1 E_BASE=0.9 e-capsule.sh e4
 #
 #   setup  stage release E_NEW (out/swu/<v>/ from MKSWU_CAP=… mkswu.sh, with its capsule) and the
 #          refusal releases e3 uses
@@ -19,6 +20,11 @@
 #          firmware 36.5.2, the trial confirmed. Q4: the first capsule writes the QSPI
 #   e2     after e1: rollback-now gives chain A with slot A; forward again with no capsule
 #          (chain B now complete on the release's firmware); back to the baseline
+#   e4     a real version change: on E_BASE (0.9, a flash of the 36.4.4 build) in slot A, E_NEW's
+#          36.5.2 capsule moves chain B to 36.5.2 under 36.4.4's L4TLauncher in the ESP, with its
+#          apply time; rollback-now gives chain A on 36.4.4; then the ratchet: E4_OLD (0.9 with its
+#          own 36.4.4 capsule) into slot B, whose chain is now 36.5.2, refused by the applier, or
+#          by UEFI, or applied: recorded. Q4: both capsules write the QSPI
 #
 # Each case starts on E_BASE in slot A, committed (e2: on E_NEW in slot B after a capsule trial)
 # and records the applier's state at every step (.lab/e/<time>-<case>/<n>-<step>.json). L4: the
@@ -35,6 +41,8 @@ case=${1:?usage: e-capsule.sh setup|e3|e1|e2}
 : "${E_BOOT_TMO:=600}"                   # a reboot to ssh
 : "${E_CAPSULE_TMO:=1800}"               # a reboot that applies a capsule, to ssh
 : "${E_TRIAL_TMO:=1200}"                 # a trial's confirmation or fall-back
+: "${E4_OLD:=0.9}"                        # e4's ratchet: the 36.4.4 release with its own capsule
+: "${E4_OLD_REL:=$LAB_HOME/out/swu/$E4_OLD}"
 STAGE=/data/fjarr-update/stage/$E_NEW
 LOW=/data/fjarr-update/stage/e3-lowest   # E_NEW's root, firmware 36.4.4, a non-capsule
 CHANGED=/data/fjarr-update/stage/e3-changed
@@ -55,10 +63,11 @@ case $case in
   e3) need=1800 ;;
   e1) need=$((900 + E_CAPSULE_TMO + E_TRIAL_TMO + 2 * E_BOOT_TMO)) ;;
   e2) need=$((900 + 4 * E_BOOT_TMO + 2 * E_TRIAL_TMO)) ;;
+  e4) need=$((900 + 2 * E_CAPSULE_TMO + 2 * E_TRIAL_TMO + 4 * E_BOOT_TMO)) ;;
   *) echo "e-capsule.sh: no case '$case'" >&2; exit 2 ;;
 esac
-if [[ $case == e1 && ${E_PERSON_AT_BOX:-} != 1 ]]; then
-  echo "e-capsule.sh: e1's capsule writes the QSPI: a person at the box (Q4), E_PERSON_AT_BOX=1" >&2
+if [[ $case =~ ^e[14]$ && ${E_PERSON_AT_BOX:-} != 1 ]]; then
+  echo "e-capsule.sh: $case's capsule writes the QSPI: a person at the box (Q4), E_PERSON_AT_BOX=1" >&2
   exit 2
 fi
 lab_init "e-$case" "$need"
@@ -298,6 +307,61 @@ c_e2() {
   check "the trial confirmed" '.last_trial.result == "good" and .efivars.BootChainFwCurrent.value == 1'
   reboot_wait "$APPLIER rollback-now" baseline
   expect "back to the baseline" "$E_BASE" a
+}
+
+esp_sha() { lab_box -t 60 'sha256sum /boot/efi/EFI/BOOT/BOOTAA64.efi | cut -d" " -f1'; } # the ESP's L4TLauncher
+
+c_e4() {
+  local t0 esp0 esp rc=0 old=/data/fjarr-update/stage/$E4_OLD
+  [[ -s $E4_OLD_REL/fjarr_$E4_OLD.cap && $(cat "$E4_OLD_REL/fjarr_$E4_OLD.fw") == 36.4.4 ]] ||
+    lab_die "no release $E4_OLD with its 36.4.4 capsule in $E4_OLD_REL (MKSWU_CAP=… mkswu.sh $E4_OLD)"
+  start_on e4 "$E_BASE" a
+  untouched "e4 start"
+  check "e4 start: chain A on 36.4.4" '.bios_version == "v36.4.4" and .esrt.fw == "36.4.4" and .efivars.BootChainFwCurrent.value == 0'
+  lab_log "the ESRT before: fw $(j .esrt.fw), lowest supported $(j .esrt.lowest_supported_fw_version)"
+  esp0=$(esp_sha)
+  lab_log "the ESP's L4TLauncher: ${esp0:0:16}"
+  for f in swu fw cap; do stage "$old" "$E4_OLD_REL/fjarr_$E4_OLD.$f"; done
+  lab_box -t 60 "sha256sum $STAGE/fjarr_$E_NEW.cap" | grep -q "^$cap_sha " || lab_die "the capsule on the box is not the checked one (L4)"
+  # The version change: chain B has no marker after the flash (D1_ERASE_NVME), so set-next stages
+  # the capsule.
+  on_box "$APPLIER install $E_NEW $STAGE" >/dev/null 2>&1 || lab_die "install $E_NEW failed"
+  st installed
+  on_box "$APPLIER set-next $E_NEW" || lab_die "set-next failed"
+  st set-next
+  check "the 36.5.2 capsule staged" '.capsule_staged == true and .capsule_pending == true and .trial.capsule == 1'
+  t0=$SECONDS
+  reboot_wait 'systemctl reboot' capsule-boot "$E_CAPSULE_TMO"
+  lab_log "RESULT e4: 36.4.4 to 36.5.2, ssh $((SECONDS - t0)) s after the reboot (the apply time, the reboot included)"
+  trial_end confirmed
+  expect "the version change" "$E_NEW" b
+  check "the trial confirmed" '.last_trial.result == "good"'
+  check "chain B on 36.5.2" '.capsule_status == 1 and .bios_version == "v36.5.2" and .esrt.fw == "36.5.2" and .esrt.last_attempt_status == 0 and .efivars.BootChainFwCurrent.value == 1 and (.chains[] | select(.chain == "b") | .marker.state == "complete" and .marker.fw == "36.5.2")'
+  lab_log "the ESRT after: fw $(j .esrt.fw), lowest supported $(j .esrt.lowest_supported_fw_version)"
+  esp=$(esp_sha)
+  [[ $esp == "$esp0" ]] || lab_die "the ESP's L4TLauncher changed (${esp:0:16}): L5"
+  lab_log "PASS 36.5.2 started by 36.4.4's L4TLauncher, the ESP unchanged"
+  reboot_wait "$APPLIER rollback-now" rollback
+  expect "rollback-now after the version change" "$E_BASE" a
+  check "chain A on 36.4.4" '.efivars.BootChainFwCurrent.value == 0 and .bios_version == "v36.4.4"'
+  lab_log "the ESRT on chain A: fw $(j .esrt.fw), lowest supported $(j .esrt.lowest_supported_fw_version)"
+  # The ratchet: 0.9 with its 36.4.4 capsule into slot B, whose chain is on 36.5.2.
+  on_box "$APPLIER install $E4_OLD $old" >/dev/null 2>&1 || lab_die "install $E4_OLD failed"
+  st ratchet-installed
+  lab_box -t 120 "$APPLIER set-next $E4_OLD" >"$OUT/ratchet.out" 2>&1 || rc=$?
+  sed 's/^/  | /' "$OUT/ratchet.out" >&2
+  st ratchet-set-next
+  if ((rc == 2)); then
+    untouched "the ratchet"
+    lab_log "RESULT e4 ratchet: the applier refused the 36.4.4 capsule: $(tail -n 1 "$OUT/ratchet.out")"
+  elif ((rc == 0)) && [[ $(j .capsule_staged) == true ]]; then
+    lab_log "RESULT e4 ratchet: the applier staged the 36.4.4 capsule; what UEFI does with it:"
+    reboot_wait 'systemctl reboot' ratchet-boot "$E_CAPSULE_TMO"
+    trial_end ratchet-end
+    lab_log "RESULT e4 ratchet: $(j .booted) from slot $(j .booted_slot), bios $(j .bios_version), capsule status $(j .capsule_status), ESRT last attempt $(j .esrt.last_attempt_status), trial $(j .last_trial.result)"
+  else
+    lab_die "set-next $E4_OLD exited $rc without staging a capsule"
+  fi
 }
 
 "c_$case"
