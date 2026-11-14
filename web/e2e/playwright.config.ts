@@ -28,7 +28,9 @@ export default defineConfig({
   webServer: {
     command: "pnpm run app",
     url: "http://localhost:5174/",
-    reuseExistingServer: true,
+    // Locally a running `pnpm run app` is reused. In CI no step starts one, so a listener already
+    // on :5174 is someone else's, and a persistent runner would otherwise test against it.
+    reuseExistingServer: !process.env.CI,
     timeout: 60_000,
     stdout: "ignore",
   },
