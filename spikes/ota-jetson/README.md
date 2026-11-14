@@ -403,3 +403,27 @@ phase E, under Q4). Each case starts on 1.0 in slot A, committed, and ends there
 spikes/ota-jetson/mkswu.sh 1.2 <1.2's tegraflash package>
 LAB_DESKTOP_OK=1 spikes/ota-jetson/d3.sh setup|ab|health|panic|badroot|powercut|all
 ```
+
+## F: power cuts through the plug (`f-powercut.sh`)
+
+Phase F cuts the box's power at random moments of an update, 20 times per point, from the state
+D3 ends in (1.0 in slot A, committed; release 1.2 staged), with no capsule, so every cut lands
+on the NVMe, the ESP or the UEFI variables, never the QSPI (Q4 stays for E). Each cut is
+`lab_power_cycle` (the plug's one-shot `toggle_after`, L8), then the box must answer on its MAC
+with the image's host key, the applier's `state` is recorded, any trial is followed to its end,
+and the box goes back to the baseline (`rollback-now` from a committed 1.2) before the next cut.
+One CSV line per cut goes to `results/<date>-f-<point>.csv`.
+
+| Point | The cut | Every outcome must be |
+|---|---|---|
+| `install` | 2–30 s into `applier install 1.2` (SWUpdate writing slot B) | 1.0 from slot A; slot B unbootable until a later install completes (8.0's gate) |
+| `set-next` | 0–3 s after `applier set-next 1.2` | 1.0 from slot A with the trial ended, or the trial on slot B, confirmed; never 1.2 committed without its trial |
+| `trial` | 5–45 s after the reboot into the trial (firmware, kernel, early userspace, health) | rolled back to 1.0 on slot A, or 1.2 confirmed if the cut came after `mark-good` |
+| `mark-good` | 0–3 s after the held trial (`hold-health`) is released | confirmed, or rolled back; never a confirmed trial whose slot is unbootable |
+
+A box that does not answer within ten minutes stops the run (L7), unless its dead-man has
+entered RCM, which one power cycle leaves.
+
+```bash
+LAB_DESKTOP_OK=1 spikes/ota-jetson/f-powercut.sh install|set-next|trial|mark-good [count]
+```

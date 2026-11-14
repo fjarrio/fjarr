@@ -1217,7 +1217,12 @@ with that line deleted.
   apply time, with 36.4.4's L4TLauncher left in the shared ESP (E4):
   pending.
 - Power cuts during install: 20 of 20 back on the old slot, 8.0's gate for
-  the Yocto image (F): pending.
+  the Yocto image (F, 2026-11-14): **met**, 17 of them mid-write. And 20
+  each during `set-next`, the trial and `mark-good`, without a capsule: all
+  60 consistent (the trial confirmed, or rolled back at its second boot,
+  never 1.2 committed without its trial). `set-next` and `mark-good` finish
+  faster than the plug switches off, so their half-done states stay tested
+  off the box only. The capsule's cuts wait for E (Q4).
 - NixOS through L4TLauncher from a slot, with rollback and RCM (G): pending.
 - Flash, install and capsule times: pending.
 

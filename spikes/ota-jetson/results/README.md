@@ -128,6 +128,24 @@ backups and the logs stay in `.lab/` (gitignored); `.lab/c2/` holds the fingerpr
 | `c2-restore.sh` (20:56 to 21:10, run by Erik in his terminal) | network rescue serving, RCM by software, NVIDIA's restore 711 s: the GPT, `APP` from its tar, every raw partition, and the QSPI (erased, then 64 MiB in 86 s, in parallel with the NVMe); one power cycle, the stock system back with the same fingerprint (`nv_boot_control.conf`, the SSH host keys, the root PARTUUID, five `sl_` modules, both chains normal, the boot entries) |
 | `probe.sh` (21:11, `2026-10-20-probe-stock-after-c2.txt`) | stock R36.4.4, `BootCurrent` 0001, `BootNext` absent, entries as before, the slot variables and `BootChainFw*` at their stock values |
 
+## Phase F on 2026-11-14: power cuts through the plug
+
+`f-powercut.sh` (README, "F"), release 1.0 to 1.2 without a capsule, the cuts by `lab_power_cycle`;
+one CSV per point (`results/2026-11-14-f-<point>.csv`).
+
+| Point | Cuts | Outcomes |
+|---|---|---|
+| `install` (03:18) | **20 of 20 back on 1.0 in slot A: 8.0's gate for the Jetson Yocto recipe** | 17 mid-write (slot B unbootable, 255, until the next install re-arms it); 3 after SWUpdate had finished (slot B 1.2, bootable, inactive) |
+| `set-next` (08:20) | 20 of 20 consistent | all 20: the trial on slot B, confirmed. `set-next` finishes within a tenth of a second, so even the 0.1 s cut found the switch armed: the half-done state (trial marker written, switch not armed) stays covered by the off-box model only (`applier/test.sh` U5) |
+| `trial` (09:02) | 20 of 20 consistent | 19 confirmed: a cut before `fjarr-trial` counted the boot (firmware, kernel, early userspace; under about 29 s) gives the trial another boot, and a cut after `mark-good` keeps it; 1 (at 35.4 s, counted, not yet confirmed) rolled back to 1.0, slot B 255 |
+| `mark-good` (09:48, the last 7 at 11:00) | 20 of 20 consistent | all confirmed: the confirmation finishes within the plug's own switch-off time after the hold's release |
+
+No cut left the box unreachable, a trial unfinished, or 1.2 committed without its trial. The
+workstation slept twice during the runs: once the box sat in RCM by its dead-man (04:00–08:15);
+once a held trial ran into its 15-minute deadline (`JobTimeoutSec=15min`, `reboot-force`) and
+the trial's second boot rolled it back to 1.0 by itself, a path no case had aimed at. Since then
+the runs hold a `systemd-inhibit` lock on sleep.
+
 ## Phase D3 on 2026-11-14: the applier's rehearsal, passed
 
 `d3.sh` (README, "D3"), from a fresh write of release 1.0 (`CrashReboot=yes`, NVMe only, erased)
@@ -197,9 +215,13 @@ boot without a verify); right after a verify the slot's 0 reads as unseeded. Its
   went to chain A. `rollback-now` clearing the status first is needed.
 - Both chains booted L4TLauncher from the one `esp` (both took the same `BootOrder` entry).
 
-**`net`**: not run yet. The 36.5.2 network rescue is built (`rescue/build.sh --l4t 36.5.2`), but
-`net-rescue.sh` installs it only from 06:30 (Q6: no mini-PC change 00:00–06:00); until then the
-mini-PC serves the 36.4.4 one.
+**`net`** (08:17, after 06:30: `net-rescue.sh` changes the mini-PC only outside the night window,
+Q6): the network rescue built on 36.5.2 (`rescue/build.sh --l4t 36.5.2`, kernel 5.15.199)
+installed on the mini-PC; `BootNext` to `UEFI PXEv4` and a reboot: the rescue on ssh with its own
+host key 85 s later; `reboot -f`: slot A again, `BootNext` consumed, `BootOrder` unchanged (L5).
+The same by `UEFI HTTPv4`: 38 s. L2's network rescue boots on Fjarr's firmware. (The box spent
+04:00–08:15 in RCM, sent there by its dead-man while the workstation slept; `d2.sh recover` brought
+it back.)
 
 **`wdt`** (D2b, the kernel with the watchdog backport), first runs (01:00, 01:10):
 
