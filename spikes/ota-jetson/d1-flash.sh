@@ -131,6 +131,21 @@ if ((rc != 0)); then
   lab_uart_tail 30 >&2 || true
   lab_die "initrd-flash failed (exit $rc): the box stays as it is for the person at it (the console log, then c2-restore.sh)"
 fi
+# What this flash wrote to the QSPI, signed as written, for capsule-check.py: a capsule may carry
+# only that firmware (L4). The mini-PC's copy goes with the next D0 or D1.
+if [[ $D1_SKIP_BOOTLOADER != 1 ]]; then
+  rec=$LAB_DIR/d1/flashed-${sha:0:8}
+  rm -rf "$rec.new"
+  mkdir -p "$rec.new"
+  if lab_mpc_root -t 120 'cd "$1/d1" && tar -cf - signed ./*_bootblob_ver.txt gpt_secondary_3_0.bin gpt_backup_secondary_3_0.bin flash.xml' "$D0_DIR" |
+    tar -C "$rec.new" -xf - && echo "$sha" >"$rec.new/pkg.sha256"; then
+    rm -rf "$rec"
+    mv "$rec.new" "$rec"
+    lab_log "what the flash wrote to the QSPI: ${rec#"$LAB_HOME"/} (capsule-check.py)"
+  else
+    lab_log "WARNING: could not keep what the flash wrote: no capsule of this firmware passes capsule-check.py"
+  fi
+fi
 
 # The Fjarr image: root, its own host key, no USB device while it runs.
 lab_use_fjarr_image

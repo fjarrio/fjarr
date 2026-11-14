@@ -21,6 +21,12 @@ nothing here ships.
 | `c2-restore.sh` | C2: NVIDIA's restore of that backup, NVMe and QSPI, only with a person at the box (Q4); the box's fingerprint before and after |
 | `d0-rcmboot.sh` | D0: the Yocto image's firmware and flash initrd booted from RAM over RCM, writing nothing; `D0_DTB` swaps the device tree for one run; the box's console (debug UART, header pins 9 and 10) goes to `.lab/logs/` |
 | `d1-flash.sh` | D1: the first Fjarr flash, meta-tegra's `initrd-flash` run natively on the mini-PC (QSPI and NVMe), with a person at the box (Q4); then the Fjarr image's state and its RCM round trip (L3) |
+| `d2.sh` | D2: NVIDIA's A/B semantics measured on the Fjarr image, and D2b's watchdog and panic resets ([below](#d2-nvidias-ab-semantics-on-the-fjarr-image-d2sh)) |
+| `mkswu.sh` | the signed SWUpdate package of one slot image, the applier's release directory; with `MKSWU_CAP`, its capsule too, checked by `capsule-check.py` |
+| `capsule-check.py`, `test-capsule-check.py` | L4 for a capsule: each image in it byte-identical to what a flash wrote (`.lab/d1/flashed-*`, kept by `d1-flash.sh`); its off-box tests |
+| `d3.sh` | D3: the applier's rehearsal on the box, without a capsule ([below](#d3-the-appliers-rehearsal-on-the-box-d3sh)) |
+| `e-capsule.sh` | E1–E3: the capsule as the slot switch, rolled back with the slot, and the applier's refusals ([below](#e-the-bootloader-capsule-e-capsulesh)) |
+| `f-powercut.sh` | F: power cuts through the plug during an update ([below](#f-power-cuts-through-the-plug-f-powercutsh)) |
 | `results/` | committed measurements, identifiers redacted ([results/README.md](results/README.md)) |
 | `applier/` | the Jetson applier: the x86 applier's verbs on NVIDIA's boot state |
 | `board/` | the board package: Fjarr's bootloader files, carrier device tree and Stereolabs' pin |
@@ -402,6 +408,39 @@ phase E, under Q4). Each case starts on 1.0 in slot A, committed, and ends there
 ```bash
 spikes/ota-jetson/mkswu.sh 1.2 <1.2's tegraflash package>
 LAB_DESKTOP_OK=1 spikes/ota-jetson/d3.sh setup|ab|health|panic|badroot|powercut|all
+```
+
+## E: the bootloader capsule (`e-capsule.sh`)
+
+Phase E stages a real capsule. The release is D3's 1.2 with the capsule of its build:
+`MKSWU_CAP=<deploy>/tegra-bl.cap mkswu.sh 1.2 <package>` adds `fjarr_1.2.cap` only when
+`capsule-check.py` passes. A capsule writes the QSPI, so L4 holds it to the firmware a flash
+wrote and D0 passed: NVIDIA's blob in the capsule (V3, one image per QSPI partition) must hold,
+image for image, the signed files `initrd-flash` wrote (`d1-flash.sh` keeps them in
+`.lab/d1/flashed-<package>/`; the mini-PC's copy goes with the next flash). Three images a flash
+makes for the board in hand may differ: the two secondary GPTs, only in their random GUIDs and
+the CRCs over them, and `VER`, only in the board's FAB, the build time and its size and CRC line.
+On 2026-11-14 the 1.2 build's capsule passed against D1's flash of 1.0: 27 images identical, the
+three others as described. The release's firmware version is the capsule's own (`VER`, R36
+revision 5.2: 36.5.2).
+
+| Case | Steps | Expected |
+|---|---|---|
+| `setup` | the release with its capsule to `/data/fjarr-update/stage/1.2`, checked by sha256; two refusal releases beside it: 1.2's root with a file that is not a capsule, one saying firmware 36.4.4 | |
+| `e3` | on 1.0 in slot A, each condition set, the verb run, the condition undone (also when the run stops): `BootChainFwStatus` 12 (I15), `BootChainFwNext` from `nvbootctrl` (I16), `BootNext` to the current entry (I17), `OsIndications` bit 2 (I19), all on `install`; on `set-next`, the 36.4.4 release (N13, the ESRT's lowest is 36.5.2 after D1) and a capsule changed since `install` (N12) | each refused (exit 2) for its own reason, nothing staged, no trial, no switch pending; at the end no variable left set and chain B's marker as before. No reboot; the refusal releases carry no capsule, so even a staged copy could not reach the QSPI. `BootChainFwResetCount` (I18) is left to the off-box tests: D2 never saw the variable |
+| `e1` (Q4) | on 1.0 in slot A: `install 1.2`; chain B's marker set aside, so the applier cannot know the chain's firmware; `set-next` stages the capsule; a reboot | UEFI writes chain B and boots it with slot B; the trial confirmed; the capsule status 1, `BootChainFwCurrent` 1, `bios_version` v36.5.2, the ESRT's last attempt 0; chain B's marker `complete` 36.5.2; the apply time, reboot included, in the log; still 1.2 after a reboot |
+| `e2` | after `e1`: `rollback-now`; then `install` and `set-next` again, a reboot, and `rollback-now` | chain A with slot A on 36.5.2, both markers `complete`; forward again without a capsule (chain B is known now) and confirmed; back on the baseline |
+
+E4 (a 36.4.4 flash, then the capsule to 36.5.2) and E5 (a broken chain) follow with Q4; the
+36.4.4 image is `yocto/build.sh --l4t 36.4.4 --image-version 0.9`, and D0 boots it from RAM first
+(L4).
+
+```bash
+MKSWU_CAP=out/yocto/build/tmp/deploy/images/zedbox-mini-orin-nx16/tegra-bl.cap \
+  spikes/ota-jetson/mkswu.sh 1.2 out/pkg/1.2-n15/<the package>
+LAB_DESKTOP_OK=1 spikes/ota-jetson/e-capsule.sh setup|e3
+LAB_DESKTOP_OK=1 E_PERSON_AT_BOX=1 spikes/ota-jetson/e-capsule.sh e1
+LAB_DESKTOP_OK=1 spikes/ota-jetson/e-capsule.sh e2
 ```
 
 ## F: power cuts through the plug (`f-powercut.sh`)

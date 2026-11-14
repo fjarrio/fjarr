@@ -1209,6 +1209,13 @@ with that line deleted.
   L4TLauncher's own retries and chain switch. It found one fault of the
   applier, fixed: after `nvbootctrl verify` the retry counters read 0
   (unseeded), and `set-next` took that for "no retries left".
+- The capsule's payload against the flash (L4, 2026-11-14, off the box):
+  **the flash's firmware**. Of the 30 QSPI images in the build's capsule, 27
+  are byte-identical to the signed files D1's flash wrote. The other three
+  are made for the board in hand: the two secondary GPTs differ only in
+  their random GUIDs and the CRCs over them, and `VER` only in the board's
+  FAB and the build time. The lab checks every capsule this way before a
+  release may carry it.
 - A hung trial kernel recovering by itself, or the gap recorded (D4,
   [docs/18](18-open-questions.md) #48): pending.
 - The capsule as the slot switch, rolled back with the slot: the hypothesis
