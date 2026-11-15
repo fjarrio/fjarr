@@ -26,7 +26,8 @@ nothing here ships.
 | `capsule-check.py`, `test-capsule-check.py` | L4 for a capsule: each image in it byte-identical to what a flash wrote (`.lab/d1/flashed-*`, kept by `d1-flash.sh`); its off-box tests |
 | `d3.sh` | D3: the applier's rehearsal on the box, without a capsule ([below](#d3-the-appliers-rehearsal-on-the-box-d3sh)) |
 | `d4.sh` | D4: a trial kernel that hangs before userspace, and the way out without the button ([below](#d4-a-trial-kernel-that-hangs-before-userspace-d4sh)) |
-| `e-capsule.sh` | E1–E3: the capsule as the slot switch, rolled back with the slot, and the applier's refusals ([below](#e-the-bootloader-capsule-e-capsulesh)) |
+| `uart-sh.sh` | one command on the box through its console, when its network fails ([below](#the-boxs-console-uart-shsh)) |
+| `e-capsule.sh` | E1–E4: the capsule as the slot switch, rolled back with the slot, and the applier's refusals ([below](#e-the-bootloader-capsule-e-capsulesh)) |
 | `f-powercut.sh` | F: power cuts through the plug during an update ([below](#f-power-cuts-through-the-plug-f-powercutsh)) |
 | `results/` | committed measurements, identifiers redacted ([results/README.md](results/README.md)) |
 | `applier/` | the Jetson applier: the x86 applier's verbs on NVIDIA's boot state |
@@ -464,12 +465,21 @@ revision 5.2: 36.5.2).
 
 | `e4` (Q4) | on 0.9, a flash of the 36.4.4 build (`D1_ERASE_NVME=1`, so chain B has no marker), in slot A: `install 1.2`, `set-next` stages its 36.5.2 capsule, a reboot; `rollback-now`; then 0.9 with its own 36.4.4 capsule (`MKSWU_CAP=… mkswu.sh 0.9`, checked against 0.9's flash) into slot B, whose chain is now 36.5.2 | chain B on 36.5.2 under 36.4.4's L4TLauncher, the ESP unchanged, the apply time in the log; chain A on 36.4.4 after `rollback-now`; the 36.4.4 capsule refused by the applier or by UEFI, or applied: recorded |
 
-E4 has not run. The 36.4.4 image is `yocto/build.sh --l4t 36.4.4 --image-version 0.9`; its
-package passed D0 on 2026-11-14 (`D0_FROM=fjarr`, from the Fjarr image) and D1 wrote it, but on
-the box its Ethernet (`r8168`, enP8p1s0) times out from 19 s after boot and resets every 10 s, so
-the lab could not reach it, and the image has no console login. The dead-man sent it to RCM and
-`D1_FROM=rcm` wrote 1.0 back (Ethernet fine, ssh 34 s after the flash). E4 waits for that image's
-Ethernet; E5 (a broken chain) follows with Q4.
+The 36.4.4 image is `yocto/build.sh --l4t 36.4.4 --image-version 0.9`; its package passed D0
+on 2026-11-14 (`D0_FROM=fjarr`, from the Fjarr image). Its first flash lost the Ethernet: the
+transmit queue of `r8168` (enP8p1s0) timed out every 10 s while it still received, so the lab
+could not reach it, and the dead-man sent it to RCM (`D1_FROM=rcm` wrote 1.0 back). Through the
+console (`uart-sh.sh`, below) the cause: `pci=pcie_bus_perf`, a 36.5 kernel argument, left the
+root port's Max Payload Size at 256 bytes, above the RTL8168's 128, and only 36.5's `r8168` sets
+it to 128 at probe. `kas-r36.4.4.yml` drops the flag. E5 (a broken chain) follows E4 with Q4.
+
+## The box's console (`uart-sh.sh`)
+
+Lab images log root in on the debug UART's console (`fjarr-spike-lab`'s autologin; never in a
+product image), and the mini-PC holds that UART, so a slot whose network fails can still be
+looked at: `uart-sh.sh [-t <seconds>] '<command>'` types the command between two markers and
+prints the box's answer. It refuses while a console capture runs (two readers would split the
+bytes), so it runs between the lab scripts. D4's way out types on the same console.
 
 ```bash
 MKSWU_CAP=out/yocto/build/tmp/deploy/images/zedbox-mini-orin-nx16/tegra-bl.cap \

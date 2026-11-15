@@ -1243,10 +1243,14 @@ with that line deleted.
   changed since `install`.
 - The version ratchet after a reflash, and a real version change with its
   apply time, with 36.4.4's L4TLauncher left in the shared ESP (E4):
-  pending. The 36.4.4 build passed D0 and was flashed (2026-11-14), but its
-  Ethernet (`r8168`) times out from 19 s after boot and resets every 10 s,
-  which the 36.5.2 build never did on the same box; the lab flashed 36.5.2
-  back. E4 waits for that fix.
+  pending. The 36.4.4 build's first flash (2026-11-14) lost its Ethernet:
+  the NIC's transmit queue timed out every 10 s while it still received. The
+  cause (2026-11-15, over the console): `pci=pcie_bus_perf`, which came into
+  meta-tegra's kernel arguments with its 36.5.0 update, left the root port
+  at a 256-byte Max Payload Size above the RTL8168's 128; NVIDIA's 36.5
+  `r8168` sets the root port to 128 at probe, 36.4.4's does not. Setting it
+  to 128 by hand brought the link back at once. The 36.4.4 build now drops
+  the flag, as 36.4.4's own arguments and the stock box do.
 - Power cuts during install: 20 of 20 back on the old slot, 8.0's gate for
   the Yocto image (F, 2026-11-14): **met**, 17 of them mid-write. And 20
   each during `set-next`, the trial and `mark-good`, without a capsule: all

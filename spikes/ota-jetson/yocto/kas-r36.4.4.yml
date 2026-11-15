@@ -13,3 +13,13 @@ repos:
     branch: scarthgap
     commit: 447c21467f65be2389f68a189b6871f13729d222
     path: meta-tegra-r36.4.4
+
+local_conf_header:
+  # The machine's kernel arguments are 36.5's (conf/machine/zedbox-mini-orin-nx16.conf), and
+  # pci=pcie_bus_perf came with meta-tegra's 36.5.0 update together with NVIDIA's r8168 fix for it:
+  # 36.5's driver sets the root port to the NIC's 128-byte Max Payload Size at probe. 36.4.4's
+  # driver does not, so with the flag the root port stays at 256, the NIC's transmit DMA stalls
+  # and its queue times out every 10 s (found on the box 2026-11-15). 36.4.4's own arguments, as
+  # the stock box ran, have no flag.
+  fjarr-r36.4.4-kernel-args: |
+    KERNEL_ARGS:remove = "pci=pcie_bus_perf"

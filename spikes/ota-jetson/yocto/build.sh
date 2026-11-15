@@ -32,12 +32,13 @@ kas=$out/tools/kas-container
 
 image_version=1.0
 wdt_backport=1
+unpatched=0 # --unpatched-kernel given (36.4.4 turns the backport off by itself: not passed on for it)
 build_name=build
 l4t=36.5.2
 while [ $# -gt 0 ]; do
   case $1 in
     --image-version) image_version=${2:?--image-version needs a value}; shift 2 ;;
-    --unpatched-kernel) wdt_backport=0; build_name=build-nvwdt; shift ;;
+    --unpatched-kernel) wdt_backport=0; unpatched=1; build_name=build-nvwdt; shift ;;
     --l4t) l4t=${2:?--l4t needs a value}; shift 2 ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     -*) echo "unknown option $1" >&2; exit 2 ;;
@@ -126,7 +127,7 @@ case $cmd in
     get_kas
     lab_identity
     opts=(--image-version "$image_version")
-    [ "$wdt_backport" = 0 ] && opts+=(--unpatched-kernel)
+    [ "$unpatched" = 1 ] && opts+=(--unpatched-kernel)
     opts+=(--l4t "$l4t")
     # Detached from the caller's session, so the build outlives it. Starting again resumes
     # from the build's stamps and the shared state.

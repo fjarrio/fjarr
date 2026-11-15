@@ -4,7 +4,8 @@ known_hosts never changes across reflashes and slot switches, the certificate SW
 checks the lab's test packages against, and the lab dead-man (L3), the rescues' script from \
 spikes/ota-jetson/rescue/rootfs/ (the single source) under a systemd unit. All of it comes from spikes/ota-jetson/.lab/ (the \
 image's identity in .lab/yocto/, the SWUpdate test key in .lab/swu.*), which yocto/build.sh \
-fills once and git never sees."
+fills once and git never sees. And root logged in on the debug UART's console, the way in when \
+a slot's network fails."
 # spec: docs/32-fleet-ota.md#jetson-test-image
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
@@ -23,6 +24,7 @@ SRC_URI = " \
     file://swu.crt \
     file://fjarr-lab-deadman \
     file://fjarr-lab-deadman.service \
+    file://fjarr-lab-autologin.conf \
 "
 S = "${WORKDIR}"
 
@@ -45,6 +47,9 @@ do_install() {
     sed -i 's/fjarr-net-rescue: /fjarr-lab-deadman: /' ${D}${sbindir}/fjarr-lab-deadman
     ! grep -q fjarr-net-rescue ${D}${sbindir}/fjarr-lab-deadman || bbfatal "the network rescue's name is still in the dead-man"
     install -D -m 0644 ${S}/fjarr-lab-deadman.service ${D}${systemd_system_unitdir}/fjarr-lab-deadman.service
+
+    # Root on the debug UART's console (ttyTCU0, SERIAL_CONSOLES), lab images only.
+    install -D -m 0644 ${S}/fjarr-lab-autologin.conf ${D}${systemd_system_unitdir}/serial-getty@ttyTCU0.service.d/fjarr-lab-autologin.conf
 }
 
 FILES:${PN} = "${ROOT_HOME}/.ssh ${sysconfdir}/ssh ${sysconfdir}/fjarr ${sbindir}/fjarr-lab-deadman ${systemd_system_unitdir}"
