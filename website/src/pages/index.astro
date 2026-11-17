@@ -1,8 +1,9 @@
 ---
 // fjarr.io landing page — sells the idea, links to the docs.
-// spec: docs/19-website-and-publishing.md#landing-page-content-model — section order, owners,
-// badge states (#badge-states) and claim rules (#claims). Every number here is a row of
-// docs/16-performance-budgets.md#measured; every badge is docs/17's state.
+// spec: docs/19-website-and-publishing.md#landing-page-content-model — section order, owners
+// and claim rules (#claims). The page describes Fjarr as designed, in the present tense, with no
+// availability badges (ADR-0042); every number is a row of docs/16-performance-budgets.md#measured
+// or a recorded test count, and the release card is what apt stable serves.
 
 import "../styles/theme.css";
 import ThemeInit from "../components/ThemeInit.astro";
@@ -16,18 +17,17 @@ import { Code } from "@astrojs/starlight/components";
 const release = "0.1.2";
 
 const capabilities = [
-  { icon: "camera" as const, name: "Camera video", desc: "Many cameras, one encode fanned out to every viewer, adaptive bitrate. Cameras that already speak H.264 cost no encoder at all.", status: "available" },
-  { icon: "terminal" as const, name: "Remote terminal", desc: "A shell in the browser, over the same session. Off until configured, audited when opened.", status: "available" },
-  { icon: "link" as const, name: "Network link", desc: "A routable address for one machine: ssh, scp, ROS 2, your debugger, your vendor tools.", status: "available" },
-  { icon: "graph" as const, name: "Pipeline introspection", desc: "The live media pipeline as a graph, on the machine and in your dashboard.", status: "available" },
-  { icon: "monitor" as const, name: "Remote desktop", desc: "The machine's own desktop in your dashboard, unattended after a reboot, every monitor.", status: "in development" },
-  { icon: "mic" as const, name: "Audio", desc: "Hear the machine's microphones, talk through its speaker, push-to-talk.", status: "planned" },
-  { icon: "folder" as const, name: "Files", desc: "The machine's files as a drive, and resumable transfers that survive a flaky LTE link.", status: "planned" },
-  { icon: "chart" as const, name: "Telemetry & logs", desc: "Typed sensor streams with change-triggered updates, and logs that store and forward when offline.", status: "planned" },
-  { icon: "pulse" as const, name: "Fleet observability", desc: "Versions, host metrics and error rates across the fleet.", status: "planned" },
-  { icon: "refresh" as const, name: "Atomic OTA", desc: "A/B updates with rollback and streamed binary diffs.", status: "planned" },
+  { icon: "camera" as const, name: "Camera video", desc: "Many cameras, one encode fanned out to every viewer, adaptive bitrate. Cameras that already speak H.264 cost no encoder at all." },
+  { icon: "terminal" as const, name: "Remote terminal", desc: "A shell in the browser, over the same session. Off until configured, audited when opened." },
+  { icon: "link" as const, name: "Network link", desc: "A routable address for one machine: ssh, scp, ROS 2, your debugger, your vendor tools." },
+  { icon: "graph" as const, name: "Pipeline introspection", desc: "The live media pipeline as a graph, on the machine and in your dashboard." },
+  { icon: "monitor" as const, name: "Remote desktop", desc: "The machine's own desktop in your dashboard, unattended after a reboot, every monitor." },
+  { icon: "mic" as const, name: "Audio", desc: "Hear the machine's microphones, talk through its speaker, push-to-talk." },
+  { icon: "folder" as const, name: "Files", desc: "The machine's files as a drive, and resumable transfers that survive a flaky LTE link." },
+  { icon: "chart" as const, name: "Telemetry & logs", desc: "Typed sensor streams with change-triggered updates, and logs that store and forward when offline." },
+  { icon: "pulse" as const, name: "Fleet observability", desc: "Versions, host metrics and error rates across the fleet." },
+  { icon: "refresh" as const, name: "Fleet OTA", desc: "A whole robot under one signed release — OS image, apps, peripherals — installed when it's ready, rolled back when it isn't healthy." },
 ];
-const badgeClass = (s: string) => (s === "available" ? "avail" : s === "in development" ? "dev" : "");
 
 // docs/16#measured — copy, never round into something the table doesn't say.
 const numbers = [
@@ -86,6 +86,26 @@ const efficiency = [
 const connectSession = `$ fjarr-connect login                 # your company's sign-in, in the browser
 $ fjarr-connect robot-024
 robot-024  100.70.118.224  mtu 1184  up in 0.8 s`;
+// Section 8: the updater's steps (docs/32#updater) and what the design promises (docs/32, docs/17 M8).
+const runSteps = [
+  ["Fetch", "only the chunks it lacked, within today's budget"],
+  ["Ready", "charging · not moving · owner chose tonight"],
+  ["Prepare", "arm parked, motors off"],
+  ["Install", "os → slot B · app · config"],
+  ["Switch", "rebooted into slot B"],
+  ["Health", "agent back · probes pass"],
+  ["Peripherals", "GNSS configuration, verified by read-back"],
+  ["Commit", "slot B marked good"],
+  ["Firmware", "motor controller over CAN"],
+];
+const ota: { icon: "seal" | "battery" | "download" | "power" | "chip" | "layers"; title: string; desc: string; cloud?: boolean }[] = [
+  { icon: "seal", title: "One signed release", desc: "Everything a robot runs — OS image, applications, configuration, peripheral firmware — pinned under one version and signed with your keys. A robot always runs exactly one release." },
+  { icon: "battery", title: "Installs when the robot is ready", desc: "On the charger, not moving, nobody driving it — and, if your fleet asks owners, at the time the owner picks. Taking control is refused while it installs." },
+  { icon: "download", title: "Days of downloading, on a budget", desc: "Only the chunks a robot lacks, resumed after every drop, within a daily data budget — so a big release crosses a thin LTE link over a few days without starving its video." },
+  { icon: "power", title: "Survives a power cut", desc: "A/B slots: a cut mid-install boots the previous slot, a failed health check rolls back. In the lab, 220 power cuts at random moments of an update, on Jetson and x86: every machine came back on a consistent slot." },
+  { icon: "chip", title: "Peripherals too", desc: "GNSS receivers, MCUs on the CAN bus, the site's router: small handlers that verify every write by reading it back and roll back what can be rolled back. Write your own in any language." },
+  { icon: "layers", title: "Staged by a person", desc: "Campaigns go to one robot, then a few, then the rest — promoted by someone watching how each stage compares with the fleet, and abortable at any point.", cloud: true },
+];
 // Section 3's snippets: real exported names only (docs/19), claims as docs/09#a-session-grants.
 const backendSnippet = `// any JWT library, any language
 const grant = jwt.sign({
@@ -178,7 +198,6 @@ const client = createFjarrClient({
       .card > .ic { margin-bottom: 14px; }
       .badge { font-size: 0.72rem; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--faint); white-space: nowrap; font-weight: 500; }
       .badge.avail { border-color: color-mix(in srgb, var(--ok) 55%, transparent); color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, transparent); }
-      .badge.dev { border-color: color-mix(in srgb, var(--fj-blue) 60%, transparent); color: var(--accent); background: color-mix(in srgb, var(--fj-blue) 10%, transparent); }
       code { background: var(--sl-color-bg-inline-code); border: 1px solid var(--line-soft); padding: 1px 6px; border-radius: 5px; font-family: var(--sl-font-system-mono, ui-monospace, monospace); font-size: 0.86em; color: var(--text); overflow-wrap: anywhere; }
       pre { background: var(--fj-code-bg); border: 1px solid var(--line-soft); border-radius: 10px; padding: 14px 16px; margin: 12px 0 0; overflow-x: auto; font-size: 0.85rem; line-height: 1.55; }
       pre code { background: none; border: 0; padding: 0; color: var(--text); overflow-wrap: normal; }
@@ -217,6 +236,20 @@ const client = createFjarrClient({
       .numbers .l { display: block; color: var(--muted); font-size: 0.95rem; }
       .numbers .d { display: block; color: var(--faint); font-size: 0.8rem; margin-top: 4px; }
 
+      /* Fleet OTA: a run, shown like a CI job (docs/32#runs) */
+      .ota { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 32px; align-items: start; margin-bottom: 28px; }
+      .ota .lede { margin-bottom: 18px; }
+      .recipes { color: var(--muted); margin: 0; font-size: 0.97rem; }
+      .recipes b { color: var(--text); font-weight: 600; }
+      .run { background: var(--fj-code-bg); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: 0.9rem; }
+      .run header { display: flex; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line-soft); color: var(--text); font-weight: 600; }
+      .run header span:last-child { color: var(--ok); font-weight: 500; }
+      .run ol { list-style: none; margin: 0; padding: 6px 0; }
+      .run li { display: grid; grid-template-columns: 20px 7.5rem minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 6px 16px; }
+      .run li :global(svg) { color: var(--ok); position: relative; top: 3px; }
+      .run .step { color: var(--text); font-weight: 500; }
+      .run .what { color: var(--faint); font-family: var(--sl-font-system-mono, ui-monospace, monospace); font-size: 0.82rem; overflow-wrap: anywhere; }
+      .cloud { display: inline-block; margin-left: 6px; font-size: 0.72rem; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--faint); font-weight: 500; vertical-align: 2px; }
       ul.features { columns: 2 16rem; padding-left: 1.2rem; color: var(--muted); margin: 0 0 32px; }
       ul.features li { break-inside: avoid; margin-bottom: 6px; }
       ul.features li::marker { color: var(--fj-blue); }
@@ -232,11 +265,13 @@ const client = createFjarrClient({
       footer { border-top: 1px solid var(--line-soft); margin-top: 40px; padding: 28px 0 56px; color: var(--faint); text-align: center; font-size: 0.92rem; }
 
       @media (max-width: 900px) {
+        .ota { grid-template-columns: minmax(0, 1fr); }
         .hero-inner { grid-template-columns: minmax(0, 1fr); gap: 36px; padding-top: 72px; padding-bottom: 64px; }
       }
       @media (max-width: 720px) {
         .wrap { padding-left: 16px; padding-right: 16px; }
         section.wrap { padding-top: 40px; padding-bottom: 40px; }
+        .run li { grid-template-columns: 18px 5.6rem minmax(0, 1fr); gap: 8px; padding: 6px 12px; }
         .tiers-diagram { grid-template-columns: 1fr; }
         .tiers-diagram .backend, .tiers-diagram .control, .tiers-diagram .machine, .tiers-diagram .dashboard, .tiers-diagram .p2p { grid-column: 1; grid-row: auto; }
         .tiers-diagram .control { padding: 0 24px; }
@@ -349,22 +384,19 @@ const client = createFjarrClient({
       <p class="note">The contract between the pieces: <a href="/09-interfaces/">interfaces</a> · <a href="/02-architecture/">architecture</a></p>
     </section>
 
-    <!-- 4. Capabilities (docs/06 + docs/17; badges per docs/19#badge-states) -->
+    <!-- 4. Capabilities (docs/06) -->
     <section class="wrap">
       <h2>Capabilities <small>Everything is a plugin, including yours</small></h2>
       <div class="grid">
         {capabilities.map((c) => (
           <div class="card">
-            <div class="top">
-              <span class="ic"><FjIcon name={c.icon} /></span>
-              <span class={`badge ${badgeClass(c.status)}`}>{c.status}</span>
-            </div>
+            <span class="ic"><FjIcon name={c.icon} /></span>
             <h3>{c.name}</h3>
             <p>{c.desc}</p>
           </div>
         ))}
       </div>
-      <p class="note"><b>available</b>: in a release · <b>in development</b>: running on main · <b>planned</b>: on the <a href="/17-roadmap/">roadmap</a>. We don't market what doesn't run.</p>
+      <p class="note">The full catalog, and how to write your own: <a href="/06-capabilities/">capabilities</a> · <a href="/05-extension-model/">extension model</a>.</p>
     </section>
 
     <!-- 5. Measured, not promised (docs/16#measured) -->
@@ -387,7 +419,7 @@ const client = createFjarrClient({
       <h2>The machine's desktop <small>And control that's safe for one that moves</small></h2>
       <p class="lede">
         The desktop your machine already has, in your dashboard — no tool for the
-        end customer to install. <span class="badge dev">in development</span>
+        end customer to install.
       </p>
       <ul class="features">
         <li>Unattended: back after a reboot with nobody at the machine</li>
@@ -439,7 +471,41 @@ const client = createFjarrClient({
       </p>
     </section>
 
-    <!-- 8. Trust and efficiency (docs/10, docs/23, docs/26, ADR-0025) -->
+    <!-- 8. Updates for the whole fleet (docs/32, docs/06#fjarrota, ADR-0036, ADR-0037) -->
+    <section class="wrap">
+      <h2>Updates for the whole fleet <small>From the OS image to the GNSS receiver, under one version</small></h2>
+      <div class="ota">
+        <div>
+          <p class="lede">
+            Ship a release, and every robot gets onto it safely: when it's charging and
+            standing still, without saturating its link, and back on the previous
+            version if anything doesn't come up healthy. Every step reads like a CI job, live
+            while it runs and afterwards, even across reboots and offline stretches.
+          </p>
+          <p class="recipes">
+            Reference images for <b>Yocto</b> and <b>NixOS</b> on NVIDIA Jetson and x86,
+            an <b>Ubuntu A/B</b> image for x86, and plain <b>apt</b> for the Ubuntu robots
+            you already have.
+          </p>
+        </div>
+        <div class="run" role="img" aria-label="An update run shown step by step: fetch, ready, prepare, install, switch, health, peripherals, commit and firmware, each succeeded.">
+          <header><span>robot-024 → release 1.2</span><span>succeeded</span></header>
+          <ol>
+            {runSteps.map(([step, what]) => (
+              <li><FjIcon name="check" size="1rem" /><span class="step">{step}</span><span class="what">{what}</span></li>
+            ))}
+          </ol>
+        </div>
+      </div>
+      <div class="grid">
+        {ota.map((t) => (
+          <div class="card"><span class="ic"><FjIcon name={t.icon} /></span><h3>{t.title}{t.cloud && <span class="cloud">Fjarr Cloud</span>}</h3><p>{t.desc}</p></div>
+        ))}
+      </div>
+      <p class="note">The design, step by step: <a href="/32-fleet-ota/">fleet OTA</a> · <a href="/32-fleet-ota/#runs">run logs</a> · <a href="/32-fleet-ota/#peripherals">peripheral handlers</a>.</p>
+    </section>
+
+    <!-- 9. Trust and efficiency (docs/10, docs/23, docs/26, ADR-0025) -->
     <section class="wrap">
       <h2>Safe to put on a customer's network</h2>
       <div class="grid">
@@ -456,7 +522,7 @@ const client = createFjarrClient({
       <p class="note">The whole threat model is public: <a href="/10-security/">security</a>. Encoders and hardware: <a href="/04-supported-platforms/">supported platforms</a>.</p>
     </section>
 
-    <!-- 9. Built for the people who debug machines (docs/24, docs/26) -->
+    <!-- 10. Built for the people who debug machines (docs/24, docs/26) -->
     <section class="wrap">
       <h2>Built for the people who debug machines</h2>
       <div class="grid">
@@ -466,7 +532,7 @@ const client = createFjarrClient({
       </div>
     </section>
 
-    <!-- 10. Open core, honest split (docs/03, ADR-0011) -->
+    <!-- 11. Open core, honest split (docs/03, ADR-0011) -->
     <section class="wrap">
       <h2>Open core, honest split</h2>
       <table class="tiers">
@@ -477,7 +543,7 @@ const client = createFjarrClient({
       <p class="note">The whole business plan is a public document: <a href="/03-product-strategy/">product strategy</a>.</p>
     </section>
 
-    <!-- 11. Docs CTA -->
+    <!-- 12. Docs CTA -->
     <section class="wrap closing">
       <h2>See if it fits</h2>
       <p class="lede" style="margin:0 auto 28px;">The specs are the product's source of truth, and they're all public.</p>

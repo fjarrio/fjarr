@@ -31,6 +31,10 @@ const paths = {
   hub: '<circle cx="5" cy="6.5" r="2"/><circle cx="5" cy="17.5" r="2"/><circle cx="18.5" cy="12" r="2.5"/><path d="M6.9 7.3L16.2 11M6.9 16.7l9.3-3.7"/>',
   magnifier: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
   check: '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/>',
+  battery: '<rect x="3" y="7" width="16" height="10" rx="2"/><path d="M21 11v2"/><path d="M11.5 9l-2.5 3.2h3.5L10 15"/>',
+  download: '<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14"/>',
+  power: '<path d="M12 3.5v8"/><path d="M7.2 6.8a7 7 0 1 0 9.6 0"/>',
+  layers: '<path d="M12 4l8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4M4 16l8 4 8-4"/>',
   puzzle: '<path d="M10 4.5a2 2 0 014 0V6h4v4h-1.5a2 2 0 000 4H18v4h-4v-1.5a2 2 0 00-4 0V18H6v-4h1.5a2 2 0 000-4H6V6h4z"/>',
 } as const;
 export type FjIconName = keyof typeof paths;
