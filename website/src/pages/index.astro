@@ -15,8 +15,8 @@ import { Code, Tabs, TabItem } from "@astrojs/starlight/components";
 
 // The latest published release (apt.fjarr.io stable). Moves with each release, not with main.
 const release = "0.1.2";
-// Where "Talk to us" goes (docs/19: one address, set here). Empty: those calls to action are not
-// rendered — never a guessed address.
+// The contact address (docs/19: one address, set here), linked from the Cloud row and the footer.
+// Never a guessed address; empty hides both links.
 const contact = "contact@fjarr.io";
 const talk = contact ? `mailto:${contact}` : "";
 
@@ -359,7 +359,6 @@ const client = createFjarrClient({
           <div class="ctas">
             <a class="cta primary" href="/readme/">Read the docs</a>
             <a class="cta ghost" href="https://github.com/fjarrio/fjarr">GitHub</a>
-            {talk && <a class="cta ghost" href={talk}>Talk to us →</a>}
           </div>
           <p class="friction">Open source (AGPL-3.0) or a commercial licence. Self-host free, forever.</p>
         </div>
@@ -588,7 +587,7 @@ const client = createFjarrClient({
       <p class="lede" style="margin:0 auto 28px;">The specs are the product's source of truth, and they're all public.</p>
       <div class="ctas">
         <a class="cta primary" href="/readme/">Read the docs</a>
-        {talk ? <a class="cta ghost" href={talk}>Talk to us →</a> : <a class="cta ghost" href="https://github.com/fjarrio/fjarr">GitHub</a>}
+        <a class="cta ghost" href="https://github.com/fjarrio/fjarr">GitHub</a>
       </div>
     </section>
 
