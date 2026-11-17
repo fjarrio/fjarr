@@ -7,6 +7,7 @@
 #   LAB_DESKTOP_OK=1 e-capsule.sh setup|e3|e2
 #   LAB_DESKTOP_OK=1 E_PERSON_AT_BOX=1 e-capsule.sh e1
 #   LAB_DESKTOP_OK=1 E_PERSON_AT_BOX=1 E_BASE=0.9 e-capsule.sh e4
+#   LAB_DESKTOP_OK=1 E_PERSON_AT_BOX=1 e-capsule.sh e5
 #
 #   setup  stage release E_NEW (out/swu/<v>/ from MKSWU_CAP=… mkswu.sh, with its capsule) and the
 #          refusal releases e3 uses
@@ -25,6 +26,10 @@
 #          apply time; rollback-now gives chain A on 36.4.4; then the ratchet: E4_OLD (0.9 with its
 #          own 36.4.4 capsule) into slot B, whose chain is now 36.5.2, refused by the applier, or
 #          by UEFI, or applied: recorded. Q4: both capsules write the QSPI
+#   e5     a broken chain: E_NEW's capsule with one byte of cpu-bootloader (chain B's UEFI) flipped
+#          (e5-break-capsule.py, out/swu/e5/); the fall-back to chain A with slot A is expected, and
+#          its statuses recorded; then the good capsule repairs chain B (an E1), and back to A. The
+#          one exception to L4, with Q4: a hang before UEFI needs the button and a D1
 #
 # Each case starts on E_BASE in slot A, committed (e2: on E_NEW in slot B after a capsule trial)
 # and records the applier's state at every step (.lab/e/<time>-<case>/<n>-<step>.json). L4: the
@@ -34,7 +39,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=lib/lab.sh
 . "$here/lib/lab.sh"
 
-case=${1:?usage: e-capsule.sh setup|e3|e1|e2}
+case=${1:?usage: e-capsule.sh setup|e3|e1|e2|e4|e4r|e5}
 : "${E_BASE:=1.0}"                       # the release flashed in both slots
 : "${E_NEW:=1.2}"                        # the release with the capsule
 : "${E_REL:=$LAB_HOME/out/swu/$E_NEW}"   # its release directory (MKSWU_CAP=… mkswu.sh)
@@ -65,9 +70,10 @@ case $case in
   e2) need=$((900 + 4 * E_BOOT_TMO + 2 * E_TRIAL_TMO)) ;;
   e4) need=$((900 + 2 * E_CAPSULE_TMO + 2 * E_TRIAL_TMO + 4 * E_BOOT_TMO)) ;;
   e4r) need=$((900 + E_CAPSULE_TMO + E_TRIAL_TMO + E_BOOT_TMO)) ;;
+  e5) need=$((900 + 2 * E_CAPSULE_TMO + 2 * E_TRIAL_TMO + 2 * E_BOOT_TMO)) ;;
   *) echo "e-capsule.sh: no case '$case'" >&2; exit 2 ;;
 esac
-if [[ $case =~ ^e(1|4|4r)$ && ${E_PERSON_AT_BOX:-} != 1 ]]; then
+if [[ $case =~ ^e(1|4|4r|5)$ && ${E_PERSON_AT_BOX:-} != 1 ]]; then
   echo "e-capsule.sh: $case's capsule writes the QSPI: a person at the box (Q4), E_PERSON_AT_BOX=1" >&2
   exit 2
 fi
@@ -391,6 +397,55 @@ c_e4r() { # the ratchet alone, after e4's version change and rollback
   check "e4r start: chain A on 36.4.4, chain B on 36.5.2" '.bios_version == "v36.4.4" and (.chains[] | select(.chain == "b") | .fw == "36.5.2")'
   lab_log "the ESRT: fw $(j .esrt.fw), lowest supported $(j .esrt.lowest_supported_fw_version)"
   e4_ratchet
+}
+
+c_e5() { # Q4: one byte of chain B's UEFI flipped in the capsule; the fall-back; the repair
+  local t0 e5=/data/fjarr-update/stage/e5 bad=$LAB_HOME/out/swu/e5/fjarr_$E_NEW.cap v
+  [[ -s $bad ]] || lab_die "no broken capsule: python3 -I e5-break-capsule.py $E_REL/fjarr_$E_NEW.cap $bad"
+  ! grep -q "$(sha256sum <"$bad" | cut -d' ' -f1)" "$E_REL/SHA256SUMS" || lab_die "the broken capsule is the release's"
+  start_on e5 "$E_BASE" a
+  untouched "e5 start"
+  lab_box -t 60 "sha256sum $STAGE/fjarr_$E_NEW.cap" | grep -q "^$cap_sha " || lab_die "no good capsule staged for the repair (setup)"
+  # L4's one exception: this capsule is not the flash's firmware (capsule-check.py refuses it).
+  on_box "mkdir -p $e5 && ln -sf $STAGE/fjarr_$E_NEW.swu $e5/fjarr_$E_NEW.swu && cp $STAGE/fjarr_$E_NEW.fw $e5/"
+  stage "$e5" "$bad"
+  on_box "$APPLIER install $E_NEW $e5" >/dev/null 2>&1 || lab_die "install from $e5 failed"
+  st installed
+  on_box "[ ! -e $M/chain-b ] || mv $M/chain-b $M/chain-b.e5; sync -f $M"
+  on_box "$APPLIER set-next $E_NEW" || lab_die "set-next failed"
+  st set-next
+  check "the broken capsule staged" '.capsule_staged == true and .capsule_pending == true and .trial.capsule == 1'
+  lab_log "the reboot: UEFI writes chain B with a broken UEFI image; expected: chain B fails, the fall-back to chain A (else the button, Q4)"
+  t0=$SECONDS
+  reboot_wait 'systemctl reboot' broken-boot "$E_CAPSULE_TMO"
+  trial_end broken-end
+  v=$(j '.efivars.BootChainFwStatus.value // "-"')
+  lab_log "RESULT e5: up $((SECONDS - t0)) s after the reboot: $(j .booted) from slot $(j .booted_slot), bios $(j .bios_version), capsule status $(j .capsule_status), BootChainFwStatus $v, chains $(j '[.chains[] | "\(.chain):\(.fw)"] | join(" ")'), ESRT last attempt $(j .esrt.last_attempt_version)/$(j .esrt.last_attempt_status), trial $(j .last_trial.result)"
+  lab_log "RESULT e5: $(j '.nvbootctrl.bootloader' | tr '\n' ';')"
+  expect "a broken chain falls back" "$E_BASE" a
+  check "the trial fell back" '.last_trial.result == "fell-back"'
+  # A failure status is left for a person (the applier refuses to install over it): the person's
+  # step, recorded, before the repair.
+  if [[ $v != - ]]; then
+    lab_log "the person's step: BootChainFwStatus $v recorded and cleared"
+    on_box "f=/sys/firmware/efi/efivars/BootChainFwStatus-$NV; chattr -i \$f; rm \$f"
+  fi
+  # The repair: the good capsule rewrites chain B (an E1 from here).
+  on_box "$APPLIER install $E_NEW $STAGE" >/dev/null 2>&1 || lab_die "install $E_NEW for the repair failed"
+  on_box "[ ! -e $M/chain-b ] || mv $M/chain-b $M/chain-b.e5-after; sync -f $M"
+  on_box "$APPLIER set-next $E_NEW" || lab_die "set-next for the repair failed"
+  st repair-set-next
+  check "the good capsule staged" '.capsule_staged == true and .trial.capsule == 1'
+  t0=$SECONDS
+  reboot_wait 'systemctl reboot' repair-boot "$E_CAPSULE_TMO"
+  trial_end repaired
+  lab_log "RESULT e5: the repair, ssh $((SECONDS - t0)) s after the reboot"
+  expect "chain B repaired by the good capsule" "$E_NEW" b
+  check "the repair's trial confirmed on 36.5.2" '.last_trial.result == "good" and .bios_version == "v36.5.2" and .efivars.BootChainFwCurrent.value == 1'
+  on_box "rm -f $M/chain-b.e5 $M/chain-b.e5-after"
+  reboot_wait "$APPLIER rollback-now" baseline
+  expect "back to the baseline" "$E_BASE" a
+  check "both chains on 36.5.2" '[.chains[] | .fw == "36.5.2"] | all'
 }
 
 "c_$case"

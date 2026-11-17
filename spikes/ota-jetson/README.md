@@ -26,8 +26,9 @@ nothing here ships.
 | `capsule-check.py`, `test-capsule-check.py` | L4 for a capsule: each image in it byte-identical to what a flash wrote (`.lab/d1/flashed-*`, kept by `d1-flash.sh`); its off-box tests |
 | `d3.sh` | D3: the applier's rehearsal on the box, without a capsule ([below](#d3-the-appliers-rehearsal-on-the-box-d3sh)) |
 | `d4.sh` | D4: a trial kernel that hangs before userspace, and the way out without the button ([below](#d4-a-trial-kernel-that-hangs-before-userspace-d4sh)) |
+| `e5-break-capsule.py` | E5's broken capsule: one byte flipped in one image of a good capsule, nothing else changed (the one exception to L4) |
 | `uart-sh.sh` | one command on the box through its console, when its network fails ([below](#the-boxs-console-uart-shsh)) |
-| `e-capsule.sh` | E1–E4: the capsule as the slot switch, rolled back with the slot, and the applier's refusals ([below](#e-the-bootloader-capsule-e-capsulesh)) |
+| `e-capsule.sh` | E1–E5: the capsule as the slot switch, rolled back with the slot, and the applier's refusals ([below](#e-the-bootloader-capsule-e-capsulesh)) |
 | `f-powercut.sh` | F: power cuts through the plug during an update ([below](#f-power-cuts-through-the-plug-f-powercutsh)) |
 | `results/` | committed measurements, identifiers redacted ([results/README.md](results/README.md)) |
 | `applier/` | the Jetson applier: the x86 applier's verbs on NVIDIA's boot state |
@@ -465,6 +466,7 @@ revision 5.2: 36.5.2).
 
 | `e4` (Q4) | on 0.9, a flash of the 36.4.4 build (`D1_ERASE_NVME=1`, so chain B has no marker), in slot A: `install 1.2`, `set-next` stages its 36.5.2 capsule, a reboot; `rollback-now`; then the ratchet (`e4r`) | chain B on 36.5.2 under 36.4.4's L4TLauncher, the ESP unchanged, the apply time in the log, the trial confirmed; chain A on 36.4.4 after `rollback-now`. **Passed 2026-11-17**: 137 s, the trial boot seeing capsule status 0 and no attempt in the ESRT (applier/README.md, "Findings") |
 | `e4r` (Q4) | after `e4`, on 0.9 in slot A with chain B on 36.5.2: 0.9.1 (the 36.4.4 build again, with its own capsule: `MKSWU_CAP=… mkswu.sh 0.9.1`, checked against 0.9's flash) into slot B, `set-next` | refused by the applier or by UEFI, or applied: recorded. **2026-11-17: refused before staging** ("below the lowest supported firmware 36.5.2"): the capsule had raised the ESRT's lowest for the whole box |
+| `e5` (Q4) | on 1.0 in slot A: release 1.2 with its capsule broken by `e5-break-capsule.py` (one byte in the middle of `cpu-bootloader`, chain B's UEFI; only that image differs), chain B's marker set aside, `set-next`, a reboot; then the good capsule (an `e1`), `rollback-now` | the fall-back to chain A, its statuses recorded; chain B repaired by the good capsule. The one exception to L4, with Q4. **2026-11-17: UEFI refused it before writing** (ESRT last attempt 0x1012, `IMAGE_AUTH_FAILURE`: the capsule's PKCS7 signature, with meta-tegra's edk2 test certificate); back on chain A in 42 s; the repair 133 s |
 
 The 36.4.4 image is `yocto/build.sh --l4t 36.4.4 --image-version 0.9`; its package passed D0
 on 2026-11-14 (`D0_FROM=fjarr`, from the Fjarr image). Its first flash lost the Ethernet: the
@@ -472,7 +474,7 @@ transmit queue of `r8168` (enP8p1s0) timed out every 10 s while it still receive
 could not reach it, and the dead-man sent it to RCM (`D1_FROM=rcm` wrote 1.0 back). Through the
 console (`uart-sh.sh`, below) the cause: `pci=pcie_bus_perf`, a 36.5 kernel argument, left the
 root port's Max Payload Size at 256 bytes, above the RTL8168's 128, and only 36.5's `r8168` sets
-it to 128 at probe. `kas-r36.4.4.yml` drops the flag. E5 (a broken chain) follows E4 with Q4.
+it to 128 at probe. `kas-r36.4.4.yml` drops the flag. E5 (a broken chain) ran after E4, with Q4.
 
 ## The box's console (`uart-sh.sh`)
 
@@ -489,6 +491,8 @@ LAB_DESKTOP_OK=1 spikes/ota-jetson/e-capsule.sh setup|e3
 LAB_DESKTOP_OK=1 E_PERSON_AT_BOX=1 spikes/ota-jetson/e-capsule.sh e1
 LAB_DESKTOP_OK=1 spikes/ota-jetson/e-capsule.sh e2
 LAB_DESKTOP_OK=1 E_PERSON_AT_BOX=1 E_BASE=0.9 spikes/ota-jetson/e-capsule.sh e4|e4r
+python3 -I spikes/ota-jetson/e5-break-capsule.py out/swu/1.2/fjarr_1.2.cap out/swu/e5/fjarr_1.2.cap
+LAB_DESKTOP_OK=1 E_PERSON_AT_BOX=1 spikes/ota-jetson/e-capsule.sh e5
 ```
 
 ## F: power cuts through the plug (`f-powercut.sh`)

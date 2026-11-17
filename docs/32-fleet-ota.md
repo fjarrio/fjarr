@@ -1260,6 +1260,19 @@ with that line deleted.
   firmware shows its record only back on chain A), so `mark-good` refused
   three trials, each rolled back safely. It now judges a capsule trial by
   the firmware its chain runs and refuses only a failure status.
+- A broken chain (E5, 2026-11-17): **refused by UEFI before any write**.
+  Release 1.2's capsule with one byte of chain B's UEFI image flipped was
+  staged as E1's; at the reboot UEFI wrote nothing (no update progress) and
+  recorded the ESRT's last attempt as failed with 0x1012,
+  `LAST_ATTEMPT_STATUS_DRIVER_ERROR_IMAGE_AUTH_FAILURE`: FmpDxe checks the
+  capsule's PKCS7 signature, and the flipped byte broke it. The box came
+  back on chain A in 42 s, the trial fell back, and the good capsule then
+  rewrote chain B (an E1, 133 s). The signature is meta-tegra's default:
+  capsules signed with edk2's public test certificate, which UEFI is built
+  to trust (`PcdFmpDevicePkcs7CertBufferXdr` from edk2's `TestRoot.cer`),
+  so any capsule signed with that public key would be written: Q11's ADR
+  takes this up. A chain broken after a valid signature (a cut during the
+  write) remains F's capsule group.
 - Power cuts during install: 20 of 20 back on the old slot, 8.0's gate for
   the Yocto image (F, 2026-11-14): **met**, 17 of them mid-write. And 20
   each during `set-next`, the trial and `mark-good`, without a capsule: all
