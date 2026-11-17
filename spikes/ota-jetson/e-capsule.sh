@@ -327,6 +327,14 @@ c_e4() {
   # the capsule.
   on_box "$APPLIER install $E_NEW $STAGE" >/dev/null 2>&1 || lab_die "install $E_NEW failed"
   st installed
+  # The trial's units print to the console too, which the capture keeps: the image's journal is in
+  # RAM, so a trial boot that reboots takes its reasons with it (the first E4 run, 2026-11-15).
+  # /dev/console is tty0 (the last console= argument), so journald forwards to the UART itself, and
+  # each unit appends to a file in /data/fjarr-test, which outlives the reboot.
+  on_box 'rm -f /data/fjarr-test/e4-*.log; m=$(mktemp -d) && mount /dev/disk/by-partlabel/APP_b $m && for u in fjarr-trial fjarr-health fjarr-bless fjarr-mark-bad; do
+  d=$m/etc/systemd/system/$u.service.d; mkdir -p $d; printf "[Service]\nStandardOutput=append:/data/fjarr-test/e4-$u.log\nStandardError=append:/data/fjarr-test/e4-$u.log\n" > $d/zz-e4-console.conf; done
+mkdir -p $m/etc/systemd/journald.conf.d && printf "[Journal]\nForwardToConsole=yes\nTTYPath=/dev/ttyTCU0\nMaxLevelConsole=info\n" > $m/etc/systemd/journald.conf.d/zz-e4.conf
+sync -f $m; ls $m/etc/systemd/system | grep -c "^fjarr-.*\.service\.d$"; umount $m; rmdir $m' || lab_die "could not put the console drop-ins in slot B"
   on_box "$APPLIER set-next $E_NEW" || lab_die "set-next failed"
   st set-next
   check "the 36.5.2 capsule staged" '.capsule_staged == true and .capsule_pending == true and .trial.capsule == 1'
