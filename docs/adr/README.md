@@ -63,3 +63,4 @@ options weighed, the choice, and its consequences — so future maintainers
 | [0039](0039-x86-ubuntu-ab-sysupdate-systemd-boot.md) | The Ubuntu A/B image on x86 writes slots with systemd-sysupdate and boots through systemd-boot's counting; RAUC with GRUB was the comparison | superseded by 0040 |
 | [0040](0040-x86-ubuntu-ab-swupdate-efibootguard.md) | The Ubuntu A/B image on x86 writes slots with SWUpdate and boots through EFI Boot Guard, one engine with the Jetson recipe | accepted |
 | [0041](0041-desktop-capture-dmabuf.md) | Module E captures physical monitors as DMA-BUF and hands them to VA without a copy, shared memory as the fallback, because SHM streams freeze behind a directly scanned-out window | accepted |
+| [0042](0042-landing-page-presents-the-vision.md) | The landing page presents the product as designed, in the present tense, without availability badges; numbers stay measured, the install card and the docs stay factual | accepted |
