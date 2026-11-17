@@ -141,23 +141,34 @@ unversioned (they are history, not reference).
 Every section is owned by a doc, so marketing never drifts from engineering:
 the page restates its owner and links to it, and changing what a section says
 starts in the owner. The order is the order a visitor's questions come in —
-*is this for me, what's wrong with what I have, how does it fit, what does it
-do, does it actually work, and can I trust it*.
+*what is it, show me, is this for me, what does it do, does it work, how does
+it fit, can I trust it, what does it cost*. The page is about 1,500 words;
+a section that grows past its share takes words from another, not from the
+reader.
+
+The page has two paths and every section ends on one of them: a developer
+**tries it** (the docs, the demo, the code), a buyer **talks to us** (one
+contact address, set in one place in the page; until it is set the "Talk to
+us" calls to action are not rendered).
 
 | # | Section | Says | Owner |
 |---|---|---|---|
-| 1 | **Hero** | Short, the way complex products present themselves: the headline, one sentence of at most ~25 words saying what Fjarr does and for which machines (Linux machines in the field), and three chips — built into your product, works behind carrier NAT, open source and self-hostable. Under the calls to action, one line that removes friction: the licence, and that self-hosting is free. Beside it (below it on narrow screens), a release card: the latest version, the platforms, and the one-line install. Everything else waits for section 2 | [00](00-vision.md), [03](03-product-strategy.md#who-its-for), [26](26-robot-install-and-drivers.md) |
-| 2 | **The problem** | Opens with who it's for, by the traits of the machine rather than a list of industries ([who it's for](03-product-strategy.md#who-its-for)): Linux on board, cameras or a screen, behind someone else's network, far from the people who need it. Robots, vehicles and farm machinery appear at most once, as an example, not as a list. Then the visitor's situation, not ours: a patchwork that kind of works (VPN or jump host, a remote-desktop tool the end customer installs, a hand-rolled video stream, `scp` for logs), or the remote-access project still on the backlog. Our [prior art](11-prior-art.md) is one line of credibility, not the pitch | [00](00-vision.md#the-problem), [03](03-product-strategy.md#who-its-for) |
-| 3 | **Three tiers** | Machine, backend, dashboard as a diagram, then a short embed snippet (mint a grant in the backend, mount a component in the dashboard). The snippet uses real exported names only | [02](02-architecture.md), [09](09-interfaces.md) |
-| 4 | **Capabilities** | The capability grid, every capability as designed; everything is a plugin | [06](06-capabilities.md) |
-| 5 | **Measured, not promised** | A strip of numbers, each linking its source | [16](16-performance-budgets.md#measured) |
-| 6 | **The desktop, and control that's safe for a moving machine** | The remote desktop feature set, then control domains: take-control stops motion first, desktop control frees after idle, deadman teardown releases all input, view-only grants | [22](22-remote-desktop-client.md), [08](08-protocol.md), [15](15-testing-strategy.md#safety-behaviors) |
-| 7 | **A link, not a VPN** | The `fjarr-connect` login → pick → connect workflow, then four uses as short console snippets: the machine's CAN bus on your laptop, VS Code with gdb against a process on the machine, the `ros2` CLI, and the `docker` CLI against the machine's engine. The rest links to the [ideas](28-tunnel-ideas.md) | [03](03-product-strategy.md#tunnel-positioning), [27](27-network-tunnel.md), [29](29-tunnel-howtos.md) |
-| 8 | **Updates for the whole fleet** | One signed release pins everything a robot runs, from the OS image to its peripherals' configuration; it installs when the robot is ready (charging, not moving) and its owner agrees, if the fleet asks owners; downloads spread over days under a data budget, as file-by-file diffs where they pay; a power cut mid-install boots the previous slot and a failed health check rolls back; every step reads like a CI job; campaigns go out stage by stage, promoted by a person. Recipes for Yocto, NixOS and Ubuntu on Jetson and x86. The hardware evidence (power cuts survived) is stated with its count | [32](32-fleet-ota.md), [06](06-capabilities.md#fjarrota--fleet-ota-updates-m8), [ADR-0036](adr/0036-a-release-is-one-signed-version.md), [ADR-0037](adr/0037-release-content-over-https-chunks.md) |
-| 9 | **Trust and efficiency** | End-to-end encryption, per-capability grants the agent re-checks, short-lived relay credentials, an unprivileged agent, no ports opened on the customer's router, signed packages and images; one encode for any number of viewers, cameras that already encode cost nothing, the integrated GPU first so the discrete one stays with perception | [10](10-security.md), [04](04-supported-platforms.md), [ADR-0025](adr/0025-encoder-families.md) |
-| 10 | **Built for the people who debug machines** | Live pipeline graphs, `--check`, the driver catalog | [24](24-pipeline-introspection.md), [26](26-robot-install-and-drivers.md) |
-| 11 | **Open core, honest split** | What is free and what Cloud adds; AGPL-3.0 or a commercial licence; no GPL dependency in anything we ship | [03](03-product-strategy.md), [ADR-0011](adr/0011-license-open-core.md) |
-| 12 | **Docs CTA and footer** | Docs, GitHub, and what *Fjärr* means | — |
+| 1 | **Hero** | The headline names both pillars: *Remote access and updates for the machines you ship.* One sentence of at most ~30 words, outcome first: what the team stops shipping (a VPN, a screen-sharing tool) and what it gets (video, the desktop, a terminal and safe updates, inside its own product, through any customer network). Three chips: built into your dashboard, works behind carrier NAT, Jetson and x86. Calls to action: the docs, GitHub, and "Talk to us". Under them, one line removing friction: AGPL-3.0 or a commercial licence, self-hosting free. Beside it (below on narrow screens), a card with the one thing to run: the demo command with its time measured in [docs/16](16-performance-budgets.md#measured) once that exists, until then the release card (the version on apt `stable`, its platforms, its install command) | [00](00-vision.md), [03](03-product-strategy.md#who-its-for), [04](04-supported-platforms.md), [26](26-robot-install-and-drivers.md) |
+| 2 | **The product, running** | A short muted loop of the demo dashboard: a camera, the machine's desktop, someone taking control. A poster image under reduced motion and on slow connections. Absent until it is recorded | [21](21-web-client-architecture.md), [22](22-remote-desktop-client.md) |
+| 3 | **The problem** | Opens with who it's for, by the traits of the machine rather than a list of industries ([who it's for](03-product-strategy.md#who-its-for)): Linux on board, cameras or a screen, behind someone else's network, far from the people who need it. Then the visitor's situation: a patchwork that kind of works (VPN or jump host, a remote-desktop tool the end customer installs, a hand-rolled video stream, `scp` for logs), or the project still on the backlog. Closes on a visible pull-quote, not small print: we have built this stack three times before, inside robot companies ([prior art](11-prior-art.md)) | [00](00-vision.md#the-problem), [03](03-product-strategy.md#who-its-for), [11](11-prior-art.md) |
+| 4 | **Capabilities** | Three pillars, not a flat grid: *See and control* (camera video, the desktop, the terminal, audio), *Reach* (the network link, files), *Keep it running* (fleet updates, telemetry and logs, fleet observability). Pipeline introspection, `--check` and the driver catalog are one line of tools beneath. Everything is a plugin, including yours | [06](06-capabilities.md), [05](05-extension-model.md), [24](24-pipeline-introspection.md), [26](26-robot-install-and-drivers.md) |
+| 5 | **Measured, not promised** | A strip of numbers, each with a plain gloss a non-specialist reads ("from the robot's camera to your screen"), each linking its source | [16](16-performance-budgets.md#measured) |
+| 6 | **Updates for the whole fleet** | One signed release pins everything a robot runs, from the OS image to its peripherals' configuration; it installs when the robot is ready (charging, not moving) and its owner agrees, if the fleet asks owners; downloads spread over days under a data budget; a power cut mid-install boots the previous slot and a failed health check rolls back; every step reads like a CI job; campaigns go out stage by stage, promoted by a person. Says which part is Fjarr Cloud (campaigns) and which is open (everything on the robot). The hardware evidence is stated with its count | [32](32-fleet-ota.md), [06](06-capabilities.md#fjarrota--fleet-ota-updates-m8), [ADR-0036](adr/0036-a-release-is-one-signed-version.md), [ADR-0037](adr/0037-release-content-over-https-chunks.md) |
+| 7 | **The desktop, and control that's safe for a moving machine** | Leads with the safety: taking control stops the robot first. Then the desktop's feature set and the other control rules: desktop control frees after idle, a dropped operator's input is released, view-only grants | [22](22-remote-desktop-client.md), [08](08-protocol.md), [15](15-testing-strategy.md#safety-behaviors) |
+| 8 | **A link to one machine** | What it enables before what it isn't: the `fjarr-connect` session, then two uses (the `ros2` CLI, a debugger on a process), then one line of the rest. Isolation, one set of permissions and expiry as one sentence | [03](03-product-strategy.md#tunnel-positioning), [27](27-network-tunnel.md), [29](29-tunnel-howtos.md) |
+| 9 | **How it fits your stack** | Machine, backend, dashboard as a diagram; the backend and dashboard snippets as two tabs of one block. The snippets use real exported names only | [02](02-architecture.md), [09](09-interfaces.md) |
+| 10 | **Trust** | One grid: end-to-end encryption, per-capability grants the agent re-checks, short-lived relay credentials, nothing to open on the customer's router, an unprivileged agent, signed packages and images, one encode for any number of viewers, the integrated GPU first | [10](10-security.md), [04](04-supported-platforms.md), [ADR-0025](adr/0025-encoder-families.md) |
+| 11 | **Open core and Fjarr Cloud** | What is free and what Cloud adds; Cloud in early access, asking for the visitor's fleet size through "Talk to us", without prices; AGPL-3.0 or a commercial licence; no GPL dependency in anything we ship | [03](03-product-strategy.md), [ADR-0011](adr/0011-license-open-core.md) |
+| 12 | **Closing and footer** | The docs and "Talk to us". The footer: docs, GitHub, the contact address, the install line, and what *Fjärr* means | [26](26-robot-install-and-drivers.md) |
+
+The header carries Docs, Product (section 4) and Cloud (section 11) on both
+the landing page and the docs; Demo joins them when section 2 exists. The
+roadmap and the decisions are in the docs' sidebar.
 
 ### Claims {#claims}
 
@@ -172,9 +183,9 @@ do, does it actually work, and can I trust it*.
   [docs/16#measured](16-performance-budgets.md#measured), or a count from a
   recorded test run in the owner doc. The vision is carried in words; a
   target is never written as a result.
-- **What a visitor acts on stays factual**: the release card (the version on
-  apt `stable`, its platforms, its install command) and every link into the
-  docs.
+- **What a visitor acts on stays factual**: every command the page offers
+  (the release card's install command, the demo command once measured), the
+  contact address, and every link into the docs.
 - **Words for the first screen.** The hero and the problem speak in outcomes
   and plain terms: peer-to-peer, works behind NAT and carrier networks with
   nothing to open, end-to-end encrypted. "WebRTC" is not in the hero or the
