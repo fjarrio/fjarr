@@ -41,7 +41,7 @@ case=${1:?usage: e-capsule.sh setup|e3|e1|e2}
 : "${E_BOOT_TMO:=600}"                   # a reboot to ssh
 : "${E_CAPSULE_TMO:=1800}"               # a reboot that applies a capsule, to ssh
 : "${E_TRIAL_TMO:=1200}"                 # a trial's confirmation or fall-back
-: "${E4_OLD:=0.9}"                        # e4's ratchet: the 36.4.4 release with its own capsule
+: "${E4_OLD:=0.9.1}"                      # e4's ratchet: a 36.4.4 release with its own capsule, not the booted 0.9
 : "${E4_OLD_REL:=$LAB_HOME/out/swu/$E4_OLD}"
 STAGE=/data/fjarr-update/stage/$E_NEW
 LOW=/data/fjarr-update/stage/e3-lowest   # E_NEW's root, firmware 36.4.4, a non-capsule
@@ -64,9 +64,10 @@ case $case in
   e1) need=$((900 + E_CAPSULE_TMO + E_TRIAL_TMO + 2 * E_BOOT_TMO)) ;;
   e2) need=$((900 + 4 * E_BOOT_TMO + 2 * E_TRIAL_TMO)) ;;
   e4) need=$((900 + 2 * E_CAPSULE_TMO + 2 * E_TRIAL_TMO + 4 * E_BOOT_TMO)) ;;
+  e4r) need=$((900 + E_CAPSULE_TMO + E_TRIAL_TMO + E_BOOT_TMO)) ;;
   *) echo "e-capsule.sh: no case '$case'" >&2; exit 2 ;;
 esac
-if [[ $case =~ ^e[14]$ && ${E_PERSON_AT_BOX:-} != 1 ]]; then
+if [[ $case =~ ^e(1|4|4r)$ && ${E_PERSON_AT_BOX:-} != 1 ]]; then
   echo "e-capsule.sh: $case's capsule writes the QSPI: a person at the box (Q4), E_PERSON_AT_BOX=1" >&2
   exit 2
 fi
@@ -321,7 +322,6 @@ c_e4() {
   lab_log "the ESRT before: fw $(j .esrt.fw), lowest supported $(j .esrt.lowest_supported_fw_version)"
   esp0=$(esp_sha)
   lab_log "the ESP's L4TLauncher: ${esp0:0:16}"
-  for f in swu fw cap; do stage "$old" "$E4_OLD_REL/fjarr_$E4_OLD.$f"; done
   lab_box -t 60 "sha256sum $STAGE/fjarr_$E_NEW.cap" | grep -q "^$cap_sha " || lab_die "the capsule on the box is not the checked one (L4)"
   # The version change: chain B has no marker after the flash (D1_ERASE_NVME), so set-next stages
   # the capsule.
@@ -331,8 +331,9 @@ c_e4() {
   # RAM, so a trial boot that reboots takes its reasons with it (the first E4 run, 2026-11-15).
   # /dev/console is tty0 (the last console= argument), so journald forwards to the UART itself, and
   # each unit appends to a file in /data/fjarr-test, which outlives the reboot.
-  on_box 'rm -f /data/fjarr-test/e4-*.log; m=$(mktemp -d) && mount /dev/disk/by-partlabel/APP_b $m && for u in fjarr-trial fjarr-health fjarr-bless fjarr-mark-bad; do
+  on_box 'rm -f /data/fjarr-test/e4-*.log /data/fjarr-test/e4-trial-state.json; m=$(mktemp -d) && mount /dev/disk/by-partlabel/APP_b $m && for u in fjarr-trial fjarr-health fjarr-bless fjarr-mark-bad; do
   d=$m/etc/systemd/system/$u.service.d; mkdir -p $d; printf "[Service]\nStandardOutput=append:/data/fjarr-test/e4-$u.log\nStandardError=append:/data/fjarr-test/e4-$u.log\n" > $d/zz-e4-console.conf; done
+printf "[Service]\nExecStartPre=-/bin/sh -c \"/usr/lib/fjarr/applier state > /data/fjarr-test/e4-trial-state.json 2>&1\"\n" > $m/etc/systemd/system/fjarr-bless.service.d/zz-e4-state.conf
 mkdir -p $m/etc/systemd/journald.conf.d && printf "[Journal]\nForwardToConsole=yes\nTTYPath=/dev/ttyTCU0\nMaxLevelConsole=info\n" > $m/etc/systemd/journald.conf.d/zz-e4.conf
 sync -f $m; ls $m/etc/systemd/system | grep -c "^fjarr-.*\.service\.d$"; umount $m; rmdir $m' || lab_die "could not put the console drop-ins in slot B"
   on_box "$APPLIER set-next $E_NEW" || lab_die "set-next failed"
@@ -344,7 +345,10 @@ sync -f $m; ls $m/etc/systemd/system | grep -c "^fjarr-.*\.service\.d$"; umount 
   trial_end confirmed
   expect "the version change" "$E_NEW" b
   check "the trial confirmed" '.last_trial.result == "good"'
-  check "chain B on 36.5.2" '.capsule_status == 1 and .bios_version == "v36.5.2" and .esrt.fw == "36.5.2" and .esrt.last_attempt_status == 0 and .efivars.BootChainFwCurrent.value == 1 and (.chains[] | select(.chain == "b") | .marker.state == "complete" and .marker.fw == "36.5.2")'
+  # The trial boot cannot see the record of a capsule 36.4.4's firmware applied: status 0 and no
+  # attempt in the ESRT (applier/README.md, "Findings"); the firmware chain B runs is the proof.
+  check "chain B on 36.5.2" '(.capsule_status == 0 or .capsule_status == 1) and .bios_version == "v36.5.2" and .esrt.fw == "36.5.2" and .efivars.BootChainFwCurrent.value == 1 and (.chains[] | select(.chain == "b") | .fw == "36.5.2" and .marker.state == "complete" and .marker.fw == "36.5.2")'
+  lab_log "on the trial: capsule status $(j .capsule_status), the ESRT's last attempt $(j .esrt.last_attempt_version) status $(j .esrt.last_attempt_status)"
   lab_log "the ESRT after: fw $(j .esrt.fw), lowest supported $(j .esrt.lowest_supported_fw_version)"
   esp=$(esp_sha)
   [[ $esp == "$esp0" ]] || lab_die "the ESP's L4TLauncher changed (${esp:0:16}): L5"
@@ -353,7 +357,16 @@ sync -f $m; ls $m/etc/systemd/system | grep -c "^fjarr-.*\.service\.d$"; umount 
   expect "rollback-now after the version change" "$E_BASE" a
   check "chain A on 36.4.4" '.efivars.BootChainFwCurrent.value == 0 and .bios_version == "v36.4.4"'
   lab_log "the ESRT on chain A: fw $(j .esrt.fw), lowest supported $(j .esrt.lowest_supported_fw_version)"
-  # The ratchet: 0.9 with its 36.4.4 capsule into slot B, whose chain is on 36.5.2.
+  e4_ratchet
+
+}
+
+e4_ratchet() { # on E_BASE in slot A, chain B on 36.5.2: E4_OLD's 36.4.4 capsule into slot B
+  local rc=0 old=/data/fjarr-update/stage/$E4_OLD
+  [[ -s $E4_OLD_REL/fjarr_$E4_OLD.cap && $(cat "$E4_OLD_REL/fjarr_$E4_OLD.fw") == 36.4.4 ]] ||
+    lab_die "no release $E4_OLD with its 36.4.4 capsule in $E4_OLD_REL (MKSWU_CAP=… mkswu.sh $E4_OLD)"
+  for f in swu fw cap; do stage "$old" "$E4_OLD_REL/fjarr_$E4_OLD.$f"; done
+  # The ratchet: a 36.4.4 release with its capsule into slot B, whose chain is on 36.5.2.
   on_box "$APPLIER install $E4_OLD $old" >/dev/null 2>&1 || lab_die "install $E4_OLD failed"
   st ratchet-installed
   lab_box -t 120 "$APPLIER set-next $E4_OLD" >"$OUT/ratchet.out" 2>&1 || rc=$?
@@ -370,6 +383,14 @@ sync -f $m; ls $m/etc/systemd/system | grep -c "^fjarr-.*\.service\.d$"; umount 
   else
     lab_die "set-next $E4_OLD exited $rc without staging a capsule"
   fi
+}
+
+c_e4r() { # the ratchet alone, after e4's version change and rollback
+  start_on e4r "$E_BASE" a
+  untouched "e4r start"
+  check "e4r start: chain A on 36.4.4, chain B on 36.5.2" '.bios_version == "v36.4.4" and (.chains[] | select(.chain == "b") | .fw == "36.5.2")'
+  lab_log "the ESRT: fw $(j .esrt.fw), lowest supported $(j .esrt.lowest_supported_fw_version)"
+  e4_ratchet
 }
 
 "c_$case"

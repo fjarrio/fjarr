@@ -343,18 +343,14 @@ refused M10 "the trial of 1.2 is on slot b" mark-good
 trial 1 1; echo 1 > "$T/fw/capsule_status"; echo v36.5.2 > "$R/sys/class/dmi/id/bios_version"
 kvw "$R/data/fjarr-update/applier/chain-b" fw=36.5.2 state=in-progress
 case_run M6 0 mark-good
-# A capsule applied by 36.4.4's firmware: nvbootctrl's status 0, the attempt in the ESRT (E4).
-attempt() { # <last attempt version> <its status>, in the fake root trial() just made
-  echo "$1" > "$R/sys/firmware/efi/esrt/entries/entry0/last_attempt_version"
-  echo "$2" > "$R/sys/firmware/efi/esrt/entries/entry0/last_attempt_status"
-}
-trial 1 1; echo 0 > "$T/fw/capsule_status"; attempt 2360578 0
+# A capsule applied by 36.4.4's firmware: the trial boot sees status 0 and no record (E4).
+trial 1 1; echo 0 > "$T/fw/capsule_status"
 kvw "$R/data/fjarr-update/applier/chain-b" fw=36.5.2 state=in-progress
 case_run M11 0 mark-good
 expect "M11: chain B complete" "$(tr '\n' ' ' < "$R/data/fjarr-update/applier/chain-b")" "fw=36.5.2 state=complete "
-trial 1 1; echo 0 > "$T/fw/capsule_status"; attempt 2360578 1
+trial 1 1; echo 2 > "$T/fw/capsule_status"
 case_run M12 1 mark-good
-trial 1 1; echo 0 > "$T/fw/capsule_status"; attempt 2360324 0
+trial 1 1; echo 0 > "$T/fw/capsule_status"; echo 36.4.4 > "$T/fw/chain-1"; sysfw
 case_run M13 1 mark-good
 
 # --- boot-verify (fjarr-boot-verify.service) ---------------------------------------------------

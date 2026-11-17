@@ -1241,16 +1241,25 @@ with that line deleted.
   `BootChainFwStatus` or `BootChainFwNext`, a set `BootNext`, a pending
   capsule, a capsule below the ESRT's lowest supported version, and one
   changed since `install`.
-- The version ratchet after a reflash, and a real version change with its
-  apply time, with 36.4.4's L4TLauncher left in the shared ESP (E4):
-  pending. The 36.4.4 build's first flash (2026-11-14) lost its Ethernet:
-  the NIC's transmit queue timed out every 10 s while it still received. The
-  cause (2026-11-15, over the console): `pci=pcie_bus_perf`, which came into
-  meta-tegra's kernel arguments with its 36.5.0 update, left the root port
-  at a 256-byte Max Payload Size above the RTL8168's 128; NVIDIA's 36.5
-  `r8168` sets the root port to 128 at probe, 36.4.4's does not. Setting it
-  to 128 by hand brought the link back at once. The 36.4.4 build now drops
-  the flag, as 36.4.4's own arguments and the stock box do.
+- A real version change, its rollback and the ratchet, with 36.4.4's
+  L4TLauncher left in the shared ESP (E4, 2026-11-17): **passed**. On a box
+  flashed with the 36.4.4 build (release 0.9), release 1.2's capsule moved
+  chain B to 36.5.2: 137 s from the reboot to ssh, the write included.
+  36.4.4's L4TLauncher started 36.5.2's kernel, the ESP unchanged, the trial
+  confirmed; `rollback-now` gave chain A on 36.4.4. The capsule raised the
+  ESRT's lowest supported version to 36.5.2 for the box, chain A included,
+  so a 36.4.4 capsule offered afterwards was refused before staging. Two
+  faults on the way, fixed. The 36.4.4 build's Ethernet: its first flash
+  lost the network (the NIC's transmit queue timed out every 10 s), because
+  `pci=pcie_bus_perf`, which came into meta-tegra's kernel arguments with
+  its 36.5.0 update, left the root port at a 256-byte Max Payload Size above
+  the RTL8168's 128, and only 36.5's `r8168` sets it to 128; the 36.4.4
+  build drops the flag, as 36.4.4's own arguments do. And the applier's
+  confirmation: a trial boot cannot see the record of a capsule an older
+  firmware applied (capsule status 0, no attempt in the ESRT; 36.4.4's
+  firmware shows its record only back on chain A), so `mark-good` refused
+  three trials, each rolled back safely. It now judges a capsule trial by
+  the firmware its chain runs and refuses only a failure status.
 - Power cuts during install: 20 of 20 back on the old slot, 8.0's gate for
   the Yocto image (F, 2026-11-14): **met**, 17 of them mid-write. And 20
   each during `set-next`, the trial and `mark-good`, without a capsule: all

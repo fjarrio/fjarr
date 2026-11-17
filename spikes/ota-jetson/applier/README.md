@@ -34,7 +34,7 @@ writes nothing; a failure after the first write exits 1.
 | `install <v> <dir>` | **Pre-flight:** see [Refusals](#refusals). **Then:** marks the other slot unbootable, runs `swupdate -v -B none --digest-provider opensslCMS -k /etc/fjarr/swu.crt -e fjarr,slot-<other> -i <dir>/fjarr_<v>.swu` (as on x86, through `systemd-run` with `TMPDIR=/data/fjarr-update/tmp`), checks the slot's ext4 label is `<IMAGE_ID>_<v>`, records the slot and marks it bootable again. Never touches the ESP, the QSPI or the chains. A capsule stays in `<dir>`, the cache |
 | `set-next <v>` | The other slot boots on its own chain, so the chain must hold the release's firmware: when its marker is missing or not `complete`, or the chain holds another version (by `SystemFwVersions`, the firmware's reading of the chain at this boot; by the marker when that variable is absent), the capsule goes (copied to the ESP as `TEGRA_BL.Cap.tmp`, `sync -f`, renamed `TEGRA_BL.Cap`, `sync -f`, `OsIndications` bit 2 set); otherwise `nvbootctrl set-active-boot-slot <other>`. Never both. The trial marker comes first, and the chain is marked `in-progress` before the capsule is staged |
 | `state` | JSON: the booted version and slot; per slot its label, install record, `RootfsStatusSlot` and retry count; per chain its firmware version (`SystemFwVersions`, `?` when unreadable), its marker and BootROM status; the trial and the last trial; the UEFI variables (`BootChainFw*` with `ResetCount` and `Previous`, `BootChainOsCurrent`, `RootfsStatusSlot*`, `RootfsRetryCountMax`, `RootfsRedundancyLevel`, `L4TDefaultBootMode`, `OsIndications`, `BootNext`); the PMC nodes; the ESRT; `bios_version`; the capsule status; both `nvbootctrl dump-slots-info` outputs |
-| `mark-good` | After health, on the trial's slot. When the trial staged a capsule: "Capsule update status" must be 1, or the ESRT's last attempt must be the trial's firmware with status 0 (a capsule applied by 36.4.4's firmware leaves the status 0, E4). Always: the running firmware (`bios_version`) must be the trial's. Then `nvbootctrl verify`, the chain marked `complete`, a finished switch's `BootChainFwStatus` cleared, and the trial marker renamed `last-trial`: the commit point. Without a trial: "not a trial boot", exit 0, as on x86 |
+| `mark-good` | After health, on the trial's slot. When the trial staged a capsule: "Capsule update status" must not be a failure (2 or 3), and the trial's chain must hold the trial's firmware by `SystemFwVersions`; a trial boot cannot see the capsule's own record when an older firmware applied it (E4), so status 0 counts as well as 1. Always: the running firmware (`bios_version`) must be the trial's. Then `nvbootctrl verify`, the chain marked `complete`, a finished switch's `BootChainFwStatus` cleared, and the trial marker renamed `last-trial`: the commit point. Without a trial: "not a trial boot", exit 0, as on x86 |
 | `rollback-now [--mark-bad]` | `nvbootctrl set-active-boot-slot <other>`, then `systemctl reboot`. An unconfirmed trial is always marked unbootable first, as x86 marks it `FAILED`; `--mark-bad` does the same from a committed slot. A `BootChainFwStatus` still set is cleared first, or the firmware would not switch ([below](#from-the-source)) |
 | `is-trial` | exit 0 when a trial marker names the booted slot |
 | `trial-boot` | `fjarr-trial.service`. With a trial marker: on another slot than the trial's, the trial is over (`last-trial`, `result=fell-back`); on the trial's slot, `boots` + 1, and at 2 `rollback-now`, otherwise `systemctl start --no-block fjarr-bless.service` |
@@ -105,9 +105,9 @@ variables immutable, both retry counters at 3. Each row names what differs.
 | M4 | as M3, capsule status 3: exit 1 | |
 | M5 | as M3, `bios_version` v36.4.4: exit 1 | |
 | M6 | as M3, `bios_version` v36.5.2, the form meta-tegra's firmware build gives | `nvbootctrl:verify` `run:verified` `data:applier/chain-b` `data:applier/trial` `data:applier/trial>applier/last-trial` |
-| M11 | as M3, capsule status 0 and the ESRT's last attempt 36.5.2 with status 0, as after a capsule applied by 36.4.4's firmware | `nvbootctrl:verify` `run:verified` `data:applier/chain-b` `data:applier/trial` `data:applier/trial>applier/last-trial` |
-| M12 | as M11, the last attempt's status 1 (unsuccessful): exit 1 | |
-| M13 | as M11, the last attempt 36.4.4: exit 1 | |
+| M11 | as M3, capsule status 0, as on the trial boot after a capsule applied by 36.4.4's firmware | `nvbootctrl:verify` `run:verified` `data:applier/chain-b` `data:applier/trial` `data:applier/trial>applier/last-trial` |
+| M12 | as M3, capsule status 2: exit 1 | |
+| M13 | as M11, `SystemFwVersions` says chain B holds 36.4.4: exit 1 | |
 | V1 | `boot-verify`, this boot not yet verified | `nvbootctrl:verify` `run:verified` |
 | V2 | `boot-verify` on a trial boot | |
 | V3 | `boot-verify` after a chain switch: `BootChainFwStatus=0`, no marker for chain A | `nvbootctrl:verify` `run:verified` `data:applier/chain-a` `efi:-BootChainFwStatus` |
@@ -233,14 +233,14 @@ and one `write()` of the whole file, as NVIDIA's `nv_ota_common.func` does with 
 
 **Findings that change what docs/32 expects:**
 
-- **"Capsule update status" says 0 after a capsule applied by 36.4.4's firmware** (E4,
-  2026-11-15): 36.4.4's UEFI wrote 36.5.2 into chain B and booted it, and the ESRT recorded the
-  attempt (last attempt 36.5.2, status 0, the lowest supported version raised to 36.5.2), but
-  `nvbootctrl` on the trial boot read status 0, "no capsule update", where 36.5.2's firmware gives
-  1 (E1). `mark-good` therefore also accepts the ESRT's last attempt at the trial's firmware with
-  status 0. A flash clears the attempt (0 after D1); a second capsule of the same version cannot
-  be told from the first by it, which the check on the running firmware covers.
-
+- **A trial boot cannot see the record of a capsule an older firmware applied** (E4,
+  2026-11-15 and 2026-11-17). 36.4.4's UEFI wrote 36.5.2 into chain B and booted it; on that trial
+  boot `nvbootctrl` read "Capsule update status" 0 and the ESRT's last attempt 0, with
+  `BootChainFwStatus` absent, while chain B ran 36.5.2 by `bios_version`, the ESRT and
+  `SystemFwVersions`. Back on chain A, 36.4.4's firmware showed its record: the last attempt
+  36.5.2, status 0. Where the applying firmware is the new one, the trial sees status 1 (E1).
+  So `mark-good` judges a capsule trial by the firmware its chain runs, and refuses only a
+  failure status; a second capsule of the same version cannot be told from none by it.
 - **`BootChainFwResetCount` cannot be checked from Linux,** although docs/32 has the applier
   check it. BootChainDxe declares it, and `BootChainFwPrevious`, without runtime access and
   under another GUID, so efivarfs never shows them. The applier checks the count only if it ever

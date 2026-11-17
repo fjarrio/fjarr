@@ -340,15 +340,13 @@ mark-good)
   b=$(need_booted)
   [ "$b" = "$t" ] || refuse "slot $b booted; the trial of $v is on slot $t"
   if [ "$(kv "$STATE/trial" capsule)" = 1 ]; then
+    # The trial boot sees the capsule's record only when the new firmware applied it (E1); after
+    # an older firmware's capsule it reads status 0 and no attempt (E4; README.md, "Findings").
+    # So: no failure status, and the trial's chain runs the trial's firmware.
     cs=$(capsule_status)
-    if [ "$cs" != 1 ]; then
-      # A capsule applied by 36.4.4's firmware leaves nvbootctrl's status 0 although the ESRT records
-      # the attempt (E4; README.md, "Findings"): its last attempt must be this firmware, status 0.
-      la=$(cat "$ESRT/last_attempt_version" 2>/dev/null || true)
-      las=$(cat "$ESRT/last_attempt_status" 2>/dev/null || true)
-      [ "$las" = 0 ] && [ "$la" = "$(hexver "$fw")" ] ||
-        fail "capsule update status ${cs:-unknown}, not 1, and the ESRT's last attempt is $(decver "${la:-0}") with status ${las:-unknown}, not $fw with 0"
-    fi
+    case $cs in 2 | 3) fail "capsule update status $cs: the capsule failed" ;; esac
+    cf=$(chain_fw "$t" || true)
+    [ "$cf" = "$fw" ] || fail "chain $t holds ${cf:-an unknown firmware} by SystemFwVersions, the trial expects $fw"
   fi
   [ "$(bios_fw)" = "$fw" ] || fail "the firmware runs $(bios_fw), the trial expects $fw"
   nvbootctrl verify
