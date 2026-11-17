@@ -1,9 +1,9 @@
 ---
-// fjarr.io landing page — sells the idea, links to the docs.
+// fjarr.io landing page — sells the product and guides the project.
 // spec: docs/19-website-and-publishing.md#landing-page-content-model — section order, owners
 // and claim rules (#claims). The page describes Fjarr as designed, in the present tense, with no
 // availability badges (ADR-0042); every number is a row of docs/16-performance-budgets.md#measured
-// or a recorded test count, and the release card is what apt stable serves.
+// or a recorded test count, and every command and address it offers works today.
 
 import "../styles/theme.css";
 import ThemeInit from "../components/ThemeInit.astro";
@@ -11,82 +11,73 @@ import SiteHeader from "../components/SiteHeader.astro";
 import NetworkField from "../components/NetworkField.astro";
 import FjIcon from "../components/FjIcon.astro";
 // The docs' code renderer (Expressive Code, same themes and config), so code looks the same on both.
-import { Code } from "@astrojs/starlight/components";
+import { Code, Tabs, TabItem } from "@astrojs/starlight/components";
 
 // The latest published release (apt.fjarr.io stable). Moves with each release, not with main.
 const release = "0.1.2";
+// Where "Talk to us" goes (docs/19: one address, set here). Empty: those calls to action are not
+// rendered — never a guessed address.
+const contact = "";
+const talk = contact ? `mailto:${contact}` : "";
 
-const capabilities = [
-  { icon: "camera" as const, name: "Camera video", desc: "Many cameras, one encode fanned out to every viewer, adaptive bitrate. Cameras that already speak H.264 cost no encoder at all." },
-  { icon: "terminal" as const, name: "Remote terminal", desc: "A shell in the browser, over the same session. Off until configured, audited when opened." },
-  { icon: "link" as const, name: "Network link", desc: "A routable address for one machine: ssh, scp, ROS 2, your debugger, your vendor tools." },
-  { icon: "graph" as const, name: "Pipeline introspection", desc: "The live media pipeline as a graph, on the machine and in your dashboard." },
-  { icon: "monitor" as const, name: "Remote desktop", desc: "The machine's own desktop in your dashboard, unattended after a reboot, every monitor." },
-  { icon: "mic" as const, name: "Audio", desc: "Hear the machine's microphones, talk through its speaker, push-to-talk." },
-  { icon: "folder" as const, name: "Files", desc: "The machine's files as a drive, and resumable transfers that survive a flaky LTE link." },
-  { icon: "chart" as const, name: "Telemetry & logs", desc: "Typed sensor streams with change-triggered updates, and logs that store and forward when offline." },
-  { icon: "pulse" as const, name: "Fleet observability", desc: "Versions, host metrics and error rates across the fleet." },
-  { icon: "refresh" as const, name: "Fleet OTA", desc: "A whole robot under one signed release — OS image, apps, peripherals — installed when it's ready, rolled back when it isn't healthy." },
+// Section 4: three pillars (docs/06), then the tools beneath.
+const pillars = [
+  {
+    title: "See and control",
+    items: [
+      { icon: "camera" as const, name: "Camera video", desc: "Every camera, one encode fanned out to every viewer, adaptive to the link." },
+      { icon: "monitor" as const, name: "Remote desktop", desc: "The machine's own desktop, every monitor, unattended after a reboot." },
+      { icon: "terminal" as const, name: "Terminal", desc: "A shell in the browser, off until configured, audited when opened." },
+      { icon: "mic" as const, name: "Audio", desc: "Hear its microphones, talk through its speaker." },
+    ],
+  },
+  {
+    title: "Reach",
+    items: [
+      { icon: "link" as const, name: "Network link", desc: "A routable address for one machine: ssh, ROS 2, your debugger, your vendor's tools." },
+      { icon: "folder" as const, name: "Files", desc: "Its files as a drive, and transfers that survive a flaky LTE link." },
+    ],
+  },
+  {
+    title: "Keep it running",
+    items: [
+      { icon: "refresh" as const, name: "Fleet updates", desc: "The whole robot under one signed release, rolled back when it isn't healthy." },
+      { icon: "chart" as const, name: "Telemetry & logs", desc: "Typed sensor streams, and logs that store and forward when offline." },
+      { icon: "pulse" as const, name: "Fleet observability", desc: "Versions, host metrics and error rates across the fleet." },
+    ],
+  },
 ];
 
-// docs/16#measured — copy, never round into something the table doesn't say.
+// docs/16#measured — copy, never round into something the table doesn't say. `label` is the plain
+// gloss; `detail` keeps the measurement's own terms.
 const numbers = [
-  { value: "56 ms", label: "camera glass-to-glass on a LAN", detail: "p50; p95 79 ms" },
-  { value: "102 ms", label: "the same, p95, through a relay", detail: "p50 69 ms" },
-  { value: "52 ms", label: "desktop input-to-photon", detail: "p50; p95 59 ms, real hardware" },
-  { value: "11 ms", label: "terminal round trip", detail: "budget 150 ms" },
-  { value: "~250 Mbps", label: "1 GiB scp over the network link", detail: "246–253 Mbps, hash-verified" },
-  { value: "31–33 fps", label: "camera beside a saturating transfer", detail: "no lost frames" },
+  { value: "56 ms", label: "from the robot's camera to your screen, on a LAN", detail: "glass-to-glass p50; p95 79 ms" },
+  { value: "102 ms", label: "the same through a relay, at the slow end", detail: "p95; p50 69 ms" },
+  { value: "52 ms", label: "from your click to seeing it happen on the desktop", detail: "input-to-photon p50; p95 59 ms, real hardware" },
+  { value: "11 ms", label: "a keystroke in the terminal, there and back", detail: "budget 150 ms" },
+  { value: "~250 Mbps", label: "copying a 1 GiB file over the network link", detail: "246–253 Mbps, hash-verified" },
+  { value: "31–33 fps", label: "camera video while a transfer fills the link", detail: "no lost frames" },
 ];
 
 const tunnelUses = [
   {
-    title: "The machine's CAN bus on your laptop",
-    desc: "Bridge its bus to a virtual interface; SavvyCAN or the vendor's tool sees it live.",
-    lang: "sh",
-    code: "cannelloni -I vcan0 -R <machine> -r 20000 -l 20000\ncandump vcan0",
-    href: "/29-tunnel-howtos/#can-the-robots-bus-on-your-laptop-cannelloni",
-  },
-  {
-    title: "Your debugger, on its process",
-    desc: "VS Code Remote-SSH for the editor, gdbserver for a process that's already running.",
-    lang: "sh",
-    code: "gdb ./my_node -ex \"target remote <machine>:2345\"",
-    href: "/29-tunnel-howtos/#gdbserver-debug-a-process-on-the-robot",
-  },
-  {
     title: "ROS 2 from your desk",
-    desc: "DDS discovery crosses the link, so the CLI and rviz2 just see the robot's graph.",
-    lang: "sh",
+    desc: "DDS discovery crosses the link, so the CLI and rviz2 see the robot's graph.",
     code: "ros2 topic list\nrviz2",
     href: "/29-tunnel-howtos/#ros-2-over-the-link",
   },
   {
-    title: "Its containers, from your CLI",
-    desc: "Your docker client, the machine's engine — logs, exec, restarts.",
-    lang: "sh",
-    code: "DOCKER_HOST=ssh://user@<machine> \\\n  docker logs -f my-node",
-    href: "/29-tunnel-howtos/#docker-on-the-robot-from-your-cli",
+    title: "Your debugger, on its process",
+    desc: "gdbserver on the robot, gdb or VS Code on your laptop.",
+    code: "gdb ./my_node -ex \"target remote <machine>:2345\"",
+    href: "/29-tunnel-howtos/#gdbserver-debug-a-process-on-the-robot",
   },
-];
-
-const trust = [
-  { icon: "lock" as const, title: "Encrypted end to end", desc: "Media and data are encrypted between the machine and the viewer. When a relay is needed, it only ever forwards ciphertext." },
-  { icon: "ticket" as const, title: "Your backend decides", desc: "Access is a short-lived grant your backend signs, scoped per capability. The machine re-checks it against its own config, so a grant can't switch on what you didn't." },
-  { icon: "clock" as const, title: "No static secrets", desc: "Relay credentials are minted per session and expire with the grant. Nothing long-lived is compiled into a frontend." },
-  { icon: "shield" as const, title: "Nothing to open", desc: "The machine dials out. It never asks the customer's router to open a port, and their IT department has no inbound rule to approve." },
-  { icon: "user" as const, title: "Least privilege on the machine", desc: "The agent runs as its own unprivileged user. Desktop access is narrowed to the screen — not the microphone." },
-  { icon: "seal" as const, title: "Signed from repo to robot", desc: "A signed apt repository, and container images signed with an SBOM." },
-];
-const efficiency = [
-  { icon: "fanout" as const, title: "One encode, any number of viewers", desc: "A second viewer costs fan-out, not another encoder." },
-  { icon: "chip" as const, title: "The integrated GPU first", desc: "Video encodes on the iGPU, so the discrete GPU stays with perception — the job the machine exists to do." },
-  { icon: "gauge" as const, title: "Bulk never starves video", desc: "A transfer saturating the link leaves the camera beside it at full frame rate." },
 ];
 const connectSession = `$ fjarr-connect login                 # your company's sign-in, in the browser
 $ fjarr-connect robot-024
 robot-024  100.70.118.224  mtu 1184  up in 0.8 s`;
-// Section 8: the updater's steps (docs/32#updater) and what the design promises (docs/32, docs/17 M8).
+
+// Section 6: the updater's steps (docs/32#updater) and what the design promises (docs/32, docs/17 M8).
 const runSteps = [
   ["Fetch", "only the chunks it lacked, within today's budget"],
   ["Ready", "charging · not moving · owner chose tonight"],
@@ -99,14 +90,27 @@ const runSteps = [
   ["Firmware", "motor controller over CAN"],
 ];
 const ota: { icon: "seal" | "battery" | "download" | "power" | "chip" | "layers"; title: string; desc: string; cloud?: boolean }[] = [
-  { icon: "seal", title: "One signed release", desc: "Everything a robot runs — OS image, applications, configuration, peripheral firmware — pinned under one version and signed with your keys. A robot always runs exactly one release." },
-  { icon: "battery", title: "Installs when the robot is ready", desc: "On the charger, not moving, nobody driving it — and, if your fleet asks owners, at the time the owner picks. Taking control is refused while it installs." },
-  { icon: "download", title: "Days of downloading, on a budget", desc: "Only the chunks a robot lacks, resumed after every drop, within a daily data budget — so a big release crosses a thin LTE link over a few days without starving its video." },
-  { icon: "power", title: "Survives a power cut", desc: "A/B slots: a cut mid-install boots the previous slot, a failed health check rolls back. In the lab, 220 power cuts at random moments of an update, on Jetson and x86: every machine came back on a consistent slot." },
-  { icon: "chip", title: "Peripherals too", desc: "GNSS receivers, MCUs on the CAN bus, the site's router: small handlers that verify every write by reading it back and roll back what can be rolled back. Write your own in any language." },
-  { icon: "layers", title: "Staged by a person", desc: "Campaigns go to one robot, then a few, then the rest — promoted by someone watching how each stage compares with the fleet, and abortable at any point.", cloud: true },
+  { icon: "seal", title: "One signed release", desc: "Everything a robot runs — OS image, applications, configuration, peripheral firmware — pinned under one version and signed with your keys." },
+  { icon: "battery", title: "Installs when the robot is ready", desc: "On the charger, not moving, nobody driving it — and, if your fleet asks owners, when the owner picks." },
+  { icon: "download", title: "Days of downloading, on a budget", desc: "Only the chunks a robot lacks, resumed after every drop, within a daily data budget that leaves its video alone." },
+  { icon: "power", title: "Survives a power cut", desc: "A cut mid-install boots the previous slot; a failed health check rolls back. In the lab: 220 cuts at random moments of an update, on Jetson and x86, every one back on a consistent slot." },
+  { icon: "chip", title: "Peripherals too", desc: "GNSS receivers, MCUs on the CAN bus, the site's router — each write verified by reading it back. Handlers in any language." },
+  { icon: "layers", title: "Staged by a person", desc: "One robot, then a few, then the rest, promoted by someone watching each stage against the fleet. Abort at any point.", cloud: true },
 ];
-// Section 3's snippets: real exported names only (docs/19), claims as docs/09#a-session-grants.
+
+// Section 10: one grid (docs/10, docs/04, ADR-0025).
+const trust = [
+  { icon: "lock" as const, title: "Encrypted end to end", desc: "Between the machine and the viewer. A relay, when one is needed, only forwards ciphertext." },
+  { icon: "ticket" as const, title: "Your backend decides", desc: "A short-lived grant your backend signs, per capability, re-checked by the machine against its own config." },
+  { icon: "clock" as const, title: "No static secrets", desc: "Relay credentials are minted per session and expire with the grant." },
+  { icon: "shield" as const, title: "Nothing to open", desc: "The machine dials out. No port on the customer's router, no inbound rule for their IT to approve." },
+  { icon: "user" as const, title: "Least privilege", desc: "The agent runs as its own unprivileged user; desktop access is narrowed to the screen." },
+  { icon: "seal" as const, title: "Signed from repo to robot", desc: "A signed apt repository, and container images signed with an SBOM." },
+  { icon: "fanout" as const, title: "One encode, any number of viewers", desc: "A second viewer costs fan-out, not another encoder." },
+  { icon: "chip" as const, title: "The integrated GPU first", desc: "Video encodes on the iGPU, so the discrete GPU stays with perception." },
+];
+
+// Section 9's snippets: real exported names only (docs/19), claims as docs/09#a-session-grants.
 const backendSnippet = `// any JWT library, any language
 const grant = jwt.sign({
   aud: "fjarr",
@@ -136,8 +140,8 @@ const client = createFjarrClient({
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Fjarr — remote access for the machines you ship</title>
-    <meta name="description" content="Live video, remote desktop, a terminal and a direct network link to machines in the field — peer-to-peer, end-to-end encrypted, through firewalls and carrier NAT. Open-core libraries for your machine, your backend and your dashboard." />
+    <title>Fjarr — remote access and updates for the machines you ship</title>
+    <meta name="description" content="Live video, the desktop, a terminal and safe over-the-air updates for Linux machines in the field — built into your own product, peer-to-peer and end-to-end encrypted, through any customer network. Open source, or Fjarr Cloud." />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <ThemeInit />
     <style>
@@ -264,6 +268,28 @@ const client = createFjarrClient({
       .closing .ctas { justify-content: center; }
       footer { border-top: 1px solid var(--line-soft); margin-top: 40px; padding: 28px 0 56px; color: var(--faint); text-align: center; font-size: 0.92rem; }
 
+
+      /* Capabilities: three pillars */
+      .pillars { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 16px; }
+      .pillar { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 22px; }
+      .pillar h3 { margin: 0 0 14px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); }
+      .pillar ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 16px; }
+      .pillar li { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 12px; align-items: start; }
+      .pillar li b { display: block; color: var(--sl-color-white); font-weight: 600; }
+      .pillar li span.d { display: block; color: var(--muted); font-size: 0.95rem; }
+      .tools { color: var(--muted); margin: 18px 0 0; }
+
+      /* The problem's pull-quote */
+      blockquote.founders { margin: 32px 0 0; padding: 18px 24px; border-left: 3px solid var(--fj-blue); background: color-mix(in srgb, var(--fj-blue) 7%, transparent); border-radius: 0 12px 12px 0; }
+      blockquote.founders p { margin: 0; color: var(--sl-color-white); font-size: 1.2rem; font-weight: 600; line-height: 1.45; }
+      blockquote.founders a { display: inline-block; margin-top: 8px; font-size: 0.95rem; }
+
+      /* Trust: one grid of eight */
+      .grid.four { grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); }
+      .card.compact h3 { font-size: 1rem; }
+      .card.compact p { font-size: 0.93rem; }
+      .tabs-block :global(starlight-tabs) { display: block; }
+
       @media (max-width: 900px) {
         .ota { grid-template-columns: minmax(0, 1fr); }
         .hero-inner { grid-template-columns: minmax(0, 1fr); gap: 36px; padding-top: 72px; padding-bottom: 64px; }
@@ -289,26 +315,28 @@ const client = createFjarrClient({
   <body>
     <SiteHeader />
 
-    <!-- 1. Hero — who it's for, by traits (docs/03#who-its-for) -->
+    <!-- 1. Hero (docs/00, docs/03#who-its-for, docs/04, docs/26) -->
     <header class="hero">
       <NetworkField />
       <div class="hero-inner wrap">
         <div>
-          <h1>Remote access for<br /><span class="grad">the machines you ship.</span></h1>
+          <h1>Remote access and updates for <span class="grad">the machines you ship.</span></h1>
           <p class="fit">
-            Live video, the desktop, a terminal and a network link to Linux machines
-            in the field: peer-to-peer, end-to-end encrypted, nothing to open on their network.
+            Stop shipping a VPN and a screen-sharing tool with every machine. Give your team
+            live video, the desktop, a terminal and safe updates, inside your product, through
+            any customer network.
           </p>
           <ul class="chips">
-            <li><FjIcon name="check" size="1.05rem" />Built into your product</li>
+            <li><FjIcon name="check" size="1.05rem" />Built into your dashboard</li>
             <li><FjIcon name="check" size="1.05rem" />Works behind carrier NAT</li>
-            <li><FjIcon name="check" size="1.05rem" />Open source, self-hostable</li>
+            <li><FjIcon name="check" size="1.05rem" />Jetson and x86</li>
           </ul>
           <div class="ctas">
             <a class="cta primary" href="/readme/">Read the docs</a>
             <a class="cta ghost" href="https://github.com/fjarrio/fjarr">GitHub</a>
+            {talk && <a class="cta ghost" href={talk}>Talk to us →</a>}
           </div>
-          <p class="friction">Open source (AGPL-3.0). Self-host free, forever.</p>
+          <p class="friction">Open source (AGPL-3.0) or a commercial licence. Self-host free, forever.</p>
         </div>
         <div class="release">
           <p class="label"><span>Install</span><span class="badge avail">v{release}</span></p>
@@ -321,7 +349,9 @@ const client = createFjarrClient({
       </div>
     </header>
 
-    <!-- 2. The problem — the visitor's situation (docs/00#the-problem, docs/03#who-its-for) -->
+    <!-- 2. The product, running (docs/21, docs/22): absent until the demo loop is recorded. -->
+
+    <!-- 3. The problem (docs/00#the-problem, docs/03#who-its-for, docs/11) -->
     <section class="wrap">
       <h2>What you probably have today</h2>
       <p class="lede">
@@ -341,15 +371,136 @@ const client = createFjarrClient({
         secure, and a different login every time. Fjarr replaces the patchwork with
         one connection per machine that carries all of it.
       </p>
-      <p class="note">
-        Robots are where we started; vehicles, farm machinery and field gateways have the same shape.
-        We've built this stack three times before, inside robot companies — <a href="/11-prior-art/">what we kept and what we didn't</a>.
+      <blockquote class="founders">
+        <p>We've built this stack three times before, inside robot companies.</p>
+        <a href="/11-prior-art/">What we kept, and what we didn't →</a>
+      </blockquote>
+    </section>
+
+    <!-- 4. Capabilities (docs/06, docs/05, docs/24, docs/26) -->
+    <section class="wrap" id="capabilities">
+      <h2>One connection, everything your team needs <small>Every capability is a plugin, including yours</small></h2>
+      <div class="pillars">
+        {pillars.map((p) => (
+          <div class="pillar">
+            <h3>{p.title}</h3>
+            <ul>
+              {p.items.map((c) => (
+                <li><span class="ic"><FjIcon name={c.icon} /></span><span><b>{c.name}</b><span class="d">{c.desc}</span></span></li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+      <p class="tools">
+        And the tools you debug with: the live media pipeline as a graph, <code>fjarr-agent --check</code> with
+        the fix for anything missing, and a driver catalog that installs only what the hardware needs.{" "}
+        <a href="/06-capabilities/">The full catalog</a> · <a href="/05-extension-model/">write your own</a>
       </p>
     </section>
 
-    <!-- 3. Three tiers (docs/02, docs/09) -->
+    <!-- 5. Measured, not promised (docs/16#measured) -->
     <section class="wrap">
-      <h2>Three pieces, your stack</h2>
+      <h2>Measured, not promised</h2>
+      <p class="lede">Measured on named hardware at a milestone gate, against a written budget. Click one for where and when.</p>
+      <div class="numbers">
+        {numbers.map((n) => (
+          <a href="/16-performance-budgets/#measured">
+            <span class="v">{n.value}</span>
+            <span class="l">{n.label}</span>
+            <span class="d">{n.detail}</span>
+          </a>
+        ))}
+      </div>
+    </section>
+
+    <!-- 6. Updates for the whole fleet (docs/32, docs/06#fjarrota, ADR-0036, ADR-0037) -->
+    <section class="wrap">
+      <h2>Updates for the whole fleet <small>From the OS image to the GNSS receiver, under one version</small></h2>
+      <div class="ota">
+        <div>
+          <p class="lede">
+            Ship a release, and every robot gets onto it safely: when it's charging and
+            standing still, without saturating its link, and back on the previous
+            version if anything doesn't come up healthy. Every step reads like a CI job,
+            live and afterwards, across reboots and offline stretches.
+          </p>
+          <p class="recipes">
+            Reference images for <b>Yocto</b> and <b>NixOS</b> on NVIDIA Jetson and x86,
+            an <b>Ubuntu A/B</b> image for x86, and plain <b>apt</b> for the Ubuntu robots
+            you already have. Everything on the robot is open source; campaigns across a
+            fleet are Fjarr Cloud.
+          </p>
+        </div>
+        <div class="run" role="img" aria-label="An update run shown step by step: fetch, ready, prepare, install, switch, health, peripherals, commit and firmware, each succeeded.">
+          <header><span>robot-024 → release 1.2</span><span>succeeded</span></header>
+          <ol>
+            {runSteps.map(([step, what]) => (
+              <li><FjIcon name="check" size="1rem" /><span class="step">{step}</span><span class="what">{what}</span></li>
+            ))}
+          </ol>
+        </div>
+      </div>
+      <div class="grid">
+        {ota.map((t) => (
+          <div class="card"><span class="ic"><FjIcon name={t.icon} /></span><h3>{t.title}{t.cloud && <span class="cloud">Fjarr Cloud</span>}</h3><p>{t.desc}</p></div>
+        ))}
+      </div>
+      <p class="note">The design, step by step: <a href="/32-fleet-ota/">fleet updates</a> · <a href="/32-fleet-ota/#runs">run logs</a> · <a href="/32-fleet-ota/#peripherals">peripheral handlers</a>.</p>
+    </section>
+
+    <!-- 7. The desktop, and control that's safe for a moving machine (docs/22, docs/08, docs/15) -->
+    <section class="wrap">
+      <h2>Taking control stops the robot first <small>The machine's own desktop in your dashboard — with control that's safe for one that moves</small></h2>
+      <p class="lede">
+        Driving is one operator at a time and never handed over on idle; taking it over
+        releases every input before anyone new can move it. And the desktop is the one the
+        machine already has, with no tool for the end customer to install:
+      </p>
+      <ul class="features">
+        <li>Unattended: back after a reboot with nobody at the machine</li>
+        <li>Every monitor, plugged in or out while you watch</li>
+        <li>Virtual screens for machines with no monitor attached</li>
+        <li>The clipboard both ways</li>
+        <li>Typing through the machine's own keyboard layout</li>
+        <li>Its own cursor, drawn where it really is</li>
+      </ul>
+      <div class="grid">
+        <div class="card"><span class="ic"><FjIcon name="pointer" /></span><h3>One pointer, handed over cleanly</h3><p>Desktop control frees five seconds after the holder's last input, or anyone takes it at once — and the holder is told.</p></div>
+        <div class="card"><span class="ic"><FjIcon name="heartbeat" /></span><h3>Gone means released</h3><p>If an operator's connection dies, their held keys and buttons are released. A machine is never left stuck.</p></div>
+        <div class="card"><span class="ic"><FjIcon name="eye" /></span><h3>Watch without touching</h3><p>A view-only grant can never take control or read the clipboard — for the customer, the auditor, the second pair of eyes.</p></div>
+      </div>
+      <p class="note">Each of these ships with a regression test (<a href="/15-testing-strategy/#safety-behaviors">safety behaviors</a>). How control works: <a href="/22-remote-desktop-client/">remote desktop</a>.</p>
+    </section>
+
+    <!-- 8. A link to one machine (docs/03#tunnel-positioning, docs/27, docs/29) -->
+    <section class="wrap">
+      <h2>A link to one machine <small>ssh, ROS 2 and your debugger, straight to the robot</small></h2>
+      <p class="lede">
+        An authorized operator gets a routable address for <b>one</b> machine, inside the session
+        that already carries its video — and the tools they already use just work.
+      </p>
+      <Code lang="console" code={connectSession} />
+      <div class="grid two" style="margin-top:16px;">
+        {tunnelUses.map((u) => (
+          <div class="card">
+            <h3>{u.title}</h3>
+            <p>{u.desc}</p>
+            <Code code={u.code} lang="sh" frame="none" />
+            <p style="margin-top:10px;font-size:0.875rem;"><a href={u.href}>How-to →</a></p>
+          </div>
+        ))}
+      </div>
+      <p class="note">
+        And ssh, scp, RDP, Wireshark, the robot's CAN bus, its docker engine — <a href="/28-tunnel-ideas/">more ideas</a>.
+        Each link reaches one machine, under the same grant and audit log as everything else,
+        and is gone when the session ends; two machines never see each other (<a href="/27-network-tunnel/">the design</a>).
+      </p>
+    </section>
+
+    <!-- 9. How it fits your stack (docs/02, docs/09) -->
+    <section class="wrap">
+      <h2>How it fits your stack</h2>
       <p class="lede">Fjarr embeds into what you already run. Your backend stays in charge of who may reach what; video and data go straight between the machine and the person looking at it.</p>
       <div class="tiers-diagram" role="img" aria-label="Your backend, with the fjarr-server sidecar, issues grants and handles signaling for the machine and the dashboard. Media and data flow directly between the machine and the dashboard, peer-to-peer.">
         <div class="node backend">
@@ -371,191 +522,58 @@ const client = createFjarrClient({
           <p><code>@fjarr/core</code> + <code>@fjarr/react</code> in the dashboard you already have — standard WebRTC, any modern browser. Headless-first: your design system wins.</p>
         </div>
       </div>
-      <div class="snippets">
-        <div class="card">
-          <h3>Your backend: decide who may open what</h3>
-          <Code code={backendSnippet} lang="js" />
-        </div>
-        <div class="card">
-          <h3>Your dashboard: mount it</h3>
-          <Code code={dashboardSnippet} lang="tsx" />
-        </div>
+      <div class="tabs-block">
+        <Tabs>
+          <TabItem label="Your backend: who may open what">
+            <Code code={backendSnippet} lang="js" />
+          </TabItem>
+          <TabItem label="Your dashboard: mount it">
+            <Code code={dashboardSnippet} lang="tsx" />
+          </TabItem>
+        </Tabs>
       </div>
       <p class="note">The contract between the pieces: <a href="/09-interfaces/">interfaces</a> · <a href="/02-architecture/">architecture</a></p>
     </section>
 
-    <!-- 4. Capabilities (docs/06) -->
+    <!-- 10. Trust (docs/10, docs/04, ADR-0025) -->
     <section class="wrap">
-      <h2>Capabilities <small>Everything is a plugin, including yours</small></h2>
-      <div class="grid">
-        {capabilities.map((c) => (
-          <div class="card">
-            <span class="ic"><FjIcon name={c.icon} /></span>
-            <h3>{c.name}</h3>
-            <p>{c.desc}</p>
-          </div>
-        ))}
-      </div>
-      <p class="note">The full catalog, and how to write your own: <a href="/06-capabilities/">capabilities</a> · <a href="/05-extension-model/">extension model</a>.</p>
-    </section>
-
-    <!-- 5. Measured, not promised (docs/16#measured) -->
-    <section class="wrap">
-      <h2>Measured, not promised</h2>
-      <p class="lede">Every number below was measured on named hardware at a milestone gate, against a written budget. Click one for where and when.</p>
-      <div class="numbers">
-        {numbers.map((n) => (
-          <a href="/16-performance-budgets/#measured">
-            <span class="v">{n.value}</span>
-            <span class="l">{n.label}</span>
-            <span class="d">{n.detail}</span>
-          </a>
-        ))}
-      </div>
-    </section>
-
-    <!-- 6. The desktop, and control that's safe for a moving machine (docs/22, docs/10, docs/15) -->
-    <section class="wrap">
-      <h2>The machine's desktop <small>And control that's safe for one that moves</small></h2>
-      <p class="lede">
-        The desktop your machine already has, in your dashboard — no tool for the
-        end customer to install.
-      </p>
-      <ul class="features">
-        <li>Unattended: back after a reboot with nobody at the machine</li>
-        <li>Every monitor, plugged in or out while you watch</li>
-        <li>Virtual screens for machines with no monitor attached</li>
-        <li>The clipboard both ways</li>
-        <li>Typing through the machine's own keyboard layout</li>
-        <li>Its own cursor, drawn where it really is</li>
-      </ul>
-      <h3 class="sub">Who's in control is explicit</h3>
-      <div class="grid two">
-        <div class="card"><span class="ic"><FjIcon name="stop" /></span><h3>Taking control stops the robot first</h3><p>Driving is one operator at a time, and never handed over on idle. Taking it over releases every input before anyone new can move it.</p></div>
-        <div class="card"><span class="ic"><FjIcon name="pointer" /></span><h3>One pointer, handed over cleanly</h3><p>Desktop control frees five seconds after the holder's last input, or anyone can take it at once — and the holder is told.</p></div>
-        <div class="card"><span class="ic"><FjIcon name="heartbeat" /></span><h3>Gone means released</h3><p>If an operator's connection dies, their held keys and buttons are released and their control lapses. A machine is never left stuck.</p></div>
-        <div class="card"><span class="ic"><FjIcon name="eye" /></span><h3>Watch without touching</h3><p>A view-only grant can never take control or read the clipboard — for the customer, the auditor, the second pair of eyes.</p></div>
-      </div>
-      <p class="note">Each of these ships with a regression test (<a href="/15-testing-strategy/#safety-behaviors">safety behaviors</a>). How control works: <a href="/10-security/">security</a> · <a href="/22-remote-desktop-client/">remote desktop</a>.</p>
-    </section>
-
-    <!-- 7. A link, not a VPN (docs/03#tunnel-positioning, docs/27, docs/29) -->
-    <section class="wrap">
-      <h2>A link to one machine <small>Not a VPN</small></h2>
-      <p class="lede">
-        Every team keeps a list of things it occasionally needs to do on a machine
-        that nobody will ever write a protocol for. The network link is the escape
-        hatch: an authorized operator gets a routable address for <b>one</b> machine, inside the session that already carries its video — and the tools
-        they already use just work.
-      </p>
-      <Code lang="console" code={connectSession} />
-      <div class="grid two" style="margin-top:16px;">
-        {tunnelUses.map((u) => (
-          <div class="card">
-            <h3>{u.title}</h3>
-            <p>{u.desc}</p>
-            <Code code={u.code} lang={u.lang} frame="none" />
-            <p style="margin-top:10px;font-size:0.875rem;"><a href={u.href}>How-to →</a></p>
-          </div>
-        ))}
-      </div>
-      <p class="note">And ssh, scp, RDP, your file manager, Wireshark, a serial port, Modbus — <a href="/28-tunnel-ideas/">more ideas</a>.</p>
-      <div class="grid" style="margin-top:24px;">
-        <div class="card"><span class="ic"><FjIcon name="hub" /></span><h3>Isolation you can't misconfigure</h3><p>Connect to two machines at once and they still can't see each other. Every link ends at you and nothing is forwarded between them — there's no path to leave open by mistake.</p></div>
-        <div class="card"><span class="ic"><FjIcon name="ticket" /></span><h3>One set of permissions</h3><p>You already decide who may reach machine 42. The link is that same decision, in the same grant, in the same audit log. No second identity system to run beside yours.</p></div>
-        <div class="card"><span class="ic"><FjIcon name="clock" /></span><h3>Access that expires</h3><p>The link exists while a session does, then it's gone. Nothing becomes permanently reachable, and there's no extra daemon on the machine to install, update or license.</p></div>
-      </div>
-      <p class="note">
-        It deliberately isn't a mesh: no shared network, no machine-to-machine
-        routing, no always-on reachability. It's developer and support access — <a href="/27-network-tunnel/">the design</a> says exactly where that line sits.
-      </p>
-    </section>
-
-    <!-- 8. Updates for the whole fleet (docs/32, docs/06#fjarrota, ADR-0036, ADR-0037) -->
-    <section class="wrap">
-      <h2>Updates for the whole fleet <small>From the OS image to the GNSS receiver, under one version</small></h2>
-      <div class="ota">
-        <div>
-          <p class="lede">
-            Ship a release, and every robot gets onto it safely: when it's charging and
-            standing still, without saturating its link, and back on the previous
-            version if anything doesn't come up healthy. Every step reads like a CI job, live
-            while it runs and afterwards, even across reboots and offline stretches.
-          </p>
-          <p class="recipes">
-            Reference images for <b>Yocto</b> and <b>NixOS</b> on NVIDIA Jetson and x86,
-            an <b>Ubuntu A/B</b> image for x86, and plain <b>apt</b> for the Ubuntu robots
-            you already have.
-          </p>
-        </div>
-        <div class="run" role="img" aria-label="An update run shown step by step: fetch, ready, prepare, install, switch, health, peripherals, commit and firmware, each succeeded.">
-          <header><span>robot-024 → release 1.2</span><span>succeeded</span></header>
-          <ol>
-            {runSteps.map(([step, what]) => (
-              <li><FjIcon name="check" size="1rem" /><span class="step">{step}</span><span class="what">{what}</span></li>
-            ))}
-          </ol>
-        </div>
-      </div>
-      <div class="grid">
-        {ota.map((t) => (
-          <div class="card"><span class="ic"><FjIcon name={t.icon} /></span><h3>{t.title}{t.cloud && <span class="cloud">Fjarr Cloud</span>}</h3><p>{t.desc}</p></div>
-        ))}
-      </div>
-      <p class="note">The design, step by step: <a href="/32-fleet-ota/">fleet OTA</a> · <a href="/32-fleet-ota/#runs">run logs</a> · <a href="/32-fleet-ota/#peripherals">peripheral handlers</a>.</p>
-    </section>
-
-    <!-- 9. Trust and efficiency (docs/10, docs/23, docs/26, ADR-0025) -->
-    <section class="wrap">
-      <h2>Safe to put on a customer's network</h2>
-      <div class="grid">
+      <h2>Safe on a customer's network</h2>
+      <div class="grid four">
         {trust.map((t) => (
-          <div class="card"><span class="ic"><FjIcon name={t.icon} /></span><h3>{t.title}</h3><p>{t.desc}</p></div>
-        ))}
-      </div>
-      <h3 class="sub" style="margin-top:36px;">Light on the machine</h3>
-      <div class="grid">
-        {efficiency.map((t) => (
-          <div class="card"><span class="ic"><FjIcon name={t.icon} /></span><h3>{t.title}</h3><p>{t.desc}</p></div>
+          <div class="card compact"><span class="ic"><FjIcon name={t.icon} /></span><h3>{t.title}</h3><p>{t.desc}</p></div>
         ))}
       </div>
       <p class="note">The whole threat model is public: <a href="/10-security/">security</a>. Encoders and hardware: <a href="/04-supported-platforms/">supported platforms</a>.</p>
     </section>
 
-    <!-- 10. Built for the people who debug machines (docs/24, docs/26) -->
-    <section class="wrap">
-      <h2>Built for the people who debug machines</h2>
-      <div class="grid">
-        <div class="card"><span class="ic"><FjIcon name="graph" /></span><h3>See the media plane</h3><p>The live pipeline graph, with rates and drops, on the machine and in your dashboard — readable by a support engineer or an AI coding agent. <a href="/24-pipeline-introspection/">Introspection</a></p></div>
-        <div class="card"><span class="ic"><FjIcon name="check" /></span><h3>One command says if it's healthy</h3><p><code>sudo fjarr-agent --check</code> lists every configured source and backend, and gives the one-line fix for anything missing. <a href="/26-robot-install-and-drivers/">Install &amp; drivers</a></p></div>
-        <div class="card"><span class="ic"><FjIcon name="puzzle" /></span><h3>Only the drivers it needs</h3><p><code>fjarr-agent drivers detect</code> matches the hardware actually attached against a catalog and names the package each needs. Install those, and nothing else lands on the machine.</p></div>
-      </div>
-    </section>
-
-    <!-- 11. Open core, honest split (docs/03, ADR-0011) -->
-    <section class="wrap">
-      <h2>Open core, honest split</h2>
+    <!-- 11. Open core and Fjarr Cloud (docs/03, ADR-0011) -->
+    <section class="wrap" id="cloud">
+      <h2>Open core and Fjarr Cloud</h2>
       <table class="tiers">
-        <tr><td><b>Free &amp; open</b></td><td>All three libraries, the signaling sidecar, the network link and its client, the protocol, the docs, the demos. Genuinely usable alone, self-hosted forever.</td></tr>
-        <tr><td><b>Fjarr Cloud</b></td><td>Managed signaling and relays, fleet observability, staged OTA campaigns, SSO — metered by machines, session-minutes and relay bandwidth. Same contract as self-hosting: switch either way, no rework.</td></tr>
+        <tr><td><b>Free &amp; open</b></td><td>All three libraries, the signaling sidecar, the network link and its client, everything that updates a robot, the protocol, the docs, the demos. Usable alone, self-hosted forever.</td></tr>
+        <tr><td><b>Fjarr Cloud</b></td><td>Managed signaling and relays, fleet observability, staged update campaigns, SSO — the same contract as self-hosting, so you can switch either way. In early access: {talk ? <a href={talk}>tell us your fleet size</a> : "tell us your fleet size"}.</td></tr>
         <tr><td><b>Licence</b></td><td>AGPL-3.0, or a commercial licence when AGPL doesn't fit your product. Nothing we ship depends on GPL code, and the build environment refuses it.</td></tr>
       </table>
       <p class="note">The whole business plan is a public document: <a href="/03-product-strategy/">product strategy</a>.</p>
     </section>
 
-    <!-- 12. Docs CTA -->
+    <!-- 12. Closing and footer (docs/26) -->
     <section class="wrap closing">
       <h2>See if it fits</h2>
       <p class="lede" style="margin:0 auto 28px;">The specs are the product's source of truth, and they're all public.</p>
       <div class="ctas">
         <a class="cta primary" href="/readme/">Read the docs</a>
-        <a class="cta ghost" href="https://github.com/fjarrio/fjarr">GitHub</a>
-        <a class="cta ghost" href="/17-roadmap/">Roadmap</a>
+        {talk ? <a class="cta ghost" href={talk}>Talk to us →</a> : <a class="cta ghost" href="https://github.com/fjarrio/fjarr">GitHub</a>}
       </div>
     </section>
 
     <footer>
-      <div class="wrap">Fjarr · <a href="/readme/">documentation</a> · <a href="https://github.com/fjarrio/fjarr">GitHub</a> · built documentation-first in Sweden 🇸🇪 · <i>Fjärr</i> is Swedish for "remote"</div>
+      <div class="wrap">
+        Fjarr · <a href="/readme/">documentation</a> · <a href="https://github.com/fjarrio/fjarr">GitHub</a>{" "}
+        {contact && <>· <a href={talk}>{contact}</a>{" "}</>}
+        · v{release} on apt stable: <a href="/26-robot-install-and-drivers/">install</a>{" "}
+        · built documentation-first in Sweden 🇸🇪 · <i>Fjärr</i> is Swedish for "remote"
+      </div>
     </footer>
   </body>
 </html>

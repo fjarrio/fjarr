@@ -4,9 +4,9 @@
 interface Props { path?: string }
 const path = Astro.props.path ?? "";
 const links = [
-  { label: "Docs", href: "/readme/", match: (p: string) => p !== "" && !p.startsWith("/17-roadmap") && !p.startsWith("/adr/") },
-  { label: "Roadmap", href: "/17-roadmap/", match: (p: string) => p.startsWith("/17-roadmap") },
-  { label: "Decisions", href: "/adr/readme/", match: (p: string) => p.startsWith("/adr/") },
+  { label: "Docs", href: "/readme/", match: (p: string) => p !== "" && p !== "/" },
+  { label: "Product", href: "/#capabilities", match: () => false },
+  { label: "Cloud", href: "/#cloud", match: () => false },
 ];
 ---
 <nav class="site-links" aria-label="Site">
