@@ -17,7 +17,7 @@ import { Code, Tabs, TabItem } from "@astrojs/starlight/components";
 const release = "0.1.2";
 // Where "Talk to us" goes (docs/19: one address, set here). Empty: those calls to action are not
 // rendered — never a guessed address.
-const contact = "";
+const contact = "contact@fjarr.io";
 const talk = contact ? `mailto:${contact}` : "";
 
 // Section 4: three pillars (docs/06), then the tools beneath.
@@ -59,6 +59,7 @@ const numbers = [
   { value: "31–33 fps", label: "camera video while a transfer fills the link", detail: "no lost frames" },
 ];
 
+// Section 8: commands as docs/29 gives them, the visitor's side only.
 const tunnelUses = [
   {
     title: "ROS 2 from your desk",
@@ -71,6 +72,30 @@ const tunnelUses = [
     desc: "gdbserver on the robot, gdb or VS Code on your laptop.",
     code: "gdb ./my_node -ex \"target remote <machine>:2345\"",
     href: "/29-tunnel-howtos/#gdbserver-debug-a-process-on-the-robot",
+  },
+  {
+    title: "Its CAN bus on your laptop",
+    desc: "Bridged to a virtual interface: SavvyCAN or the vendor's tool sees the bus live.",
+    code: "cannelloni -I vcan0 -R <machine> -r 20000 -l 20000\ncandump vcan0",
+    href: "/29-tunnel-howtos/#can-the-robots-bus-on-your-laptop-cannelloni",
+  },
+  {
+    title: "Its containers, from your CLI",
+    desc: "Your docker client, the machine's engine — logs, exec, restarts.",
+    code: "export DOCKER_HOST=ssh://user@<machine>\ndocker logs -f my-node",
+    href: "/29-tunnel-howtos/#docker-on-the-robot-from-your-cli",
+  },
+  {
+    title: "Wireshark on its interfaces",
+    desc: "A live capture from the robot's network, in the Wireshark on your desk.",
+    code: "ssh user@<machine> \\\n  \"sudo tcpdump -i eth0 -U -w - 'not port 22'\" \\\n  | wireshark -k -i -",
+    href: "/29-tunnel-howtos/#wireshark-live-capture-from-the-robots-interfaces",
+  },
+  {
+    title: "Any USB device, on your desk",
+    desc: "A programmer or USB-serial adapter plugged into the robot appears on your laptop.",
+    code: "usbip list -r <machine>\nsudo usbip attach -r <machine> -b 1-2",
+    href: "/29-tunnel-howtos/#usbip-any-usb-device-on-your-machine",
   },
 ];
 const connectSession = `$ fjarr-connect login                 # your company's sign-in, in the browser
@@ -492,7 +517,7 @@ const client = createFjarrClient({
         ))}
       </div>
       <p class="note">
-        And ssh, scp, RDP, Wireshark, the robot's CAN bus, its docker engine — <a href="/28-tunnel-ideas/">more ideas</a>.
+        And ssh, scp, RDP, a serial port, Modbus, Foxglove — <a href="/28-tunnel-ideas/">more ideas</a>.
         Each link reaches one machine, under the same grant and audit log as everything else,
         and is gone when the session ends; two machines never see each other (<a href="/27-network-tunnel/">the design</a>).
       </p>
