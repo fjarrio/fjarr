@@ -1,9 +1,9 @@
 ---
 title: "ADR 0043: Jetson Capsule Signing and the Firmware Ratchet"
-description: Which certificate a Jetson's UEFI trusts for bootloader capsules, who holds the signing key, and where the firmware's lowest supported version sits; proposed after phase E of slice 8.0 measured both on the ZED Box Mini.
+description: Jetson capsules are signed with the robot company's own key, which UEFI is built to trust; the firmware floor stays at the product's first firmware, with signed vulnerability advisories as the main protection against old firmware, decided after phase E of slice 8.0 measured both on the ZED Box Mini.
 ---
 
-- **Status**: proposed (Q11 in [docs/32](../32-fleet-ota.md#jetson-test-image); Erik decides)
+- **Status**: accepted (Q11 in [docs/32](../32-fleet-ota.md#jetson-test-image); Erik, 2026-11-19)
 - **Date**: 2026-11-19
 - **Supersedes**: —
 
@@ -95,67 +95,101 @@ build with edk2's test root.
 
 ### The firmware's lowest supported version
 
+The floor is the lowest firmware a robot accepts by capsule. Its purpose is replay: every
+capsule ever shipped stays validly signed, so the signature alone would let an old firmware
+with a known hole be put back. It does not affect `rollback-now`, which switches to the
+other chain without writing firmware; it decides only whether older firmware can be written
+again once both chains carry the new one.
+
+Who it stops matters. docs/32's release rules already keep old releases off the normal update
+path (a monotonic release counter, and a signed downgrade authorization to go back). Without
+NVIDIA's secure boot fuses, which the product's robots do not have today, root on a robot can
+rewrite the QSPI directly, without a capsule. So on these robots a UEFI floor adds only a
+second lock against someone who can deliver a capsule but has no root. On a robot fused for
+secure boot it is the lock that matters: there a capsule downgrade to a vulnerable bootloader
+is the way to break the secure boot chain.
+
 **a. meta-tegra's default:** every capsule's floor is its own version.
 
-- Pro: no older firmware can ever come back through a capsule.
-- Con: it contradicts the signed downgrade authorization. A deliberate downgrade to a
-  release with older firmware fails at UEFI, after the slot was written, with no way
-  forward but a newer release.
-- Con: as E4 showed, one capsule raises the floor for the whole box, so the first
-  firmware update of a product decides all its later rollbacks.
+- Pro: no older firmware ever comes back through a capsule, with no decisions to make.
+- Con: a bad firmware release cannot be undone once both chains carry it: only a newer
+  firmware, or a reflash at each robot over RCM.
+- Con: it contradicts docs/32's signed downgrade authorization, which then works for
+  everything but the firmware, and fails at UEFI.
+- Con: as E4 showed, one capsule raises the floor for the whole box.
 
-**b. The floor as an explicit release property.** A release states its firmware floor.
-It stays at the product's first shipped firmware unless a release is marked as a
-security floor, which raises it on purpose (`TEGRA_UEFI_LOWEST_SUPPORTED_VERSION` set
-from the release, not from the firmware version). The applier keeps refusing capsules
-below the ESRT's floor before it stages anything (N13).
+**b. The floor as an explicit release property.** A release states its firmware floor; it
+stays at the product's first shipped firmware unless a release is marked as a security floor.
 
-- Pro: downgrades within the floor work as docs/32 designs them, and a fixed
-  vulnerability is still locked out once it matters.
-- Con: someone must decide, per release, whether it raises the floor. A floor raised
-  by mistake cannot be lowered.
+- Pro: downgrades within the floor work, and a fixed vulnerability can be locked out.
+- Con: a decision for every firmware release; a forgotten one leaves an old firmware
+  installable, and one made by mistake cannot be undone.
 
 **c. No floor.**
 
-- Pro: nothing to decide.
-- Con: a signed capsule with a known firmware vulnerability can be installed again
-  forever; that rules it out for production.
+- Pro: nothing to decide; every downgrade works.
+- Con: firmware older than the board package was ever built for could be written too.
+- Con: nothing on the robot ever refuses old firmware, even on a robot fused for secure boot.
+
+**d. Advisories first, the floor kept low and raised rarely.** Releases carry signed
+vulnerability advisories; Fjarr Cloud shows them and asks before an affected release is
+installed, and `fjarr-update` does the same for a local bundle. The UEFI floor stays at the
+product's first shipped firmware, and is raised only on robots fused for secure boot, or for
+a vulnerability severe enough to lock out for good.
+
+- Pro: the honest path gets an informed choice instead of a hard refusal: a bad firmware
+  release can be undone, as docs/32's downgrade rule intends.
+- Pro: no decision per release, which was b's cost.
+- Pro: the floor stays available for the robots where it is the real protection.
+- Con: on today's robots, old signed firmware stays installable by anyone who can deliver a
+  capsule and ignore the advisory. That is the exposure docs/32 already accepts for releases,
+  and on unfused robots root has a shorter way anyway.
 
 ## Decision
 
-**Proposed: C and b.** Erik decides; nothing below is built yet.
+**C and d** (Erik, 2026-11-19).
 
-- **The capsule key is the robot company's**, a build input of the board package, with
-  a Fjarr-managed key per tenant as the easy start. This is the custody model docs/32
-  already chose for release keys, so the firmware gains no party able to forge it that
-  the releases do not already have. A production build refuses edk2's test root; lab
-  and prototype builds keep it, labelled as such.
-- **The firmware floor is set by the release**, not by every capsule: by default the
-  product's first shipped firmware, raised only by a release marked as a security floor.
-  That keeps docs/32's signed downgrade authorization meaningful for firmware too. The
-  applier's pre-flight refusal below the ESRT's floor (N13) stays.
+- **The capsule key is the robot company's**, a build input of the board package, with a
+  Fjarr-managed key per tenant as the easy start. This is the custody model docs/32 already
+  chose for release keys, so the firmware gains no party able to forge it that the releases
+  do not already have. A production build refuses edk2's test root; lab and prototype builds
+  keep it, labelled as such.
+- **Old firmware is met by advisories, not by the floor.** A release carries signed
+  vulnerability advisories in the open release format. Fjarr Cloud shows them before an
+  affected release is installed or targeted, and `fjarr-update` warns before a local bundle
+  is installed, so open-core users without the cloud see them too. The choice stays the
+  installer's.
+- **The UEFI floor stays at the product's first shipped firmware**, so a capsule cannot write
+  firmware the board package was never built for. `fjarr bundle` sets
+  `TEGRA_UEFI_LOWEST_SUPPORTED_VERSION` to it, not to each capsule's own version. Raising it is
+  a deliberate, reviewed step in a release, for robots fused for secure boot or for a
+  vulnerability to lock out for good. The applier keeps refusing capsules below the ESRT's
+  floor before it stages anything (N13).
 - **Independent of both: the release signature covers the capsule.** The capsule and its
-  firmware version are listed, with their hashes, in the signed release manifest. In
-  the spike, they go into the signed SWUpdate description, and `install` checks the
-  staged capsule against that hash, not against whatever file is there.
+  firmware version are listed, with their hashes, in the signed release manifest. In the
+  spike, they go into the signed SWUpdate description, and `install` checks the staged
+  capsule against that hash, not against whatever file is there.
 
 ## Consequences
 
 - The Jetson board package gains a UEFI change: a `.bbappend` that builds the company's
-  certificate into `PcdFmpDevicePkcs7CertBufferXdr`. A test shows that a capsule signed
-  with edk2's test key is refused (E5's check, with a validly signed foreign capsule),
-  and that the company's capsule is accepted.
+  certificate into `PcdFmpDevicePkcs7CertBufferXdr`. A test shows that a capsule signed with
+  edk2's test key is refused (E5's check, with a validly signed foreign capsule), and that
+  the company's capsule is accepted.
 - `fjarr provision` and the release CI need a capsule key alongside the release key:
-  generation, a hardware-token or signing-server path through `sign_uefi_capsules`,
-  backup, and rotation by a capsule carrying the new certificate.
-- The release format gains a firmware floor field, and `fjarr bundle` sets
-  `TEGRA_UEFI_LOWEST_SUPPORTED_VERSION` from it rather than from the firmware version.
-  Raising it is a deliberate, reviewed step in the release.
-- A lost capsule key leaves reflash over RCM as the only way to change the firmware,
-  which needs a person at each robot. The docs must say so where the key is created.
-- In the spike, until this is accepted, capsules stay signed with meta-tegra's test keys
-  (Q11), and the lab's capsule check (L4, `capsule-check.py`) is what holds a capsule to
-  the firmware a flash wrote.
-- Revisit if NVIDIA's secure boot fusing becomes part of the product (it would add the
-  bootloader's own PKC chain, and the capsule key would sit beside it), or if edk2-nvidia
-  starts taking the trusted certificate from a source other than the UEFI build.
+  generation, a hardware-token or signing-server path through `sign_uefi_capsules`, backup,
+  and rotation by a capsule carrying the new certificate.
+- A lost capsule key leaves reflash over RCM as the only way to change the firmware, which
+  needs a person at each robot. The docs say so where the key is created.
+- The release format gains signed advisories (which components and versions a vulnerability
+  affects, its severity, a link) and a firmware floor field. Fjarr Cloud shows advisories in
+  targeting and in the update prompt; `fjarr-update` shows them for local installs.
+  Tooling may flag L4T releases whose notes list security fixes, so a floor or an advisory
+  is not left to memory.
+- Firmware downgrades within the floor follow docs/32's signed downgrade authorization like
+  any other component.
+- Until this is built, the spike keeps signing capsules with meta-tegra's test keys, and the
+  lab's capsule check (L4, `capsule-check.py`) holds a capsule to the firmware a flash wrote.
+- Revisit when robots are fused for secure boot (the floor then becomes the main protection,
+  and the capsule key sits beside the bootloader's own PKC chain), or if edk2-nvidia starts
+  taking the trusted certificate from a source other than the UEFI build.

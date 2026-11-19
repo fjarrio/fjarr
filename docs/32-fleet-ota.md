@@ -115,6 +115,15 @@ fresh metadata; a robot that cannot reach the server installs a local bundle
 on those three checks alone, so robots without a clock or offline for months
 still update.
 
+**Known vulnerabilities are shown, not enforced.** A release can carry signed
+advisories: which components and versions a vulnerability affects, its
+severity, a link. Fjarr Cloud shows them before an affected release is
+targeted or installed, and `fjarr-update` before a local bundle is installed,
+and the choice stays the installer's. On a Jetson the firmware's own floor
+stays at the product's first firmware unless a release raises it on purpose,
+for robots fused for secure boot or a vulnerability to lock out for good
+([ADR-0043](adr/0043-jetson-capsule-signing-and-ratchet.md)).
+
 ## The robot side: `fjarr-update` {#updater}
 
 The updater is a process of its own, beside the agent. The agent may be one
@@ -866,7 +875,7 @@ console is connected.
 | Q8 | **Early-hang protection is a gate for 8.4**, measured in 8.0 ([docs/18](18-open-questions.md) #48) |
 | Q9 | The capsule test makes a **real version change**: a 36.4.4 build, then a capsule to 36.5.2 |
 | Q10 | NixOS boots first through NVIDIA's root A/B with extlinux in each slot, sharing the applier (path i); systemd-boot with a UKI per slot (path ii) comes after |
-| Q11 | An ADR on capsule signing and the version ratchet follows the capsule phase (E): [ADR-0043](adr/0043-jetson-capsule-signing-and-ratchet.md), proposed; until it is accepted the spike signs capsules with meta-tegra's test keys |
+| Q11 | An ADR on capsule signing and the version ratchet follows the capsule phase (E): [ADR-0043](adr/0043-jetson-capsule-signing-and-ratchet.md), accepted 2026-11-19; until it is built the spike signs capsules with meta-tegra's test keys |
 
 **The image**, built off the box in phase A:
 
@@ -1286,7 +1295,7 @@ with that line deleted.
 **After measuring**, two ADRs are planned: one on the Jetson boot path and
 applier (decided by D and G), and one on the capsule ratchet and signing
 keys (decided by E, Q11): [ADR-0043](adr/0043-jetson-capsule-signing-and-ratchet.md),
-proposed.
+accepted.
 
 ## Open core {#open-core}
 
